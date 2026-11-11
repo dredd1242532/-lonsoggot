@@ -315,7 +315,7 @@ static int has_link(const char *p) {
 static int copy_tree(const char *from, const char *to) {
     if (is_link(from)) return copy_link(from, to);
     if (!is_dir(from)) {
-        FILE *in = fopen(from, "rb"), *out = in ? hos_fopen_write(to, "wb") : NULL;
+        FILE *in = hos_fopen_read_binary(from), *out = in ? hos_fopen_write(to, "wb") : NULL;   /* (not a FIFO) */
         int ok = in && out;
         char buf[1 << 16];
         for (size_t n; ok && (n = fread(buf, 1, sizeof buf, in)) > 0;) ok = fwrite(buf, 1, n, out) == n;
@@ -498,7 +498,7 @@ static void load_longshot_env(void) {
         while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
         memcpy(path + n, "longshot_env.txt", 17);
     }
-    FILE *f = fopen(path, "r");
+    FILE *f = hos_fopen_read(path);
     if (!f) return;
     /* The environment the game was started with wins over the file: a switch set for one launch (HOS_FULLSCREEN=0 in a
        shell, a script's RX_VK_PACE=1) beats the same name saved in the file. The file's own later lines still replace its
@@ -1962,7 +1962,7 @@ static int game_main(int argc, char **argv) {
             char *slash = len ? strrchr(path, SEP) : NULL;
             if (slash) {
                 snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "longshot_options.ini");
-                FILE *o = fopen(path, "r");
+                FILE *o = hos_fopen_read(path);
                 if (o) {
                     char line[80];
                     while (fgets(line, sizeof line, o)) {

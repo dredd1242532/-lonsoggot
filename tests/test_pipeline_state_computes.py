@@ -303,7 +303,7 @@ enum VkFormat : uint32_t { VK_FORMAT_UNDEFINED = 0 };
 typedef uint32_t VkFormatFeatureFlags;
 constexpr uint32_t VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT = 0x80, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT = 0x200;
 struct VkFormatProperties { uint32_t linearTilingFeatures, optimalTilingFeatures, bufferFeatures; };
-struct { void* physical = (void*)1; } dev;
+struct { void* physical = (void*)1; struct { struct { uint32_t framebufferColorSampleCounts = 0xF, framebufferDepthSampleCounts = 0xF; } limits; } props; } dev;
 // (a device that draws to every format: these records are not about formats)
 static void vkGetPhysicalDeviceFormatProperties(void*, VkFormat, VkFormatProperties* p) {
     p->optimalTilingFeatures = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;

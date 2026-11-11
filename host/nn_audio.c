@@ -38,6 +38,7 @@
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
+#include "hos_fopen_write.h"   /* (longshot_options.ini read as a regular file only) */
 
 void hos_system_event_init(uint64_t key, int autoclear);
 void hos_system_event_signal(uint64_t key);
@@ -808,7 +809,7 @@ static int au_menu_output(void) {
     char *slash = len ? (strrchr(path, 92) ? strrchr(path, 92) : strrchr(path, 47)) : NULL;   /* (linux: '/') */
     if (!slash) return 0;
     snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "longshot_options.ini");
-    FILE *f = fopen(path, "r");
+    FILE *f = hos_fopen_read(path);
     if (!f) return 0;
     char line[80];
     int v = 0;
