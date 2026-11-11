@@ -1,5 +1,6 @@
 """vk_draw.cpp's pcache_file_read: a pipeline cache of this device and driver is read byte for byte; one of another (or a
-truncated or short file) is dropped by its 32-byte header, before the rest of the file is read.
+truncated or short file) is dropped by its 32-byte header, before the rest of the file is read, and one larger than
+kPcacheMax (4 GB) is not read at all (Linux: a sparse 5 GB file with this device's header, taking no disk).
 
 python -I -B tests/test_pcache_header_read.py --cxx <compiler> --headers <Vulkan-Headers include dir>
 """
@@ -30,6 +31,8 @@ def main():
     args = parser.parse_args()
     source = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     reader = function(source, "PipelineCacheFile pcache_file_read(const std::string& path)")
+    cap = source[source.index("constexpr uint64_t kPcacheMax"):]
+    cap = cap[:cap.index("\n") + 1]
     fixture = r'''
 #define _CRT_SECURE_NO_WARNINGS   /* (Windows: fopen is not deprecated here) */
 #include <cstdint>
@@ -61,7 +64,8 @@ static ssize_t counted_read(int fd, void* p, size_t n, off_t offset) {
 #endif
 #include "pipeline_cache_file.h"
 using mkwvk::PipelineCacheFile;
-''' + reader + r'''
+static void logf(const char*, ...) {}
+''' + cap + reader + r'''
 static std::vector<uint8_t> cache(uint32_t vendor, uint32_t device, uint8_t uuid0, size_t body, uint32_t head_size = 32) {
     std::vector<uint8_t> d(32 + body);
     const uint32_t version = VK_PIPELINE_CACHE_HEADER_VERSION_ONE;
@@ -103,6 +107,12 @@ int main(int argc, char** argv) {
     CHECK(roundtrip(path, std::vector<uint8_t>(good.begin(), good.begin() + 20)).empty());
     CHECK(roundtrip(path, {}).empty());
     CHECK(pcache_file_read(path + ".missing").empty());
+#ifndef _WIN32
+    roundtrip(path, good);
+    CHECK(truncate(path.c_str(), (off_t)(kPcacheMax + (uint64_t{1} << 30))) == 0);
+    bytes_read = 0;
+    CHECK(pcache_file_read(path).empty() && bytes_read == 32);
+#endif
     std::puts("ok");
 }
 '''

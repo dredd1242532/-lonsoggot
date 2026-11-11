@@ -730,8 +730,14 @@ std::atomic<int64_t> pcache_built_since_save{0};
 // most precompiled pipelines as not found in the app's cache (~460 of ~12,900 here), which it then serves from its own.
 std::atomic<size_t> pcache_saved_size{0};
 /// A pipeline cache file's data, or nothing when it cannot be read or was made by another device or driver
+/// (longshot: a file larger than kPcacheMax is not read: a large or sparse one from elsewhere would be handed to the driver whole)
+constexpr uint64_t kPcacheMax = uint64_t{4} << 30;   // (NVIDIA's after a full preparation: about 1.1 GB)
 PipelineCacheFile pcache_file_read(const std::string& path) {
-    return PipelineCacheFile::read(path, [](const uint8_t* head, uint64_t size) {
+    return PipelineCacheFile::read(path, [&path](const uint8_t* head, uint64_t size) {
+        if (size > kPcacheMax) {
+            logf("vk: %s: %llu MB, larger than a pipeline cache is: not read", path.c_str(), (unsigned long long)(size >> 20));
+            return false;
+        }
         uint32_t head_size = 0, version = 0, vendor = 0, device = 0;
         std::memcpy(&head_size, head, 4);
         std::memcpy(&version, head + 4, 4);
