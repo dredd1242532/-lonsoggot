@@ -141,19 +141,72 @@ def load(path, most=None):
     with open(path, "rb") as f:
         data = f.read() if most is None else f.read(most + 1)
     if data[:6] == XZ_MAGIC:
+        # (longshot) unpacked up to MAX_LIST only: a contributed file of a few KB could unpack to gigabytes in CI
+        dec = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
         try:
-            if most is None:
-                data = lzma.decompress(data)
-            else:   # (unpacked no further than the limit: a small xz file can unpack to gigabytes)
-                un = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-                data = un.decompress(data, max_length=most + 1)
+            data = dec.decompress(data, max_length=(MAX_LIST if most is None else most) + 1)
+            if most is not None:   # (a list someone sent: no further than its own limit)
                 if len(data) > most:
                     raise SystemExit("%s: unpacks to more than a pipeline state list holds (%d bytes)" % (path, most))
-                if not un.eof or un.unused_data:
+                if not dec.eof or dec.unused_data:
                     raise SystemExit("%s: a damaged xz file (cut short, or with more after its end)" % path)
         except lzma.LZMAError as e:
             raise SystemExit("%s: a damaged xz file (%s)" % (path, e))
+        if len(data) > MAX_LIST:
+            raise SystemExit("%s: unpacks to more than %d MB, far more than a pipeline state list" % (path, MAX_LIST >> 20))
+        if not dec.eof:
+            raise SystemExit("%s: a damaged xz file (it ends before its data does)" % path)
     return data
+
+
+MAX_LIST = 64 << 20   # (a list's bytes: the game's own lists hold some 25,000 pipelines, 14 MB)
+STRIDE_MAX = 2048    # (Vulkan's least maxVertexInputBindingStride; the game's strides are under 100)
+DIVISOR_MAX = 0xFFFF
+
+
+def record_problem(rec):
+    """(longshot) What is wrong with a record's values, or None: the counts in their arrays' range, a sample count and topology
+    Vulkan has, booleans 0 or 1, and vertex strides and divisors within Vulkan's limits (gpu/vk/vk_draw.cpp state_list_read,
+    targets_ok and streams_ok refuse the same in the game). A contributed list is checked before it is added or shipped"""
+    if kind(rec) == COMPUTE:   # (a key and zeros, no draw state: check_kinds holds it to exactly that)
+        return None
+    if len(rec) == SIZE2:
+        v = _V2.unpack(rec)
+        mesh, topo, n, samples, has_depth = v[5:10]
+        nvattr, stride, divisor = v[51], v[52:68], v[68:84]
+        blend_en, poly, clamp, a2c, nanswers, nquestions = v[84], v[86], v[87], v[88], v[89], v[90]
+        extra = v[116:118]
+    elif len(rec) == SIZE:
+        v = _V1.unpack(rec)
+        mesh, topo, n, samples, has_depth = v[5], v[6], v[7], v[8], v[10]
+        nvattr, stride, divisor = v[44], v[45:61], v[61:77]
+        blend_en, poly, clamp, a2c, nanswers, nquestions = v[77], v[79], v[80], v[81], v[83], v[84]
+        extra = (v[82],)
+    else:
+        return "a record of %d bytes" % len(rec)
+    for name, value, top in (("targets", n, 8), ("vertex attributes", nvattr, 16), ("answers", nanswers, 24),
+                             ("questions", nquestions, 32), ("topology", topo, 10), ("polygon mode", poly, 2),
+                             ("blend enables", blend_en, 0xFF)):
+        if value > top:
+            return "%s %d (at most %d)" % (name, value, top)
+    if not (1 <= samples <= 64 and not samples & (samples - 1)):
+        return "a sample count of %d" % samples
+    if any(b > 1 for b in (mesh, has_depth, clamp, a2c)):
+        return "a yes/no value other than 0 or 1"
+    if any(extra):
+        return "padding that is not zero"
+    if max(stride) > STRIDE_MAX or max(divisor) > DIVISOR_MAX:
+        return "a vertex stride of %d or divisor of %d" % (max(stride), max(divisor))
+    return None
+
+
+def check_records(recs, path):
+    """Stops when any of the records has a value a pipeline cannot have (record_problem)"""
+    bad = [(i, record_problem(r)) for i, r in enumerate(recs)]
+    bad = [(i, why) for i, why in bad if why]
+    if bad:
+        raise SystemExit("%s: %d records with values a pipeline cannot have (the first, record %d: %s)"
+                         % (path, len(bad), bad[0][0], bad[0][1]))
 
 
 def parse(data, path, strict=False):
@@ -223,6 +276,7 @@ def read_sent(path):
     if not recs:
         raise SystemExit("%s holds no pipelines" % path)
     check_kinds(recs, path)
+    check_records(recs, path)
     computes = len(compute_keys(recs))
     if computes > SENT_COMPUTE_MOST:
         raise SystemExit("%s: names %d compute programs, more than the game has (at most %d): not a list the game wrote"
@@ -238,6 +292,7 @@ def check_shipped(path):
     if not recs:
         raise SystemExit("%s holds no pipelines" % path)
     check_kinds(recs, path)
+    check_records(recs, path)
     return recs
 
 
@@ -518,6 +573,7 @@ def tour(d, lists, fields):
     recs = unique(read(p) for p in lists)
     if not recs:
         raise SystemExit("the tour's lists hold no pipelines")
+    check_records(recs, "the tour's lists")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, TOUR)
     write(path, recs)
