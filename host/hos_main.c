@@ -433,6 +433,11 @@ static int env_line_allowed(const char *name, const char *value) {
     int ok = 0;
     for (size_t i = 0; i < sizeof prefixes / sizeof *prefixes; i++) ok |= !strncmp(name, prefixes[i], strlen(prefixes[i]));
     if (!ok || !strcmp(name, "HOS_ENV_FILE") || !strcmp(name, "SDL_DYNAMIC_API")) return 0;
+    /* (longshot) of the LONGSHOT_ names, only the game's own: the others are the builder's (LONGSHOT_MEM_LIMIT_GB,
+       LONGSHOT_LATEST_TAG, LONGSHOT_JOBS...). LONGSHOT_PREPARE_ONLY is the game's but set by --prepare-shaders alone (from the file, the game would never play) */
+    if (!strncmp(name, "LONGSHOT_", 9) && strcmp(name, "LONGSHOT_NO_AV1_NOTICE") &&
+        strcmp(name, "LONGSHOT_OCCLUSION_OFF"))
+        return 0;
     /* (longshot) nor the libraries SDL loads by name (SDL_VULKAN_LIBRARY, SDL_OPENGL_LIBRARY, SDL_VIDEO_GL_DRIVER,
        SDL_VIDEO_EGL_DRIVER...): a bare file name is looked for beside the game and in the current folder on Windows */
     if (!strncmp(name, "SDL_", 4) && (strstr(name, "_LIB") || strstr(name, "GL_DRIVER"))) return 0;
