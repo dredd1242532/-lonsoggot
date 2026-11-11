@@ -46,6 +46,7 @@ FIXTURE = r"""
 #include <mutex>   // (save() locks since the control bridge, #926)
 #include <string>
 #include "longshot_env.h"   // (gpu/vk/compat: env_value_off, the switches' rule)
+#include "hos_fopen_write.h"   // (host/: the options file is written without following a link)
 #include "hos_wide_size.h"   // (host/: the output sizes the menu accepts, hos_output_size_valid)
 #include "display_modes.h"   // (gpu/vk/: the sizes the Output resolution offers)
 using namespace mkwvk;

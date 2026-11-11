@@ -72,6 +72,7 @@
 #include "vk_programs.h"
 #include "vk_pipelines.h"
 #include "warm_bounded.h"
+#include "../../host/hos_fopen_write.h"   // (the pipeline caches, lists and markers: not through a link)
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
 namespace mkwvk {
@@ -1210,7 +1211,7 @@ void driver_fault_note(uint64_t key) {
     static std::mutex mu;
     std::lock_guard lk(mu);
     const std::string path = driver_faults_path();
-    FILE* f = fopen(path.c_str(), "ab");
+    FILE* f = hos_fopen_write(path.c_str(), "ab");
     if (!f) {   // (a folder the game cannot write to: Program Files)
         static bool told;
         if (!told) told = true, logf("vk: %s could not be written: the faulted programs are kept out for this run only", path.c_str());
@@ -1438,7 +1439,7 @@ void precompile_built_write(size_t notes) {
     // ("kept 0 of 32"), so the first play after a preparation found none of the noted pipelines in a cache and compiled them
     // in play with draws left out. Left unwritten, the first play start builds them itself, and its cache does answer)
     if (env_on("LONGSHOT_PREPARE_ONLY")) return;
-    if (FILE* f = fopen(precompile_built_path().c_str(), "wb")) {
+    if (FILE* f = hos_fopen_write(precompile_built_path().c_str(), "wb")) {
         const uint64_t rec[2] = {program_cache_stamp(), (uint64_t)notes};
         fwrite(rec, 8, 2, f);
         fclose(f);
@@ -1532,7 +1533,7 @@ void notes_open_locked(const std::vector<std::unique_ptr<PipeNote>>* known) {
             fclose(f);
         }
     }
-    note_file = fopen(path.c_str(), same ? "ab" : "wb");
+    note_file = hos_fopen_write(path.c_str(), same ? "ab" : "wb");
     if (note_file && !same) {
         const uint64_t h[2] = {stamp, sizeof(PipeNote)};
         fwrite(h, 8, 2, note_file);
@@ -1593,7 +1594,7 @@ void compute_note(uint64_t key) {
     if (!compute_note_file) {
         computes_noted = computes_read();
         const bool append = !computes_noted.empty();   // (none read: a new file, or one that is not a list)
-        compute_note_file = fopen(computes_path().c_str(), append ? "ab" : "wb");
+        compute_note_file = hos_fopen_write(computes_path().c_str(), append ? "ab" : "wb");
         if (compute_note_file && !append) fwrite(kComputesMagic, 1, 8, compute_note_file);
     }
     if (compute_note_file && computes_noted.insert(key).second) fwrite(&key, 8, 1, compute_note_file), fflush(compute_note_file);
@@ -1626,7 +1627,7 @@ void compute_variant_note(uint64_t key, uint64_t variant) {
     if (!compute_variant_file) {
         const auto had = compute_variants_read();
         for (const auto& [k, v] : had) compute_variants_noted.insert(mix(k, v));
-        compute_variant_file = fopen(compute_variants_path().c_str(), had.empty() ? "wb" : "ab");
+        compute_variant_file = hos_fopen_write(compute_variants_path().c_str(), had.empty() ? "wb" : "ab");
         if (compute_variant_file && had.empty()) fwrite(kComputeVariantsMagic, 1, 8, compute_variant_file);
     }
     if (compute_variant_file && compute_variants_noted.insert(mix(key, variant)).second) {
@@ -1870,7 +1871,7 @@ void state_open_locked() {
             if (rename(path.c_str(), old.c_str()) == 0) logf("vk: state list: the version 1 list kept as %s", old.c_str());
         }
     }
-    state_file = fopen(path.c_str(), keep ? "ab" : "wb");
+    state_file = hos_fopen_write(path.c_str(), keep ? "ab" : "wb");
     if (state_file && !keep) {
         const uint32_t size = sizeof(StateRec2);
         fwrite(kStateMagic2, 8, 1, state_file), fwrite(&size, 4, 1, state_file);
@@ -8432,7 +8433,7 @@ int prepared_read(const std::string& path, PreparedFor* had) {
 }
 void prepared_write(const std::string& path, const PreparedFor& now) {
     const uint64_t r[6] = {now.stamp, now.seed_hash, now.seed_size, (uint64_t)now.seed_time, (uint64_t)file_clock_now(), now.warmed};
-    if (FILE* f = fopen(path.c_str(), "wb")) fwrite(r, 8, 6, f), fclose(f);
+    if (FILE* f = hos_fopen_write(path.c_str(), "wb")) fwrite(r, 8, 6, f), fclose(f);
 }
 /// Whether to prepare (and why), and what for: *now, written once the prepare is done. No seed: the translator alone, as before.
 /// *hash_ms: how long the seed's hash took (0: not taken). now->warmed is the record's, for this translator: the caller's to renew
@@ -8622,7 +8623,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
                 fclose(f);
                 logf("vk: the last start did not finish the driver's part of the shaders: left out");
             } else {
-                if (FILE* w = fopen(warming.c_str(), "wb")) fclose(w);
+                if (FILE* w = hos_fopen_write(warming.c_str(), "wb")) fclose(w);
                 if (!warm_libraries(progress)) {
                     remove(warming.c_str());
                     return false;
@@ -8654,7 +8655,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         warm = warm_cs = false;
         logf("vk: the last start did not finish the driver's part of the shaders: left out");
     } else if (warm || warm_cs) {
-        if (FILE* w = fopen(warming.c_str(), "wb")) fclose(w);
+        if (FILE* w = hos_fopen_write(warming.c_str(), "wb")) fclose(w);
     }
     pcache_init();   // (once, here: the workers below build compute pipelines into it)
     std::atomic<size_t> next{0}, done{0}, made{0}, libs{0}, variants{0}, asking{0}, capped{0};
@@ -8828,7 +8829,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
              "are, a pipeline the caches lack is made when it is first drawn");
         return;
     }
-    if (FILE* f = fopen(warming.c_str(), "wb")) fprintf(f, "%d\n", ended_inside + 1), fclose(f);
+    if (FILE* f = hos_fopen_write(warming.c_str(), "wb")) fprintf(f, "%d\n", ended_inside + 1), fclose(f);
     // (by program, in the notes' order: a worker's borrowed program serves all its notes)
     std::vector<uint64_t> progs;
     std::unordered_map<uint64_t, std::vector<const NoteRef*>> by_prog;
@@ -9015,7 +9016,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         }
         logf("vk: the last start did not get through the precompile (closed, or it crashed there): trying it once more");
     }
-    if (FILE* f = fopen(running.c_str(), "wb")) fprintf(f, "%d\n", ended_inside + 1), fclose(f);
+    if (FILE* f = hos_fopen_write(running.c_str(), "wb")) fprintf(f, "%d\n", ended_inside + 1), fclose(f);
     struct Done { const std::string& path; ~Done() { remove(path.c_str()); } } done_marker{running};
     pcache_init();
     std::vector<std::unique_ptr<PipeNote>> notes = pipe_notes_read();
@@ -9291,7 +9292,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     }
     if (resumed) logf("vk: the last start did not finish building the predicted pipelines (%s): they are built again (what the "
                       "driver kept comes from its cache)", began ? "it ended in them" : "closed");
-    if (FILE* f = fopen(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began + 1), fclose(f);
+    if (FILE* f = hos_fopen_write(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began + 1), fclose(f);
     size_t programs = 0;
     PredictCounts left_out;
     std::vector<std::unique_ptr<PipeNote>> predicted = predict_pipelines(notes, &programs, &left_out);
@@ -9433,7 +9434,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     }
     // (gone on: what is stuck is left to play, as the stall guard says; a start that does it again would only stall again)
     if (!prepare_stopped()) remove(predict_pending_path().c_str());
-    else if (FILE* f = fopen(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began), fclose(f);   // (closed: not counted)
+    else if (FILE* f = hos_fopen_write(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began), fclose(f);   // (closed: not counted)
     driver_cache_log("after the prediction");
     if (!gone_on) delete pre;
 }
@@ -9453,7 +9454,7 @@ void predicted_sample_write(const std::vector<std::unique_ptr<PipeNote>>& predic
     for (size_t i = 0; i < predicted.size() && pick.size() < kSample; i += std::max<size_t>(1, predicted.size() / kSample))
         pick.push_back(*predicted[i]);
     const std::string path = predicted_sample_path();
-    if (FILE* f = fopen(path.c_str(), "wb")) {
+    if (FILE* f = hos_fopen_write(path.c_str(), "wb")) {
         const uint64_t head[3] = {program_cache_stamp(), sizeof(PipeNote), pick.size()};
         const bool ok = fwrite(head, 8, 3, f) == 3 && fwrite(pick.data(), sizeof(PipeNote), pick.size(), f) == pick.size();
         if (fclose(f) != 0 || !ok) remove(path.c_str());
@@ -9472,7 +9473,7 @@ void predicted_keys_write(std::vector<uint64_t> keys) {
     std::sort(keys.begin(), keys.end());
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
     const std::string path = predicted_keys_path();
-    if (FILE* f = fopen(path.c_str(), "wb")) {
+    if (FILE* f = hos_fopen_write(path.c_str(), "wb")) {
         const uint64_t head[2] = {program_cache_stamp(), keys.size()};
         const bool ok = fwrite(head, 8, 2, f) == 2 && fwrite(keys.data(), 8, keys.size(), f) == keys.size();
         if (fclose(f) != 0 || !ok) remove(path.c_str());

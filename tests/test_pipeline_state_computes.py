@@ -284,6 +284,7 @@ def check_source(draw):
 
 FIXTURE_HEAD = r'''
 #define _CRT_SECURE_NO_WARNINGS 1
+#include "HOS_FOPEN_WRITE_H"   // (host/hos_fopen_write.h: the compute records are written without following a link)
 #include <cstdarg>
 #include <cstddef>
 #include <cstdint>
@@ -530,7 +531,7 @@ def check_game(tool, draw, cxx):
         "std::mutex state_mu;\nFILE* state_file = nullptr;\nstd::unordered_set<uint64_t> state_seen;",
         block(draw, "void state_open_locked()"), block(draw, "void state_record_compute(uint64_t key)")))
     head, _, tail = FIXTURE_MAIN.partition("@READERS@")
-    fixture = FIXTURE_HEAD + readers.replace("@STUBS@", head) + tail
+    fixture = FIXTURE_HEAD.replace("HOS_FOPEN_WRITE_H", (ROOT / "host" / "hos_fopen_write.h").as_posix()) + readers.replace("@STUBS@", head) + tail
     g = graphics(tool, 5, 6)
     with tempfile.TemporaryDirectory(prefix="state-computes-") as tmp:
         folder = Path(tmp)
