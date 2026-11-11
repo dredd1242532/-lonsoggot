@@ -682,7 +682,7 @@ def main():
     need(ui, r"pr.g == kAddChar && \*l == 'L'.*?pr.g == kRemoveChar && \*l == 'R'",
          "text field: Add and Remove do not show right and left shoulders")
     need(menu, r'\{TAB_GRAPHICS, "Custom output size", nullptr,', "vk_menu.cpp: no Custom output size row")
-    need(menu, r'const FieldRow field_rows\[\] = \{\{"Custom output size", &output_field, output_field_apply\}\};',
+    need(menu, r'const FieldRow field_rows\[\] = \{\{"Custom output size", &output_field, output_field_apply\}[,}]',
          "vk_menu.cpp: Custom output size is not a text field")
     need(hid, r"static int key\(int vk\) \{ return !rx_option\(1, 0\) &&",
          "nn_hid.c: the game's keys are not held back while the menu (and so a field) has the keyboard")
