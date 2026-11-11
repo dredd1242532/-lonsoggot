@@ -127,13 +127,14 @@ if [ "$WHAT" = tools ] && ! done_for llvm "$LLVM_VER"; then
 fi
 
 # ---- Python and the tools' modules ----
-PY_MARK="$PY_VER-$PY_TAG-notk-$(sha256sum requirements.txt nx2/prompt_requirements.txt | sha256sum | cut -c1-12)"   # (a new pin installs again)
+PY_MARK="$PY_VER-$PY_TAG-notk-$(sha256sum requirements.txt nx2/prompt_requirements.txt requirements-lock.txt | sha256sum | cut -c1-12)"   # (a new pin installs again)
 if ! done_for python "$PY_MARK"; then
     fetch "https://github.com/astral-sh/python-build-standalone/releases/download/$PY_TAG/cpython-$PY_VER+$PY_TAG-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz" python.tar.gz "$PY_SHA256"
     rm -rf "$DEPS/python"
     tar -xzf "$DL/python.tar.gz" -C "$DEPS"
+    # (each wheel checked against requirements-lock.txt's SHA-256s, as every other download here: scripts/python_lock.py)
     "$DEPS/python/bin/python3" -m pip install --no-cache-dir --only-binary :all: --disable-pip-version-check -q \
-        -r requirements.txt
+        --require-hashes -r requirements-lock.txt
     rm -rf "$DEPS/python/lib/python3.12/test" "$DEPS/python/lib/python3.12/idlelib" "$DEPS/python/lib/python3.12/ensurepip"
     # (Tcl/Tk and tkinter: nothing in the AppImage has a window)
     rm -rf "$DEPS/python/lib/python3.12/tkinter" "$DEPS/python/lib/python3.12/turtle.py" "$DEPS/python/lib/python3.12/turtledemo" \
