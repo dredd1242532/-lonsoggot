@@ -396,6 +396,11 @@ def long_path(p):
     return "\\\\?\\" + p
 
 
+# (Windows) the reparse points that are links: a symbolic link, a junction (mount point), WSL's link. OneDrive marks its files
+# and folders with reparse points of its own, which are not
+LINK_TAGS = (0xA000000C, 0xA0000003, 0xA000001D)
+
+
 def package_parts(rel):
     parts = rel.split("/")
     if (not rel or "\\" in rel or any(not p or p in (".", "..") or p[-1] in " ." or
@@ -405,8 +410,12 @@ def package_parts(rel):
     return parts
 
 
-def is_link(info):
-    return stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+def is_link(info, links_only=False):
+    """A link or reparse point. links_only: only reparse points that are links (LINK_TAGS) count"""
+    reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if reparse and links_only:
+        reparse = getattr(info, "st_reparse_tag", 0) in LINK_TAGS
+    return stat.S_ISLNK(info.st_mode) or bool(reparse)
 
 
 class Destination:
@@ -436,8 +445,9 @@ class Destination:
         return os.path.join(at, parts[-1])
 
 
-def extraction_path(out, part, rel, temporary_suffix=".part"):
-    """A package path stays under its part, without following existing output links."""
+def extraction_path(out, part, rel, temporary_suffix=".part", links_only=False):
+    """A package path stays under its part, without following existing output links. links_only (longshot): only reparse
+    points that are links count (a game folder OneDrive keeps, read back after the unpack); the unpack itself refuses any"""
     parts = package_parts(rel)
     root = long_path(os.path.realpath(os.path.abspath(out)))
     base = os.path.join(root, part)
@@ -456,7 +466,7 @@ def extraction_path(out, part, rel, temporary_suffix=".part"):
             info = os.lstat(path)
         except FileNotFoundError:
             continue
-        if is_link(info):
+        if is_link(info, links_only):
             raise SystemExit("extraction path is a link or reparse point: %s" % path)
         if path == temporary and info.st_nlink > 1:
             raise SystemExit("extraction temporary file has other hard links: %s" % path)
