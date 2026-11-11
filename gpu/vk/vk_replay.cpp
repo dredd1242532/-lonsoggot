@@ -326,16 +326,40 @@ int64_t st_wait_ns;   // (time the replay waited for a recording slot: the GPU b
 VkQueryPool ts_pool = VK_NULL_HANDLE;
 bool ts_pending[kRecordings];
 int64_t st_gpu_ns, st_gpu_max_ns;
+// (hookshot) With the slot's own times, the same call reads those of the slots after it that are still unread and that the GPU has
+// finished (each query's availability), up to kTsRun slots: one vkGetQueryPoolResults for a run of recordings, not one each. On an
+// RX 9070 XT (AMD's Windows driver) the per-slot calls were 0.16 ms a frame of the presentation thread in Hyrule Field, ~50 a frame.
+// A pending slot is submitted and not yet begun again (its query reset is recorded only then, after it is read here), so an
+// available result is that use's; one not available yet stays pending for its own turn. RX_VK_TS_EACH=1: one slot a call, as before
+constexpr int kTsRun = 16;
+void gpu_time_add(uint64_t t0, uint64_t t1) {
+    if (t1 <= t0) return;
+    const int64_t ns = (int64_t)((t1 - t0) * (double)dev.props.limits.timestampPeriod);
+    st_gpu_ns += ns;
+    st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
+}
 void gpu_time_collect(Recording& r) {
     if (!ts_pool || !ts_pending[r.slot]) return;
     ts_pending[r.slot] = false;
-    uint64_t t[2] = {0, 0};
-    if (vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+    static const bool each = env_on("RX_VK_TS_EACH");
+    if (each) {
+        uint64_t t[2] = {0, 0};
+        if (vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+            return;
+        gpu_time_add(t[0], t[1]);
         return;
-    if (t[1] <= t[0]) return;
-    const int64_t ns = (int64_t)((t[1] - t[0]) * (double)dev.props.limits.timestampPeriod);
-    st_gpu_ns += ns;
-    st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
+    }
+    int n = 1;
+    while (n < kTsRun && r.slot + n < kRecordings && ts_pending[r.slot + n]) n++;
+    uint64_t t[kTsRun][2][2] = {};   // (a slot's start and end, each its value and its availability)
+    const VkResult res = vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2 * n, sizeof t, t, 2 * sizeof(uint64_t),
+                                               VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if (res != VK_SUCCESS && res != VK_NOT_READY) return;
+    for (int i = 0; i < n; i++) {
+        if (!t[i][0][1] || !t[i][1][1]) continue;   // (the slot's own: dropped, as before; the others: read in their turn)
+        ts_pending[r.slot + i] = false;
+        gpu_time_add(t[i][0][0], t[i][1][0]);
+    }
 }
 }   // namespace
 /// (the FPS counter's Breakdown, vk_fps.cpp) the GPU's time in the timed recordings so far: read when their slots come round
