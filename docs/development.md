@@ -632,6 +632,11 @@ The other rows are 0 Off and 1 On. Some are read at the start, before the menu e
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
 (`gpu/vk/vk_main.cpp`) and the controls (`host/nn_hid.c`).
 
+These named keys, including `walk_mode` and `walk_speed`, are independent of the internal host/renderer option IDs in
+`gpu/vk/vk_api.h`; renumbering an option does not require changing a player's saved options file.
+Walk mode and Walk speed use IDs 52 and 53 respectively; the input regression check compiles the real header
+with the host's reads and checks the renderer's answers and menu rows against those names.
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`
 as its client. `status.game` holds Link's position/facing, the camera's yaw, event/loading/age, life, maximum life,
