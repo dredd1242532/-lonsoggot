@@ -760,6 +760,8 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
 (`gpu/vk/vk_main.cpp`), the controls (`host/nn_hid.c`) and `skip_title_screen` (`host/oot_autoload.c`).
+Co-op's `coop`, `coop_name`, `coop_server` and `coop_port` are read at the start by `host/coop.c` and have no row yet;
+the menu keeps lines it does not write ([coop.md](coop.md)).
 
 These named keys, including `walk_mode` and `walk_speed`, are independent of the internal host/renderer option IDs in
 `gpu/vk/vk_api.h`; renumbering an option does not require changing a player's saved options file.
