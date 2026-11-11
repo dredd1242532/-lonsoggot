@@ -442,7 +442,7 @@ behaves (a function's name and arguments, a result code, the order of calls) is 
 replacements for the console's functions are written from such facts; describe them in your own words and cite a
 public source when there is one.
 
-The third-party parts (Eden, suyu, Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus
+The third-party parts (Eden, suyu, Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, Monocypher, the Libertinus
 fonts, zbic and the a64-kit tools) keep their own notices: preserve them, and don't relicense their code. NVIDIA's DLSS
 SDK is not one of them: it is never in the repository ([NVIDIA DLSS](#nvidia-dlss-optional)).
 

@@ -1213,8 +1213,8 @@ are Longshot's.
     Longshot: Copyright (C) 2026 the Longshot contributors
 
 It includes code from Eden and suyu, which are under the GPL too. Third-party parts under other licenses that
-work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus fonts, zbic and the
-a64-kit tools) keep their own notices in their folders.
+work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, Monocypher, the Libertinus fonts,
+zbic and the a64-kit tools) keep their own notices in their folders.
 
 Longshot is an unofficial fan project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and Ocarina of
 Time are trademarks of Nintendo.

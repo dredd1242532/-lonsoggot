@@ -56,6 +56,7 @@ HOST = os.path.join(kit.HERE, "..", "host")
 OPUS = os.path.join(kit.HERE, "..", "third_party", "opus")
 ZSTD = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "zstd", "lib"))
 ZSTD_HOST = ("prompts.c", "hos_zstd.c")   # (the host files that use it: a mod's size table; the game's stream decode)
+MONOCYPHER = os.path.join(kit.HERE, "..", "third_party", "monocypher")
 OBJ_CACHE = os.path.join(kit.WORK, "objcache")
 # (LONGSHOT_OBJ_STORE: one store of objects for every work folder, nx2/object_store.py. Its folder for this work folder's compiler
 # and headers, or None)
@@ -1164,6 +1165,10 @@ def main():
     if host_srcs:
         jobs += zstd_jobs(cc, target() + CPU + ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DZSTD_DISABLE_ASM",
                                                 "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0"], obj_dir, "zstd_")
+    # Monocypher 4.0.2 (third_party/monocypher): co-op's cryptography (host/coop_proto.c)
+    if host_srcs:
+        jobs.append((cc, os.path.join(MONOCYPHER, "monocypher.c"), os.path.join(obj_dir, "monocypher.o"),
+                     target() + CPU + ["-O2", "-g0", "-Wno-everything"], b"monocypher-4.0.2"))
     # the renderer (C++20, NDEBUG: no asserts in it or suyu), when a wgpu-native release is there
     wgpu = a.standalone and not LINUX and os.path.isfile(os.path.join(WGPU, "include", "webgpu", "webgpu.h"))
     if a.standalone and not wgpu and not LINUX:
