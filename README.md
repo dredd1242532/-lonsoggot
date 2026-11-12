@@ -255,6 +255,9 @@ The build reads your game and never changes it.
   needed to play. To keep them, so that an update compiles only what changed, set `LONGSHOT_KEEP_BUILD_FILES=1` for the
   build; **Free up space** in the launcher's settings deletes them later. Their folder can be moved there before a build
   (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
+- **Files at a link:** the game does not write through a symbolic link (or, on Windows, a junction) at the name of a
+  file it writes itself, such as `longshot_options.ini`, `mouse_sens.txt` or a pipeline cache: it leaves the file as it
+  is and says so once in the log. To keep these files elsewhere, link the folder that holds them, not the file.
 - **Uninstall:** uninstall the launcher (Windows: *Apps & features*), then delete its folder, the game folder and the
   shortcuts.
 
