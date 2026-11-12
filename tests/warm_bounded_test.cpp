@@ -62,6 +62,16 @@ int main() {
     expect(warm_bounded::predicted_bound_s("15") == 15, "predicted_bound_s(\"15\") == 15");
     expect(warm_bounded::predicted_bound_s("-5") == 60, "predicted_bound_s(\"-5\") == 60");
     expect(warm_bounded::predicted_bound_s("1m") == 60, "predicted_bound_s(\"1m\") == 60");
+    // (and its cap on what it adds to our cache: 200 MB unless said otherwise, 0 is none added)
+    expect(warm_bounded::predicted_cap_mb(nullptr) == 200, "predicted_cap_mb(nullptr) == 200");
+    expect(warm_bounded::predicted_cap_mb("0") == 0, "predicted_cap_mb(\"0\") == 0");
+    expect(warm_bounded::predicted_cap_mb("750") == 750, "predicted_cap_mb(\"750\") == 750");
+    expect(warm_bounded::predicted_cap_mb("200MB") == 200, "predicted_cap_mb(\"200MB\") == 200");
+    expect(warm_bounded::predicted_cap_mb("-1") == 200, "predicted_cap_mb(\"-1\") == 200");
+    expect(!warm_bounded::over_cap(199ull << 20, 200ull << 20), "!over_cap(199 MB, 200 MB)");
+    expect(warm_bounded::over_cap(200ull << 20, 200ull << 20), "over_cap(200 MB, 200 MB)");
+    expect(warm_bounded::over_cap(900ull << 20, 200ull << 20), "over_cap(900 MB, 200 MB)");
+    expect(!warm_bounded::over_cap(900ull << 20, 0), "!over_cap(900 MB, 0)");   // (no cap)
     expect(!warm_bounded::out_of_time(59.9, 60), "!out_of_time(59.9, 60)");
     expect(warm_bounded::out_of_time(60.1, 60), "out_of_time(60.1, 60)");
     expect(!warm_bounded::out_of_time(100000, 0), "!out_of_time(100000, 0)");   // (no bound)

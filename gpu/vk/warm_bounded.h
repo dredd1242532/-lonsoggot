@@ -64,6 +64,22 @@ inline int predicted_bound_s(const char* text) {
     }
     return n;
 }
+/// The MB the first start's pass over the predicted pipelines may add to our pipeline cache (precompile_warm,
+/// RX_VK_WARM_PREDICTED_MB), from the variable's text: 200 where it is not set or not a number (about 14,000 pipelines on an
+/// RTX 3090's driver, of 50,000), 0 for none: the pass is not made. The file is read whole by every start and held by the
+/// driver for the session, so its size is memory
+constexpr int kPredictedCapMb = 200;
+inline int predicted_cap_mb(const char* text) {
+    if (!text || !*text) return kPredictedCapMb;
+    int n = 0;
+    for (const char* c = text; *c; c++) {
+        if (*c < '0' || *c > '9' || n > 100000) return kPredictedCapMb;
+        n = n * 10 + (*c - '0');
+    }
+    return n;
+}
+/// Whether the pass has added as much as it may (a cap of 0 bytes: it has none)
+inline bool over_cap(unsigned long long added_bytes, unsigned long long cap_bytes) { return cap_bytes && added_bytes >= cap_bytes; }
 /// Whether a pass that has run for elapsed_s is past its bound (0 or less: it has none)
 inline bool out_of_time(double elapsed_s, int bound_s) { return bound_s > 0 && elapsed_s > bound_s; }
 } // namespace warm_bounded

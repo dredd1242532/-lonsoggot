@@ -30,7 +30,9 @@ def check_source():
     # (the predicted pass in the game's own process: bounded in time, into our cache, and the marker written all the same)
     if 'warm_bounded::predicted_bound_s(getenv("RX_VK_WARM_PREDICTED_S"))' not in warm or "predict_warm_bound_s = bound_s" not in warm:
         raise SystemExit("precompile_warm's predicted pass has no time bound")
-    for needle in ("driver_cache_only = !warm;", "warm_bounded::out_of_time("):
+    if 'warm_bounded::predicted_cap_mb(getenv("RX_VK_WARM_PREDICTED_MB"))' not in warm or "cap_mb > 0 &&" not in warm:
+        raise SystemExit("precompile_warm's predicted pass has no cap on what it adds to the pipeline cache")
+    for needle in ("driver_cache_only = !warm;", "warm_bounded::out_of_time(", "warm_bounded::over_cap(", "pre->capped.load()) return;"):
         if needle not in draw:
             raise SystemExit("predict_run no longer has: " + needle)
     if warm.index("build_graphics(") > warm.index("vkDestroyPipeline(dev.device, made, nullptr);"):
@@ -46,7 +48,7 @@ def check_source():
     # (the predicted pipelines are built again in the game's own process, into the cache it loads from then on: after the noted
     # and compute ones, before the cache is saved and the marker left, and never in the preparation's own process, whose step
     # before this one has just built them)
-    again = warm.find("const bool again = all && !prepare_only && warm_predicted && !prepare_stopped() && !predicted_here.load();")
+    again = warm.find("const bool again = all && !prepare_only && warm_predicted && cap_mb > 0 && !prepare_stopped() && !predicted_here.load();")
     run_it = warm.find("predict_run(progress);")
     if again < 0 or not warm.index("program_cache_compute_keys()") < again < run_it < warm.index("pipeline_cache_save(true);"):
         raise SystemExit("precompile_warm does not build the predicted pipelines in the game's process before it saves the cache")

@@ -885,6 +885,11 @@ std::atomic<size_t> predict_answered{0}, predict_compiled{0};
 std::atomic<int> predict_warm_bound_s{0};
 std::atomic<size_t> predict_reached{0}, predict_total{0};
 std::atomic<bool> predict_cut{false};
+// (and its cap: the bytes that pass may add to our cache (0: no cap), what it added, whether the cap stopped it, and how many of
+// the predicted pipelines are of programs a list names in another variant, which go first)
+std::atomic<uint64_t> predict_warm_cap_bytes{0}, predict_added_bytes{0};
+std::atomic<bool> predict_capped{false};
+std::atomic<size_t> predict_of_noted{0}, predict_made{0};
 std::atomic<bool> predicted_here{false};   // (predict_run ran in this process already: a preparation done inside the game's own start)
 template <class CI>
 VkResult create_cached(VkResult (*create)(VkPipelineCache, const CI*, VkPipeline*), const CI* ci, VkPipeline* pl) {
@@ -8499,28 +8504,36 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     static const bool warm_predicted = [] { const char* v = getenv("RX_VK_WARM_PREDICTED"); return !v || !env_value_off(v); }();
     const auto p0 = std::chrono::steady_clock::now();
     // (not where this process has built them already: a preparation done inside the game's own start is predict_run before this)
-    const bool again = all && !prepare_only && warm_predicted && !prepare_stopped() && !predicted_here.load();
+    // (and in what it adds to our cache: every start reads that file whole and the driver holds it for the session, about
+    // 0.9 MB of memory for each MB of file. All of them are 700 MB more on an RTX 3090's driver, 14.6 KB a pipeline, for an
+    // answer in 0.4 ms where the driver's own cache takes 3.5 ms. RX_VK_WARM_PREDICTED_MB=<MB>, 0: none added, the pass not made)
+    static const int cap_mb = warm_bounded::predicted_cap_mb(getenv("RX_VK_WARM_PREDICTED_MB"));
+    const bool again = all && !prepare_only && warm_predicted && cap_mb > 0 && !prepare_stopped() && !predicted_here.load();
     // (bounded in time: this pass is in front of the game's first start, and where the driver's cache does not answer it, it is
     // the compile of every one of them over again (19 minutes on an RX 580 from empty caches). What it does not get to is as
     // before this pass was here: asked for at its first draw, built by the workers where no cache has it.
     // RX_VK_WARM_PREDICTED_S=<seconds>, 0: no bound)
     static const int bound_s = warm_bounded::predicted_bound_s(getenv("RX_VK_WARM_PREDICTED_S"));
     if (again) {
-        predict_counts = true, predict_warm_bound_s = bound_s;
+        predict_counts = true, predict_warm_bound_s = bound_s, predict_warm_cap_bytes = (uint64_t)cap_mb << 20;
         predict_run(progress);
-        predict_counts = false, predict_warm_bound_s = 0;
+        predict_counts = false, predict_warm_bound_s = 0, predict_warm_cap_bytes = 0;
     }
     const double predicted_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - p0).count();
-    char cut[160] = "";
-    if (again && predict_cut.load())
+    char cut[200] = "";
+    if (again && predict_capped.load())
+        snprintf(cut, sizeof cut, " (stopped at its cap of %d MB, RX_VK_WARM_PREDICTED_MB: the rest are asked for at their first "
+                                  "draws, as before)", cap_mb);
+    else if (again && predict_cut.load())
         snprintf(cut, sizeof cut, " (stopped at its bound of %d s, RX_VK_WARM_PREDICTED_S: the rest are asked for at their first "
                                   "draws, as before)", bound_s);
     if (again)
         logf("vk: precompile: the predicted pipelines built again in the game's own process, into the cache it loads from: %zu "
-             "the caches answered without compiling, %zu compiled, in %.1f s; %zu of %zu reached%s", predict_answered.load(),
-             predict_compiled.load(), predicted_s, predict_reached.load(), predict_total.load(),
-             cut);
-    else if (all && !prepare_only && warm_predicted && !prepare_stopped())
+             "the caches answered without compiling, %zu compiled, in %.1f s; %zu of %zu reached, %zu went in, %.0f MB added; "
+             "%zu of them are of programs a list names in another variant, which go first%s", predict_answered.load(),
+             predict_compiled.load(), predicted_s, predict_reached.load(), predict_total.load(), predict_made.load(),
+             predict_added_bytes.load() / 1048576.0, predict_of_noted.load(), cut);
+    else if (all && !prepare_only && warm_predicted && cap_mb > 0 && !prepare_stopped())
         logf("vk: precompile: the predicted pipelines were built by this process already (its own preparation): not again");
     if (all && !prepare_stopped()) {
         pipeline_cache_save(true);   // (in the file before the marker says they are there)
@@ -8891,7 +8904,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
         std::unordered_map<uint64_t, std::vector<const PipeNote*>> by_program;
         std::vector<uint64_t> keys;
         std::atomic<size_t> next{0}, done{0}, made{0}, same{0};
-        std::atomic<bool> out_of_time{false}, abandoned{false}, graphics_begun{false};
+        std::atomic<bool> out_of_time{false}, abandoned{false}, graphics_begun{false}, capped{false};
         std::mutex first_graphics;
     };
     Pre* pre = new Pre;
@@ -8903,6 +8916,9 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     {
         std::unordered_set<uint64_t> noted;
         for (const auto& n : pre->notes) noted.insert(n->prog);
+        size_t of_noted = 0;
+        for (const auto& n : pre->predicted) of_noted += noted.count(n->prog) != 0;
+        predict_of_noted = of_noted;
         std::sort(pre->keys.begin(), pre->keys.end(), [&](uint64_t a, uint64_t b) {
             const bool na = noted.count(a) != 0, nb = noted.count(b) != 0;
             return na != nb ? na : a < b;
@@ -8926,7 +8942,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
         ub_thread_off();   // (a background thread: see ub_thread_off)
         driver_cache_only = !warm;
         for (;;) {
-            if (prepare_stopped() || pre->abandoned.load()) return;
+            if (prepare_stopped() || pre->abandoned.load() || pre->capped.load()) return;
             if (warm_bounded::out_of_time(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), bound_s)) {
                 pre->out_of_time = true;
                 return;
@@ -8995,7 +9011,23 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     bool gone_on = false;
     auto log_at = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     const auto built0 = std::chrono::steady_clock::now();
-    while (next.load() < pre->keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load()) {
+    // (precompile_warm's cap on what the pass adds to our cache: its size asked of the driver about once a second, less often
+    // where the driver is slow to say (never more than a twentieth of the time spent asking))
+    const uint64_t cap_bytes = warm ? predict_warm_cap_bytes.load() : 0;
+    const auto cache_size = [] {
+        size_t n = 0;
+        return pcache && vkGetPipelineCacheData(dev.device, pcache, &n, nullptr) == VK_SUCCESS ? (uint64_t)n : 0;
+    };
+    const uint64_t size0 = warm ? cache_size() : 0;
+    auto size_at = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (next.load() < pre->keys.size() + threads.size() && !prepare_stopped() && !out_of_time.load() && !pre->capped.load()) {
+        if (cap_bytes && std::chrono::steady_clock::now() >= size_at) {
+            const auto q0 = std::chrono::steady_clock::now();
+            const uint64_t now_size = cache_size();
+            const auto took = std::chrono::steady_clock::now() - q0;
+            if (warm_bounded::over_cap(now_size > size0 ? now_size - size0 : 0, cap_bytes)) pre->capped = true;
+            size_at = std::chrono::steady_clock::now() + std::max<std::chrono::steady_clock::duration>(std::chrono::seconds(1), took * 20);
+        }
         if (progress) progress(done.load(), predicted_n);
         prepare_progress_log("predicted pipelines", done.load(), predicted_n, built0, log_at);
         Sleep(100);
@@ -9016,7 +9048,11 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     } else {
         for (std::thread& t : threads) t.join();
     }
-    if (progress) progress(gone_on ? predicted_n : done.load(), predicted_n);
+    if (progress) progress(gone_on || pre->capped.load() || out_of_time.load() ? predicted_n : done.load(), predicted_n);
+    if (warm) {
+        const uint64_t size1 = gone_on ? 0 : cache_size();   // (gone on: workers are still inside the driver)
+        predict_added_bytes = size1 > size0 ? size1 - size0 : 0, predict_capped = pre->capped.load(), predict_made = made.load();
+    }
     const double all_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     logf("vk: predicted %zu pipelines from %zu notes for %zu program variants no note names: %zu made, %zu the same pipeline as "
          "another, in %.1f s (%.1f s deciding them, %.1f s building them on %zu threads); left out as no draw could ask for them: %zu "
@@ -9025,11 +9061,13 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
          pre->same.load(), all_s, decide_s, all_s - decide_s, threads.size(), left_out.vertex_types, left_out.output_types,
          left_out.variants_unfit, left_out.notes_unfit, left_out.refit,
          gone_on ? " (gone on without the pipelines the driver did not finish)"
+         : pre->capped.load() ? " (the first start's cap on what goes into our cache, RX_VK_WARM_PREDICTED_MB, was reached: the "
+                                "rest are built in play)"
          : out_of_time.load() ? " (the time bound, RX_VK_PREDICT_S or the first start's RX_VK_WARM_PREDICTED_S, ran out: the rest "
                                 "are built in play)"
          : prepare_stopped() ? " (stopped: the window was closed; the driver keeps what was built)" : "");
     predict_reached = done.load(), predict_total = predicted_n, predict_cut = out_of_time.load();
-    if (!prepare_stopped() && !out_of_time.load() && !gone_on) predicted_sample_write(pre->predicted);
+    if (!prepare_stopped() && !out_of_time.load() && !pre->capped.load() && !gone_on) predicted_sample_write(pre->predicted);
     // (gone on: what is stuck is left to play, as the stall guard says; a start that does it again would only stall again)
     if (!prepare_stopped()) remove(predict_pending_path().c_str());
     else if (FILE* f = fopen(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began), fclose(f);   // (closed: not counted)
