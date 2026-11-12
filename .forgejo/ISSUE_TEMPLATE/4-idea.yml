@@ -1,10 +1,11 @@
-name: Idea or feature request
-description: Something Longshot doesn't do yet
+name: Idea
+about: Something Longshot doesn't do yet
+title: "Idea: "
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
-      value: Search the open issues first; if someone asked already, add to theirs. English, please.
+      value: Search the [open issues](https://git.magicbean.dev/MagicBeanDev/Longshot/issues) first; if someone asked already, add to theirs. English, please.
   - type: textarea
     id: idea
     attributes:
