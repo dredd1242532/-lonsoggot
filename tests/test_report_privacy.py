@@ -23,17 +23,28 @@ int main(void) {
     HosReportPrivacy p;
     hos_report_privacy_init(&p, "/home/private-user", "private-user", "private-host");
     const char *bad[] = {"/home/private-user/game", "private-user.dll", "PRIVATE-HOST.dll",
-        "10.20.30.40", "fe80::1", "user@example.test", "..\\secret", "line\ninjected", "key:\tvalue"};
+        "10.20.30.40", "fe80::1", "dead::beef", "DEAD::BEEF", "sead:MainThread",
+        "sead::MainThread/path", "sead::MainThread\\path",
+        "user@example.test", "..\\secret", "line\ninjected", "key:\tvalue"};
     char b[80];
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; ++i) {
         hos_report_privacy_redact(&p, b, sizeof b, bad[i], strlen(bad[i]));
         assert(!strcmp(b, "redacted"));
     }
-    const char *good[] = {"longshot.exe", "libc.so.6", "nvoglv64.dll", "Presentation Thread", "v2.1.0-gabc123"};
+    const char *good[] = {"longshot.exe", "libc.so.6", "nvoglv64.dll", "Presentation Thread", "v2.1.0-gabc123",
+        "sead::MainThread", "sead::TaskMgr::Worker_2"};
     for (size_t i = 0; i < sizeof good / sizeof good[0]; ++i) {
         hos_report_privacy_redact(&p, b, sizeof b, good[i], strlen(good[i]));
         assert(!strcmp(b, good[i]));
     }
+    HosReportPrivacy identities;
+    hos_report_privacy_init(&identities, "/home/privateuser", "privateuser", "privatehost");
+    const char *named_user = "sead::privateuser::Thread";
+    hos_report_privacy_redact(&identities, b, sizeof b, named_user, strlen(named_user));
+    assert(!strcmp(b, "redacted"));
+    const char *named_host = "sead::privatehost::Thread";
+    hos_report_privacy_redact(&identities, b, sizeof b, named_host, strlen(named_host));
+    assert(!strcmp(b, "redacted"));
     struct { char out[4]; char sentinel; } bounded = {{0}, 'X'};
     assert(hos_report_privacy_redact(&p, bounded.out, sizeof bounded.out, "abcdef", 6) == 3);
     assert(!strcmp(bounded.out, "abc") && bounded.sentinel == 'X');
@@ -65,6 +76,7 @@ def main():
                         "-I", str(ROOT / "host"), str(src), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=10)
     print("PASS: report labels omit identities, paths and addresses; bounds and no-allocation guard")
+    print("PASS: C++ namespace thread labels kept; IPv6, single colons, paths and names still redacted")
 
 
 if __name__ == "__main__":

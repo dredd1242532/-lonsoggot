@@ -29,16 +29,37 @@ static inline void hos_report_privacy_init(HosReportPrivacy *p, const char *home
     }
 }
 
+/* Ordinary C++ identifiers are useful thread names, not network addresses.
+   All-hex segments stay private: dead::beef is also a valid IPv6 spelling. */
+static inline int hos_report_namespace_label(const char *text, size_t size) {
+    int at_start = 1, scoped = 0, non_hex = 0;
+    for (size_t i = 0; i < size; ++i) {
+        const unsigned char c = (unsigned char)text[i];
+        if (c == ':') {
+            if (at_start || i + 1 >= size || text[i + 1] != ':') return 0;
+            ++i; at_start = 1; scoped = 1;
+            continue;
+        }
+        const int letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        const int digit = c >= '0' && c <= '9';
+        if (!letter && c != '_' && (!digit || at_start)) return 0;
+        if (!digit && !(c >= 'a' && c <= 'f') && !(c >= 'A' && c <= 'F')) non_hex = 1;
+        at_start = 0;
+    }
+    return scoped && !at_start && non_hex;
+}
+
 static inline size_t hos_report_privacy_redact(const HosReportPrivacy *p, char *out,
                                                size_t cap, const char *text, size_t size) {
     const char *ids[3] = {p->home, p->user, p->host};
-    int private_label = p->incomplete;
+    int private_label = p->incomplete, namespace_label = -1;
     size_t n = 0;
     if (!text) size = 0;
     while (n < size && text[n]) ++n;
     for (size_t i = 0; i < n && !private_label; ++i) {
         const unsigned char c = (unsigned char)text[i];
-        if (c < 32 || c == 127 || c == '/' || c == '\\' || c == ':' || c == '@') private_label = 1;
+        if (c == ':' && namespace_label < 0) namespace_label = hos_report_namespace_label(text, n);
+        if (c < 32 || c == 127 || c == '/' || c == '\\' || (c == ':' && !namespace_label) || c == '@') private_label = 1;
         /* Dotted numeric labels can be IP addresses. Module names have letters. */
         if (c >= '0' && c <= '9') {
             size_t j = i;

@@ -119,7 +119,7 @@ def build(cc, temp, glue, threads, main):
     if os.name == "nt":
         cmd += ["-ldbghelp", "-ladvapi32"]
     else:
-        cmd += ["-I", str(ROOT / "host/posix"), "-pthread"]
+        cmd += ["-I", str(ROOT / "host/posix"), "-pthread", "-ldl"]
     subprocess.run(cmd, check=True, timeout=120)
     return exe
 
@@ -181,8 +181,11 @@ def main():
             run(folder, "signal-metadata")
             assert not records(folder) and not records(folder, "unclean")
             print("PASS: sent signals re-raised; real faults return to preserve original core siginfo")
+            folder = temp / "module-offsets"; folder.mkdir()
+            run(folder, "module-offsets")
+            print("PASS: module offsets equal dladdr load-base offsets; gapped segments, same basenames and repeated mappings covered")
 
-        for mode in ("fake", "partial", "privacy", "bounds", "fatal", "device-lost", "device-early", "crash", "signal", "abort", "heap"):
+        for mode in ("fake", "partial", "privacy", "namespace", "bounds", "fatal", "device-lost", "device-early", "crash", "signal", "abort", "heap"):
             folder = temp / mode; folder.mkdir()
             result = run(folder, mode, 3 if mode in ("fatal", "device-lost", "device-early") else None if mode in ("crash", "signal", "abort", "heap") else 0)
             paths = records(folder); assert len(paths) == 1, (mode, paths)
@@ -198,6 +201,8 @@ def main():
                     assert "guest_register: x0=0x1000" in text and "guest_backtrace: 0x80005678" in text, (mode, text)
             if mode == "privacy":
                 assert values["thread"] == "redacted"
+            if mode == "namespace":
+                assert values["thread"] == "sead::MainThread"
             if mode in ("device-lost", "device-early"):
                 assert values["reason"] == "device lost"
                 assert result.stderr.count("vk: FATAL:") == 2  # no writer recursion or duplicate record

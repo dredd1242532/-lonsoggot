@@ -198,6 +198,10 @@ fault-address class (not the address), thread, module basenames and offsets,
 bounded host and guest backtraces, and the guest registers already printed in
 the log. It does not copy the memory near those registers, saves, full paths or
 environment values. Last-present age is `unknown` when the host has no timestamp.
+Offsets are relative to the module's load base, the same numbers as the existing
+`CRASH:` lines, not offsets in the file. Ordinary namespace-qualified thread
+names such as `sead::MainThread` are retained; addresses, paths and identities
+are still redacted.
 The Linux host trace is a checked frame-pointer chain, and may stop early in
 optimized code; the existing log still attempts its longer glibc backtrace.
 Linux core-dump settings are neither requested nor changed. The record's pid and

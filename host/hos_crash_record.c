@@ -264,25 +264,27 @@ static const char *hex_read(const char *p, uint64_t *n) {
     while ((d = hex_digit((unsigned char)*p)) >= 0) { *n = (*n << 4) | (unsigned)d; ++p; }
     return p;
 }
-static int map_line(const char *line, uintptr_t pc, char *name, size_t cap, uint64_t *offset) {
+typedef struct CrashMap {
     uint64_t lo, hi, file_offset;
-    const char *p = hex_read(line, &lo); if (*p++ != '-') return 0;
-    p = hex_read(p, &hi);
-    if (pc < lo || pc >= hi || *p++ != ' ') return 0;
-    const char *permissions = p;
+    const char *path;
+    int executable;
+} CrashMap;
+static int map_line(const char *line, CrashMap *map) {
+    const char *p = hex_read(line, &map->lo); if (*p != '-') return 0;
+    p = hex_read(p + 1, &map->hi);
+    if (map->hi <= map->lo || *p != ' ') return 0;
+    const char *permissions = ++p;
     while (*p && *p != ' ') ++p;
-    if (p - permissions < 3 || permissions[2] != 'x') return 0;
+    if (p - permissions < 3) return 0;
+    map->executable = permissions[2] == 'x';
     while (*p == ' ') ++p;
-    p = hex_read(p, &file_offset);
+    p = hex_read(p, &map->file_offset);
     for (int field_index = 0; field_index < 2; ++field_index) {
         while (*p == ' ') ++p;
         while (*p && *p != ' ') ++p;
     }
     while (*p == ' ') ++p;
-    if (*p != '/' && *p != '[') return 0;
-    const char *base = basename_of(p);
-    hos_crash_redact(name, cap, base, length(base, 512));
-    *offset = pc - lo + file_offset;
+    map->path = p;
     return 1;
 }
 #endif
@@ -306,20 +308,52 @@ static int module_at(uintptr_t pc, char *name, size_t cap, uint64_t *offset) {
     raw[n] = 0;
     hos_crash_redact(name, cap, raw, n); return name[0] != 0;
 #else
-    if (maps_fd < 0 || lseek(maps_fd, 0, SEEK_SET) < 0) return 0;
-    static char chunk[1024], line[PATH_CAP + 128]; size_t used = 0; int cut = 0;
-    ssize_t got;
-    while ((got = read(maps_fd, chunk, sizeof chunk)) > 0) {
-        for (ssize_t i = 0; i < got; ++i) {
-            if (chunk[i] == '\n') {
-                line[used] = 0;
-                if (!cut && map_line(line, pc, name, cap, offset)) return 1;
-                used = 0; cut = 0;
-            } else if (used + 1 < sizeof line) line[used++] = chunk[i];
-            else cut = 1;
+    if (maps_fd < 0) return 0;
+    static char chunk[1024], line[PATH_CAP + 128], path[PATH_CAP + 128];
+    uint64_t code_start = 0, base = 0;
+    int selected = 0, have_base = 0;
+    /* ELF's virtual segment offset need not equal its file offset (lld leaves
+       gaps). Use the module's offset-zero mapping, as dladdr's load base does,
+       not pc - executable_map_start + file_offset. No loader calls here. */
+    for (int pass = 0; pass < 2; ++pass) {
+        if (lseek(maps_fd, 0, SEEK_SET) < 0) return 0;
+        size_t used = 0; int cut = 0, stop = 0;
+        ssize_t got;
+        while (!stop && (got = read(maps_fd, chunk, sizeof chunk)) > 0) {
+            for (ssize_t i = 0; i < got; ++i) {
+                if (chunk[i] == '\n') {
+                    line[used] = 0;
+                    CrashMap map;
+                    if (!cut && map_line(line, &map)) {
+                        if (!pass && pc >= map.lo && pc < map.hi && map.executable &&
+                            (*map.path == '/' || *map.path == '[')) {
+                            memcpy(path, map.path, strlen(map.path) + 1);
+                            code_start = map.lo; selected = 1; stop = 1;
+                            if (!map.file_offset) base = map.lo, have_base = 1;
+                        } else if (pass) {
+                            if (map.lo <= code_start && !map.file_offset && !strcmp(map.path, path))
+                                base = map.lo, have_base = 1;
+                            if (map.lo >= code_start) {
+                                stop = 1;
+                                if (map.lo != code_start || !map.executable || pc >= map.hi || strcmp(map.path, path))
+                                    have_base = 0; /* module unmapped/changed during the read */
+                            }
+                        }
+                    }
+                    used = 0; cut = 0;
+                    if (stop) break;
+                } else if (used + 1 < sizeof line) line[used++] = chunk[i];
+                else cut = 1;
+            }
         }
+        if (!selected || (pass && !stop)) return 0;
+        if (have_base) break;
     }
-    return 0;
+    if (!have_base) return 0;
+    const char *leaf = basename_of(path);
+    hos_crash_redact(name, cap, leaf, length(leaf, 512));
+    *offset = pc - base;
+    return 1;
 #endif
 }
 static void module_field(Text *b, const char *key, uintptr_t pc) {

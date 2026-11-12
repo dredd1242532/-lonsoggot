@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <ucontext.h>
+#include <dlfcn.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 #endif
@@ -189,6 +190,39 @@ int main(int argc, char **argv) {
     char stamp[17]; timestamp(0, stamp); assert(!strcmp(stamp, "19700101T000000Z"));
     if (!strcmp(mode, "prune-denied") || !strcmp(mode, "prune-reparse")) { hos_crash_clean_end(); return 0; }
 #ifndef _WIN32
+    if (!strcmp(mode, "module-offsets")) {
+        const uintptr_t pcs[] = {(uintptr_t)authored_context, (uintptr_t)malloc};
+        for (unsigned i = 0; i < sizeof pcs / sizeof pcs[0]; ++i) {
+            Dl_info info; char name[160]; uint64_t offset = 0;
+            assert(dladdr((const void *)pcs[i], &info));
+            assert(module_at(pcs[i], name, sizeof name, &offset));
+            assert(offset == pcs[i] - (uintptr_t)info.dli_fbase);
+        }
+        /* Executable virtual offsets differ from file offsets by one page.
+           Same basename/different path and a second instance must not alias. */
+        static const char maps[] =
+            "00100000-00101000 r--p 00000000 00:01 1 /authored/private-user/libgap.so\n"
+            "00102000-00104000 r-xp 00001000 00:01 1 /authored/private-user/libgap.so\n"
+            "00200000-00201000 r--p 00000000 00:01 2 /other/libgap.so\n"
+            "00202000-00204000 r-xp 00001000 00:01 2 /other/libgap.so\n"
+            "00302000-00304000 r-xp 00001000 00:01 3 /missing/libgap.so\n"
+            "00400000-00401000 r--p 00000000 00:01 1 /authored/private-user/libgap.so\n"
+            "00403000-00405000 r-xp 00002000 00:01 1 /authored/private-user/libgap.so\n";
+        char path[PATH_CAP]; assert(join(path, sizeof path, argv[1], "authored.maps"));
+        File file = open_file(path, 1, 0); assert(file != NO_FILE);
+        assert(write_file(file, maps, sizeof maps - 1));
+        const int original = maps_fd; maps_fd = file;
+        char name[160]; uint64_t offset = 0;
+        poison_alloc = 1;
+        assert(module_at(0x102020, name, sizeof name, &offset) && offset == 0x2020 && !strcmp(name, "libgap.so"));
+        assert(module_at(0x202020, name, sizeof name, &offset) && offset == 0x2020);
+        assert(module_at(0x403020, name, sizeof name, &offset) && offset == 0x3020);
+        assert(!module_at(0x302020, name, sizeof name, &offset)); /* no offset-zero mapping: unknown, not a guessed base */
+        assert(!module_at(0x100020, name, sizeof name, &offset)); /* not executable */
+        poison_alloc = 0;
+        maps_fd = original; close_file(file);
+        hos_crash_clean_end(); return 0;
+    }
     if (!strcmp(mode, "signal-metadata")) {
         ucontext_t uc; assert(getcontext(&uc) == 0);
         siginfo_t si; memset(&si, 0, sizeof si); si.si_addr = (void *)0x40;
@@ -267,6 +301,7 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "partial")) io_mode = 1;
     if (!strcmp(mode, "disk-full")) io_mode = 2;
     if (!strcmp(mode, "privacy")) strcpy(guest_thread.name, "private-user@private-host");
+    if (!strcmp(mode, "namespace")) strcpy(guest_thread.name, "sead::MainThread");
     poison_alloc = 1;
     hos_crash_record_write(&c);
     hos_crash_record_write(&c); /* reentry/second fault must leave the first record alone */
