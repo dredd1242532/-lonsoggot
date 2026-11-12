@@ -474,7 +474,9 @@ std::string write(const Inputs& in) {
     else if (in.current_log.empty()) where = "Not known\n(This run's log is not in a file: the game was started from a terminal, or by a program that reads its output.";
     else where = "Not known\n(This run's log names no map yet: no save loaded since the start.";
     where += last.copied && !last.map.empty() ? " The run before was last in " + last.map + ".)" : std::string(")");
-    std::string settings = in.options.empty() ? "Every Insert menu option is at its default.\n" : in.options;
+    const std::string options = in.options.empty() ? (in.pc_options.empty() ? "Every Insert menu option is at its default.\n" :
+        "Every Insert menu option with a fixed default is at its default.\n") : in.options;
+    std::string settings = options;
     std::string names;
     const std::string sw = switches(in.env, &names);
     settings += sw.empty() ? "Switches set: none.\n"
@@ -517,12 +519,12 @@ std::string write(const Inputs& in) {
                        (now.map.empty() ? "" : "&field:where=" + url_part(now.map)) + "&field:gpu=" + url_part(gpu) +
                        "&field:system=" + url_part(in.system);
     const auto count = [](const std::string& s) { return std::to_string(std::count(s.begin(), s.end(), '\n')); };
-    const std::string options = in.options.empty() ? "Every Insert menu option is at its default.\n" : in.options;
     const std::string named = sw.empty() ? "Switches set: none.\n" : "Switches set (their values are in the attached report.txt): " + names + ".\n";
     const std::string listed = sw.empty() ? "" : "Switches set: " + count(sw) + ", listed in the attached report.txt.\n";
     bool link_short = false;
     for (const std::string& s : {options + named, options + listed,
-                                 count(in.options) + " Insert menu options changed and " + count(sw) +
+                                 count(in.options) + (in.pc_options.empty() ? " Insert menu options changed and " :
+                                     " Insert menu options with fixed defaults changed and ") + count(sw) +
                                      " switches set, listed in the attached report.txt.\n"}) {
         const std::string part = "&field:settings=" + url_part(s);
         if (link.size() + part.size() <= kLinkMax) {
@@ -542,6 +544,7 @@ std::string write(const Inputs& in) {
     text += "### Graphics card and driver version\n\n" + gpu + "\n\n";
     text += "### CPU, RAM and operating system\n\n" + in.system + "\n\n";
     text += "### Changes from the defaults\n\n" + settings + "\n";
+    if (!in.pc_options.empty()) text += "### Depends on this PC\n\n" + in.pc_options + "\n";
     text += "### longshot_log.txt\n\n" + logs + "\n";
     text += std::string("### Screenshots or video\n\n") +
             (picture ? "picture.png: the game's picture when the report was made, without the menu.\n\n"

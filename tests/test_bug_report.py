@@ -32,6 +32,9 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "v2.1.0-rc.3-39-gbdfe09c (source 763271ad)"
@@ -79,6 +82,13 @@ int main(int argc, char** argv) {
               "HOS_RELAY=192.168.1.5", "HOS_RELAY_HOST=relay.example.org:47732", "RX_VK_LONG=1234567890123"};
     if (mode == "many")   // (a long longshot_env.txt: more switches than a link takes)
         for (int i = 0; i < 80; i++) in.env.push_back("RX_TEST_SWITCH_" + std::to_string(i) + "=" + std::string(20, 'v'));
+    if (mode == "context" || mode == "context-count") {
+        in.options.clear();
+        in.pc_options = "Aspect ratio: Monitor's shape (default depends on this PC)\n"
+                        "Upscaler: NVIDIA DLSS (default depends on this PC)\n";
+        if (mode == "context-count")
+            for (int i = 0; i < 80; ++i) in.options += "Authored fixed row " + std::to_string(i) + ": On (default: Off)\n";
+    }
     in.game_dir = argv[2];
     in.current_log = argv[3];
     in.home = argv[4];
@@ -182,7 +192,7 @@ def wiring():
           "a prompt (the menu's, or the compact bar's) does not say Save for the row")
     save = menu[menu.index("void bug_report_save() {"):]
     save = save[:save.index("\n}\n")]
-    for call in ("fill_here(in)", "device_report_text()", "changed_rows_text()", "ini_path()", "bug_report::start("):
+    for call in ("fill_here(in)", "device_report_text()", "changed_rows_text(in.pc_options)", "ini_path()", "bug_report::start("):
         check(call in save, "bug_report_save does not call " + call)
     picture = menu[menu.index("bool bug_report_picture(const char* path, uint64_t ticket) {"):]
     picture = picture[:picture.index("\n}\n")]
@@ -392,6 +402,24 @@ def main():
         folders, out = run(exe, "plain", str(blocked) + os.sep, str(now_log), home, user, windows)
         said = next((ln for ln in out if "menu: bug report not written:" in ln), "")
         check(folders == [""] and ("(Windows error " if windows else "(Not a directory)") in said, "no folder: %s" % out)
+
+        # PC-dependent values have their own heading and are not fixed-default
+        # changes, including the link's count-only fallback.
+        for mode in ("context", "context-count"):
+            folders, _ = run(exe, mode, game, str(now_log), home, user, windows)
+            report = (game_path / folders[0] / "report.txt").read_text(encoding="utf-8")
+            changes = hw.section(report, "Changes from the defaults")
+            context = hw.section(report, "Depends on this PC")
+            check("Aspect ratio:" not in changes and "Upscaler:" not in changes, "PC values counted as changes")
+            check("Monitor's shape (default depends on this PC)" in context and
+                  "NVIDIA DLSS (default depends on this PC)" in context, "PC values/default uncertainty lost")
+            check("Switches set" in changes and "Switches set" not in context, "switches moved into the wrong section")
+            link = next(line for line in report.splitlines() if line.startswith("https://github.com/NotRexed/Hookshot/issues/new?"))
+            settings = parse_qs(urlsplit(link).query)["settings"][0]
+            if mode == "context":
+                check("with a fixed default" in changes and "with a fixed default" in settings, "claims every option has a known default")
+            else:
+                check("80 Insert menu options with fixed defaults changed" in settings, "link counted PC-dependent rows as changes")
     print("bug report: ok (report.txt as the issue form, both logs redacted, the picture, the long log, the terminal start, "
           "switch values, NUL bytes, the folder's reason)")
 

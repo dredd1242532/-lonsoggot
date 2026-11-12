@@ -488,6 +488,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   system, the menu options and the `RX_`/`HOS_` switches you changed) and ends with a link that opens the form with them
   filled in (the switches by name only); `longshot_log.txt` (this run's log so far) and `longshot_log.1.txt` (the run
   before's, which has the crash if the game crashed last time); and `picture.png`, the game's picture without the menu.
+  Settings whose defaults depend on the display, upscaler, Auto preset or other run-time context are listed separately
+  under **Depends on this PC**, with their current value and “default depends on this PC”. They are not counted as changed
+  settings; the report does not invent a default from a run-time list index. Fixed defaults, including GPU Auto and the
+  system-default microphone, still report actual changes in the usual section.
   Your home folder is written `~` (`%USERPROFILE%` on Windows) and your user name `<user>` in the logs' paths. A switch's
   value is written only when it is a number, a size or on/off, and never for a name with `TOKEN`, `KEY`, `ROOM`,
   `SECRET`, `PASS`, `SERVER` or `USER` in it; other values read `(value left out)`. Nothing else goes in (no saves, no
