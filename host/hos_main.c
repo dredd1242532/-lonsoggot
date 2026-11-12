@@ -1818,6 +1818,8 @@ static int game_main(int argc, char **argv) {
     const char *hos_report_run_id(void);
     hos_log("run_id: %s", hos_report_run_id());
     hos_game_layout_log();
+    void hos_crash_record_log_notes(void);
+    hos_crash_record_log_notes();
     removed_switch_notes();
     void hos_control_start(const char *version);
     hos_control_start(LONGSHOT_VERSION);   /* (HOS_CONTROL=<socket>: the control bridge, host/control.c) */
