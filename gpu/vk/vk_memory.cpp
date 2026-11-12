@@ -42,6 +42,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
+#include "vk_builtin_spv.h"   // (RX_VK_SHADER_DIR)
 #include "shaders/wb_diff_comp_spv.h"
 #include "vram_pressure.h"
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
@@ -4008,8 +4009,9 @@ bool wbd_pipe_ready() {
     VkShaderModule m = VK_NULL_HANDLE;
     if (vkCreatePipelineLayout(dev.device, &li, nullptr, &wbd_pipe.layout) == VK_SUCCESS) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        mi.codeSize = sizeof WB_DIFF_COMP_SPV;
-        mi.pCode = WB_DIFF_COMP_SPV;
+        const auto spv = BUILTIN_SPV(WB_DIFF_COMP_SPV);
+        mi.codeSize = spv.size;
+        mi.pCode = spv.code;
         if (vkCreateShaderModule(dev.device, &mi, nullptr, &m) == VK_SUCCESS) {
             VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
             ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;

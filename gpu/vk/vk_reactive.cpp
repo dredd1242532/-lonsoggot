@@ -16,6 +16,7 @@
 #include "vk_draw.h"   // (descriptors_disturbed)
 #include "vk_texture.h"
 
+#include "vk_builtin_spv.h"   // (RX_VK_SHADER_DIR)
 #include "shaders/reactive_mask_comp_spv.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -145,7 +146,8 @@ bool make_pipeline() {
     pi.setLayoutCount = 1, pi.pSetLayouts = &s.set, pi.pushConstantRangeCount = 1, pi.pPushConstantRanges = &pr;
     if (vkCreatePipelineLayout(dev.device, &pi, nullptr, &s.layout) != VK_SUCCESS) return false;
     VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    mi.codeSize = sizeof REACTIVE_MASK_COMP_SPV, mi.pCode = REACTIVE_MASK_COMP_SPV;
+    const auto spv = BUILTIN_SPV(REACTIVE_MASK_COMP_SPV);
+    mi.codeSize = spv.size, mi.pCode = spv.code;
     VkShaderModule m = VK_NULL_HANDLE;
     if (vkCreateShaderModule(dev.device, &mi, nullptr, &m) != VK_SUCCESS) return false;
     VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
