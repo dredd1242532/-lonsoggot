@@ -21,7 +21,7 @@ def check_source():
     ask = body.find("build_graphics(p, s, at, topo, -1, &needs_compiling)")
     if ask < 0:
         raise SystemExit("graphics_pipeline does not ask the caches for a new pipeline without compiling")
-    if not body.index("budget.allow(texture_frame_no())") < ask < body.index("jobs_push("):
+    if not body.index("budget.allow(texture_frame_no(), programs_frame_ms())") < ask < body.index("jobs_push("):
         raise SystemExit("the ask is not inside the frame's budget, or not before the pipeline goes to a worker")
     after = body[ask:body.index("jobs_push(")]
     for needle in ("budget.spent(", "e->ready.store(true, std::memory_order_release);", "return remember(e);", "st_first_ask_over++"):

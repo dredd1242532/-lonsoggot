@@ -2225,7 +2225,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
     static const bool first_ask_on = [] { const char* v = getenv("RX_VK_FIRST_ASK"); return !v || !env_value_off(v); }();
     if (first_ask_on && dev.vk13.pipelineCreationCacheControl) {
         static thread_local first_ask::Budget budget;
-        if (budget.allow(texture_frame_no())) {
+        if (budget.allow(texture_frame_no(), programs_frame_ms())) {
             const auto t0 = std::chrono::steady_clock::now();
             bool needs_compiling = false;
             use_counters.made_how = 0;

@@ -25,6 +25,9 @@ bool programs_load_at_create();
 /// (vk_main.cpp, once the device is up) RX_VK_LOAD or the default decided. native_mesh: the GPU draws mesh programs itself, so
 /// a start keeps no mesh fallback programs ready
 void programs_load_decide(bool native_mesh);
+/// How long the frame being drawn is, as far as that can be said while it is drawn: the longer of the frame before it and of
+/// the time since the last present, in ms (first_ask.h: a long frame's asks get a share of its length)
+double programs_frame_ms();
 /// (the replay thread, with each frame line) the safety net's second part: the listed pipelines this session's loads found in
 /// no cache (load_default.h caches_lacked). Draws left out for pipelines no list names are not this mode's and not counted
 void programs_frames_note();

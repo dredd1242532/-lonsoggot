@@ -53,6 +53,7 @@ double secs(Clock::time_point t) { return std::chrono::duration<double>(t - life
 double ms_between(Clock::time_point a, Clock::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); }
 
 std::atomic<int64_t> last_present_ns{0};   // (since life_t0; 0: none yet)
+std::atomic<int64_t> last_frame_us{0};   // (the frame before this one: first_ask.h's budget)
 std::atomic<int64_t> game_presents{0};
 int64_t now_ns() { return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - life_t0).count(); }
 
@@ -525,9 +526,15 @@ bool programs_in_load(double* since_ms) {
     return ms >= kLoadGapMs;
 }
 
+double programs_frame_ms() {
+    const int64_t last = last_present_ns.load(std::memory_order_relaxed);
+    const double so_far = last ? (now_ns() - last) / 1e6 : 0.0, before = last_frame_us.load(std::memory_order_relaxed) / 1e3;
+    return so_far > before ? so_far : before;
+}
 void programs_presented() {
     const int64_t now = now_ns();
     const int64_t prev = last_present_ns.exchange(now, std::memory_order_relaxed);
+    if (prev) last_frame_us.store((now - prev) / 1000, std::memory_order_relaxed);
     game_presents.fetch_add(1, std::memory_order_relaxed);
     const double frame_ms = prev ? (now - prev) / 1e6 : 0.0;
     if (!created_pending.load(std::memory_order_relaxed)) return;
