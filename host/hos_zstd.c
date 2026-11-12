@@ -84,28 +84,35 @@ static void zs_lock(void) {
 }
 static void zs_unlock(void) { __atomic_store_n(&zs_lock_word, 0, __ATOMIC_RELEASE); }
 
-static int zs_mode(void) {
-    static int mode = -1;
-    if (mode < 0) {
-        const int m = env_on("HOS_NATIVE_ZSTD") ? (env_int("HOS_NATIVE_ZSTD", 1) == 2 ? 2 : 1) : 0;
-        if (m)
-            hos_log("zstd: the game's stream decode on the host's libzstd %s (HOS_NATIVE_ZSTD=%d%s)", ZSTD_versionString(), m,
-                    m == 1 ? ": the core given up while it decodes" : "");
-        mode = m;
-    }
-    return mode;
+/* a switch read once: several decode threads may make their first call at once, and the one that publishes it logs it */
+static int zs_publish(int *mode, int m) {
+    int unset = -1;
+    return __atomic_compare_exchange_n(mode, &unset, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
 }
 
-static void zs_note(const char *why) {   /* (each kind of fallback logged once) */
-    static const char *seen[8];
-    for (int i = 0; i < 8; i++) {
-        if (seen[i] == why) return;
-        if (!seen[i]) {
-            seen[i] = why;
-            hos_log("zstd: a decode runs lifted: %s", why);
-            return;
-        }
+static int zs_mode(void) {
+    static int mode = -1;
+    int m = __atomic_load_n(&mode, __ATOMIC_RELAXED);
+    if (m < 0) {
+        m = env_on("HOS_NATIVE_ZSTD") ? (env_int("HOS_NATIVE_ZSTD", 1) == 2 ? 2 : 1) : 0;
+        if (zs_publish(&mode, m) && m)
+            hos_log("zstd: the game's stream decode on the host's libzstd %s (HOS_NATIVE_ZSTD=%d%s)", ZSTD_versionString(), m,
+                    m == 1 ? ": the core given up while it decodes" : "");
     }
+    return m;
+}
+
+static void zs_note(const char *why) {   /* (each kind of fallback logged once; called without zs_lock) */
+    static const char *seen[8];
+    int first = 0;
+    zs_lock();
+    for (int i = 0; i < 8 && seen[i] != why; i++)
+        if (!seen[i]) {
+            seen[i] = why, first = 1;
+            break;
+        }
+    zs_unlock();
+    if (first) hos_log("zstd: a decode runs lifted: %s", why);
 }
 
 /* (holding zs_lock) */
@@ -352,12 +359,12 @@ int hos_zstd_stream(Ctx *c) {
 
 static int zf_mode(void) {
     static int mode = -1;
-    if (mode < 0) {
-        const int m = env_on("HOS_NATIVE_ZSTD_FRAMES");
-        if (m) hos_log("zstd: the game's whole-buffer decode on the host's libzstd %s (HOS_NATIVE_ZSTD_FRAMES)", ZSTD_versionString());
-        mode = m;
+    int m = __atomic_load_n(&mode, __ATOMIC_RELAXED);
+    if (m < 0) {
+        m = env_on("HOS_NATIVE_ZSTD_FRAMES");
+        if (zs_publish(&mode, m) && m) hos_log("zstd: the game's whole-buffer decode on the host's libzstd %s (HOS_NATIVE_ZSTD_FRAMES)", ZSTD_versionString());
     }
-    return mode;
+    return m;
 }
 
 /* (nx2/oot_patches.py: first in f_8010b380) 1 when the call was done here, x0 its result */

@@ -52,6 +52,12 @@ ENV_ON_H = ROOT / "gpu/vk/compat/longshot_env.h"
 BROKEN = ("                S_STAGED(g) = (uint32_t)staged;\n", "")   # (the staging fill never stored)
 BROKEN_F = ("ZSTD_decompress_usingDDict(z, GP(dst), room, GP(src), n, d->dd)",   # (the whole-buffer decode's DDict not passed)
             "ZSTD_decompress_usingDDict(z, GP(dst), room, GP(src), n, NULL)")
+F_LOG = 'hos_log("zstd: the game\'s whole-buffer decode on the host\'s libzstd %s (HOS_NATIVE_ZSTD_FRAMES)", ZSTD_versionString());'
+BROKEN_ONCE = ("if (zs_publish(&mode, m) && m) " + F_LOG + "\n",
+               "if (m) " + F_LOG + "\n        zs_publish(&mode, m);\n")   # (the old way: logged, then published)
+BROKEN_NOTE = ("    zs_unlock();\n    if (first) hos_log(", "    if (first) hos_log(")   # (logged under zs_lock...)
+BROKEN_NOTE2 = ('hos_log("zstd: a decode runs lifted: %s", why);\n}', 'hos_log("zstd: a decode runs lifted: %s", why);\n'
+                "    zs_unlock();\n}")   # (...and released after)
 
 # the guest window: base, size, and where things are in it
 BASE, SIZE = 0x10000000, 4 << 20
@@ -150,6 +156,66 @@ int main(int argc, char **argv) {
     return 0;
 }
 ''' % (SIZE, S0)
+
+# first calls from two threads at once: the second runs start to end while the first is in its first log line (a stand-in
+# hos_log holds it there), so a switch published after its log line, or a log line written under zs_lock, shows every time
+CONC = r'''
+#include <pthread.h>
+#include <sched.h>
+#include <stdio.h>
+#include <time.h>
+#include "hos.h"
+uint8_t *zs_mem;
+void zs_mark(const void *p, size_t n) { (void)p, (void)n; }
+int hos_vcore_away(void) { return 1; }
+void hos_vcore_back(void) {}
+static int armed, b_done, stuck, n_on, n_note;
+static int (*fn)(Ctx *);
+static Ctx cb;
+static pthread_t tb;
+static void *second(void *p) {
+    (void)p;
+    fn(&cb);
+    __atomic_store_n(&b_done, 1, __ATOMIC_SEQ_CST);
+    return NULL;
+}
+void hos_log(const char *fmt, ...) {
+    __atomic_fetch_add(strstr(fmt, "runs lifted") ? &n_note : &n_on, 1, __ATOMIC_SEQ_CST);
+    if (!__atomic_exchange_n(&armed, 0, __ATOMIC_SEQ_CST)) return;
+    pthread_create(&tb, NULL, second, NULL);
+    const time_t t0 = time(NULL);
+    while (!__atomic_load_n(&b_done, __ATOMIC_SEQ_CST) && time(NULL) - t0 < 3) sched_yield();
+    stuck = !__atomic_load_n(&b_done, __ATOMIC_SEQ_CST);
+}
+#include "hos_zstd.c"
+static void phase(const char *name, int (*f)(Ctx *), Ctx a) {
+    fn = f, cb = a, n_on = n_note = b_done = stuck = 0, armed = 1;
+    f(&a);
+    const int started = !armed;
+    if (started) pthread_join(tb, NULL);
+    printf("%s %d %d %d %d\n", name, started, n_on, n_note, stuck);
+}
+int main(void) {
+    zs_mem = calloc(1, 0x10000);
+    Ctx s = {{0}}, raw = {{0}}, fmt = {{0}};
+    s.x[0] = ZS_BASE + 0x100;                                     /* a stream the host has no entry for */
+    raw.x[0] = ZS_BASE, raw.x[5] = ZS_BASE + 0x400, raw.x[6] = 16;   /* a raw dictionary */
+    fmt.x[0] = ZS_BASE + 0x8000, G32(ZS_BASE + 0x8000 + 0x7110) = 1;  /* another frame format */
+    phase("stream", hos_zstd_stream, s);
+    phase("raw", hos_zstd_frames, raw);
+    phase("format", hos_zstd_frames, fmt);
+    return 0;
+}
+'''
+
+
+def conc_checks(exe, tmp, quick=False):
+    r = subprocess.run([str(exe)], env=dict(os.environ, HOS_NATIVE_ZSTD="1", HOS_NATIVE_ZSTD_FRAMES="1"),
+                       capture_output=True, text=True, timeout=60)
+    got = {ln.split()[0]: tuple(map(int, ln.split()[1:])) for ln in r.stdout.splitlines() if ln.strip()}
+    want = {"stream": (1, 1, 0, 0), "raw": (1, 1, 1, 0), "format": (1, 0, 1, 0)}
+    return ["first calls at once, %s: (second call made, switch lines, fallback lines, second call held) %s, not %s"
+            % (k, got.get(k), v) for k, v in want.items() if got.get(k) != v] + (["exit %d" % r.returncode] if r.returncode else [])
 
 
 # ---------------------------------------------------------------- content (made here)
@@ -505,21 +571,21 @@ def frames_checks(exe, tmp, quick=False):
     return chk.failed
 
 
-def build(cxx, tmp, broken=False):
+def build(cxx, tmp, broken=False, conc=False):
     stem, ext = os.path.splitext(cxx) if cxx.lower().endswith(".exe") else (cxx, "")
     cc = stem[:-2] + ext if stem.endswith("++") else "cc"   # (the C compiler beside the C++ one)
     if Path(cc).name == "g" or cc.endswith("-g"):
         cc += "cc"
-    d = Path(tmp) / ("broken%d" % len(list(Path(tmp).glob("broken*"))) if broken else "ok")
+    d = Path(tmp) / ("broken%d" % len(list(Path(tmp).glob("broken*"))) if broken else "conc" if conc else "ok")
     d.mkdir()
     src = (ROOT / "host/hos_zstd.c").read_text(encoding="utf-8")
-    if broken:
-        if src.count(broken[0]) != 1:
-            raise SystemExit("FAIL: the broken variant's line is not in host/hos_zstd.c: %r" % broken[0])
-        src = src.replace(*broken)
+    for old, new in ([broken] if broken and isinstance(broken[0], str) else broken or []):
+        if src.count(old) != 1:
+            raise SystemExit("FAIL: the broken variant's line is not in host/hos_zstd.c: %r" % old)
+        src = src.replace(old, new)
     (d / "hos_zstd.c").write_text(src, encoding="utf-8")   # (beside the stand-in hos.h: quotes look there first)
     (d / "hos.h").write_text(HOS_H, encoding="utf-8")
-    (d / "fixture.c").write_text(FIXTURE, encoding="utf-8")
+    (d / "fixture.c").write_text(CONC if conc else FIXTURE, encoding="utf-8")
     flags = ["-O1", "-DZSTD_DISABLE_ASM", "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0", "-D_CRT_SECURE_NO_WARNINGS",
              "-I" + str(ZSTD)]
     objs = []
@@ -532,7 +598,7 @@ def build(cxx, tmp, broken=False):
         objs.append(str(o))
     exe = d / "fixture.exe"
     subprocess.run([cc, "-std=gnu11", "-include", str(ENV_ON_H), "-Wall", "-Wextra", "-I", str(d), str(d / "fixture.c"),
-                    "-o", str(exe)] + flags + objs, check=True)
+                    "-o", str(exe)] + flags + objs + (["-pthread"] if conc else []), check=True)
     return exe
 
 
@@ -550,10 +616,16 @@ def main():
         if failed:
             raise SystemExit("FAIL:\n  " + "\n  ".join(failed))
         print("PASS: the host's whole-buffer decode answers and writes as the game's does")
+        failed = conc_checks(build(a.cxx, tmp, conc=True), tmp)
+        if failed:
+            raise SystemExit("FAIL:\n  " + "\n  ".join(failed))
+        print("PASS: first calls from two threads at once log the switch and each fallback once, outside zs_lock")
         for what, fault, run_checks in (("staging fill never stored", BROKEN, checks),
-                                        ("whole-buffer DDict not passed", BROKEN_F, frames_checks)):
+                                        ("whole-buffer DDict not passed", BROKEN_F, frames_checks),
+                                        ("switch published after its log line", BROKEN_ONCE, conc_checks),
+                                        ("fallback logged under zs_lock", [BROKEN_NOTE, BROKEN_NOTE2], conc_checks)):
             try:
-                broken = run_checks(build(a.cxx, tmp, broken=fault), tmp, quick=True)
+                broken = run_checks(build(a.cxx, tmp, broken=fault, conc=run_checks is conc_checks), tmp, quick=True)
             except Crash as e:
                 broken = [str(e)]
             if not broken:
