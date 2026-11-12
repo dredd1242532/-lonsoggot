@@ -50,6 +50,10 @@ static VkResult vkGetQueryPoolResults(VkDevice, VkQueryPool, uint32_t first, uin
     }
     return res;
 }
+static void vkResetQueryPool(VkDevice, VkQueryPool, uint32_t first, uint32_t count) {
+    if (first + count > 2 * kRecordings) throw std::runtime_error("reset past the pool");
+    for (uint32_t q = first; q < first + count; q++) available[q] = false;
+}
 static bool each_switch;
 static bool env_on(const char*) { return each_switch; }
 
@@ -112,6 +116,15 @@ static void run(const std::string& c) {
     } else if (c == "not_pending") {   // a slot never timed (a parallel segment's) is not read
         reuse(3);
         require(calls == 0 && st_gpu_ns == 0, "nothing read");
+    } else if (c == "stale") {   // a slot used again, its queries' reset (in its new command buffer) not run yet: its old times
+        timed(0, 10, true), timed(1, 20, true);   // still show as available, and must not be counted again
+        reuse(0);   // (slot 1's 20 read with slot 0's)
+        reuse(1);   // (slot 1 comes round: done)
+        timed(0, 30, true);
+        ts_pending[1] = true;   // (slot 1 recorded and submitted again; the GPU has not reached it)
+        reuse(0);
+        require(st_gpu_ns == 60, "slot 1's old times not counted again");
+        require(ts_pending[1], "slot 1's new use still pending");
     } else if (c == "each") {   // RX_VK_TS_EACH=1: one call a slot, as before
         each_switch = true;
         for (int i = 0; i < 6; i++) timed(i, 5, true);

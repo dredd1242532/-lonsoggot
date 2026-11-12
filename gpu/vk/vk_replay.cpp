@@ -329,8 +329,10 @@ int64_t st_gpu_ns, st_gpu_max_ns;
 // (hookshot) With the slot's own times, the same call reads those of the slots after it that are still unread and that the GPU has
 // finished (each query's availability), up to kTsRun slots: one vkGetQueryPoolResults for a run of recordings, not one each. On an
 // RX 9070 XT (AMD's Windows driver) the per-slot calls were 0.16 ms a frame of the presentation thread in Hyrule Field, ~50 a frame.
-// A pending slot is submitted and not yet begun again (its query reset is recorded only then, after it is read here), so an
-// available result is that use's; one not available yet stays pending for its own turn. RX_VK_TS_EACH=1: one slot a call, as before
+// A query's availability can still show a slot's previous use until the reset recorded in its next command buffer runs, so each
+// slot's queries are also reset on the host when its slot comes round (its last submit done, before it is recorded again; the pool
+// once when made): an available result is then the current use's. One not available yet stays pending for its own turn.
+// RX_VK_TS_EACH=1: one slot a call, as before
 constexpr int kTsRun = 16;
 void gpu_time_add(uint64_t t0, uint64_t t1) {
     if (t1 <= t0) return;
@@ -338,27 +340,36 @@ void gpu_time_add(uint64_t t0, uint64_t t1) {
     st_gpu_ns += ns;
     st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
 }
-void gpu_time_collect(Recording& r) {
-    if (!ts_pool || !ts_pending[r.slot]) return;
-    ts_pending[r.slot] = false;
-    static const bool each = env_on("RX_VK_TS_EACH");
-    if (each) {
-        uint64_t t[2] = {0, 0};
-        if (vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
-            return;
-        gpu_time_add(t[0], t[1]);
-        return;
-    }
+/// slot's times (its last submit done) and those of the pending slots after it that the GPU has written
+void gpu_time_read_run(int slot) {
+    ts_pending[slot] = false;
     int n = 1;
-    while (n < kTsRun && r.slot + n < kRecordings && ts_pending[r.slot + n]) n++;
+    while (n < kTsRun && slot + n < kRecordings && ts_pending[slot + n]) n++;
     uint64_t t[kTsRun][2][2] = {};   // (a slot's start and end, each its value and its availability)
-    const VkResult res = vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2 * n, sizeof t, t, 2 * sizeof(uint64_t),
+    const VkResult res = vkGetQueryPoolResults(dev.device, ts_pool, 2 * slot, 2 * n, sizeof t, t, 2 * sizeof(uint64_t),
                                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
     if (res != VK_SUCCESS && res != VK_NOT_READY) return;
     for (int i = 0; i < n; i++) {
         if (!t[i][0][1] || !t[i][1][1]) continue;   // (the slot's own: dropped, as before; the others: read in their turn)
-        ts_pending[r.slot + i] = false;
+        ts_pending[slot + i] = false;
         gpu_time_add(t[i][0][0], t[i][1][0]);
+    }
+}
+void gpu_time_collect(Recording& r) {
+    if (!ts_pool) return;
+    static const bool each = env_on("RX_VK_TS_EACH");
+    if (!each) {
+        if (ts_pending[r.slot]) gpu_time_read_run(r.slot);
+        vkResetQueryPool(dev.device, ts_pool, 2 * r.slot, 2);   // (done: unavailable until its next use writes them)
+        return;
+    }
+    if (!ts_pending[r.slot]) return;
+    ts_pending[r.slot] = false;
+    {
+        uint64_t t[2] = {0, 0};
+        if (vkGetQueryPoolResults(dev.device, ts_pool, 2 * r.slot, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+            return;
+        gpu_time_add(t[0], t[1]);
     }
 }
 }   // namespace
@@ -374,6 +385,7 @@ void gpu_time_begin(Recording& r) {
         qi.queryCount = 2 * kRecordings;
         if (vkCreateQueryPool(dev.device, &qi, nullptr, &ts_pool) != VK_SUCCESS) ts_pool = VK_NULL_HANDLE;
         if (!ts_pool) return;
+        vkResetQueryPool(dev.device, ts_pool, 0, 2 * kRecordings);   // (gpu_time_collect: every slot's queries start unavailable)
     }
     vkCmdResetQueryPool(r.cmd, ts_pool, 2 * r.slot, 2);
     vkCmdWriteTimestamp2(r.cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, ts_pool, 2 * r.slot);
