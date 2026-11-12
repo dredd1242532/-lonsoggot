@@ -13,6 +13,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -117,6 +118,19 @@ def times_table(work, n):
     return ["%-*s  %s" % (width, label, "  ".join("%16s" % c for c in cells)) for label, cells in rows]
 
 
+def replayed(argv):
+    """The last build's arguments for this one: all of them but --log and its file (that build's log, not this one's)"""
+    out, skip = [], False
+    for arg in argv:
+        if skip:
+            skip = False
+        elif arg == "--log":
+            skip = True
+        elif not arg.startswith("--log="):
+            out.append(arg)
+    return out
+
+
 def build(work, dev):
     """The last make_game.py build again: its arguments, its Python, its tools' variables; --dev for the dev profile"""
     record = last_build(work)
@@ -124,8 +138,9 @@ def build(work, dev):
         raise SystemExit("no last build in %s: build once with nx2/make_game.py (or the builder) first" % work)
     env = dict(os.environ, **record.get("toolchain", {}))
     env["LONGSHOT_PROFILE"] = "dev" if dev else record.get("profile", "release")
-    cmd = [record.get("python") or sys.executable, "-I", "-u", os.path.join("nx2", "make_game.py")] + list(record.get("argv", []))
-    print("dev: " + " ".join(cmd) + ("  (dev profile)" if dev else ""), flush=True)
+    cmd = [record.get("python") or sys.executable, "-I", "-u", os.path.join("nx2", "make_game.py")] + replayed(record.get("argv", []))
+    shown = subprocess.list2cmdline(cmd) if os.name == "nt" else " ".join(shlex.quote(c) for c in cmd)
+    print("dev: " + shown + ("  (dev profile)" if dev else ""), flush=True)
     return subprocess.call(cmd, cwd=record.get("root") or ROOT, env=env)
 
 

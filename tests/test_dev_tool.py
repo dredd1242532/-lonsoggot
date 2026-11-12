@@ -143,7 +143,7 @@ class TimesAndBuildTests(unittest.TestCase):
 
     def test_build_runs_the_last_build_again(self):
         with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "last_build.json").write_text(json.dumps({"argv": ["--nup", "x.nup", "--out", "g"], "python": "py.exe",
+            (Path(d) / "last_build.json").write_text(json.dumps({"argv": ["--nup", "x.nup", "--log", "old.log", "--out", "g"], "python": "py.exe",
                                                                   "root": "R", "profile": "release",
                                                                   "toolchain": {"LONGSHOT_MINGW": "C:/mingw"}}))
             with mock.patch.object(dev.subprocess, "call", return_value=0) as call, contextlib.redirect_stdout(io.StringIO()):
