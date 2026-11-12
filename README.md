@@ -427,6 +427,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | Controls | Controller in background | Off, On | Off |
 | | Mouse camera | As the stick, Native, Off | As the stick |
 | | Disable camera centering | Off, On | Off |
+| | Sprint | Off, On | Off |
 | | Mouse sensitivity | 0.10 to 5.00, in steps of 0.10 | 1.00 |
 | | Invert mouse vertical | Off, On | Off |
 | | Invert camera X | Off, On | Off |
@@ -622,6 +623,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Disable camera centering:** On stops the game gradually turning the camera toward your movement, so it does not fight
   native mouse look. Off keeps the game's standard behavior. Changes apply immediately with either Mouse camera mode.
   Manual controls, explicit recentering and scripted camera headings still work; automatic pitch adjustment is unchanged.
+- **Sprint:** On lets Link run with <kbd>Shift</kbd> held or the left stick pressed once while you move (see **Sprint**
+  under Controls). Turning it on moves Shift from B to Sprint (B goes to <kbd>V</kbd>) and the left stick's press from LS
+  to Sprint; turning it off puts them back.
 - **Camera speed** is how fast the right stick turns the camera, in percent of the game's own speed. The camera keys
   follow it, and so does the mouse with Mouse camera on As the stick; Native mouse look has its own sensitivity. The
   game's own camera speed option still picks the speed this multiplies.
@@ -650,14 +654,15 @@ Use a controller, or the keyboard and mouse. On the keyboard, <kbd>W</kbd> <kbd>
 and the arrow keys (or <kbd>I</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd>) turn the camera.
 With the default keyboard bindings, press <kbd>E</kbd> to select **New Game** on the title screen.
 
-**Sprint:** hold <kbd>Shift</kbd> while you move and Link runs. On a controller, press the left stick in once while you
-move: Link keeps running until you stop, then press it again. Sprint holds A, the game's own run, only while the left
-stick (or the movement keys) is pushed, so standing still it does not talk, open or pick up. A pressed while Link moves
-is a roll, so Sprint starts with the stick let go for a moment (120 ms; `HOS_SPRINT_STILL_MS=<ms>` in
-`hookshot_env.txt` changes it, 0 starts with the roll). The Controls tab's **Sprint** row turns it off: its key and
-button then do nothing. For it, B moved to <kbd>V</kbd> on the keyboard, and the stick's press is no longer the Switch's LS. An
-options file from before Sprint that still had Shift on B and the press on LS gets the new defaults; a control you bound
-otherwise keeps yours. Sprint has its own row on the Controls page.
+**Sprint** (off by default: the Controls tab's **Sprint** row): hold <kbd>Shift</kbd> while you move and Link runs. On a
+controller, press the left stick in once while you move: Link keeps running until you stop, then press it again. Sprint
+holds A, the game's own run, only while the left stick (or the movement keys) is pushed. A pressed while Link moves is a
+roll, so Sprint starts with the stick let go for a moment (120 ms; `HOS_SPRINT_STILL_MS=<ms>` in `hookshot_env.txt`
+changes it, 0 starts with the roll). That moment is an A press, so starting a sprint right in front of something Link
+can talk to, open or pick up may do that. Turning the row on changes your controls: Shift moves from B to Sprint (B
+goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint. Turning it off puts them
+back. Controls you rebound yourself, and keys or buttons you gave Sprint, are left alone. Sprint has its own row on the
+Controls page.
 
 **Mouse in the game's menus (Windows):** the title screen and its file list, the pause menu, the Key Items, Threads of
 Time and Map pages, the options and the save dialogs free the mouse while they are shown. Point at an entry to select

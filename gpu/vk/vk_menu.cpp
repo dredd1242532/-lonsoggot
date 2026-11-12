@@ -1287,8 +1287,9 @@ Row rows[] = {
      "Stops the camera gradually turning toward the direction you move, useful with native mouse look. Off keeps the "
      "game's standard behavior. Manual camera controls and recentering still work.", nullptr, false, true},
     {TAB_CONTROLS, "Sprint", &opts.sprint, 0, 1, 1, tx_onoff,
-     "Link runs while you move: Shift held, or the left stick pressed once until you stop (the Controls page binds them). "
-     "It holds A, the game's own run, started without the roll. Off: those do nothing.", nullptr, false, true},
+     "Link runs while you move: Shift held, or the left stick pressed once until you stop, without the roll. Turning it "
+     "on changes your controls: Shift moves from B to Sprint (B goes to V) and the left stick's press from LS to Sprint. "
+     "Turning it off puts them back. Controls you rebound yourself are left alone.", nullptr, false, true},
     {TAB_CONTROLS, "Mouse sensitivity", &opts.mouse_sens, 10, 500, 10, tx_sens,
      "How far the camera turns for a mouse movement, with either Mouse camera: at 1.00 native look turns 0.1 degree a "
      "count. The - and = keys change it in game too.", nullptr, false, true},
@@ -1906,9 +1907,8 @@ void save() {
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
         // host/nn_hid.c binds_load; 4: Descriptor reuse on by default, see menu_init and vk_draw.cpp desc_slotgen_on; 5: the
         // Menu shortcut "Insert, F1 or Esc" by default, see menu_init; 6: the Aspect ratio's 16:9 from before moves on a
-        // screen narrower than 16:9, see menu_init and host/hos_wide_size.h; 7: Sprint, Shift and the left stick's press by
-        // default, see host/nn_hid.c binds_sprint_migrate)
-        fprintf(f, "options_version=7\n");
+        // screen narrower than 16:9, see menu_init and host/hos_wide_size.h)
+        fprintf(f, "options_version=6\n");
         fputs(others.c_str(), f);
         if (!can_bind()) fputs(kept.c_str(), f);
         for (int i = 0; i < HOS_KEY_N && can_bind(); i++) {   // (the stick's and camera's rows, HOS_KEY_MOVE_*/CAM_*, have no pad_ line; the ocarina note rows and Sprint do)
@@ -2316,6 +2316,46 @@ void share_pipeline_list() {
 
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
 /// (a slider's drag: saved once it is let go)
+/// (hookshot) The Controls tab's Sprint row turned on: Sprint gets Shift and the left stick's press where they are still
+/// the defaults' (Shift on B, which moves to V when no control has V; the press on LS, which keeps its other input), and only
+/// when Sprint has none of its own. Off: those go back to B and LS. A control the player rebound is left as it is
+void apply_sprint_layout(bool on) {
+    if (!can_bind()) return;
+    constexpr int kShift = 0x10, kV = 'V';   // (Windows key codes)
+    auto key = [](int b, int s) { return host->binding(HOS_BIND_KEY, b, s); };
+    auto pad = [](int b, int s) { return host->binding(HOS_BIND_PAD, b, s); };
+    auto key_used = [&](int code) {
+        for (int i = 0; i < HOS_KEY_N; i++)
+            for (int s = 0; s < 2; s++)
+                if (key(i, s) == code) return true;
+        return false;
+    };
+    const int S = HOS_KEY_SPRINT;
+    if (on) {
+        if (!key(S, 0) && !key(S, 1)) {
+            if (key(HOS_SW_B, 0) == kShift && !key_used(kV)) host->bind(HOS_BIND_KEY, HOS_SW_B, 0, kV);
+            if (!key_used(kShift)) host->bind(HOS_BIND_KEY, S, 0, kShift);
+        }
+        if (pad(S, 0) < 0 && pad(S, 1) < 0 && pad(HOS_SW_LS, 0) == HOS_PAD_LSTICK) {
+            const int other = pad(HOS_SW_LS, 1);   // (LS's Input 2 moves into its Input 1)
+            host->bind(HOS_BIND_PAD, HOS_SW_LS, 1, -1);
+            host->bind(HOS_BIND_PAD, HOS_SW_LS, 0, other);
+            host->bind(HOS_BIND_PAD, S, 0, HOS_PAD_LSTICK);
+        }
+        return;
+    }
+    if (key(HOS_SW_B, 0) == kV && (key(S, 0) == kShift || key(S, 1) == kShift))
+        host->bind(HOS_BIND_KEY, HOS_SW_B, 0, kShift);   // (taken from Sprint; V is free again)
+    for (int s = 0; s < 2; s++)
+        if (key(S, s) == kShift) host->bind(HOS_BIND_KEY, S, s, 0);
+    if (pad(S, 0) == HOS_PAD_LSTICK || pad(S, 1) == HOS_PAD_LSTICK) {
+        for (int s = 0; s < 2; s++)
+            if (pad(S, s) == HOS_PAD_LSTICK) host->bind(HOS_BIND_PAD, S, s, -1);
+        if (pad(HOS_SW_LS, 0) < 0) host->bind(HOS_BIND_PAD, HOS_SW_LS, 0, HOS_PAD_LSTICK);
+        else if (pad(HOS_SW_LS, 1) < 0) host->bind(HOS_BIND_PAD, HOS_SW_LS, 1, HOS_PAD_LSTICK);
+    }
+}
+
 void set_row(Row& r, int v, int dir, bool keep = true) {
     // (nothing else to choose: no change, no save. A saved choice that cannot run here is kept)
     if (row_fixed(r.value)) return;
@@ -2364,6 +2404,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         }
     }
     if (r.value == &opts.mic && can_mic()) mic_chosen();   // (longshot)
+    if (r.value == &opts.sprint) apply_sprint_layout(*r.value != 0);   // (longshot: the bindings follow the row)
     // (longshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
     if (r.value == &opts.anisotropy || r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.preset)
         samplers_changed();
@@ -3238,8 +3279,8 @@ void draw_controls(ui::Ctx& c) {
                        : page_row ? page_row->help
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
                            ? "Link runs while you move: the key while it is held, the gamepad button pressed once until you "
-                             "stop. It holds A, the game's own run, started without the roll, and only while you move, so "
-                             "standing still it does not talk or pick up. Enter binds; Delete clears it."
+                             "stop, without the roll. Only with the Controls tab's Sprint row on, which gives it Shift and the "
+                             "left stick's press. Enter binds; Delete clears it."
                                   : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
                                     "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
                                     "another's empty Input 2. The game's button icons follow after a restart.";
@@ -4937,6 +4978,7 @@ void menu_tick() {
                     if (i == kControls) {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
+                        if (opts.sprint) apply_sprint_layout(true);   // (the defaults give Sprint nothing)
                         save();
                     }
                     else listening = col == kCtlKeyboard ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
