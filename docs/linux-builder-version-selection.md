@@ -1,13 +1,13 @@
 # Which Linux Builder opens a game
 
-Starting the game folder's `hookshot` uses the executable named by `builder=` in `hookshot_version.txt` when it
+Starting the game folder's `longshot` uses the executable named by `builder=` in `longshot_version.txt` when it
 still exists and is executable. This is the Builder that last built that folder. Another game's installed Builder
 does not override it, whether that installed version is older or newer. The selected Builder can check its own
 update track normally; starting a folder does not switch versions by itself.
 
 If that recorded executable has been moved or removed, the wrapper falls back to the installed Builder under
-`$HOOKSHOT_BUILDER_HOME/hookshot/builder`, or `$XDG_DATA_HOME/hookshot/builder` (default `~/.local/share`). With
-neither available, it starts `bin/hookshot` directly. The wrapper does not run either Builder to query its version
+`$LONGSHOT_BUILDER_HOME/longshot/builder`, or `$XDG_DATA_HOME/longshot/builder` (default `~/.local/share`). With
+neither available, it starts `bin/longshot` directly. The wrapper does not run either Builder to query its version
 or require an additional interpreter to compare versions.
 
 ## A newer game opened with older tools

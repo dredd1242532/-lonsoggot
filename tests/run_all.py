@@ -88,9 +88,9 @@ def header_dir(env, cpm_name, probe):
 
 
 def dav1d_prefix():
-    """A dav1d to build against (its include/dav1d/dav1d.h, and lib/libdav1d.a or the system's -ldav1d): HOOKSHOT_DAV1D, else
+    """A dav1d to build against (its include/dav1d/dav1d.h, and lib/libdav1d.a or the system's -ldav1d): LONGSHOT_DAV1D, else
     the CPM cache's (scripts/windows/dav1d.sh), the Linux dependencies' (scripts/linux/deps.sh), the system's"""
-    roots = [os.environ.get("HOOKSHOT_DAV1D")]
+    roots = [os.environ.get("LONGSHOT_DAV1D")]
     for cpm in (os.environ.get("RX_CPM"), os.path.join(ROOT, "build-linux", "deps", "cpm")):
         d = os.path.join(cpm or "", "dav1d")
         if cpm and os.path.isdir(d) and os.listdir(d):
@@ -105,8 +105,8 @@ def dav1d_prefix():
 def find_tools():
     return {
         "dav1d": None if WINDOWS else dav1d_prefix(),
-        "spirv_headers": header_dir("HOOKSHOT_SPIRV_HEADERS", "spirv-headers", os.path.join("spirv", "unified1", "spirv.h")),
-        "vulkan_headers": header_dir("HOOKSHOT_VULKAN_HEADERS", "vulkanheaders", os.path.join("vulkan", "vulkan.h")),
+        "spirv_headers": header_dir("LONGSHOT_SPIRV_HEADERS", "spirv-headers", os.path.join("spirv", "unified1", "spirv.h")),
+        "vulkan_headers": header_dir("LONGSHOT_VULKAN_HEADERS", "vulkanheaders", os.path.join("vulkan", "vulkan.h")),
         "spirv_val": which("spirv-val"),
         "glslang": which("glslangValidator", "glslang"),
         "dotnet": which("dotnet"),

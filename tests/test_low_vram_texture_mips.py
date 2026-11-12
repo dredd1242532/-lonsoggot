@@ -27,7 +27,7 @@ def block(text, marker):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cxx", default=os.environ.get("CXX", "clang++"))
-    p.add_argument("--headers", default=os.environ.get("HOOKSHOT_VULKAN_HEADERS"))
+    p.add_argument("--headers", default=os.environ.get("LONGSHOT_VULKAN_HEADERS"))
     p.add_argument("--sanitize", default="")
     a = p.parse_args()
     source = (ROOT / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8-sig")
@@ -43,7 +43,7 @@ def main():
 #include <vulkan/vulkan.h>
 #define _Static_assert static_assert
 #include "gpu/render/rx_nvn.h"
-#include "gpu/vk/compat/hookshot_env.h"
+#include "gpu/vk/compat/longshot_env.h"
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL:%d %s\n",__LINE__,#x); std::exit(1); } } while(0)
 struct Texture {
     uint32_t width, height, depth = 1, levels, layers = 1, skip = 0;

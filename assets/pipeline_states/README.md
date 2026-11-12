@@ -1,10 +1,10 @@
 # The pipeline state list's sources
 
 **These are not Nintendo files, and they hold no game code or game data.** Each is a list of Vulkan pipelines that
-Hookshot's renderer made while someone played on their own PC, written by Hookshot itself. Keep it that way: only lists
-written by Hookshot and this folder's tool go in here. The lists named `contrib/pmwork-personal-fritchii-recipe*` are converted
+Longshot's renderer made while someone played on their own PC, written by Longshot itself. Keep it that way: only lists
+written by Longshot and this folder's tool go in here. The lists named `contrib/pmwork-personal-fritchii-recipe*` are converted
 instead: made from the pipeline records another emulator ships for the game (hashes and draw state, no code), matched to
-Hookshot's shader hashes; their notes say how. They hold the same records as any other list and nothing more.
+Longshot's shader hashes; their notes say how. They hold the same records as any other list and nothing more.
 
 - **What a record is:** one pipeline the game asked for. Each record holds:
   - the hashes of its shaders and of the program variant
@@ -13,12 +13,12 @@ Hookshot's shader hashes; their notes say how. They hold the same records as any
   - the draw state it was built with
 
   There are no shaders in it, only their hashes. A player's build turns those hashes back into shaders from the
-  player's own `hookshot_shaders.bin`. `nx2/pipeline_states.py` documents the record layout.
+  player's own `longshot_shaders.bin`. `nx2/pipeline_states.py` documents the record layout.
 - **Compute programs:** a record can also name a compute program the game ran (culling, terrain, post-processing). It
   holds the hash of that one shader and nothing else, because a compute pipeline has no formats or draw state. It is
   the same on every GPU and with any settings. The tools count these as `compute` beside `graphics` and `mesh`.
 - **What it is for:** `nx2/make_game.py` merges every list here into the game folder's
-  `hookshot_pipeline_states_shipped.bin`. The first start's shader preparation then builds these pipelines before the
+  `longshot_pipeline_states_shipped.bin`. The first start's shader preparation then builds these pipelines before the
   title screen, so the first field load doesn't wash out white while they compile. Every start also keeps the listed
   compute programs' pipelines ready, together with the ones the player's own play has run, so a program is not set up
   the first time the game runs it. `nx2/pipeline_states.py check` stops when the merged list names more than 1024
@@ -47,10 +47,10 @@ a pipeline again, the merge keeps it once.
 
 ## Contributing a list
 
-Players without a clone send their list to the [Submit your pipelines](https://github.com/NotRexed/Hookshot/issues/2034)
+Players without a clone send their list to the [Submit your pipelines](https://github.com/NotRexed/Longshot/issues/2034)
 issue: **Save my pipeline list** (the game's menu, Debug tab, or the builders' launcher page; readme, *Send your
-pipeline list*) zips the game folder's `hookshot_pipeline_states.bin` with a filled-in report
-(`hookshot_pipeline_report.txt`: the version, OS, GPU and driver, settings and mods), and nothing else. A maintainer then
+pipeline list*) zips the game folder's `longshot_pipeline_states.bin` with a filled-in report
+(`longshot_pipeline_report.txt`: the version, OS, GPU and driver, settings and mods), and nothing else. A maintainer then
 adds it as below, with the report's lines as `--gpu`, `--build`, `--settings` and `--route`. The zip is made by
 `gpu/vk/pipeline_share.h` in the game and `nx2/pipeline_share.py` in the builders, after the same checks as
 `nx2/pipeline_states.py --check`. The list goes into the zip as the game wrote it, so the compute programs the player's
@@ -67,7 +67,7 @@ With a clone:
 
 1. Build the game from current `main`. A list from an older build may hold pipelines the current build no longer asks
    for.
-2. Move the game folder's `hookshot_pipeline_states.bin` aside if there is one. Play: every pipeline the game makes in
+2. Move the game folder's `longshot_pipeline_states.bin` aside if there is one. Play: every pipeline the game makes in
    play is added to that file. A run doesn't write the pipelines that the shipped list already built before the title,
    so your list only holds what the current one misses. It does write every compute program the run used, and `add`
    keeps the ones no other contributed list has. Play what the current lists miss, such as areas, dungeons,
@@ -75,7 +75,7 @@ With a clone:
 3. Add it, from the repository's root:
 
    ```sh
-   python -I nx2/pipeline_states.py add <github user>-<what you played> <game folder>/hookshot_pipeline_states.bin \
+   python -I nx2/pipeline_states.py add <github user>-<what you played> <game folder>/longshot_pipeline_states.bin \
        --who "<github user>" --gpu "<GPU>, driver <version>, <OS>" --build "main at <commit>" \
        --settings "<resolution, upscaler, frame generation, mods>" --route "<what you played>"
    python -I nx2/pipeline_states.py check

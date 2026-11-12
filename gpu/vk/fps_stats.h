@@ -1,4 +1,4 @@
-/* (hookshot) The FPS counter's levels and its numbers (vk_fps.cpp measures, vk_menu.cpp draws): the row's values, the frames
+/* (longshot) The FPS counter's levels and its numbers (vk_fps.cpp measures, vk_menu.cpp draws): the row's values, the frames
    of the last seconds in a ring, their averages, the 1% low, the graph's columns and its scale. Plain functions:
    tests/test_fps_stats.cpp checks them. */
 #pragma once

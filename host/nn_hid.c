@@ -1,8 +1,8 @@
 /* nn::hid: one Pro Controller (FullKey style) on Npad No.1, from every XInput gamepad and the keyboard and mouse at
    once. Buttons map by position (the Xbox bottom face button is the Switch's bottom one, B).
 
-   (hookshot) What presses each button, on a gamepad and on the keyboard, is the player's: the Insert menu's Controls
-   page (gpu/vk/vk_menu.cpp) changes it, kept in hookshot_options.ini (binds_load). The defaults:
+   (longshot) What presses each button, on a gamepad and on the keyboard, is the player's: the Insert menu's Controls
+   page (gpu/vk/vk_menu.cpp) changes it, kept in longshot_options.ini (binds_load). The defaults:
    Keyboard (totk-pc-recomp's layout): WASD left stick, arrows or IJKL right stick (camera), Space X (jump), E A
    (action), Shift B (run/cancel), Q L (abilities), R R, Z ZL, X or F ZR (bow), Ctrl left-stick click (crouch), C
    right-stick click (first person), Tab or Enter Plus, M Minus (map), 1 2 3 4 d-pad left, up, right, down. Only
@@ -36,8 +36,8 @@
 #include <xinput.h>
 #include "../gpu/vk/vk_api.h"   /* (the controls' names: HOS_SW_*, HOS_PAD_*) */
 #include "hos_motion.h"
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 enum { B_A = 0, B_B, B_X, B_Y, B_LS, B_RS, B_L, B_R, B_ZL, B_ZR, B_PLUS, B_MINUS, B_LEFT, B_UP, B_RIGHT, B_DOWN };
@@ -498,8 +498,8 @@ static void stick_max(int32_t stick[4], const int32_t v[4]) {
         if ((v[i] < 0 ? -v[i] : v[i]) > (stick[i] < 0 ? -stick[i] : stick[i])) stick[i] = v[i];
 }
 
-/* ---- (hookshot) the controls: the gamepad inputs (by position) and the keys that press each Switch button, from
-   hookshot_options.ini beside the executable when it has them: pad_<button>=<position>[,<position>] (HOS_PAD_*, -1 none) and
+/* ---- (longshot) the controls: the gamepad inputs (by position) and the keys that press each Switch button, from
+   longshot_options.ini beside the executable when it has them: pad_<button>=<position>[,<position>] (HOS_PAD_*, -1 none) and
    key_<button>=<key code>,<key code> (Windows key codes, 0 none), <button> one of bind_names. Read once, at the
    first use; what the file leaves out keeps its default. Keys only, after the Switch's buttons (HOS_KEY_*): the left
    stick's and the camera's directions, and the ocarina's five note controls (which take a gamepad input too).
@@ -533,7 +533,7 @@ static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static int pad_bind[HOS_KEY_N][2];
 static volatile LONG key_bind[HOS_KEY_N][2];   /* (the menu changes them as the game reads them) */
 
-/* ---- (hookshot) the ocarina's five note controls, driven by the wait flag nx2/oot_patches.py's patch sets ---- */
+/* ---- (longshot) the ocarina's five note controls, driven by the wait flag nx2/oot_patches.py's patch sets ---- */
 volatile uint64_t hos_oc_note_bits;
 volatile int hos_oc_wait;
 volatile int hos_oc_last_kind;
@@ -571,7 +571,7 @@ static void binds_load(void) {
     char *slash = len ? (strrchr(path, 92) ? strrchr(path, 92) : strrchr(path, 47)) : NULL;   /* (linux: '/') */
     FILE *f = NULL;
     if (slash) {
-        snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
+        snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "longshot_options.ini");
         f = fopen(path, "r");
     }
     int changed = 0;
@@ -612,7 +612,7 @@ static void binds_load(void) {
             }
         }
     }
-    if (changed) hos_log("hid: %d controls from hookshot_options.ini", changed);
+    if (changed) hos_log("hid: %d controls from longshot_options.ini", changed);
     InterlockedExchange(&state, 2);
 }
 int hos_binding(int set, int button, int slot) {
@@ -740,7 +740,7 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
             static int64_t load_retry;
             if (now >= load_retry) {
                 load_retry = now + 5000000000LL;
-#ifdef _WIN32   /* (hookshot: System32's, not one beside the game, in the current folder or on PATH) */
+#ifdef _WIN32   /* (longshot: System32's, not one beside the game, in the current folder or on PATH) */
                 HMODULE x = LoadLibraryExA("xinput1_4.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
                 if (!x) x = LoadLibraryExA("xinput9_1_0.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 #else
@@ -807,7 +807,7 @@ static int pads_in_background(const char *env, int menu) {
     return env ? atoi(env) != 0 : menu != 0;
 }
 
-/* (hookshot) Whether a pad's motion counts: when its buttons do, with the game's window in front, or behind another
+/* (longshot) Whether a pad's motion counts: when its buttons do, with the game's window in front, or behind another
    window when the player asked for the pads there. Otherwise GetSixAxisSensorStates hands out the pad at rest, so a
    gyro moved while the player is in another window does not turn the camera. tests/test_motion_background.py */
 static int motion_counts(int front, const char *env, int menu) {
@@ -962,7 +962,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     memset(stick, 0, 4 * sizeof *stick);
     void hos_mouse_native_stick(int held);
     scripted_input(buttons, stick);
-    /* (hookshot) HOS_CONTROL: the control bridge's presses (host/control.c); one that asked to be exclusive keeps the
+    /* (longshot) HOS_CONTROL: the control bridge's presses (host/control.c); one that asked to be exclusive keeps the
        player's devices out while it lasts */
     if (hos_control_input(buttons, stick)) return;
     oc_notes();   /* (marks the note rows' inputs consumed before the pads and keys below are read) */
@@ -970,13 +970,13 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
        left set in a shell no longer leaves the game without controls), and otherwise the pads count only
        while the game's window is in front, like the keyboard: XInput is global, so a test run in the background
        used to follow the player's pad (and pressed things in its own menus). */
-    /* (hookshot) The player's devices count during a script too (the user plays along in test runs, 2026-11-05):
+    /* (longshot) The player's devices count during a script too (the user plays along in test runs, 2026-11-05):
        the presses add to theirs. HOS_INPUT_EXCLUSIVE=1: the script alone until 5 s after its last press, as before */
     static int exclusive = -1;
     if (exclusive < 0) exclusive = env_on("HOS_INPUT_EXCLUSIVE");
     if (exclusive && npresses > 0 && script_elapsed_ms(hos_now_ns()) < script_end_ms + 5000)
         return;
-    /* (hookshot, issue 389) A scripted press (HOS_INPUT_SCRIPT, HOS_INPUT_LIVE) is the test's own, not the
+    /* (longshot, issue 389) A scripted press (HOS_INPUT_SCRIPT, HOS_INPUT_LIVE) is the test's own, not the
        player's: it counts with the game's window behind another one, so a test run can drive the game on one
        monitor while the player works in the front window. HOS_INPUT_BACKGROUND still decides the pads. */
     static int scripted_background = -1;
@@ -991,7 +991,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
         if (pads_in_background(env, rx_option(4, 0))) pads_read(buttons, stick);
         return;
     }
-    {   /* (hookshot) while the Insert menu is open the pads are its own, as the keyboard is (key()), and after it
+    {   /* (longshot) while the Insert menu is open the pads are its own, as the keyboard is (key()), and after it
            closed until they are let go (the press that closed it never reaches the game) */
         uint64_t pb = 0;
         int32_t ps[4] = {0};
@@ -1006,7 +1006,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
             ps[3] > 12000 || ps[3] < -12000)
             player_used();
     }
-    binds_load();   /* (the keys: key_default's, or hookshot_options.ini's; the mouse's buttons once its capture is known) */
+    binds_load();   /* (the keys: key_default's, or longshot_options.ini's; the mouse's buttons once its capture is known) */
     for (int i = 0; i < HOS_SW_N; i++)
         if (bound_down(i, 0)) *buttons |= 1ULL << i, player_used();
     int32_t mouse[4] = {0};
@@ -1045,7 +1045,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
                              cx * 32767, cy * 32767};
     stick_max(stick, keys);
     if (keys[0] || keys[1] || keys[2] || keys[3]) player_used();
-    /* (hookshot, mouse_native.c) the keys and the pads are the right stick too: while they turn the camera, its angles are
+    /* (longshot, mouse_native.c) the keys and the pads are the right stick too: while they turn the camera, its angles are
        the native mouse's new start, so the two do not undo each other */
     hos_mouse_native_stick(stick[2] != 0 || stick[3] != 0);
 }
@@ -1070,7 +1070,7 @@ static void npad_states(Ctx *c) {
             hos_log("hid: the game read no controller for %.1f s (lr %#llx)", (now - last_read) / 1e9,
                     (unsigned long long)c->x[30]);
         if (connected) last_read = hos_hid_last_read = now;
-        void hos_prompts_live(void);   /* (hookshot, prompts.c: a new face or new controls shown at once) */
+        void hos_prompts_live(void);   /* (longshot, prompts.c: a new face or new controls shown at once) */
         if (connected) hos_prompts_live();
         int known = 0;
         for (int i = 0; i < nseen; i++) known |= seen_ids[i] == id;
@@ -1149,7 +1149,7 @@ HLE(_ZN2nn3hid21ShowControllerSupportEPNS0_27ControllerSupportResultInfoERKNS0_2
 /* Handles: six-axis ones are opaque u32s; a vibration handle is {u8 style type (3 = full key), u8 npad id, u8 device
    index (0 left, 1 right), u8 reserved}, which the SDK's vibration classes read. Vibration goes nowhere yet. */
 HLE(_ZN2nn3hid23GetSixAxisSensorHandlesEPNS0_19SixAxisSensorHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE) {
-    /* (hookshot) OoT asks for two (a Joy-Con pair) but runs its motion path only when three come back: at two its
+    /* (longshot) OoT asks for two (a Joy-Con pair) but runs its motion path only when three come back: at two its
        third source (the console's own, through JCMS) stays dead, and that branch is what marks motion active for the
        aim (spluton, issue 112). The count says three; only the handles asked for are written, so a caller's array
        sized for two is never written past (the handles are opaque: GetSixAxisSensorStates does not read them). */
@@ -1161,7 +1161,7 @@ HLE(_ZN2nn3hid23GetSixAxisSensorHandlesEPNS0_19SixAxisSensorHandleEiRKjNS_4util1
 }
 /* SixAxisSensorState, 0x60 bytes: {i64 delta time (ns), i64 sampling number, f32 acceleration[3] (G), angular velocity[3]
    (revolutions a second), angle[3] (revolutions), direction[3][3], u32 attributes (1 connected), pad}. Newest first.
-   (hookshot) With Motion controls on and a pad with a gyroscope (host/pad_sdl.c), the state OoT aims with
+   (longshot) With Motion controls on and a pad with a gyroscope (host/pad_sdl.c), the state OoT aims with
    (host/hos_motion.h: the full state, as the console and Eden build it); else a pad lying still. */
 HLE(_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19SixAxisSensorHandleE) {
     /* (the sampling number goes up once per reading, as the hardware's does: while live it is the readings' own count,
@@ -1263,7 +1263,7 @@ static void vibration_send(uint64_t handle, uint64_t value) {
     memcpy(v, GP(value), sizeof v);
     const int dev = (G32(handle) >> 16) & 1;
     rumble_map(v, amp[dev]);
-    {   /* (hookshot, issue 263) what the game asks for: the first values, then a count now and then */
+    {   /* (longshot, issue 263) what the game asks for: the first values, then a count now and then */
         static long long n, strong;
         static float peak;
         if (v[0] > peak) peak = v[0];

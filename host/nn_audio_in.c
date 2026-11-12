@@ -1,4 +1,4 @@
-/* (hookshot) nn::audio's input streams: the microphone, as the ocarina's "play with your voice / an instrument" option uses it.
+/* (longshot) nn::audio's input streams: the microphone, as the ocarina's "play with your voice / an instrument" option uses it.
 
    The game lists the virtual input devices once at its start (ListVirtualInputDevices) and opens two input streams only if
    there is one: one on the default virtual device, one on the "true raw" one (GetTrueRawAudioInputDevice), both 48 kHz,
@@ -25,8 +25,8 @@
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 #define MIC_MAGIC 0x4D494349u   /* "MICI": the high word of our handle in the game's InputStreamType */
@@ -385,7 +385,7 @@ HLE(_ZN2nn5audio15OpenInputStreamEPNS0_15InputStreamTypeEPvmRKNS0_15AudioDeviceN
     if (s->channels < 1 || s->channels > 8) s->channels = 1;
     if (s->rate < 8000 || s->rate > 192000) s->rate = 48000;
     s->frame_bytes = sample_bytes(s->format) * s->channels;
-    /* (hookshot) at most 10 s: the ring's byte offsets are ints (a larger frame count from the game overflowed them) */
+    /* (longshot) at most 10 s: the ring's byte offsets are ints (a larger frame count from the game overflowed them) */
     s->capacity = frames > 0 && frames <= s->rate * 10 ? frames : frames > 0 ? s->rate * 10 : s->rate / 10;
     s->ring = (uint8_t *)malloc((size_t)s->capacity * s->frame_bytes);
     if (!s->ring) {
@@ -481,7 +481,7 @@ HLE(_ZN2nn5audio15ReadInputStreamEPNS0_15InputStreamTypeEPvi) {
         const int have = filled(s);
         frames = (int)ARG(2) < have ? (int)ARG(2) : have;
         const int cap = s->capacity * s->frame_bytes, n = frames * s->frame_bytes;
-        uint8_t *dst = (uint8_t *)hos_guest_range(ARG(1), (uint64_t)n);   /* (hookshot: only into guest memory) */
+        uint8_t *dst = (uint8_t *)hos_guest_range(ARG(1), (uint64_t)n);   /* (longshot: only into guest memory) */
         if (!dst) frames = 0;
         else {
             const int first = n < cap - s->ring_start ? n : cap - s->ring_start;

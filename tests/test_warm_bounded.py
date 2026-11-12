@@ -20,7 +20,7 @@ def check_source():
     warm = draw[start:draw.index("\n}\n", start)]
     for needle in ("warm_bounded::run(", "program_cache_borrow(", "vkDestroyPipeline(dev.device, made, nullptr);",
                    "warm_bounded::leaves_marker(prepare_only, all, prepare_stopped())) precompile_built_write(total);",
-                   'static const bool prepare_only = env_on("HOOKSHOT_PREPARE_ONLY");',
+                   'static const bool prepare_only = env_on("LONGSHOT_PREPARE_ONLY");',
                    "program_cache_compute_keys()", "cached_compute(&ci, &made)"):
         if needle not in warm:
             raise SystemExit("precompile_warm no longer has: " + needle)
@@ -37,7 +37,7 @@ def check_source():
     # at create calls or to the keep-everything precompile; and a start that dropped the pipeline cache's files drops the marker)
     if warm.count("precompile_built_write(") != 2 or warm.index("pipeline_cache_save(true);") > warm.index("warm_bounded::leaves_marker("):
         raise SystemExit("precompile_warm writes the marker by another way than warm_bounded::leaves_marker, or before the cache is saved")
-    if 'if (prepare_stopped() || env_on("HOOKSHOT_PREPARE_ONLY")) return;' not in run:
+    if 'if (prepare_stopped() || env_on("LONGSHOT_PREPARE_ONLY")) return;' not in run:
         raise SystemExit("a --prepare-shaders run goes on after its warm")
     if "if (pcache_drop_stale()) remove(precompile_built_path().c_str());" not in run or \
             run.index("pcache_drop_stale()") > run.index("precompile_covers_notes()"):

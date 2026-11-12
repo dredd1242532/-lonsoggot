@@ -1,8 +1,8 @@
-/* (hookshot) The update offer: at start, the latest release on GitHub is asked for (a few seconds at most, nothing when offline), and
-   when it is not the release this game folder was built with, the player is asked whether to update. Yes starts the Hookshot Builder
-   that made the folder (hookshot_version.txt, written by nx2/make_game.py) with --update: it downloads the new release and builds the
-   folder again from the game files the folder keeps, and the game closes. A folder with no hookshot_version.txt (built from the
-   repository, or before updates came in) is never asked about. HOOKSHOT_NO_UPDATE_CHECK=1 (hookshot_env.txt) turns it off */
+/* (longshot) The update offer: at start, the latest release on GitHub is asked for (a few seconds at most, nothing when offline), and
+   when it is not the release this game folder was built with, the player is asked whether to update. Yes starts the Longshot Builder
+   that made the folder (longshot_version.txt, written by nx2/make_game.py) with --update: it downloads the new release and builds the
+   folder again from the game files the folder keeps, and the game closes. A folder with no longshot_version.txt (built from the
+   repository, or before updates came in) is never asked about. LONGSHOT_NO_UPDATE_CHECK=1 (longshot_env.txt) turns it off */
 #if defined(_WIN32) || defined(__linux__)
 #include <ctype.h>
 #include <stdlib.h>
@@ -66,7 +66,7 @@ static int tag_in(const char *body, char *tag, size_t cap) {
         if (e && e > k && (size_t)(e - k) < cap) {
             memcpy(tag, k, (size_t)(e - k));
             tag[e - k] = 0;
-            return safe_tag(tag);   /* (hookshot: it goes on the Builder's command line) */
+            return safe_tag(tag);   /* (longshot: it goes on the Builder's command line) */
         }
         return 0;
     }
@@ -104,8 +104,8 @@ static int newest_tag(const char *body, char *tag, size_t cap) {
 #include <string.h>
 
 #define UPDATE_HOST L"api.github.com"
-#define UPDATE_PATH L"/repos/NotRexed/Hookshot/releases/latest"
-#define RELEASES_PAGE L"https://github.com/NotRexed/Hookshot/releases/latest"
+#define UPDATE_PATH L"/repos/NotRexed/Longshot/releases/latest"
+#define RELEASES_PAGE L"https://github.com/NotRexed/Longshot/releases/latest"
 
 /* (a line "name=value" of a small text file, in UTF-8: its value, trimmed) */
 static int read_value(const wchar_t *path, const char *name, char *out, size_t cap) {
@@ -133,7 +133,7 @@ static int read_value(const wchar_t *path, const char *name, char *out, size_t c
 /* a GET of https://host/path: its body (malloc'd, at most 512 KB), NULL when it did not answer 200 */
 static char *get_body(const wchar_t *host, const wchar_t *path) {
     char *body = NULL;
-    HINTERNET s = WinHttpOpen(L"Hookshot-update-check", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET s = WinHttpOpen(L"Longshot-update-check", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!s) return NULL;
     WinHttpSetTimeouts(s, 2500, 2500, 2500, 3000);
     HINTERNET c = WinHttpConnect(s, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
@@ -163,11 +163,11 @@ static int latest_tag(const char *have, char *tag, size_t cap) {
     int ok = 0;
     char *body;
     if (nightly_version(have)) {
-        if ((body = get_body(L"github.com", L"/NotRexed/Hookshot/releases/download/nightly/hookshot-setup.txt")))
+        if ((body = get_body(L"github.com", L"/NotRexed/Longshot/releases/download/nightly/longshot-setup.txt")))
             ok = tag_in(body, tag, cap), free(body);
         return ok;
     }
-    if (strchr(have, '-') && (body = get_body(UPDATE_HOST, L"/repos/NotRexed/Hookshot/releases?per_page=20"))) {
+    if (strchr(have, '-') && (body = get_body(UPDATE_HOST, L"/repos/NotRexed/Longshot/releases?per_page=20"))) {
         ok = newest_tag(body, tag, cap);
         free(body);
         if (ok) return 1;
@@ -180,14 +180,14 @@ static int latest_tag(const char *have, char *tag, size_t cap) {
 static int local_builder(const wchar_t *file, const wchar_t *dir, wchar_t *out, size_t cap) {
     char local[8];
     if (!read_value(file, "builder_local", local, sizeof local) || strcmp(local, "1")) return 0;
-    const int n = _snwprintf(out, cap, L"%ls\\hookshot.exe", dir);
+    const int n = _snwprintf(out, cap, L"%ls\\longshot.exe", dir);
     if (n < 0 || (size_t)n >= cap) return 0;
     const DWORD attributes = GetFileAttributesW(out);
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
 void hos_update_check(void) {
-    if (getenv("HOOKSHOT_NO_UPDATE_CHECK") && strcmp(getenv("HOOKSHOT_NO_UPDATE_CHECK"), "0")) return;
+    if (getenv("LONGSHOT_NO_UPDATE_CHECK") && strcmp(getenv("LONGSHOT_NO_UPDATE_CHECK"), "0")) return;
     wchar_t dir[MAX_PATH], file[MAX_PATH + 64];
     DWORD n = hos_game_path_w(dir, MAX_PATH);
     if (!n || n >= MAX_PATH) return;
@@ -195,9 +195,9 @@ void hos_update_check(void) {
     if (!n) return;
     dir[n - 1] = 0;
     char have[128], builder[MAX_PATH * 3], skipped[128] = "", tag[128];
-    _snwprintf(file, MAX_PATH + 64, L"%ls\\hookshot_version.txt", dir);
+    _snwprintf(file, MAX_PATH + 64, L"%ls\\longshot_version.txt", dir);
     if (!read_value(file, "version", have, sizeof have) || !safe_tag(have)) return;
-    _snwprintf(file, MAX_PATH + 64, L"%ls\\user\\hookshot_update_skip.txt", dir);
+    _snwprintf(file, MAX_PATH + 64, L"%ls\\user\\longshot_update_skip.txt", dir);
     read_value(file, "skip", skipped, sizeof skipped);
     if (!latest_tag(have, tag, sizeof tag)) {
         fprintf(stderr, "update: the latest release could not be asked for (offline?)\n");
@@ -212,7 +212,7 @@ void hos_update_check(void) {
     wchar_t wtag[128], whave[128], wbuilder[MAX_PATH], text[2048];
     MultiByteToWideChar(CP_UTF8, 0, tag, -1, wtag, 128);
     MultiByteToWideChar(CP_UTF8, 0, have, -1, whave, 128);
-    _snwprintf(file, MAX_PATH + 64, L"%ls\\hookshot_version.txt", dir);
+    _snwprintf(file, MAX_PATH + 64, L"%ls\\longshot_version.txt", dir);
     char local_mode[8];
     const int portable = read_value(file, "builder_local", local_mode, sizeof local_mode) && !strcmp(local_mode, "1");
     const int has_builder = portable ? local_builder(file, dir, wbuilder, MAX_PATH) :
@@ -221,23 +221,23 @@ void hos_update_check(void) {
                             GetFileAttributesW(wbuilder) != INVALID_FILE_ATTRIBUTES;
     if (has_builder)
         _snwprintf(text, 2048,
-                   L"A new version of Hookshot is out: %ls (this game is %ls).\n\n"
-                   L"Update now? The game closes, and Hookshot Builder downloads the new version and builds this game folder again from the "
+                   L"A new version of Longshot is out: %ls (this game is %ls).\n\n"
+                   L"Update now? The game closes, and Longshot Builder downloads the new version and builds this game folder again from the "
                    L"game files it keeps. That takes about as long as your first build. Your saves and settings stay.\n\n"
                    L"Yes: update now\nNo: not now (asked again next time)\nCancel: skip this version",
                    wtag, whave);
     else
         _snwprintf(text, 2048,
-                   L"A new version of Hookshot is out: %ls (this game is %ls).\n\n"
-                   L"The Hookshot Builder that made this folder was not found, so it can't update by itself. Open the download page?\n\n"
+                   L"A new version of Longshot is out: %ls (this game is %ls).\n\n"
+                   L"The Longshot Builder that made this folder was not found, so it can't update by itself. Open the download page?\n\n"
                    L"Yes: open the page\nNo: not now (asked again next time)\nCancel: skip this version",
                    wtag, whave);
-    const int answer = MessageBoxW(NULL, text, L"Hookshot update", MB_YESNOCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+    const int answer = MessageBoxW(NULL, text, L"Longshot update", MB_YESNOCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
     if (answer == IDCANCEL) {
         wchar_t user[MAX_PATH + 16];
         _snwprintf(user, MAX_PATH + 16, L"%ls\\user", dir);
         CreateDirectoryW(user, NULL);
-        _snwprintf(file, MAX_PATH + 64, L"%ls\\user\\hookshot_update_skip.txt", dir);
+        _snwprintf(file, MAX_PATH + 64, L"%ls\\user\\longshot_update_skip.txt", dir);
         FILE *f = _wfopen(file, L"wb");
         if (f) fprintf(f, "skip=%s\n", tag), fclose(f);
         return;
@@ -250,7 +250,7 @@ void hos_update_check(void) {
     /* (the Python builder: builder= is its pythonw.exe, and builder_args= what goes before --update, its start script) */
     char bargs[1024] = "";
     wchar_t wbargs[1024] = L"";
-    _snwprintf(file, MAX_PATH + 64, L"%ls\\hookshot_version.txt", dir);
+    _snwprintf(file, MAX_PATH + 64, L"%ls\\longshot_version.txt", dir);
     if (!portable && read_value(file, "builder_args", bargs, sizeof bargs)) MultiByteToWideChar(CP_UTF8, 0, bargs, -1, wbargs, 1024);
     wchar_t args[MAX_PATH + 1280], wdir[MAX_PATH];
     _snwprintf(args, MAX_PATH + 1280, L"%ls%ls--update \"%ls\" --tag \"%ls\"", wbargs, wbargs[0] ? L" " : L"", dir, wtag);
@@ -261,11 +261,11 @@ void hos_update_check(void) {
     if ((INT_PTR)ShellExecuteW(NULL, L"open", wbuilder, args, slash ? wdir : NULL, SW_SHOWNORMAL) > 32) {
         void hos_log_flush(void);
         hos_log_flush();   /* (the lines logged before, queued: host/hos_thread.c log_queue) */
-        fprintf(stderr, "update: Hookshot Builder started to update to %s; the game closes\n", tag);
+        fprintf(stderr, "update: Longshot Builder started to update to %s; the game closes\n", tag);
         fflush(stderr);
         ExitProcess(0);
     }
-    MessageBoxW(NULL, L"Hookshot Builder could not be started. The game starts as it is.", L"Hookshot update", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    MessageBoxW(NULL, L"Longshot Builder could not be started. The game starts as it is.", L"Longshot update", MB_OK | MB_ICONWARNING | MB_TOPMOST);
 }
 #elif defined(__linux__)
 #include "hos_paths.h"
@@ -276,10 +276,10 @@ void hos_update_check(void) {
 #include <string.h>
 #include <unistd.h>
 
-/* (the same offer as Windows, when the player started bin/hookshot itself. The launcher sets HOOKSHOT_NO_UPDATE_CHECK
+/* (the same offer as Windows, when the player started bin/longshot itself. The launcher sets LONGSHOT_NO_UPDATE_CHECK
    and asks in its own window. curl and zenity do the network and the question; without either, the game just starts) */
 
-/* "Skip this version" is kept with the saves, where they are (hos_main.c sets it first: $XDG_DATA_HOME/hookshot, or
+/* "Skip this version" is kept with the saves, where they are (hos_main.c sets it first: $XDG_DATA_HOME/longshot, or
    --user's folder). It was written to user/ beside the game, as on Windows, where Linux keeps no saves any more: the
    start's move of an old user/ folder (saves_dir) took the file for one, moved it to the saves' place and wrote
    saves-moved.txt, so the next start asked again. Skipped again, the file was in both places, which the move reads as
@@ -329,28 +329,28 @@ static int pipe_tag(const char *cmd, char *tag, size_t cap, int newest) {
 
 static int latest_tag(const char *have, char *tag, size_t cap) {
     if (nightly_version(have))
-        return pipe_tag("curl -fsSL --max-time 8 --retry 2 -A Hookshot-update-check "
-                        "https://github.com/NotRexed/Hookshot/releases/download/nightly/hookshot-linux.txt 2>/dev/null", tag, cap, 0);
-    if (strchr(have, '-') && pipe_tag("curl -fsSL --max-time 6 --retry 2 -A Hookshot-update-check "
+        return pipe_tag("curl -fsSL --max-time 8 --retry 2 -A Longshot-update-check "
+                        "https://github.com/NotRexed/Longshot/releases/download/nightly/longshot-linux.txt 2>/dev/null", tag, cap, 0);
+    if (strchr(have, '-') && pipe_tag("curl -fsSL --max-time 6 --retry 2 -A Longshot-update-check "
                                       "-H \"Accept: application/vnd.github+json\" "
-                                      "'https://api.github.com/repos/NotRexed/Hookshot/releases?per_page=20' 2>/dev/null", tag, cap, 1))
+                                      "'https://api.github.com/repos/NotRexed/Longshot/releases?per_page=20' 2>/dev/null", tag, cap, 1))
         return 1;
-    if (pipe_tag("curl -fsSL --max-time 4 --retry 2 -A Hookshot-update-check "
+    if (pipe_tag("curl -fsSL --max-time 4 --retry 2 -A Longshot-update-check "
                  "-H \"Accept: application/vnd.github+json\" "
-                 "https://api.github.com/repos/NotRexed/Hookshot/releases/latest 2>/dev/null", tag, cap, 0))
+                 "https://api.github.com/repos/NotRexed/Longshot/releases/latest 2>/dev/null", tag, cap, 0))
         return 1;
-    return pipe_tag("curl -fsSL --max-time 8 --retry 2 -A Hookshot-update-check "
-                    "https://github.com/NotRexed/Hookshot/releases/latest/download/hookshot-linux.txt 2>/dev/null", tag, cap, 0);
+    return pipe_tag("curl -fsSL --max-time 8 --retry 2 -A Longshot-update-check "
+                    "https://github.com/NotRexed/Longshot/releases/latest/download/longshot-linux.txt 2>/dev/null", tag, cap, 0);
 }
 
-/* the builder an update installed (builder/linux/linux_update.py): <data>/hookshot/builder/versions/<current>/AppRun. The
+/* the builder an update installed (builder/linux/linux_update.py): <data>/longshot/builder/versions/<current>/AppRun. The
    builder= line names the AppImage that built the folder, which the player may have deleted since */
 static int installed_builder(char *out, size_t cap) {
-    const char *home = getenv("HOOKSHOT_BUILDER_HOME"), *data = getenv("XDG_DATA_HOME"), *user = getenv("HOME");
+    const char *home = getenv("LONGSHOT_BUILDER_HOME"), *data = getenv("XDG_DATA_HOME"), *user = getenv("HOME");
     char root[MAX_PATH * 2], path[MAX_PATH * 2 + 64], tag[128];
-    if (home && *home) snprintf(root, sizeof root, "%s/hookshot/builder", home);
-    else if (data && *data) snprintf(root, sizeof root, "%s/hookshot/builder", data);
-    else if (user && *user) snprintf(root, sizeof root, "%s/.local/share/hookshot/builder", user);
+    if (home && *home) snprintf(root, sizeof root, "%s/longshot/builder", home);
+    else if (data && *data) snprintf(root, sizeof root, "%s/longshot/builder", data);
+    else if (user && *user) snprintf(root, sizeof root, "%s/.local/share/longshot/builder", user);
     else return 0;
     snprintf(path, sizeof path, "%s/current", root);
     FILE *f = fopen(path, "rb");
@@ -365,7 +365,7 @@ static int installed_builder(char *out, size_t cap) {
 }
 
 void hos_update_check(void) {
-    const char *off = getenv("HOOKSHOT_NO_UPDATE_CHECK");
+    const char *off = getenv("LONGSHOT_NO_UPDATE_CHECK");
     if (off && strcmp(off, "0")) return;
     char path[MAX_PATH + 64], have[128], builder[MAX_PATH * 2], skipped[128] = "", tag[128];
     DWORD n = hos_game_path_a(path, MAX_PATH);
@@ -376,10 +376,10 @@ void hos_update_check(void) {
     char dir[MAX_PATH];
     memcpy(dir, path, n);
     dir[n] = 0;
-    snprintf(path, sizeof path, "%shookshot_version.txt", dir);
+    snprintf(path, sizeof path, "%slongshot_version.txt", dir);
     if (!read_value(path, "version", have, sizeof have) || !safe_tag(have)) return;
     char skip[MAX_PATH + 64];
-    snprintf(skip, sizeof skip, "%s/hookshot_update_skip.txt", hos_user_dir);
+    snprintf(skip, sizeof skip, "%s/longshot_update_skip.txt", hos_user_dir);
     read_value(skip, "skip", skipped, sizeof skipped);
     if (!latest_tag(have, tag, sizeof tag)) {
         fprintf(stderr, "update: the latest release could not be asked for (offline?)\n");
@@ -390,16 +390,16 @@ void hos_update_check(void) {
     if (strchr(have, '-') && !nightly_version(have) && !newer_version(tag, have)) return;   /* (a release candidate: newer only) */
     if (!nightly_version(have) && newer_version(have, tag)) return;   /* (a release or release candidate newer than the latest:
         a test build of the next release, before it is out. "Update" would build the older one over it, 2026-11-11) */
-    snprintf(path, sizeof path, "%shookshot_version.txt", dir);
+    snprintf(path, sizeof path, "%slongshot_version.txt", dir);
     const int has_builder = installed_builder(builder, sizeof builder) ||
                             (read_value(path, "builder", builder, sizeof builder) && access(builder, X_OK) == 0);
     char text[1600], cmd[4096];
     snprintf(text, sizeof text,
              has_builder
-                 ? "A new version of Hookshot is out: %s (this game is %s). Update now? The game closes, and Hookshot Builder downloads only what changed and builds this folder again. Your saves and settings stay."
-                 : "A new version of Hookshot is out: %s (this game is %s). The builder that made this folder was not found. Open the download page?",
+                 ? "A new version of Longshot is out: %s (this game is %s). Update now? The game closes, and Longshot Builder downloads only what changed and builds this folder again. Your saves and settings stay."
+                 : "A new version of Longshot is out: %s (this game is %s). The builder that made this folder was not found. Open the download page?",
              tag, have);
-    snprintf(cmd, sizeof cmd, "zenity --list --title=Hookshot --hide-header --column= --text='%s' 'Update now' 'Not now' 'Skip this version'", text);
+    snprintf(cmd, sizeof cmd, "zenity --list --title=Longshot --hide-header --column= --text='%s' 'Update now' 'Not now' 'Skip this version'", text);
     FILE *pick = popen(cmd, "r");
     if (!pick) return;
     char answer[64] = "";
@@ -414,7 +414,7 @@ void hos_update_check(void) {
     if (strncmp(answer, "Update", 6)) return;
     if (!has_builder) {
         if (fork() == 0) {
-            execlp("xdg-open", "xdg-open", "https://github.com/NotRexed/Hookshot/releases/latest", (char *)0);
+            execlp("xdg-open", "xdg-open", "https://github.com/NotRexed/Longshot/releases/latest", (char *)0);
             _exit(127);
         }
         return;
@@ -425,7 +425,7 @@ void hos_update_check(void) {
         _exit(127);
     }
     if (pid > 0) {
-        fprintf(stderr, "update: Hookshot Builder started to update to %s; the game closes\n", tag);
+        fprintf(stderr, "update: Longshot Builder started to update to %s; the game closes\n", tag);
         fflush(stderr);
         _exit(0);
     }

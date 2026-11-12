@@ -1,10 +1,10 @@
-/* (hookshot) The button prompts of the controller in use: the game's button-icon font (Font2/Scalable/External.*.bfotf,
+/* (longshot) The button prompts of the controller in use: the game's button-icon font (Font2/Scalable/External.*.bfotf,
    every icon in a text: dialogue, the control hints, menus) served from prompts/External.bfotf in the game folder, which
    nx2/prompt_assets.py draws with every controller face's icons at build time, with each Switch button's icon pointed at
    the face's icon of the pad input bound to it (host/nn_hid.c's controls, the menu's Layout preset and Controls page). So
    the icons say which button to press on this pad, custom controls too.
 
-   The face: hookshot_options.ini's button_prompts (the menu's Button prompts row): 0 Auto, from the first controller's name
+   The face: longshot_options.ini's button_prompts (the menu's Button prompts row): 0 Auto, from the first controller's name
    (SDL; with none, and none through XInput, the keyboard's), else 1 Switch, 2 Xbox, 3 PlayStation 4, 4 PlayStation 5, 5 Steam
    Deck, 6 Keyboard. The keyboard face (nx2/prompt_keys.py) points each Switch button at the icon of the first key bound to it,
    the sticks at the keys that move (WASD) and the mouse that turns the camera, and keeps the Switch's textures and the Talk
@@ -128,7 +128,7 @@ static int choose_face(const char *dir) {
     int choice = 0;
     snprintf(path, sizeof path, "%sprompts/keyboard", dir);
     keyboard_built = GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
-    snprintf(path, sizeof path, "%shookshot_options.ini", dir);
+    snprintf(path, sizeof path, "%slongshot_options.ini", dir);
     FILE *f = fopen(path, "r");
     if (f) {
         while (fgets(line, sizeof line, f))
@@ -569,7 +569,7 @@ static int build_textures(char *out, size_t cap) {
     return ok;
 }
 
-/* ---- (hookshot) the prompts changed while the game runs: a new face (the Button prompts row, or Auto's controller) or new
+/* ---- (longshot) the prompts changed while the game runs: a new face (the Button prompts row, or Auto's controller) or new
    controls (the Controls page, a layout preset) reach what the game has loaded, at once, by the rules the start follows
    (each icon the pad input bound to its button; a mod's file never touched: only the files served here are looked for).
    - The textures (Common.bntx): their data lies in a memory pool the game makes over the file (hos_prompts_pool, found by

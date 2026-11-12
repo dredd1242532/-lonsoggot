@@ -42,8 +42,8 @@ namespace {
 // (a log is copied whole up to 10 MB, GitHub taking files up to 25 MB; a longer one keeps its first MB, where the start, the
 // device and the options are, and its last 9 MB, where the problem usually is: an hour of play logs about 10 MB)
 constexpr uint64_t kLogCap = 10ull << 20, kLogHead = 1ull << 20;
-constexpr const char* kIssues = "https://github.com/NotRexed/Hookshot/issues/new/choose";
-constexpr const char* kForm = "https://github.com/NotRexed/Hookshot/issues/new?template=1-game-problem.yml";
+constexpr const char* kIssues = "https://github.com/NotRexed/Longshot/issues/new/choose";
+constexpr const char* kForm = "https://github.com/NotRexed/Longshot/issues/new?template=1-game-problem.yml";
 // (the link's longest: a player who is not signed in is sent to GitHub's sign-in page with the whole address in it, encoded
 // once more, and that page failed (HTTP 400 or 500, or the address dropped) from links of 3500 characters of escaped text on,
 // signed in or not GitHub answers 414 from 8192; 2000 passes both, and every browser and chat program takes it)
@@ -129,7 +129,7 @@ uint64_t file_size(FILE* f) {
 #endif
     return n > 0 ? (uint64_t)n : 0;
 }
-/// Whether two paths name one file (the log this run writes, and hookshot_log.txt in the game folder)
+/// Whether two paths name one file (the log this run writes, and longshot_log.txt in the game folder)
 bool same_file(const std::string& a, const std::string& b, bool windows) {
     if (a.empty() || b.empty()) return false;
 #ifndef _WIN32
@@ -172,7 +172,7 @@ struct LogFacts {
 };
 void take_facts(const std::string& line, LogFacts& f) {
     size_t at;
-    if (f.version.empty() && (at = line.find("] hookshot ")) != std::string::npos) f.version = trimmed(line.substr(at + 11));
+    if (f.version.empty() && (at = line.find("] longshot ")) != std::string::npos) f.version = trimmed(line.substr(at + 11));
     if ((at = line.find("] map: ")) != std::string::npos) f.map = trimmed(line.substr(at + 7));   // (host/hos_main.c, on Link's update)
     if (f.trouble.empty() && (line.find("FATAL:") != std::string::npos || line.find("CRASH:") != std::string::npos ||
                               line.find("device lost") != std::string::npos))
@@ -228,7 +228,7 @@ LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& 
     return f;
 }
 
-/// Whether a switch's value goes into the report. CONTRIBUTING.md lists hookshot_env.txt among the files never to share, so
+/// Whether a switch's value goes into the report. CONTRIBUTING.md lists longshot_env.txt among the files never to share, so
 /// only a value that cannot hold anything private is written: a number of at most 12 characters (60, -1, 1.5), a size
 /// (1920x1080), or on/off, true/false, yes/no; and never for a name that may hold a secret, a place or a person (TOKEN, KEY,
 /// ROOM, SECRET, PASS, SERVER or USER in it). Every other value is left out, paths and addresses with them
@@ -256,7 +256,7 @@ bool value_shown(const std::string& name, const std::string& value) {
 /// The switches set: the game's own (host/hos_main.c env_line_allowed's names) and what loads other code into it (the form
 /// asks about software hooked in), a NAME=VALUE line each, the value as value_shown allows; names: the names alone
 std::string switches(const std::vector<std::string>& env, std::string* names) {
-    static const char* const prefixes[] = {"RX_", "HOS_", "HOOKSHOT_", "EDEN_", "NVN_", "SDL_"};
+    static const char* const prefixes[] = {"RX_", "HOS_", "LONGSHOT_", "EDEN_", "NVN_", "SDL_"};
     static const char* const hooks[] = {"VK_INSTANCE_LAYERS", "VK_LOADER_LAYERS_ENABLE", "VK_DRIVER_FILES", "VK_ICD_FILENAMES",
                                         "ENABLE_VKBASALT", "MANGOHUD", "LD_PRELOAD"};
     std::vector<std::pair<std::string, std::string>> out;
@@ -405,13 +405,13 @@ void fill_here(Inputs& in) {
     in.env.clear();
 #ifdef _WIN32
     in.windows = true;
-    if (char* block = GetEnvironmentStringsA()) {   // (NAME=VALUE\0 ... \0\0; the host's _putenv of hookshot_env.txt reaches it)
+    if (char* block = GetEnvironmentStringsA()) {   // (NAME=VALUE\0 ... \0\0; the host's _putenv of longshot_env.txt reaches it)
         for (const char* e = block; *e; e += strlen(e) + 1) in.env.push_back(e);
         FreeEnvironmentStringsA(block);
     }
     if (const char* h = getenv("USERPROFILE")) in.home = h;
     if (const char* u = getenv("USERNAME")) in.user = u;
-    const HANDLE err = (HANDLE)_get_osfhandle(_fileno(stderr));   // (the game freopens stderr as hookshot_log.txt)
+    const HANDLE err = (HANDLE)_get_osfhandle(_fileno(stderr));   // (the game freopens stderr as longshot_log.txt)
     char path[MAX_PATH * 3 + 16];
     if (err != INVALID_HANDLE_VALUE && GetFileType(err) == FILE_TYPE_DISK) {
         const DWORD n = GetFinalPathNameByHandleA(err, path, (DWORD)sizeof path, FILE_NAME_NORMALIZED);
@@ -461,11 +461,11 @@ std::string write(const Inputs& in) {
     const bool asked = in.ask_picture && in.ask_picture(picture_path.c_str(), ticket);
 
     // the logs: this run's, and the run before's (its own after a start from the icon, which moves the last one to .1)
-    const std::string g0 = in.game_dir + "hookshot_log.txt", g1 = in.game_dir + "hookshot_log.1.txt";
+    const std::string g0 = in.game_dir + "longshot_log.txt", g1 = in.game_dir + "longshot_log.1.txt";
     const std::string before = same_file(in.current_log, g0, in.windows) ? g1 : exists(g0) ? g0 : g1;
     LogFacts now, last;
-    if (!in.current_log.empty()) now = copy_log(in.current_log, dir + "hookshot_log.txt", in);
-    if (!same_file(before, in.current_log, in.windows)) last = copy_log(before, dir + "hookshot_log.1.txt", in);
+    if (!in.current_log.empty()) now = copy_log(in.current_log, dir + "longshot_log.txt", in);
+    if (!same_file(before, in.current_log, in.windows)) last = copy_log(before, dir + "longshot_log.1.txt", in);
     const bool picture = asked && wait_picture(ticket, picture_path, in.picture_wait_ms);
 
     // (the first line answers the form's one-line field, as the link fills it in; the second says where it comes from)
@@ -478,11 +478,11 @@ std::string write(const Inputs& in) {
     std::string names;
     const std::string sw = switches(in.env, &names);
     settings += sw.empty() ? "Switches set: none.\n"
-                           : "Switches set (the environment, hookshot_env.txt; a value only when it is a number or on/off, and never for "
+                           : "Switches set (the environment, longshot_env.txt; a value only when it is a number or on/off, and never for "
                              "a name with TOKEN, KEY, ROOM, SECRET, PASS, SERVER or USER in it):\n" + sw;
     std::string logs;
     if (now.copied) {
-        logs += "hookshot_log.txt: this run's log as it was when the report was made, " + megabytes(now.size) + ".\n";
+        logs += "longshot_log.txt: this run's log as it was when the report was made, " + megabytes(now.size) + ".\n";
         if (now.cut) logs += "  Only its first and its last part are in the copy: it is longer than " + megabytes(kLogCap) + ".\n";
     } else {
         logs += in.current_log.empty() ? "This run's log is not here: it is not in a file (the game was started from a terminal, or by a "
@@ -490,9 +490,9 @@ std::string write(const Inputs& in) {
                                        : "This run's log could not be read.\n";
     }
     if (last.copied) {
-        logs += "hookshot_log.1.txt: the run before's log";
+        logs += "longshot_log.1.txt: the run before's log";
         if (!last.version.empty() || last.written)
-            logs += " (" + (last.version.empty() ? std::string() : "hookshot " + last.version) +
+            logs += " (" + (last.version.empty() ? std::string() : "longshot " + last.version) +
                     (!last.version.empty() && last.written ? ", " : "") +
                     (last.written ? "last written " + when(last.written, "%Y-%m-%d %H:%M") : std::string()) + ")";
         logs += ", " + megabytes(last.size) + ".\n";
@@ -505,7 +505,7 @@ std::string write(const Inputs& in) {
     logs += in.windows ? "In both, the home folder is written %USERPROFILE% and the user's name <user>.\n"
                        : "In both, the home folder is written ~ and the user's name <user>.\n";
     std::string files = "report.txt (this file)";
-    for (const auto& [here, name] : {std::pair{now.copied, "hookshot_log.txt"}, std::pair{last.copied, "hookshot_log.1.txt"},
+    for (const auto& [here, name] : {std::pair{now.copied, "longshot_log.txt"}, std::pair{last.copied, "longshot_log.1.txt"},
                                      std::pair{picture, "picture.png"}})
         if (here) files += std::string(", ") + name;
     const std::string gpu = in.gpu.empty() ? "Not known: the game has no Vulkan device." : in.gpu;
@@ -531,16 +531,16 @@ std::string write(const Inputs& in) {
     }
 
     std::string text;
-    text += "Hookshot bug report, made by the Insert menu's Bug report on " + when(in.now, "%Y-%m-%d at %H:%M") + ".\n\n";
+    text += "Longshot bug report, made by the Insert menu's Bug report on " + when(in.now, "%Y-%m-%d at %H:%M") + ".\n\n";
     text += std::string("To send it: open ") + kIssues + " and choose Game problem (or the link at the end of this file, which "
             "fills in the answers below), copy the answers below into the fields of the same names, say what happened, and drag "
             "the files of this folder, this one too, into the issue.\n\n";
-    text += "### Hookshot version\n\n" + in.version + "\n\n";
+    text += "### Longshot version\n\n" + in.version + "\n\n";
     text += "### Where in the game\n\n" + where + "\n\n";
     text += "### Graphics card and driver version\n\n" + gpu + "\n\n";
     text += "### CPU, RAM and operating system\n\n" + in.system + "\n\n";
     text += "### Changes from the defaults\n\n" + settings + "\n";
-    text += "### hookshot_log.txt\n\n" + logs + "\n";
+    text += "### longshot_log.txt\n\n" + logs + "\n";
     text += std::string("### Screenshots or video\n\n") +
             (picture ? "picture.png: the game's picture when the report was made, without the menu.\n\n"
                      : "No picture: the game showed no new frame while the report was made, or its picture could not be written.\n\n");
@@ -559,8 +559,8 @@ std::string write(const Inputs& in) {
     }
     if (in.log) {
         std::string line = "menu: bug report written to " + rel + ": report.txt";
-        if (now.copied) line += ", hookshot_log.txt (" + megabytes(now.size) + ")";
-        if (last.copied) line += ", hookshot_log.1.txt (" + megabytes(last.size) + ")";
+        if (now.copied) line += ", longshot_log.txt (" + megabytes(now.size) + ")";
+        if (last.copied) line += ", longshot_log.1.txt (" + megabytes(last.size) + ")";
         line += picture ? ", picture.png" : ", no picture";
         in.log(line.c_str());
     }

@@ -20,19 +20,19 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "builder" / "py"))
-from hookshot_builder import core  # noqa: E402
+from longshot_builder import core  # noqa: E402
 
-RUNNER = (ROOT / "builder" / "HookshotBuilder" / "Runner.cs").read_text(encoding="utf-8")
+RUNNER = (ROOT / "builder" / "LongshotBuilder" / "Runner.cs").read_text(encoding="utf-8")
 
 
 class PythonBuilderTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hookshot-own-python-")
+        temporary = tempfile.TemporaryDirectory(prefix="longshot-own-python-")
         self.addCleanup(temporary.cleanup)
         self.tools = Path(temporary.name) / "tools"
         (self.tools / "nx2").mkdir(parents=True)
         (self.tools / "nx2" / "make_game.py").write_text("raise SystemExit('authored: never run')\n")
-        patch = mock.patch.dict(os.environ, {"HOOKSHOT_TOOLS": str(self.tools)})
+        patch = mock.patch.dict(os.environ, {"LONGSHOT_TOOLS": str(self.tools)})
         patch.start()
         self.addCleanup(patch.stop)
         self.own = str(self.tools / "python" / "python.exe")

@@ -9,8 +9,8 @@ requests for help, the same trail docs/workflow.md asks for, in a place both peo
     python -I scripts/team_chat.py logout
 
 login signs in with Discord: it prints a link (and opens it unless --no-browser), the browser comes back to a one-time
-listener on 127.0.0.1, and the session is saved to the config folder (Linux: $XDG_CONFIG_HOME/hookshot, default
-~/.config/hookshot; Windows: %APPDATA%\\Hookshot; HOOKSHOT_TEAM_CHAT_DIR overrides it) as team_chat.json, readable by
+listener on 127.0.0.1, and the session is saved to the config folder (Linux: $XDG_CONFIG_HOME/longshot, default
+~/.config/longshot; Windows: %APPDATA%\\Longshot; LONGSHOT_TEAM_CHAT_DIR overrides it) as team_chat.json, readable by
 you only. The first sign-in creates the account. --access-token-stdin saves a token copied
 from Element (Settings, Help & About, Access token) instead.
 
@@ -38,8 +38,8 @@ SERVER = "magicbean.dev"
 ROOM = "#agent-updates:magicbean.dev"
 MIN_INTERVAL_MINUTES = 60
 PREFIX = "\N{ROBOT FACE} "
-DEVICE_NAME = "Hookshot agent"
-USER_AGENT = "hookshot-team-chat/1"
+DEVICE_NAME = "Longshot agent"
+USER_AGENT = "longshot-team-chat/1"
 LOGIN_TIMEOUT = 300
 EXIT_REFUSED = 3
 
@@ -49,12 +49,12 @@ class ChatError(Exception):
 
 
 def config_dir():
-    if os.environ.get("HOOKSHOT_TEAM_CHAT_DIR"):
-        return os.environ["HOOKSHOT_TEAM_CHAT_DIR"]
+    if os.environ.get("LONGSHOT_TEAM_CHAT_DIR"):
+        return os.environ["LONGSHOT_TEAM_CHAT_DIR"]
     if os.name == "nt":
-        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Hookshot")
+        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Longshot")
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "hookshot")
+    return os.path.join(base, "longshot")
 
 
 def config_path():
@@ -151,7 +151,7 @@ def wait_for_login_token(port_holder, ready, timeout):
                 self.send_response(200 if token else 400)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                self.wfile.write(("<!doctype html><title>Hookshot team chat</title><p>%s</p>" % text).encode("utf-8"))
+                self.wfile.write(("<!doctype html><title>Longshot team chat</title><p>%s</p>" % text).encode("utf-8"))
             except OSError:
                 pass   # (the browser went away first, e.g. WinError 10053; the token above is what matters)
 

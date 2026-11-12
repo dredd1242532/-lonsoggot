@@ -9,7 +9,7 @@ bool framegen_on();
 /// Records the frame's processing into the present's recording (src: the window texture's view, sw x sh, the crop
 /// x, y, w, h); false when interpolation cannot run (the present goes to the window as without it)
 bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4]);
-/// (hookshot) Who made the made frames of the sets shown lately (the last 64, about a second at 60): what the Insert menu's
+/// (longshot) Who made the made frames of the sets shown lately (the last 64, about a second at 60): what the Insert menu's
 /// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second)
 enum class FgMaker { None, BuiltIn, Dlss, Fsr3 };
 FgMaker framegen_maker();
@@ -19,7 +19,7 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h);
 void framegen_queue(uint64_t value);
 /// The window's present of an image (GENERAL, w x h; crop as above or null), vk_replay.cpp: the display thread's
 void present_image(VkImage src, uint32_t w, uint32_t h, const int crop[4], VkImageView view = VK_NULL_HANDLE);
-/// (hookshot) Present ahead (vk_framegen.cpp display_main, #1702): while present_defer_into is set on a thread, present_image
+/// (longshot) Present ahead (vk_framegen.cpp display_main, #1702): while present_defer_into is set on a thread, present_image
 /// submits the frame's copy into its swapchain image and stops there, with what present_commit needs to show it later. The
 /// copy is then on the queue before the game's next frame, so its present at its time does not wait for that frame's rendering
 struct PendingPresent {
@@ -37,8 +37,8 @@ bool present_commit(const PendingPresent& p);   // (false: not shown, nothing de
 /// pq: src is the game's own HDR10 picture (Native HDR), scaled into an RGB10A2 image
 VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh,
                        bool pq = false);
-VkImageView framegen_scaled_view();   // (hookshot) the view of framegen_scale's last image
-/// (hookshot) The HDR10 picture of src's crop at dw x dh (the Insert menu's HDR), GENERAL; null: none (the SDR picture then;
+VkImageView framegen_scaled_view();   // (longshot) the view of framegen_scale's last image
+/// (longshot) The HDR10 picture of src's crop at dw x dh (the Insert menu's HDR), GENERAL; null: none (the SDR picture then;
 /// Native's scaled picture, else black: present_image).
 /// pq: src is the game's own HDR10 picture (Native), its PQ codes as they are at 100% contrast, else graded and written again;
 /// else the SDR picture, expanded

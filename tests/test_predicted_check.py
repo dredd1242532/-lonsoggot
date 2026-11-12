@@ -2,7 +2,7 @@
 
 predict_run (gpu/vk/vk_draw.cpp) builds the predicted pipelines into the driver's own disk cache alone and lets them go. On a driver
 without such a cache, or with one too small, that work leaves nothing. predict_run now writes a sample of what it built
-(hookshot_pipelines.bin.predicted, stamped with program_cache_stamp), and the next start asks the driver for each, without
+(longshot_pipelines.bin.predicted, stamped with program_cache_stamp), and the next start asks the driver for each, without
 compiling and with an empty pipeline cache of its own as play does, on a thread behind the game: "the driver's shader cache kept N
 of M predicted pipelines". The process that built them does not ask (the driver would answer from memory). The driver cache
 folders' size is logged at the start and after the prediction.
@@ -41,7 +41,7 @@ def main():
     for need, why in (("predicted_this_run", "the process that built them asks the driver, which answers from memory"),
                       ("if (!dev.vk13.pipelineCreationCacheControl) return;",
                        "the check asks under FAIL_ON_PIPELINE_COMPILE_REQUIRED on a device without pipelineCreationCacheControl"),
-                      ('if (env_on("HOOKSHOT_PREPARE_ONLY")) return;',
+                      ('if (env_on("LONGSHOT_PREPARE_ONLY")) return;',
                        "a --prepare-shaders run starts the check on a thread that would race its exit"),
                       ("head[0] == program_cache_stamp()", "a sample of another translator or cache format is asked"),
                       ("std::thread(", "the check holds up the start"),

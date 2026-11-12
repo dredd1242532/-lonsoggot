@@ -30,7 +30,7 @@ MINUTE_AGO = time.time() - 60
 
 class HashCacheTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="hookshot-hash-cache-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="longshot-hash-cache-")
         self.addCleanup(self.temporary.cleanup)
         self.dir = Path(self.temporary.name)
         self.src = self.dir / "code_001.c"
@@ -139,7 +139,7 @@ class HashCacheTests(unittest.TestCase):
 
     def test_the_build_uses_the_record(self):
         """main loads it before the stamps and saves it after the plan; the plan, the kept list and the fingerprint use it.
-        compile_one keeps object_key: with make_game.py's HOOKSHOT_TIMES every key it needs is planned already"""
+        compile_one keeps object_key: with make_game.py's LONGSHOT_TIMES every key it needs is planned already"""
         src = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
         main = src[src.index("\ndef main("):]
         self.assertLess(main.index("load_hashes(out)"), main.index("migrate_stamps("))

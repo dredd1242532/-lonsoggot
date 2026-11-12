@@ -235,13 +235,13 @@ def samples_on_path(path, names, segs, top):
         for a, b in ss:
             for k in range(bisect.bisect_left(times, a), bisect.bisect_right(times, b)):
                 frames = [name(f) for f in smp[k][1]]
-                fn = next((f for f in frames if ":f_" in f or f.startswith("hookshot_vk:")), frames[0])
+                fn = next((f for f in frames if ":f_" in f or f.startswith("longshot_vk:")), frames[0])
                 inner["%s  %s" % (sn, fn)] += 1
                 leaf["%s  %s" % (sn, frames[0])] += 1
                 cpu = not prof.waiting(smp[k][1][0].rpartition("+")[0], frames)
                 state[(sn, cpu)] += 1
                 if not cpu:
-                    held["%s  %s" % (sn, next((f for f in frames if f.startswith(("hookshot:", "hookshot_vk:"))), frames[0]))] += 1
+                    held["%s  %s" % (sn, next((f for f in frames if f.startswith(("longshot:", "longshot_vk:"))), frames[0]))] += 1
                 n += 1
     print("-- samples on the path: %d" % n)
     if not n:

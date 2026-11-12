@@ -1,14 +1,14 @@
 /* Windows Builder home protocol. No cwd discovery, installation, UI or process launch here.
    The app uses the same marker and relative association format (BuilderHome.cs / make_game.py). */
-#ifndef HOOKSHOT_PORTABLE_HOME_H
-#define HOOKSHOT_PORTABLE_HOME_H
+#ifndef LONGSHOT_PORTABLE_HOME_H
+#define LONGSHOT_PORTABLE_HOME_H
 #include <windows.h>
 #include <string.h>
 #include <wchar.h>
 
-#define HB_HOME_MARKER L".hookshot-portable"
-#define HB_HOME_MAGIC "Hookshot Builder portable home v1"
-#define HB_GAME_HOME L".hookshot_builder_home"
+#define HB_HOME_MARKER L".longshot-portable"
+#define HB_HOME_MAGIC "Longshot Builder portable home v1"
+#define HB_GAME_HOME L".longshot_builder_home"
 
 typedef struct { wchar_t root[MAX_PATH]; int portable; } HbHome;
 
@@ -116,7 +116,7 @@ static int hb_home_game(HbHome *home, const wchar_t *game) {
     if (read == 0) {
         /* A portable game's missing association must not silently select an unrelated AppData install. */
         char metadata[2048];
-        if (!hb_home_join(path, MAX_PATH, game, L"hookshot_version.txt")) return -1;
+        if (!hb_home_join(path, MAX_PATH, game, L"longshot_version.txt")) return -1;
         DWORD size = 0;
         int version = hb_home_bytes(path, metadata, sizeof metadata - 1, &size);
         if (version < 0) return -1;
@@ -174,7 +174,7 @@ static int hb_home_discover(HbHome *home, const wchar_t *requested, const wchar_
     /* The original setup remains beside its dedicated data folder after --portable's first invocation. */
     if (!game_launcher) {
         wchar_t sibling[MAX_PATH];
-        if (hb_home_join(sibling, MAX_PATH, setup_directory, L"HookshotBuilder")) {
+        if (hb_home_join(sibling, MAX_PATH, setup_directory, L"LongshotBuilder")) {
             int marked = hb_home_marked(sibling);
             if (marked < 0) return 0;
             if (marked) { wcscpy(home->root, sibling); home->portable = 1; return 1; }

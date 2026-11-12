@@ -1,4 +1,4 @@
-/* (hookshot) An AV1 decoder on Media Foundation, for nn::codec's AV1 decoder (host/nn_video.c).
+/* (longshot) An AV1 decoder on Media Foundation, for nn::codec's AV1 decoder (host/nn_video.c).
 
    OoT's movies (romfs/Movie: the intro, ...) are AV1, and the static FFmpeg the build links has no AV1 decoder (its
    native one needs a hardware context; dav1d / libaom are not in it). Windows has one: the decoder MFT of the AV1
@@ -19,8 +19,8 @@
 #include <mftransform.h>
 #include <stdio.h>
 #include <string.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 #ifndef MFVideoFormat_AV1
@@ -73,13 +73,13 @@ static int set_output_nv12(MfAv1 *m) {
     return 1;
 }
 
-/* (hookshot) Without the AV1 Video Extension the movies have no decoder: their pictures stay empty, which shows as a green screen, and the
+/* (longshot) Without the AV1 Video Extension the movies have no decoder: their pictures stay empty, which shows as a green screen, and the
    intro never ends. Said once, on its own thread (the game goes on), with the way to the Store page. HOS_AV1_MISSING=1: as if it were missing */
 static DWORD WINAPI av1_missing_notice(LPVOID unused) {
     (void)unused;
-    if (MessageBoxA(NULL, "Hookshot's movies need Microsoft's free AV1 Video Extension, which this PC does not have. Without it they show a green "
+    if (MessageBoxA(NULL, "Longshot's movies need Microsoft's free AV1 Video Extension, which this PC does not have. Without it they show a green "
                           "screen and the game can stop at a black screen.\n\nOpen its Microsoft Store page now? Install it, then restart the game.",
-                    "Hookshot", MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST) == IDYES)
+                    "Longshot", MB_YESNO | MB_ICONINFORMATION | MB_TOPMOST) == IDYES)
         ShellExecuteA(NULL, "open", "ms-windows-store://pdp/?ProductId=9MVZQVXJBQ9V", NULL, NULL, SW_SHOWNORMAL);
     return 0;
 }

@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
 #define LOAD(n) n = reinterpret_cast<PFN_##n>(symbol(#n)); if (!n) { std::puts("UNAVAILABLE: " #n); return 77; }
     APIS(LOAD)
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "Hookshot authored write-back observations";
+    app.pApplicationName = "Longshot authored write-back observations";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;

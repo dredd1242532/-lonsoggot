@@ -11,8 +11,8 @@
 #include <direct.h>
 
 #include "vk_dump.h"
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -29,7 +29,7 @@ struct Item {
     void* map = nullptr;
     uint32_t w = 0, h = 0, src_w = 0, src_h = 0;
     Kind kind = KIND_FLOAT;
-    bool rgb9e5 = false;   // (hookshot, RX_VK_DUMP_9E5: an R11G11B10 image's words read as RGB9E5)
+    bool rgb9e5 = false;   // (longshot, RX_VK_DUMP_9E5: an R11G11B10 image's words read as RGB9E5)
     int depth_bytes = 0;   // (a depth image: copied as it is, w x h = the level's; 2 = D16, 4 = D32F or D24 in 32 bits)
     bool depth_float = false;
     VkFormat format = VK_FORMAT_UNDEFINED;

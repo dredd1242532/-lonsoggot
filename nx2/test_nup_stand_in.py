@@ -94,18 +94,18 @@ with tempfile.TemporaryDirectory() as out:
     os.makedirs(romfs)
     make_game.stand_in_damaged_files(out, romfs)
     check("no stamp: not the builder's romfs", calls, [])
-    with open(os.path.join(out, ".hookshot_romfs"), "w") as f:
+    with open(os.path.join(out, ".longshot_romfs"), "w") as f:
         f.write("unpacked by this builder: game.nup 1\n")
     make_game.stand_in_damaged_files(out, romfs)
     make_game.stand_in_damaged_files(out, romfs)
     check("checked once", calls, [romfs])
-    with open(os.path.join(out, ".hookshot_romfs"), "w") as f:
+    with open(os.path.join(out, ".longshot_romfs"), "w") as f:
         f.write("unpacked by this builder: other.nup 2\n")
     make_game.stand_in_damaged_files(out, romfs)
     check("checked again for another unpack", calls, [romfs, romfs])
-    with open(os.path.join(out, ".hookshot_romfs"), "rb") as f:
+    with open(os.path.join(out, ".longshot_romfs"), "rb") as f:
         stamp = f.read()
-    with open(os.path.join(out, ".hookshot_romfs_checked"), "wb") as f:
+    with open(os.path.join(out, ".longshot_romfs_checked"), "wb") as f:
         f.write(b"resolved-v1\n" + stamp)   # (as builders before #2361 wrote it)
     make_game.stand_in_damaged_files(out, romfs)
     make_game.stand_in_damaged_files(out, romfs)

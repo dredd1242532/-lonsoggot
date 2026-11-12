@@ -13,7 +13,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get("HOOKSHOT_CLEANUP_TEST_SOURCE", ROOT / "nx2/make_game.py"))
+SOURCE = Path(os.environ.get("LONGSHOT_CLEANUP_TEST_SOURCE", ROOT / "nx2/make_game.py"))
 sys.path[:0] = [str(ROOT / "nx2"), str(ROOT / "third_party/a64-kit/tools")]
 spec = importlib.util.spec_from_file_location("cleanup_make_game", SOURCE)
 module = importlib.util.module_from_spec(spec)
@@ -98,14 +98,14 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(self.invoke(rows)[0], [4, 5, 6])
 
     def test_default_work_across_packaged_builder_versions(self):
-        home = r"C:\Users\authored user\AppData\Local\HookshotBuilder"
-        old = home + r"\versions\v-old\HookshotBuilder\tools\nx2\make_game.py"
+        home = r"C:\Users\authored user\AppData\Local\LongshotBuilder"
+        old = home + r"\versions\v-old\LongshotBuilder\tools\nx2\make_game.py"
         rows = [row(10, "python.exe", ["python", "-I", old]),
                 row(11, "python.exe", ["python", "nx2/build.py", "--standalone"], parent=10),
                 row(12, "clang.exe", ["clang", "-o", home + r"\sa\build\one.o"]),
-                row(20, "python.exe", ["python", r"D:\other\versions\v-old\HookshotBuilder\tools\nx2\make_game.py"]),
-                row(21, "python.exe", ["python", home + r"-other\versions\v-old\HookshotBuilder\tools\nx2\make_game.py"]),
-                row(22, "python.exe", ["python", home + r"\versions\v-old\extra\HookshotBuilder\tools\nx2\make_game.py"]),
+                row(20, "python.exe", ["python", r"D:\other\versions\v-old\LongshotBuilder\tools\nx2\make_game.py"]),
+                row(21, "python.exe", ["python", home + r"-other\versions\v-old\LongshotBuilder\tools\nx2\make_game.py"]),
+                row(22, "python.exe", ["python", home + r"\versions\v-old\extra\LongshotBuilder\tools\nx2\make_game.py"]),
                 row(23, "python.exe", ["python", home + r"\versions\v-old\other\tools\nx2\make_game.py"]),
                 row(24, "python.exe", ["python", old, "--work", r"D:\other"])]
         self.assertEqual(self.invoke(rows, work=home, default=home)[0], [10, 12, 11])

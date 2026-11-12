@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "builder" / "linux"))
 import linux_update  # noqa: E402
 
-SOURCE = ROOT / "builder" / "linux" / "hookshot_builder.py"
+SOURCE = ROOT / "builder" / "linux" / "longshot_builder.py"
 BUILDER = next(node for node in ast.parse(SOURCE.read_text(encoding="utf-8")).body
                if isinstance(node, ast.ClassDef) and node.name == "Builder")
 
@@ -92,7 +92,7 @@ class DownloadTests(unittest.TestCase):
         with mock.patch.object(linux_update._OPENER, "open", opened), \
                 mock.patch.object(linux_update.time, "sleep", lambda s: self.fail("waited to try again")):
             with self.assertRaises(linux_update.Cancelled) as raised:
-                linux_update.fetch_bytes("https://github.com/NotRexed/Hookshot/releases/download/v9/part.zip", stop=stop)
+                linux_update.fetch_bytes("https://github.com/NotRexed/Longshot/releases/download/v9/part.zip", stop=stop)
         self.assertEqual(str(raised.exception), "The update was cancelled.")
         self.assertEqual([a.reads for a in answers], [3])   # (one download, three of its eight megabytes; not the API's either)
 
@@ -125,17 +125,17 @@ class DownloadTests(unittest.TestCase):
 
 class InstallTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hookshot-update-cancel-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="longshot-update-cancel-")
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name) / "home"
-        self.versions = self.home / "hookshot" / "builder" / "versions"
+        self.versions = self.home / "longshot" / "builder" / "versions"
         (self.versions / "v1").mkdir(parents=True)
         (self.versions / "v1" / "kept").write_bytes(b"the version installed before")
         (self.versions.parent / "current").write_text("v1\n", encoding="utf-8")
-        patch = mock.patch.dict(os.environ, {"HOOKSHOT_BUILDER_HOME": str(self.home)})
+        patch = mock.patch.dict(os.environ, {"LONGSHOT_BUILDER_HOME": str(self.home)})
         patch.start()
         self.addCleanup(patch.stop)
-        tools, self.tools = part(".", {"usr/share/hookshot/builder/linux/AppRun": b"#!/bin/sh\n", "inside": b"inside"})
+        tools, self.tools = part(".", {"usr/share/longshot/builder/linux/AppRun": b"#!/bin/sh\n", "inside": b"inside"})
         library, self.library = part("usr/lib", {"target": b"library"})
         self.manifest = linux_update.Manifest("v2", [tools, library])
         self.payloads = {tools.url: self.tools, library.url: self.library}
@@ -260,20 +260,20 @@ class BuilderTests(unittest.TestCase):
 
     def test_the_download_is_given_the_event_cancel_sets(self):
         w = Window(manifest_tag="v2")   # (a newer version: installed first)
-        w.begin_update("/games/Hookshot")
+        w.begin_update("/games/Longshot")
         w.threads[0]()
         self.assertEqual(w.installs, [w.stop_update])
 
     def test_an_update_cancelled_before_it_builds_does_not_build(self):
         w = Window()   # (these tools are the version asked for: nothing to install, make_game.py is next)
-        w.begin_update("/games/Hookshot")
+        w.begin_update("/games/Longshot")
         w.cancel()
         w.threads[0]()
         self.assertEqual(w.shown, [("page", "Updating your game"), ("update-error", "The update was cancelled.")])
 
     def test_a_cancel_after_the_threads_last_look_does_not_build(self):
         w = Window()
-        w.begin_update("/games/Hookshot")
+        w.begin_update("/games/Longshot")
         w.threads[0]()   # (the thread looked, found no Cancel, and handed over the build)
         w.cancel()   # (before the window's loop took that line)
         w.pump([w.shown.pop()])
@@ -282,13 +282,13 @@ class BuilderTests(unittest.TestCase):
 
     def test_the_next_update_starts_clean(self):
         w = Window()
-        w.begin_update("/games/Hookshot")
+        w.begin_update("/games/Longshot")
         w.cancel()
         w.threads[0]()
-        w.begin_update("/games/Hookshot")   # (Back, Update)
+        w.begin_update("/games/Longshot")   # (Back, Update)
         self.assertFalse(w.stop_update.is_set())
         w.threads[1]()
-        self.assertEqual(w.shown[-1], ("do-build", "/games/Hookshot"))
+        self.assertEqual(w.shown[-1], ("do-build", "/games/Longshot"))
 
 
 if __name__ == "__main__":
