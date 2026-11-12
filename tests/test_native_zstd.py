@@ -442,14 +442,21 @@ def frames_checks(exe, tmp, quick=False):
                   ("unknown content size", small, compress(small, size=False), None, None),
                   ("two frames, a skippable one between", text + small, compress(text, 3) + skip + compress(small, 9, True),
                    None, None)]
-    for name, data, frame, d, kind in cases:
+        cases += [(name + ", 64 KB more room", data, frame, d, kind, len(data) + (64 << 10))
+                  for name, data, frame, d, kind in cases[:4]]
+    for name, data, frame, d, kind, *more in cases:
         pre = []
         dd = place(pre, 0, d, kind) if d else 0
-        calls, mem = run(exe, tmp, [whole(frame, len(data), dd)], pre=pre)
+        room = more[0] if more else len(data)
+        x = whole(frame, room, dd)
+        calls, mem = run(exe, tmp, [x], pre=pre)
         h, changed, unmarked, aways, backs, x0 = calls[0][:6]
         chk(h == 1 and x0 == len(data), "whole %s: handled %d, result %#x" % (name, h, x0))
         chk(mem[DST - BASE:DST - BASE + len(data)] == data, "whole %s: the output is not the original" % name)
         chk(unmarked == 0 and aways == backs == 0, "whole %s: %d page(s) unmarked, core given up %d" % (name, unmarked, aways))
+        off = run(exe, tmp, [x], mode="0", pre=pre)[1]   # (memory as it was: nothing changes outside the output room)
+        chk(mem[:DST - BASE] == off[:DST - BASE] and mem[DST - BASE + room:] == off[DST - BASE + room:],
+            "whole %s: memory outside the output room changed" % name)
     if quick:
         return chk.failed
     ck = compress(mesh, 19, True)
@@ -465,9 +472,9 @@ def frames_checks(exe, tmp, quick=False):
         h, changed, unmarked, x0 = calls[0][0], calls[0][1], calls[0][2], calls[0][5]
         chk(h == 1 and zerr(x0) == want, "whole %s: handled %d, error %d, wanted %d" % (name, h, zerr(x0), want))
         chk(unmarked == 0, "whole %s: %d page(s) unmarked" % (name, unmarked))
-        # (nothing written outside the output room: the input, DDicts and context as they were)
-        chk(mem[:DST - BASE] == run(exe, tmp, [whole(frame, room, dd)], mode="0", pre=pre)[1][:DST - BASE],
-            "whole %s: memory before the output changed" % name)
+        off = run(exe, tmp, [whole(frame, room, dd)], mode="0", pre=pre)[1]   # (nothing written outside the output room)
+        chk(mem[:DST - BASE] == off[:DST - BASE] and mem[DST - BASE + room:] == off[DST - BASE + room:],
+            "whole %s: memory outside the output room changed" % name)
     # the game's DDict made again in place for another dictionary with the same ID and size
     same_a, same_b = (zstandard.train_dictionary(8192, [synth(k, 3000, s + i) for i in range(200)], dict_id=12345).as_bytes()
                       for k, s in (("text", 500), ("mesh", 700)))

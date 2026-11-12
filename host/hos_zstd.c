@@ -378,8 +378,9 @@ int hos_zstd_frames(Ctx *c) {
     if (!ok || !z) {
         zs_lock();
         zs_dict_put(d);
-        if (z) zs_spare[zs_nspare++] = z;   /* (taken from the spares or made: there is room) */
+        if (z && zs_nspare < ZS_STREAMS) zs_spare[zs_nspare++] = z, z = NULL;   /* (streams may have filled the spares) */
         zs_unlock();
+        ZSTD_freeDCtx(z);
         zs_note(!ok ? "a dictionary libzstd does not take as the game's" : "no libzstd context");
         return 0;
     }
