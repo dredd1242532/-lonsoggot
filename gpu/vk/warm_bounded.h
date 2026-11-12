@@ -50,4 +50,20 @@ size_t run(size_t n, unsigned threads, Work&& work, Stop&& stop, Tick&& tick) {
 /// out), while what a play process builds is answered from then on. So the preparation's process never leaves the marker,
 /// and the first start of the game after it warms again, itself
 inline bool leaves_marker(bool prepare_only, bool got_to_the_end, bool stopped) { return !prepare_only && got_to_the_end && !stopped; }
+
+/// The seconds the first start's pass over the predicted pipelines may take (precompile_warm, RX_VK_WARM_PREDICTED_S), from
+/// the variable's text: 60 where it is not set or not a number, 0 for no bound. An RTX 3090 goes through all 50,000 from
+/// the driver's cache well inside it; a PC that would compile them again (an RX 580: 19 minutes) is stopped there
+constexpr int kPredictedBoundS = 60;
+inline int predicted_bound_s(const char* text) {
+    if (!text || !*text) return kPredictedBoundS;
+    int n = 0;
+    for (const char* c = text; *c; c++) {
+        if (*c < '0' || *c > '9' || n > 100000) return kPredictedBoundS;
+        n = n * 10 + (*c - '0');
+    }
+    return n;
+}
+/// Whether a pass that has run for elapsed_s is past its bound (0 or less: it has none)
+inline bool out_of_time(double elapsed_s, int bound_s) { return bound_s > 0 && elapsed_s > bound_s; }
 } // namespace warm_bounded

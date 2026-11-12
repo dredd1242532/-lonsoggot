@@ -27,6 +27,12 @@ def check_source():
     for kept in ("pipelines.emplace", "pipeline_keep_ready(", "programs[", "program_cache_load_some("):
         if kept in warm:
             raise SystemExit("precompile_warm keeps what it builds: " + kept)
+    # (the predicted pass in the game's own process: bounded in time, into our cache, and the marker written all the same)
+    if 'warm_bounded::predicted_bound_s(getenv("RX_VK_WARM_PREDICTED_S"))' not in warm or "predict_warm_bound_s = bound_s" not in warm:
+        raise SystemExit("precompile_warm's predicted pass has no time bound")
+    for needle in ("driver_cache_only = !warm;", "warm_bounded::out_of_time("):
+        if needle not in draw:
+            raise SystemExit("predict_run no longer has: " + needle)
     if warm.index("build_graphics(") > warm.index("vkDestroyPipeline(dev.device, made, nullptr);"):
         raise SystemExit("precompile_warm does not destroy the pipeline it has just built")
     run = draw[draw.index("void precompile_run(void (*progress)(size_t done, size_t total)) {"):]

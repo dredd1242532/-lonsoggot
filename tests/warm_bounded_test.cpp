@@ -55,6 +55,16 @@ int main() {
     expect(!warm_bounded::leaves_marker(false, false, false), "!warm_bounded::leaves_marker(false, false, false)");  // (not through)
     expect(!warm_bounded::leaves_marker(false, true, true), "!warm_bounded::leaves_marker(false, true, true)");    // (the window was closed)
     expect(!warm_bounded::leaves_marker(true, false, true), "!warm_bounded::leaves_marker(true, false, true)");
+    // (the predicted pass's bound: 60 s unless said otherwise, 0 is no bound, and nothing else than a number changes it)
+    expect(warm_bounded::predicted_bound_s(nullptr) == 60, "predicted_bound_s(nullptr) == 60");
+    expect(warm_bounded::predicted_bound_s("") == 60, "predicted_bound_s(\"\") == 60");
+    expect(warm_bounded::predicted_bound_s("0") == 0, "predicted_bound_s(\"0\") == 0");
+    expect(warm_bounded::predicted_bound_s("15") == 15, "predicted_bound_s(\"15\") == 15");
+    expect(warm_bounded::predicted_bound_s("-5") == 60, "predicted_bound_s(\"-5\") == 60");
+    expect(warm_bounded::predicted_bound_s("1m") == 60, "predicted_bound_s(\"1m\") == 60");
+    expect(!warm_bounded::out_of_time(59.9, 60), "!out_of_time(59.9, 60)");
+    expect(warm_bounded::out_of_time(60.1, 60), "out_of_time(60.1, 60)");
+    expect(!warm_bounded::out_of_time(100000, 0), "!out_of_time(100000, 0)");   // (no bound)
     if (failures) return std::printf("%d checks failed\n", failures), 1;
     std::printf("warm_bounded: ok\n");
     return 0;
