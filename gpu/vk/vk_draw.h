@@ -80,6 +80,8 @@ void draw_stats3(int64_t* pending_skips, int64_t* waits, double* wait_ms);
 bool draw_stats4(int64_t* links, double* link_ms, int64_t* lib_hits, int64_t* lib_cold, int64_t* lib_built, double* lib_build_ms);
 /// (first_ask.h) new pipelines their first draw asked the caches for: asked, answered, not asked for the frame's budget, ms
 void draw_stats5(int64_t* asks, int64_t* answered, int64_t* over_budget, double* ask_ms);
+/// (first_ask.h) frames, on a recording thread, whose asks stopped because several in a row were in no cache
+int64_t draw_first_ask_miss_frames();
 /// (first_ask.h) of the answered: by this process's own cache and by the driver's disk cache, with their time; the slowest ask
 void draw_stats6(int64_t* ours, double* ours_ms, int64_t* drivers, double* drivers_ms, double* worst_ms);
 void draw_skip_report(double frames);   // (hookshot) skips by the line that made them

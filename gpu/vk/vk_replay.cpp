@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "first_ask.h"
 #include "vk_temporal.h"
 #include "vk_fsr3_inputs.h"   // (the camera jitter while AMD FSR 3.1 upscales)
 #include "status_line.h"
@@ -3136,10 +3137,12 @@ void log_frame_stats() {
                 logf("vk: first draws: %lld new pipelines asked of the caches since the last line (%lld answered, %.1f ms in "
                      "all), %lld past the frame's budget; so far %lld asked: %lld answered by this process's own cache (%.2f ms "
                      "each, %.1f ms in all), %lld by the driver's disk cache (%.2f ms each, %.1f ms in all), %lld in no cache; "
-                     "the slowest ask %.1f ms; %lld past the budget",
+                     "the slowest ask %.1f ms; %lld past the budget; stopped by misses (%d asks in a row in no cache): %lld "
+                     "frames",
                      (long long)(asks - l_asks), (long long)(had - l_had), ask_ms - l_ask_ms, (long long)(over - l_over),
                      (long long)asks, (long long)ours, ours ? ours_ms / ours : 0.0, ours_ms, (long long)drivers,
-                     drivers ? drivers_ms / drivers : 0.0, drivers_ms, (long long)(asks - had), worst_ms, (long long)over);
+                     drivers ? drivers_ms / drivers : 0.0, drivers_ms, (long long)(asks - had), worst_ms, (long long)over,
+                     first_ask::kMissesInARow, (long long)draw_first_ask_miss_frames());
             l_asks = asks, l_had = had, l_over = over, l_ask_ms = ask_ms;
         }
         logf("vk: a frame: %.1f draws left out (not ready), %.2f waits for shaders or pipelines (%.1f ms); "

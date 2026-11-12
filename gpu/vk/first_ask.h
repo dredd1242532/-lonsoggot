@@ -16,10 +16,14 @@ namespace first_ask {
 // when an area loads, in frames that take 100-370 ms for other reasons, and there a few ms served a few dozen of several
 // hundred while the rest were left out for the frames it took the workers to make them. How long the frame is, is not known
 // while it is drawn: the longer of the frame before it and of the time this one has taken so far stands for it.
-// One ask is always allowed in a frame that has asked nothing yet.)
+// One ask is always allowed in a frame that has asked nothing yet.
+// An ask no cache answers is lost time: the pipeline goes to a worker all the same, later by the ask (0.25-0.5 ms each on
+// an RX 580, where 9 of 9 were in no cache). Where the caches are cold a long frame would spend its whole share on them, so
+// a frame's asks stop after kMissesInARow in a row; an answer begins the count again.)
 constexpr double kBaseMs = 3.0;    // (an ordinary frame's asks)
 constexpr double kShare = 0.25;    // (of a long frame's length)
 constexpr double kMostMs = 60.0;   // (however long the frame)
+constexpr int kMissesInARow = 3;   // (asks no cache answered, one after the other: the frame asks no more)
 
 /// The time a frame's asks may take: frame_ms is the longer of the frame before and of this one so far
 inline double limit_ms(double frame_ms) {
@@ -29,17 +33,25 @@ inline double limit_ms(double frame_ms) {
 
 struct Budget {
     uint64_t frame = ~0ull;
-    int asks = 0;
+    int asks = 0, misses = 0;
     double ms = 0;
+    bool miss_stop_told = false;
     /// Whether one more ask may begin in this frame
     bool allow(uint64_t now_frame, double frame_ms) {
-        if (now_frame != frame) frame = now_frame, asks = 0, ms = 0;
-        return asks == 0 || ms < limit_ms(frame_ms);
+        if (now_frame != frame) frame = now_frame, asks = 0, misses = 0, ms = 0, miss_stop_told = false;
+        return asks == 0 || (misses < kMissesInARow && ms < limit_ms(frame_ms));
     }
-    /// An ask that began took this long
-    void spent(double took_ms) {
+    /// An ask that began took this long, and a cache answered it or none did
+    void spent(double took_ms, bool answered = true) {
         asks++;
         ms += took_ms > 0 ? took_ms : 0;
+        misses = answered ? 0 : misses + 1;
+    }
+    /// After allow() said no: whether it was the misses that stopped this frame's asks, said once a frame (for the count of
+    /// such frames)
+    bool stopped_by_misses_first() {
+        if (misses < kMissesInARow || miss_stop_told) return false;
+        return miss_stop_told = true;
     }
 };
 
