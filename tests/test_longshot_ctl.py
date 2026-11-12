@@ -7,6 +7,7 @@ Linux uses a Unix socket; Windows uses the named pipe (launch is Linux-only).
 python -I -B tests/test_longshot_ctl.py [--source-root OTHER_CHECKOUT]
 """
 import argparse
+import importlib.util
 import json
 import os
 import subprocess
@@ -17,7 +18,14 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CTL = ROOT / "scripts" / "longshot_ctl.py"
+CTL = Path(os.environ.get("LONGSHOT_CTL_SOURCE", ROOT / "scripts" / "longshot_ctl.py"))
+
+
+def client_module():
+    spec = importlib.util.spec_from_file_location("longshot_ctl", CTL)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
 FAKE = r'''
 import json, os, socket, sys, threading, time
@@ -189,6 +197,22 @@ def ctl(*args, env=None, check=None):
 
 
 WINDOWS = os.name == "nt"
+
+
+class GamePaths(unittest.TestCase):
+    def test_builder_and_development_layouts(self):
+        m = client_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp)
+            name = "longshot.exe" if WINDOWS else "longshot"
+            (game / name).touch()
+            self.assertEqual(m.game_exe(tmp), str(game / name))
+            (game / "bin").mkdir()
+            (game / "bin" / name).touch()
+            self.assertEqual(m.game_exe(tmp), str(game / "bin" / name))
+            (game / "bin" / name).unlink()
+            self.assertEqual(m.game_exe(tmp), str(game / "bin" / name))
+            self.assertEqual(m.game_exe(tmp, str(game / "custom")), str(game / "custom"))
 
 
 class LongshotCtl(unittest.TestCase):
