@@ -28,6 +28,9 @@
 Longshot is a static recompilation. The game's code is translated to C and compiled into a Windows or Linux program,
 the console's system software is reimplemented, and the Switch 2 graphics are rebuilt on Vulkan. All of this happens
 **on your PC, from your own copy of the game**.
+
+Longshot is a fork of [Hookshot](https://github.com/NotRexed/Hookshot), the recompilation NotRexed made. The
+history up to the fork (its releases, issues and pull requests) is Hookshot's, and the links to it point there.
 <br>
 
 > [!WARNING]
@@ -1018,13 +1021,15 @@ looks like.
 
 ## Credits
 
-Longshot exists thanks to the work of many people:
+Longshot is a fork of NotRexed's [Hookshot](https://github.com/NotRexed/Hookshot), and exists thanks to the work of many
+people:
 
-- **NotRexed**: Longshot, BlueShell (Mario Kart World), Skybound (Tears of the Kingdom) and the a64-kit tools.
+- **NotRexed**: [Hookshot](https://github.com/NotRexed/Hookshot), which Longshot is a fork of, BlueShell (Mario Kart World),
+  Skybound (Tears of the Kingdom) and the a64-kit tools.
 - **[Eden](https://git.eden-emu.dev/eden-emu/eden)** and **Eglantine**: the shader recompiler and Switch 2 shader work.
 - **suyu**: the graphics decoders and the AArch64 translator.
 - **[seedds/nxnative](https://github.com/seedds/nxnative)**: reference for how task and mesh shaders work.
-- **[EvilBoyce / evilmfkr](https://github.com/evilmfkr/Longshot)** (EvilOOT): the GPU culling that brings back Kokiri's foliage
+- **[EvilBoyce / evilmfkr](https://github.com/evilmfkr/Hookshot)** (EvilOOT): the GPU culling that brings back Kokiri's foliage
   (trees, ferns, grass, falling leaves, fireflies), the ambient light probes, the pond's water, the game's own fog, the freeze
   after Load (Horizon's mutex handoff) and the exposure flicker fix.
 - **[zortos293/Lichii](https://github.com/zortos293/Lichii)**: reference for Ampere shader lowering, and its compare-exchange retry fix.
@@ -1049,6 +1054,12 @@ Longshot exists thanks to the work of many people:
 ## License
 
 Longshot is free software under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later).
+It is a modified version of Hookshot, which NotRexed released under the same license; the changes made since the fork
+are Longshot's.
+
+    Hookshot: Copyright (C) 2026 NotRexed and the Hookshot contributors
+    Longshot: Copyright (C) 2026 the Longshot contributors
+
 It includes code from Eden and suyu, which are under the GPL too. Third-party parts under other licenses that
 work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus fonts, zbic and the
 a64-kit tools) keep their own notices in their folders.

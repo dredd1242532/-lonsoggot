@@ -1,5 +1,8 @@
 # Changelog
 
+Longshot is a fork of [Hookshot](https://github.com/NotRexed/Hookshot), made by NotRexed. The entries up to and
+including 2.2.0-rc.1 are Hookshot's releases, and their links point at Hookshot's repository.
+
 ## [2.2.0-rc.1](https://github.com/NotRexed/Hookshot/compare/v2.1.0...v2.2.0-rc.1) (2026-11-12)
 
 
@@ -78,7 +81,7 @@
 * **builder:** Cancel stops a Linux update while it downloads ([#2160](https://github.com/NotRexed/Hookshot/issues/2160)) ([ed2fff0](https://github.com/NotRexed/Hookshot/commit/ed2fff0df123a3e3243ca3a5f94f711f9a3917ad))
 * **builder:** find damaged textures still in the .nup's zstd frame ([#2391](https://github.com/NotRexed/Hookshot/issues/2391)) ([17f2df2](https://github.com/NotRexed/Hookshot/commit/17f2df2307987c85da22febce2fdeea6a090e708)), closes [#2361](https://github.com/NotRexed/Hookshot/issues/2361)
 * **builder:** Linux keeps NVIDIA's DLSS SDK in its cache folder, and the license accepted in its settings ([#2485](https://github.com/NotRexed/Hookshot/issues/2485)) ([92552b7](https://github.com/NotRexed/Hookshot/commit/92552b725961716d42066537949b5427d1a6e626))
-* **builder:** Linux Play leaves the game its longshot_log.txt again ([#2279](https://github.com/NotRexed/Hookshot/issues/2279)) ([1e02fdb](https://github.com/NotRexed/Hookshot/commit/1e02fdbe39ca1c4c1fd7f93aa6e18e39ad4265ee))
+* **builder:** Linux Play leaves the game its hookshot_log.txt again ([#2279](https://github.com/NotRexed/Hookshot/issues/2279)) ([1e02fdb](https://github.com/NotRexed/Hookshot/commit/1e02fdbe39ca1c4c1fd7f93aa6e18e39ad4265ee))
 * **builder:** retain bounded Linux Play startup diagnostics ([#2024](https://github.com/NotRexed/Hookshot/issues/2024)) ([44e56b0](https://github.com/NotRexed/Hookshot/commit/44e56b0c2b7d2bf235f25455666841595ef2fc85))
 * **builder:** scope stale process cleanup to the work folder ([#2250](https://github.com/NotRexed/Hookshot/issues/2250)) ([20f891e](https://github.com/NotRexed/Hookshot/commit/20f891e212501c76cfde946d8c4472f83531a8b0))
 * **builder:** stop when damaged resources have no replacement ([#2096](https://github.com/NotRexed/Hookshot/issues/2096)) ([855a560](https://github.com/NotRexed/Hookshot/commit/855a560d0b5ee550b5f3f49dcda379555217abcd))
@@ -262,7 +265,7 @@
 * **vk:** drop another driver's pipeline cache by its header, before reading it ([#2488](https://github.com/NotRexed/Hookshot/issues/2488)) ([9b7b88a](https://github.com/NotRexed/Hookshot/commit/9b7b88a8b5d531a90f676891844608db17b13048))
 * **vk:** drop the pipeline cache's files when another translator made them ([#2684](https://github.com/NotRexed/Hookshot/issues/2684)) ([f5c9acc](https://github.com/NotRexed/Hookshot/commit/f5c9acc15bbadc88e32bdfb7c4e1eed782c1c0e4))
 * **vk:** eliminate rec_timeline write-back stalls and capture deadlock ([#2458](https://github.com/NotRexed/Hookshot/issues/2458)) ([128c32e](https://github.com/NotRexed/Hookshot/commit/128c32e49d5f1199fbf48f0fc609065e46159d0d))
-* **vk:** GCN (RX 400/500): f16 lowered where the GPU has none; no VRAM mirrors or batched submits by default (from longshot-k10) ([#2343](https://github.com/NotRexed/Hookshot/issues/2343)) ([1f8c02f](https://github.com/NotRexed/Hookshot/commit/1f8c02f90a47d1301c54455fe8ed3b037347f614))
+* **vk:** GCN (RX 400/500): f16 lowered where the GPU has none; no VRAM mirrors or batched submits by default (from hookshot-k10) ([#2343](https://github.com/NotRexed/Hookshot/issues/2343)) ([1f8c02f](https://github.com/NotRexed/Hookshot/commit/1f8c02f90a47d1301c54455fe8ed3b037347f614))
 * **vk:** import game memory in 4 MB chunks, not 16, so VRAM mirrors fit the game's pools ([#2685](https://github.com/NotRexed/Hookshot/issues/2685)) ([ec638a4](https://github.com/NotRexed/Hookshot/commit/ec638a48e8e7a2c26220436ce40cfd09fb0940ef))
 * **vk:** keep big ASTC textures as BC7 (RX_VK_ASTC_BC7) ([#2226](https://github.com/NotRexed/Hookshot/issues/2226)) ([6ce8ca3](https://github.com/NotRexed/Hookshot/commit/6ce8ca3ac7e3f0039be78403e62714a286246f7c))
 * **vk:** make part of the image pool's blocks at the start ([#2438](https://github.com/NotRexed/Hookshot/issues/2438)) ([867ddd7](https://github.com/NotRexed/Hookshot/commit/867ddd7f2949c029f3ff0809ca72cd438b8d22b2))
@@ -307,7 +310,7 @@
 * **readme:** bring Project status up to date ([#2762](https://github.com/NotRexed/Hookshot/issues/2762)) ([c2027ac](https://github.com/NotRexed/Hookshot/commit/c2027acb8665491552a04e61bf3ef44ba14d4320))
 * **readme:** NVIDIA DLSS on Linux, one entry for each way to build ([#2056](https://github.com/NotRexed/Hookshot/issues/2056)) ([#2074](https://github.com/NotRexed/Hookshot/issues/2074)) ([23840a4](https://github.com/NotRexed/Hookshot/commit/23840a481bf72786d8cee8c6d72be1944511f1f1))
 * **readme:** the option table lists every row of the menu ([#2105](https://github.com/NotRexed/Hookshot/issues/2105)) ([cf2e156](https://github.com/NotRexed/Hookshot/commit/cf2e15640b5d66b565c0bf1e80e18d1003a58cf2))
-* **readme:** what Longshot connects to ([#2650](https://github.com/NotRexed/Hookshot/issues/2650)) ([edaef2a](https://github.com/NotRexed/Hookshot/commit/edaef2a99c78c77957b3ac54b54b5e7d02ddfd56))
+* **readme:** what Hookshot connects to ([#2650](https://github.com/NotRexed/Hookshot/issues/2650)) ([edaef2a](https://github.com/NotRexed/Hookshot/commit/edaef2a99c78c77957b3ac54b54b5e7d02ddfd56))
 * record RX 7900 XT Linux test runs ([#2202](https://github.com/NotRexed/Hookshot/issues/2202)) ([8d7e473](https://github.com/NotRexed/Hookshot/commit/8d7e473b22a7499b5264a3bbbd16c0af3fe559fa))
 * tested configurations: RTX 4070, 615.71, Ubuntu 26.04 GNOME (v2.1.0-rc.3 nightly, [#2314](https://github.com/NotRexed/Hookshot/issues/2314)) ([#2428](https://github.com/NotRexed/Hookshot/issues/2428)) ([51422e9](https://github.com/NotRexed/Hookshot/commit/51422e9df1108ff367b76cf713703e24a57d38af))
 * tested configurations: RTX 5090, 621.14, Windows 11 (v2.0.14) ([#2037](https://github.com/NotRexed/Hookshot/issues/2037)) ([28a60b5](https://github.com/NotRexed/Hookshot/commit/28a60b5e38866775d80f16f4d796a1c47bbed279))
@@ -460,7 +463,7 @@ Release candidate [v2.1.0-rc.2](https://github.com/NotRexed/Hookshot/releases/ta
 * **display:** open the window on COSMIC's Wayland with SDL2 ([#992](https://github.com/NotRexed/Hookshot/issues/992)) ([e937168](https://github.com/NotRexed/Hookshot/commit/e9371683cc3162c882cf0a37c06bc4b6f4e5e693))
 * **display:** publish coherent pointer and drawable samples ([fd93173](https://github.com/NotRexed/Hookshot/commit/fd93173674025b01fa2588078617182009a340d3))
 * **display:** publish coherent pointer and drawable samples ([ee53072](https://github.com/NotRexed/Hookshot/commit/ee530725bf8ef0ddacae2b409174d13b7b7b2dc6))
-* **env:** longshot_env.txt sets no test switch that names a file or presses buttons ([74cee1e](https://github.com/NotRexed/Hookshot/commit/74cee1e17173bd0e139d05a0a7613f2f4e57ee9d))
+* **env:** hookshot_env.txt sets no test switch that names a file or presses buttons ([74cee1e](https://github.com/NotRexed/Hookshot/commit/74cee1e17173bd0e139d05a0a7613f2f4e57ee9d))
 * **framegen:** 2x made by the renderer's own blend again; AMD FSR 3.1's interpolation opt-in (RX_VK_FSR_FG=1) ([eb5b9a0](https://github.com/NotRexed/Hookshot/commit/eb5b9a0b0bfb2da861c131cfd0bdb613c279d09e))
 * **framegen:** 2x uses the renderer's own blend again; FSR 3.1 interpolation opt-in ([#1635](https://github.com/NotRexed/Hookshot/issues/1635)) ([3b76e95](https://github.com/NotRexed/Hookshot/commit/3b76e956fed4499c02a6cd9e5afa9093bb3dfc1e))
 * hardening part 3, updates, shared files, guest buffers and texture sizes ([d5feb7b](https://github.com/NotRexed/Hookshot/commit/d5feb7b875e77d5df9f9a577b6ff61090d691500))
@@ -655,4 +658,5 @@ Release candidate [v2.1.0-rc.2](https://github.com/NotRexed/Hookshot/releases/ta
 ## [2.0.14](https://github.com/NotRexed/Hookshot/releases/tag/v2.0.14) (2026-11-10)
 
 Entries from here on are written by release-please (docs/versioning.md). Releases up to v2.0.14 are described on their
-[release pages](https://github.com/NotRexed/Hookshot/releases), and the first one also in `changelog.txt`.
+[release pages](https://github.com/NotRexed/Hookshot/releases), and the first one also in Hookshot's
+[`changelog.txt`](https://github.com/NotRexed/Hookshot/blob/main/changelog.txt).

@@ -50,7 +50,7 @@ Eden's save path, under that data folder: `nand/user/save/0000000000000000/<prof
   that is the save the game loads next, so the script refuses to copy until NX2navi has been started and quit (or
   `--force`). NX2navi's launcher also has its own **Import Saves**, which takes an emulator's save folder.
 - `$XDG_DATA_HOME` replaces `~/.local/share` when it is set. Longshot's `--user <folder>` puts its saves in
-  `<folder>/save/<user id>/` ([command line arguments](../readme.md#running-the-game-from-the-command-line)).
+  `<folder>/save/<user id>/` ([command line arguments](../README.md#running-the-game-from-the-command-line)).
 - The emulator paths come from each one's `src/common/fs/fs_paths.h`, `path_util.cpp` and
   `src/core/file_sys/savedata_factory.cpp`. Official Eden does not run Switch 2 games; its name is accepted because
   the forks above use its folder.
@@ -113,7 +113,7 @@ that only exists on that side does not stay mixed in with the new save.
 
 ## What was tested
 
-- Linux (Arch-based), Longshot v2.0.5 and Lichii built from source on the same day.
+- Linux (Arch-based), Hookshot v2.0.5 and Lichii built from source on the same day.
 - A Longshot save copied to Lichii loads in Lichii at the same spot (Kokiri Forest, the spawn by the flower patch).
 - A Lichii save copied to Longshot arrives identical, but has not been played through on the Longshot side.
 - The script's discovery for every program above, its copies and backups are covered by `tests/test_oot_saves.py`, on

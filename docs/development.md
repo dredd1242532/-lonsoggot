@@ -11,7 +11,7 @@ paths it keeps so MKW's fixes apply here.
 **No game files are in this repository.** The dump is read where it lies (`work/dump.txt`); everything made from it
 (modules, image, lifted C, builds, runs) goes to `work/`, which git ignores.
 
-Status: the game plays; the README's [status table](../readme.md#project-status) says how far. The design, its stages and
+Status: the game plays; the README's [status table](../README.md#project-status) says how far. The design, its stages and
 the lessons carried over from MKW: [design.md](design.md).
 
 ## Use
@@ -51,7 +51,7 @@ Run everything with `python -I` from this folder.
 The dump can also come from `OOT_DUMP` (its folder) or `OOT_EXEFS`; `OOT_WORK` moves the work folder.
 
 The built game's own arguments (`image.bin`, `--romfs`, `--user`, `--trace`, `--prepare-shaders`) are in the README's
-[Running the game from the command line](../readme.md#running-the-game-from-the-command-line).
+[Running the game from the command line](../README.md#running-the-game-from-the-command-line).
 
 Scripted test input (`HOS_INPUT_SCRIPT` and `HOS_INPUT_LIVE`) is applied before the window-focus check. A log saying
 the game window is not in front does not mean those presses were discarded. `HOS_HEADLESS` and
@@ -389,7 +389,7 @@ menu's order, with its choices and default: `tests/test_readme_menu_rows.py` fai
 case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Output resolution, which is `output_res`.
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>` and `key_<button>`:
-the README's [Controls](../readme.md#controls)). A value outside a row's range is clamped when it is read. Where the
+the README's [Controls](../README.md#controls)). A value outside a row's range is clamped when it is read. Where the
 number is not the obvious one:
 
 | Key | Values |
@@ -430,7 +430,7 @@ through (inputs timed in frames, screenshots, waits for the game's state, the In
 | `builder/` | Longshot Builder: the Windows app (.NET 8 WPF), its setup and MSI, and the Linux builder and launcher scripts |
 | `scripts/` | test runs, the profile and log readers, the save copier (`oot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
-| `third_party/` | a64-kit (Longshot's few changes marked `(longshot)`), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
+| `third_party/` | a64-kit (Hookshot's few changes, marked `(longshot)` since the rename), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.

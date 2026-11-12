@@ -31,7 +31,7 @@ one stays as the fallback (on Windows, in a build made with wgpu-native). mkw-re
 Eglantine clone) runs dumped NVN2 programs through Eglantine's recompiler offline (SPIR-V; it prints what each program
 reads from the constant banks).
 
-Longshot's AMD FSR 4 (`vk/vk_fsr4.cpp`) was first written for Lichii's OoT branch (madebyjordan/Lichii-Hyrule,
+Hookshot's AMD FSR 4 (`vk/vk_fsr4.cpp`) was first written for Lichii's OoT branch (madebyjordan/Lichii-Hyrule,
 `renderer_vulkan/vk_fsr4_upscaler.cpp`; GPL-3.0-or-later), with its Linux path (a Vulkan FSR 4 library through dlopen) by
 N3oTraX. It draws with the frame chain of hckrman101's NVIDIA DLSS (#841), moved into `vk/vk_temporal.cpp` so both
 upscalers share it. `third_party/fidelityfx/` is AMD's FSR API headers from FidelityFX SDK v2.4.0 (MIT, `LICENSE.md`);
@@ -41,4 +41,4 @@ The HDR tone mapper's PsychoV35 (`vk/eden/shader_recompiler/ir_opt/psychov35.h`)
 mod for this game (clshortfuse/renodx, `src/games/zelda-oot-oz/scene_tonemap.slangi`, and Carlos Lopez's
 `src/shaders/tonemap/psychov/test35.hlsl`; MIT, `ir_opt/LICENSE-renodx.md`; `tests/test_psychov35.py`'s reference is a
 port of the same files under it), reduced to the path the mod takes at its defaults and written over the IR
-emitter. `ir_opt/scene_tonemap_pass.h`, which finds the game's fit in the IR and puts it there, is Longshot's.
+emitter. `ir_opt/scene_tonemap_pass.h`, which finds the game's fit in the IR and puts it there, is Hookshot's.
