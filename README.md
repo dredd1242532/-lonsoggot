@@ -1035,6 +1035,16 @@ cards, or where the GPU cannot multiply the networks' matrices itself, the movie
 not change the gameplay upscaler, and movies can look softer. `RX_VK_NETWORK_KEEP=all` takes precedence and keeps the
 movie networks.
 
+A movie whose pictures take longer to decode than the time between them is shown, rather than skipped until the sound
+has moved on. On a slow CPU the opening used to drop most of its pictures and start on a black frame: the first picture
+is waited for for about half a second, and each picture after that for about a tenth of a second. The picture can fall
+behind the sound. `HOS_VIDEO_NO_CATCHUP=1` skips nothing. `HOS_VIDEO_ACQUIRE_TRIES=1` waits by a count of sleeps instead
+of the clock. After a movie stops or is flushed, and nothing new has been submitted, there is no wait.
+
+On Windows, Intel's compiler (UHD and Arc) is entered by one thread. A fault inside it leaves that shader out instead
+of closing the game. The first scene can still pause while shaders compile, especially when they were not prepared at
+the build. `RX_VK_NO_INTEL_SERIAL=1` builds them side by side again. NVIDIA, AMD, and Intel on other systems are unchanged.
+
 `RX_VK_SKIP_CODE=<prefix,...>` leaves out the draws of every program with a stage whose native code key starts with one
 of the prefixes (the keys the log prints after "its code:"). On a Steam Deck, `RX_VK_SKIP_CODE=2c56dc1006942f74`
 avoids a GPU hang in Kokiri Forest and the Great Deku Tree: the GPU runs for seconds in the programs that share that
