@@ -1165,6 +1165,54 @@ def prune_object_cache(work):
     return kept
 
 
+# (the dev-loop proposal's A10) LONGSHOT_OBJ_STORE=<folder>: one object cache for every work folder, so a worktree for a PR
+# compiles only what no other has compiled yet. An object is named by its source, flags and headers (build.py object_key),
+# which no work folder's path is part of; the system headers and the compiler are not part of it either, and a work folder
+# throws its own cache away when they change (drop_stale_objects): the store is split by that stamp instead
+# (system_headers.txt), a part for each toolchain. Objects go in whole (build.py cache_put); nothing here prunes the store or
+# empties it after a failed build (prune_object_cache and forget_failed_build clear the work folder's own cache only). The
+# git-ignored lists a lift reads (seed_work) come from the store too when this checkout's work folder has none. Unset:
+# <work>/objcache, as before. Hard links need the store on the work folders' drive (else each object is copied)
+OBJ_STORE = "LONGSHOT_OBJ_STORE"
+SEEDS = ("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", "longshot.res", os.path.join("image", "chunks.txt"))
+
+
+def object_cache(work):
+    """Where build.py keeps the compiled objects: the store's part for this toolchain, else <work>/objcache (no store asked
+    for, or no toolchain stamp to name its part by)"""
+    store = os.environ.get(OBJ_STORE, "")
+    if store:
+        try:
+            with open(os.path.join(work, "system_headers.txt")) as f:
+                stamp = f.read().strip()
+        except OSError:
+            stamp = ""
+        if re.fullmatch(r"[0-9a-f]{40}", stamp):
+            return os.path.join(os.path.abspath(store), "objects", stamp[:16])
+        print("%s: no toolchain stamp in the work folder (system_headers.txt): its own objcache instead" % OBJ_STORE, flush=True)
+    return os.path.join(work, "objcache")
+
+
+def seed_work(work):
+    """The lists a lift reads that git does not keep (made once on the development PC: addresses and counts, no game code):
+    this checkout's work folder's, else the store's (a new worktree has none). With a store, its copy follows this checkout's"""
+    store = os.environ.get(OBJ_STORE, "")
+    seeds = os.path.join(os.path.abspath(store), "seed") if store else None
+    for name in SEEDS:
+        src, dst = os.path.join(ROOT, "work", name), os.path.join(work, name)
+        if seeds and os.path.exists(src):
+            kept = os.path.join(seeds, name)
+            if not (os.path.exists(kept) and filecmp.cmp(src, kept, shallow=False)):
+                os.makedirs(os.path.dirname(kept), exist_ok=True)
+                copy_writable(src, kept)
+        elif seeds and os.path.exists(os.path.join(seeds, name)):
+            src = os.path.join(seeds, name)
+        # (copied only when it differs: a compiler still ending from a cancelled build keeps the profile mapped, WinError 1224)
+        if os.path.exists(src) and not (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            copy_writable(src, dst)
+
+
 def clear_folder(path):
     """(issue 1354) A folder this build makes again from nothing (the game's code, exefs): gone before it is made. rmtree with
     ignore_errors left it behind whenever a file in it was held (an antivirus scan, an explorer window, a game still closing), and the
@@ -2228,18 +2276,11 @@ def main(a=None):
         shutil.copytree(exefs, kept)
     check_supported_build(exefs)
 
-    # (made once on the development PC: lists of addresses and counts, no game code)
-    for name in ("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", "longshot.res"):
-        src = os.path.join(ROOT, "work", name)
-        dst = os.path.join(work, name)
-        # (copied only when it differs: a compiler still ending from a cancelled build keeps the profile mapped, WinError 1224)
-        if os.path.exists(src) and not (os.path.exists(dst) and filecmp.cmp(src, dst, shallow=False)):
-            copy_writable(src, dst)
+    # (made once on the development PC: lists of addresses and counts, no game code; image/chunks.txt: where the lifted code's
+    # files begin)
     os.makedirs(os.path.join(work, "image"), exist_ok=True)
-    src = os.path.join(ROOT, "work", "image", "chunks.txt")   # (where the lifted code's files begin: addresses)
-    if os.path.exists(src):
-        copy_writable(src, os.path.join(work, "image", "chunks.txt"))
-    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
+    seed_work(work)
+    env ={"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
     if os.path.exists(os.path.join(work, "hot_funcs.txt")):
         env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
     if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):
@@ -2370,8 +2411,12 @@ def main(a=None):
         if m:
             failed.append(m.group(1))
         compiled(line)
+    # (the compiled objects' folder, build.py's alone: the lift's environment, and so its key, stays as it was)
+    build_env = dict(env, LONGSHOT_OBJ_CACHE=object_cache(work))
+    if os.environ.get(OBJ_STORE):
+        print("compiled objects: %s (%s, shared by every work folder)" % (build_env["LONGSHOT_OBJ_CACHE"], OBJ_STORE), flush=True)
     try:
-        if run(PY + ["nx2/build.py", "--standalone", "--jobs", str(a.jobs)] + kept_lift, env, compile_line,
+        if run(PY + ["nx2/build.py", "--standalone", "--jobs", str(a.jobs)] + kept_lift, build_env, compile_line,
                allow=(KEPT_STALE,) if kept_lift else ()) == KEPT_STALE:
             # (the translation kept from the last build no longer fits: an object of it gone, other flags or headers. Nothing was
             # compiled: the game is translated, then compiled, as when nothing was kept)
@@ -2381,7 +2426,7 @@ def main(a=None):
             say("stage", "compile", "Compiling")
             run_files.clear()
             done["n"] = 0.0
-            run(PY + ["nx2/build.py", "--standalone", "--jobs", str(a.jobs)], env, compile_line)
+            run(PY + ["nx2/build.py", "--standalone", "--jobs", str(a.jobs)], build_env, compile_line)
     except SystemExit:
         forget_failed_build(work, bool(linking), failed)
         raise
@@ -2510,9 +2555,10 @@ def main(a=None):
             lift_kept = keep_translation(work, key)
             for sub in ("probe",) if lift_kept is not None else ("sa", "probe"):
                 shutil.rmtree(os.path.join(work, sub), ignore_errors=True)
-            print("the build files in %s were deleted but this build's compiled objects (%d MB)%s, so that an update compiles only "
+            print("the build files in %s were deleted but this build's compiled objects (%s)%s, so that an update compiles only "
                   "what changed (LONGSHOT_KEEP_BUILD_FILES=1 keeps all)" % (
-                      work, kept >> 20, "" if lift_kept is None else " and the translation's other files (%d MB)" % (lift_kept >> 20)),
+                      work, "in the shared store, %s" % OBJ_STORE if os.environ.get(OBJ_STORE) else "%d MB" % (kept >> 20),
+                      "" if lift_kept is None else " and the translation's other files (%d MB)" % (lift_kept >> 20)),
                   flush=True)
     total_seconds = time.time() - STARTED
     PHASES.enter(None)

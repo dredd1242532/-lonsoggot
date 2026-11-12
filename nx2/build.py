@@ -54,7 +54,9 @@ HOST = os.path.join(kit.HERE, "..", "host")
 OPUS = os.path.join(kit.HERE, "..", "third_party", "opus")
 ZSTD = os.path.normpath(os.path.join(kit.HERE, "..", "third_party", "zstd", "lib"))
 ZSTD_HOST = ("prompts.c", "hos_zstd.c")   # (the host files that use it: a mod's size table; the game's stream decode)
-OBJ_CACHE = os.path.join(kit.WORK, "objcache")
+# (the compiled objects by their key; LONGSHOT_OBJ_CACHE: make_game.py's part of a store every work folder shares,
+# LONGSHOT_OBJ_STORE, for its toolchain)
+OBJ_CACHE = os.environ.get("LONGSHOT_OBJ_CACHE") or os.path.join(kit.WORK, "objcache")
 # (longshot) work/hot_order.txt: the functions that run, hottest first (sampled), packed together by the linker; RX_NO_ORDER=1: off
 PGO = os.environ.get("RX_PGO", "")
 
@@ -314,16 +316,25 @@ def prebuilt_renderer():
 
 
 def cache_put(obj, key):
-    """Hard-link a built object into the cache under its key (a copy across volumes)"""
+    """Hard-link a built object into the cache under its key (a copy across volumes). In whole or not at all: linked or
+    copied to a name of this thread's first, then renamed onto the key, so another build reading a shared store
+    (LONGSHOT_OBJ_STORE) never finds part of one, and a build killed meanwhile leaves no entry (only a .tmp)"""
     os.makedirs(OBJ_CACHE, exist_ok=True)
     dst = os.path.join(OBJ_CACHE, key + ".o")
     if os.path.exists(dst):
         return
+    tmp = "%s.%d-%d.tmp" % (dst, os.getpid(), threading.get_ident())
     try:
-        os.link(obj, dst)
+        try:
+            os.link(obj, tmp)
+        except OSError:
+            shutil.copyfile(obj, tmp)
+        os.replace(tmp, dst)
     except OSError:
-        import shutil
-        shutil.copyfile(obj, dst)
+        pass   # (another build put it meanwhile, and has it open: the same object, by its key)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 class MemoryStatus(ctypes.Structure):   # (Windows' MEMORYSTATUSEX, for GlobalMemoryStatusEx)
