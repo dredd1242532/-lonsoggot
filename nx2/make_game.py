@@ -114,7 +114,7 @@ def say(*words):
 FOLDER_WRITES = ["bin", "image.bin", "longshot_version.txt", "longshot_options.ini", "language.txt", "longshot.png", "longshot_pipelines.bin",
                  "longshot_pipeline_states_shipped.bin", "longshot_shaders.bin", "prompts", "ngx", "ffx", "romfs", ".game",
                  ".longshot_exefs", ".longshot_romfs", ".longshot_romfs_checked", ".longshot_romfs_heads",
-                 ".longshot_write_check"]
+                 ".longshot_write_check", ".longshot_builder_home"]
 
 
 def refuse_written_links(out, launcher_dir="bin"):
