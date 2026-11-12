@@ -35,7 +35,7 @@
 
 #include "../gpu/vk/vk_api.h"
 
-#define LONGSHOT_DISCORD_APP_ID_DEFAULT "1569529153349357731"   /* (the Longshot application's id, digits) */
+#define LONGSHOT_DISCORD_APP_ID_DEFAULT "1570559772111933578"   /* (the Longshot application's id, digits) */
 #define LONGSHOT_DISCORD_IMAGE_DEFAULT "longshot"     /* (its large-image art asset key) */
 
 void hos_log(const char *fmt, ...);
