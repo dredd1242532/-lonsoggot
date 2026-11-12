@@ -197,7 +197,7 @@ hot code at `-O1`, about a quarter less compile time; never use it for fps, timi
 
 ### Game-free checks
 
-They need no dump. One command runs them all:
+They need no dump. One command runs the source checks:
 
 ```
 python -I -B tests/run_all.py
@@ -212,6 +212,12 @@ Checks that can't run everywhere say so in their own file (`RUN_ALL_SKIP`); `--n
 Forgejo doesn't run these on pull requests or on `main` for now: CI runs only the light checks (the title, the
 description, workflow lint, the third-party notes), and a maintainer can start the full checks by hand (*Actions* >
 *CI* > *Run workflow*). So run them before you open a pull request and put their results in it.
+
+The included GitHub workflow also runs `tests/run_vulkan_fixtures.py` on Ubuntu 24.04 with Mesa's lavapipe software
+driver and the Khronos validation layer. It executes the authored write-back shader, copy-span and seven offscreen
+aspect/crop cases; missing devices, skipped cases and validation errors fail the job. This is CPU Vulkan execution,
+not hardware GPU coverage, a swapchain or a game run. The ordinary source checks keep their GPU opt-ins/skips for
+machines without Vulkan.
 
 ### Checks that need your dump or a run
 
