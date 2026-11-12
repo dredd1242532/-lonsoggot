@@ -2,7 +2,9 @@
 
 Compile the real menu rows, set_row, menu_setting_set, preset, save and options-file
 reader with hardware/UI stand-ins. Exercise every saved scale through every engine,
-including a restart while the game's own upscaler is selected. No game or GPU.
+including a restart while the game's own upscaler is selected. Auto (this PC) starts
+inactive; a separate case checks its fallback scaling and handover to manual choices
+with the real apply_auto and menu_auto_tune. No game or GPU.
 """
 import argparse
 import re
@@ -35,6 +37,7 @@ def definition(text, name):
 FIXTURE = r'''
 #define _CRT_SECURE_NO_WARNINGS
 #include "upscaler_rows.h"
+#include "auto_settings.h"
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -44,11 +47,13 @@ FIXTURE = r'''
 #include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 using namespace mkwvk;
 namespace ur = mkwvk::upscaler_rows;
 int failures = 0, checks = 0;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; std::fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); } } while (0)
 /* OPTIONS */
+/* AUTO_PRESET */
 Options opts;
 /* TABS */
 /* ROW */
@@ -59,6 +64,10 @@ bool row_fixed(const int*) { return false; }
 struct Out { uint32_t w, h; };
 Out shown_output() { return {1920, 1080}; }
 Out output_at(int) { return shown_output(); }
+const std::vector<Out>& outputs() {
+    static const std::vector<Out> sizes{shown_output()};
+    return sizes;
+}
 int custom_index() { return 0; }
 int output_choice(int v) { return v; }
 int parse_output(const char*) { return 0; }
@@ -92,10 +101,19 @@ constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;
 const char* bind_names[1] = {"a"};
 struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); } *host = nullptr;
 bool can_bind() { return false; }
+// No hardware profile or measured tuning owns the manual round trips.
+uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
+Out auto_output{};
+::auto_settings::Choice auto_choice{};
+::auto_settings::Tuning auto_tuning{};
 /* SAVE */
 void restart() {
     opts = Options{};
     env_override_count = 0;
+    auto_for = auto_tuned = 0;
+    auto_output = {};
+    auto_tuning = {};
+    // The hardware stand-ins (auto_choice and auto_fp) describe the same PC after a restart.
     bool has_options = false, has_vram_budget = false, has_memory_budget = false;
     /* LOAD */
     CHECK(has_options && has_memory_budget && !has_vram_budget);
@@ -113,13 +131,20 @@ void samplers_changed() {}
 void temporal_reset_failure() {}
 void prompts_at_once(const Row&) {}
 /* STOPS */
+void apply_auto(bool keep_own);
+void logf(const char*, ...) {}
 /* PRESET */
+/* APPLY_AUTO */
 /* SET_ROW */
 /* RESOLUTION_SCALE */
 /* RESOLUTION_AUTO */
 /* WALK */
 std::recursive_mutex menu_mu;
 bool menu_refresh = false;
+int env_int(const char*, int fallback) { return fallback; }
+double fps_target_ms() { return 1000.0 / 60; }
+int display_refresh_mhz() { return 60000; }
+/* AUTO_TUNE */
 void bridge_probe_first() {}
 bool bridge_row(int) { return true; }
 struct MkwVkSetting {
@@ -142,6 +167,10 @@ void bridge_to(int engine) {
 void fresh(int engine, int value) {
     opts = Options{};
     env_override_count = 0;
+    auto_for = auto_fp = auto_tuned = 0;
+    auto_output = {};
+    auto_choice = {};
+    auto_tuning = {};
     opts.dlss = engine;
     opts.resolution = value;
 }
@@ -252,6 +281,44 @@ int main(int argc, char** argv) {
     CHECK(opts.dlss == ur::GAME && opts.resolution == 5 && !resolution_auto());
     bridge_to(ur::DLSS);
     CHECK(opts.resolution == 5 && resolution_scale() == 5833);
+    // Unlike manual engine changes, Auto owns fallback scaling until a row hands it back to Custom.
+    for (bool via_bridge : {false, true}) {
+        fresh(ur::DLSS, 5);
+        auto_choice.tier = 3;
+        auto_choice.upscaler = ur::DLSS;
+        auto_choice.resolution = 5;
+        auto_fp = 0x2916;
+        set_row(rows[3], kAutoPreset, 1);
+        CHECK(opts.preset == kAutoPreset && auto_for == auto_fp && opts.resolution == 5);
+        auto_tuned = auto_for;   // Already settled: test engine fallback, not timing-based tuning.
+        const unsigned all_engines = available;
+        available = ur::bit(ur::GAME);
+        menu_auto_tune(10, 200, 60);
+        CHECK(opts.preset == kAutoPreset && opts.resolution == 1 && active_scale() == 10000);
+        available = all_engines;
+        menu_auto_tune(10, 200, 60);
+        CHECK(opts.preset == kAutoPreset && opts.resolution == 5 && active_scale() == 5833);
+        auto_tuning.steps = 1;
+        auto_tuning.went_down = true;
+        save();
+        restart();
+        CHECK(opts.preset == kAutoPreset && opts.resolution == 5);
+        CHECK(auto_for == auto_fp && auto_tuned == auto_fp);
+        CHECK(auto_output.w == 1920 && auto_output.h == 1080);
+        CHECK(auto_tuning.steps == 1 && auto_tuning.went_down);
+        if (via_bridge) bridge_to(ur::GAME);
+        else arrow_to(ur::GAME);
+        CHECK(opts.preset == 0 && opts.resolution == 5 && active_scale() == 5000);
+        menu_auto_tune(10, 200, 60);
+        CHECK(opts.resolution == 5 && active_scale() == 5000);
+        restart();
+        menu_auto_tune(10, 200, 60);
+        CHECK(opts.preset == 0 && opts.resolution == 5 && active_scale() == 5000);
+        if (via_bridge) bridge_to(ur::DLSS);
+        else arrow_to(ur::DLSS);
+        menu_auto_tune(10, 200, 60);
+        CHECK(opts.preset == 0 && opts.resolution == 5 && active_scale() == 5833);
+    }
     std::printf("upscaler round trip: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
@@ -264,8 +331,10 @@ def fixture(source):
     init = definition(menu, "void menu_init")
     load_at = init.index('    if (FILE* f = fopen(ini_path().c_str(), "r")) {')
     walk_at = menu.index("template <class State, class At, class Step>")
+    auto_at = header.index("constexpr int kAutoPreset")
     replacements = {
         "OPTIONS": block(header, header.index("struct Options {")) + ";",
+        "AUTO_PRESET": header[auto_at:header.index(";", auto_at) + 1],
         "TABS": block(menu, menu.index("enum MenuTab {")) + ";",
         "ROW": block(menu, menu.index("struct Row {")) + ";",
         "OVERRIDES": menu[menu.index("struct EnvOverride {"):menu.index("std::string ini_path() {")],
@@ -276,6 +345,7 @@ def fixture(source):
     }
     for marker, name in (("INI_KEY", "const char* ini_key"), ("SAVE", "void save"),
                          ("STOPS", "bool stops_at_ends"), ("PRESET", "void apply_preset"),
+                         ("APPLY_AUTO", "void apply_auto"), ("AUTO_TUNE", "void menu_auto_tune"),
                          ("SET_ROW", "void set_row"), ("BRIDGE", "int menu_setting_set"),
                          ("RESOLUTION_SCALE", "int resolution_scale"), ("RESOLUTION_AUTO", "bool resolution_auto"),
                          ("BRIDGE_FILL", "void bridge_fill"), ("GET", "int menu_setting")):
