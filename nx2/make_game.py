@@ -1193,6 +1193,35 @@ def object_cache(work):
     return os.path.join(work, "objcache")
 
 
+def adopt_objects(work, cache):
+    """A work folder's own compiled objects (<work>/objcache, built with the toolchain its stamp names) put in the store's
+    part for it, each in whole (linked or copied to a temporary, then renamed onto its key) and only where the store has
+    none: switching the store on compiles nothing again. Returns how many went in"""
+    own = os.path.join(work, "objcache")
+    if os.path.normcase(os.path.abspath(own)) == os.path.normcase(os.path.abspath(cache)) or not os.path.isdir(own):
+        return 0
+    os.makedirs(cache, exist_ok=True)
+    n = 0
+    for f in os.listdir(own):
+        dst = os.path.join(cache, f)
+        if not re.fullmatch(r"[0-9a-f]{40}\.o", f) or os.path.exists(dst):
+            continue
+        tmp = "%s.%d.tmp" % (dst, os.getpid())
+        try:
+            try:
+                os.link(os.path.join(own, f), tmp)
+            except OSError:
+                shutil.copyfile(os.path.join(own, f), tmp)
+            os.replace(tmp, dst)
+            n += 1
+        except OSError:
+            pass
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    return n
+
+
 def seed_work(work):
     """The lists a lift reads that git does not keep (made once on the development PC: addresses and counts, no game code):
     this checkout's work folder's, else the store's (a new worktree has none). With a store, its copy follows this checkout's"""
@@ -2414,7 +2443,10 @@ def main(a=None):
     # (the compiled objects' folder, build.py's alone: the lift's environment, and so its key, stays as it was)
     build_env = dict(env, LONGSHOT_OBJ_CACHE=object_cache(work))
     if os.environ.get(OBJ_STORE):
-        print("compiled objects: %s (%s, shared by every work folder)" % (build_env["LONGSHOT_OBJ_CACHE"], OBJ_STORE), flush=True)
+        adopted = adopt_objects(work, build_env["LONGSHOT_OBJ_CACHE"])
+        print("compiled objects: %s (%s, shared by every work folder%s)" % (
+            build_env["LONGSHOT_OBJ_CACHE"], OBJ_STORE, "; %d of this work folder's own put in" % adopted if adopted else ""),
+            flush=True)
     try:
         if run(PY + ["nx2/build.py", "--standalone", "--jobs", str(a.jobs)] + kept_lift, build_env, compile_line,
                allow=(KEPT_STALE,) if kept_lift else ()) == KEPT_STALE:

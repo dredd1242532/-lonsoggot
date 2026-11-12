@@ -5,8 +5,8 @@ compiles none, and its objects are the store's (links where the drive allows). A
 all (cache_put): a copy that stops halfway leaves no entry and no temporary, and two builds putting the same object leave
 one. The store is split by the toolchain's stamp (make_game.object_cache); without a store, or without a stamp, the work
 folder's own objcache is used as before. The lists a lift reads that git does not keep reach a new worktree from the store
-(seed_work), and the store follows the checkout that has them. The store's folder reaches build.py alone, not the lift's
-environment (its key).
+(seed_work), and the store follows the checkout that has them; a work folder's own objects go in when the store is first
+used (adopt_objects). The store's folder reaches build.py alone, not the lift's environment (its key).
 
 Nothing here runs a real compiler or needs the game.
 
@@ -117,6 +117,23 @@ def check_object_cache(tmp):
         assert make_game.object_cache(str(work)) == os.path.join(str(work), "objcache")
 
 
+def check_adopt(tmp):
+    """a work folder's own objects go into the store's part when the store is first used, in whole and only where it has none"""
+    work, cache = tmp / "adopt" / "work", tmp / "adopt" / "store" / "objects" / STAMP[:16]
+    (work / "objcache").mkdir(parents=True)
+    a, b = "a" * 40 + ".o", "b" * 40 + ".o"
+    (work / "objcache" / a).write_bytes(b"A")
+    (work / "objcache" / b).write_bytes(b"B")
+    (work / "objcache" / "stray.tmp").write_bytes(b"?")
+    cache.mkdir(parents=True)
+    (cache / b).write_bytes(b"the store's B")
+    assert make_game.adopt_objects(str(work), str(cache)) == 1
+    assert sorted(p.name for p in cache.iterdir()) == [a, b]
+    assert (cache / a).read_bytes() == b"A" and (cache / b).read_bytes() == b"the store's B"
+    assert make_game.adopt_objects(str(work), str(cache)) == 0   # (again: nothing more)
+    assert make_game.adopt_objects(str(work), str(work / "objcache")) == 0   # (no store: its own cache is the cache)
+
+
 def check_seeds(tmp):
     main, fresh, store = tmp / "main", tmp / "fresh", tmp / "seedstore"
     (main / "work" / "image").mkdir(parents=True)
@@ -173,6 +190,7 @@ def main():
         check_object_cache(tmp)
         check_put_whole(tmp)
         check_seeds(tmp)
+        check_adopt(tmp)
         check_two_work_folders(tmp)
     print("object store: ok")
 
