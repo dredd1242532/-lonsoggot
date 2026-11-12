@@ -71,6 +71,12 @@ int vkCreateShaderModule(uintptr_t device, const VkShaderModuleCreateInfo* info,
     made_of[*module] = {info->pCode[1], info->codeSize / 4};
     return 0;
 }
+using VkResult = int;
+constexpr VkResult VK_SUCCESS = 0;
+struct IntelDriverGate { IntelDriverGate() {} };
+VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* module) {
+    return vkCreateShaderModule(dev.device, ci, nullptr, module);
+}
 void vkDestroyShaderModule(uintptr_t, VkShaderModule module, const void*) { CHECK(made_of.count(module)); ++destroyed; }
 void disk_init() {}
 void logf(const char*, ...) {}
