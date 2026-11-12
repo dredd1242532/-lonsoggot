@@ -280,6 +280,21 @@ def save_times(work, data):
         print("the build times were not saved (%s)" % e, flush=True)
 
 
+LAST_BUILD = "last_build.json"
+
+
+def record_build(work, out, env):
+    """(nx2/dev.py build) How this build was started: its arguments, its Python, the profile and the toolchain's variables
+    (profiles.TOOLCHAIN_ENV), in <work>/last_build.json. This PC's paths: it stays in the work folder, as the build does"""
+    import profiles
+    data = {"argv": sys.argv[1:], "python": sys.executable, "root": ROOT, "work": work, "out": out,
+            "profile": profiles.profile(), "toolchain": {k: os.environ[k] for k in profiles.TOOLCHAIN_ENV if os.environ.get(k)},
+            "env": env}
+    with contextlib.suppress(OSError):
+        with open(os.path.join(work, LAST_BUILD), "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, indent=1)
+
+
 def record_times(work, files, compile_seconds, total_seconds, modules=0, kind="build", phases=None):
     """This build in the record: what each module it compiled took (a module a cache already held keeps the time it took
     before), the compile's and the whole build's seconds, and where they went (phases: PhaseClock's). Returns the last
@@ -1660,15 +1675,28 @@ def lift_key(exefs, work, env, planning=True):
     files += [(work, os.path.join(work, "hot_funcs.txt"))]
     if planning:
         files += [(work, os.path.join(work, "image", "chunks.txt")), (work, os.path.join(work, "image", "hot_pieces.txt"))]
+    parts = {"python": sys.version, "hle": sorted(standalone.implemented()), "files": {}}
     for base, f in files:
         if os.path.isfile(f):
-            h.update(os.path.relpath(f, base).replace(os.sep, "/").encode() + bytes(1))
+            rel = os.path.relpath(f, base).replace(os.sep, "/")
+            h.update(rel.encode() + bytes(1))
             with open(f, "rb") as src:
-                h.update(hashlib.sha1(src.read(), usedforsecurity=False).digest())
+                digest = hashlib.sha1(src.read(), usedforsecurity=False).digest()
+            h.update(digest)
+            parts["files"][("game/" if base == exefs else "work/" if base == work else "") + rel] = digest.hex()
     lift_env = dict(env, **os.environ)
     lift_env = {k: v for k, v in lift_env.items() if lift_reads_env(k)}
     h.update(repr(sorted(lift_env.items())).encode())
-    return h.hexdigest()
+    parts["env"] = dict(sorted(lift_env.items()))
+    key = h.hexdigest()
+    KEY_PARTS[key] = parts
+    return key
+
+
+# (nx2/dev.py status: what a lift key was made of, so that a build which translates the game again can say why. lift_key keeps
+# the parts of each key it worked out; write_lift_key writes those of the key it stores beside it, in <work>/sa, not in gen/)
+LIFT_PARTS = "lift_key_parts.json"
+KEY_PARTS = {}
 
 
 def gen_print(gen):
@@ -1687,6 +1715,9 @@ def write_lift_key(work, key):
     gen = os.path.join(work, "sa", "gen")
     with open(os.path.join(gen, LIFT_KEY), "w") as f:
         f.write(key + "\n" + gen_print(gen) + "\n")
+    if key in KEY_PARTS:   # (for nx2/dev.py status; a key worked out elsewhere has none)
+        with open(os.path.join(work, "sa", LIFT_PARTS), "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"key": key, "parts": KEY_PARTS[key]}, f, indent=0, sort_keys=True)
 
 
 def lifted_cut_short(gen):
@@ -2261,11 +2292,9 @@ def main(a=None):
     src = os.path.join(ROOT, "work", "image", "chunks.txt")   # (where the lifted code's files begin: addresses)
     if os.path.exists(src):
         copy_writable(src, os.path.join(work, "image", "chunks.txt"))
-    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
-    if os.path.exists(os.path.join(work, "hot_funcs.txt")):
-        env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
-    if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):
-        env["RX_PGO"] = os.path.join(work, "longshot_pieces.prof")
+    import profiles   # (nx2/profiles.py: the environment in one place, for nx2/dev.py's builds too)
+    env = profiles.build_env(work, exefs, romfs, out, profile_readable, profiles.profile())
+    record_build(work, out, env)
 
     say("stage", "lift", "Translating the game to PC code")
     # (the same game, tools and settings as the lift before: its C is what this lift would write, and nothing recompiles from it. A

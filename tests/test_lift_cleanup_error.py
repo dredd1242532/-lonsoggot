@@ -8,6 +8,7 @@ import contextlib
 import errno
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -26,13 +27,16 @@ def production():
     assert {node.name for node in definitions} == helpers
     key = next(node for node in tree.body if isinstance(node, ast.Assign) and
                any(isinstance(target, ast.Name) and target.id == "LIFT_KEY" for target in node.targets))
+    # (write_lift_key also writes the parts of a key lift_key worked out, for nx2/dev.py status: KEY_PARTS, LIFT_PARTS)
+    parts = [node for node in tree.body if isinstance(node, ast.Assign) and
+             any(isinstance(target, ast.Name) and target.id in ("KEY_PARTS", "LIFT_PARTS") for target in node.targets)]
     main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
     branches = [node for node in ast.walk(main) if isinstance(node, ast.If) and isinstance(node.test, ast.Call) and
                 isinstance(node.test.func, ast.Name) and node.test.func.id == "lifted_before"]
     assert len(branches) == 1
     # (PREPARE: the module global say() reads since --prepare for RecompLauncher; off, as make_game starts)
-    namespace = dict(os=os, sys=sys, hashlib=hashlib, PREPARE=False)
-    exec(compile(ast.Module(body=[key, *definitions], type_ignores=[]), str(SOURCE), "exec"), namespace)
+    namespace = dict(os=os, sys=sys, hashlib=hashlib, json=json, PREPARE=False)
+    exec(compile(ast.Module(body=[key, *parts, *definitions], type_ignores=[]), str(SOURCE), "exec"), namespace)
     return namespace, compile(ast.Module(body=branches, type_ignores=[]), str(SOURCE), "exec")
 
 
