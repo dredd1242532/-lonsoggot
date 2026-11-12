@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]
+RUN_ALL_SANITIZE = ["--sanitize"]   # (run_all.py --sanitize: the sanitizer lane)
 
 ROOT = Path(__file__).resolve().parents[1]
 
