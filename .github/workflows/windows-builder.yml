@@ -1,11 +1,11 @@
-# What a Windows player downloads, made without game data: HookshotBuilder-Setup.exe (builder/setup/setup.c, with
-# llvm-mingw) and the Hookshot Builder package (dotnet publish, versioned from the tag as docs/versioning.md says), split
+# What a Windows player downloads, made without game data: LongshotBuilder-Setup.exe (builder/setup/setup.c, with
+# llvm-mingw) and the Longshot Builder package (dotnet publish, versioned from the tag as docs/versioning.md says), split
 # into the parts the setup downloads by scripts/make_setup_parts.py. The Python, emsdk, CPM and wgpu-native parts, and the
 # third_party part's prebuilt files, are the latest release's (scripts/release_parts.py); the CPM part gets dav1d added
 # (the dav1d job) when that release's lacks it. The Windows Vulkan back end is
 # compiled too, with the same llvm-mingw: players build it on their PC, this only checks that it still builds.
 # A workflow artifact on every run; for a release, the new parts go to the builder-parts release and the setup
-# (HookshotBuilder.exe) and its list (hookshot-setup.txt) to the release, beside the Linux AppImage. A release is a tag
+# (LongshotBuilder.exe) and its list (longshot-setup.txt) to the release, beside the Linux AppImage. A release is a tag
 # pushed by hand, or the tag the Release workflow passes when it calls this one (inputs.tag). On any other push to main,
 # the same files replace those of the nightly prerelease, the latest development build, when its commit comes after the
 # one the nightly holds.
@@ -49,7 +49,7 @@ defaults:
 
 jobs:
   package:
-    name: Hookshot Builder package and setup
+    name: Longshot Builder package and setup
     # (builder-parts holds the installer's parts: no package there. nightly is moved forward by the release job of a push
     # to main, here or in the Linux AppImage workflow, and rc by the Release workflow)
     if: github.ref_name != 'builder-parts' && github.ref_name != 'nightly' && github.ref_name != 'rc'
@@ -112,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if python -I scripts/release_parts.py previous "$RUNNER_TEMP/previous-setup.txt" \
-              --repo "$GITHUB_REPOSITORY" --repo NotRexed/Hookshot --skip-tag "$TAG"; then
+              --repo "$GITHUB_REPOSITORY" --repo NotRexed/Longshot --skip-tag "$TAG"; then
             echo "PREVIOUS=$RUNNER_TEMP/previous-setup.txt" >> "$GITHUB_ENV"
           elif [[ -n $RELEASE_TAG ]]; then
             exit 1
@@ -120,29 +120,29 @@ jobs:
             echo "::warning::no earlier release's setup list: the package has only the app and .NET parts"
           fi
 
-      # (work/hookshot.ico is the builder's icon, builder/HookshotBuilder/HookshotBuilder.csproj)
+      # (work/longshot.ico is the builder's icon, builder/LongshotBuilder/LongshotBuilder.csproj)
       - name: Play profile
         if: env.PREVIOUS != ''
         run: python -I scripts/release_parts.py profile "$PREVIOUS" work
 
       # (--dependent-load-flag 0x800, LOAD_LIBRARY_SEARCH_SYSTEM32: the libraries it imports come from System32, not from
       # the folder it was downloaded to. A release candidate's setup installs that release candidate, and the nightly's the
-      # nightly, when started with no --tag: HOOKSHOT_SETUP_RELEASE)
-      - name: HookshotBuilder-Setup.exe
+      # nightly, when started with no --tag: LONGSHOT_SETUP_RELEASE)
+      - name: LongshotBuilder-Setup.exe
         working-directory: builder/setup
         run: |
           release=
           if [[ -z $RELEASE_TAG ]]; then release=nightly; elif [[ $RELEASE_TAG == *-* ]]; then release=$RELEASE_TAG; fi
           "$LLVM_MINGW/bin/x86_64-w64-mingw32-windres" setup.rc -O coff -o "$RUNNER_TEMP/setup_rc.o"
-          "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" -O2 -mwindows -municode ${release:+"-DHOOKSHOT_SETUP_RELEASE=\"$release\""} \
+          "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" -O2 -mwindows -municode ${release:+"-DLONGSHOT_SETUP_RELEASE=\"$release\""} \
             setup.c "$RUNNER_TEMP/setup_rc.o" \
             -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lole32 -Wl,--dependent-load-flag=0x800 \
-            -o "$RUNNER_TEMP/HookshotBuilder-Setup.exe"
-          ls -l "$RUNNER_TEMP/HookshotBuilder-Setup.exe"
+            -o "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
+          ls -l "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
 
-      - name: Hookshot Builder
+      - name: Longshot Builder
         run: >-
-          dotnet publish builder/HookshotBuilder/HookshotBuilder.csproj --configuration Release
+          dotnet publish builder/LongshotBuilder/LongshotBuilder.csproj --configuration Release
           -p:Version="$VERSION" -p:NuGetAudit=false --output "$RUNNER_TEMP/publish"
 
       # (it stops when assets/pipeline_states/, the sources of the pipeline state list every release ships, hold none or one does not read)
@@ -154,23 +154,23 @@ jobs:
       - name: Package folder
         run: >-
           python -I scripts/release_parts.py package "$RUNNER_TEMP/package"
-          --publish "$RUNNER_TEMP/publish" --setup "$RUNNER_TEMP/HookshotBuilder-Setup.exe"
+          --publish "$RUNNER_TEMP/publish" --setup "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
           ${PREVIOUS:+--list "$PREVIOUS" --python-packages nx2/prompt_requirements.txt --cpm-add "$RUNNER_TEMP/dav1d-cpm"}
 
       - name: Setup parts
         run: |
           python -I scripts/make_setup_parts.py "$RUNNER_TEMP/package" "$TAG" dist \
             --base "https://github.com/$GITHUB_REPOSITORY/releases/download/builder-parts" ${PREVIOUS:+--reuse "$PREVIOUS"}
-          # (a release holds the setup as HookshotBuilder.exe: builder/HookshotBuilder/Updater.cs)
-          cp "$RUNNER_TEMP/HookshotBuilder-Setup.exe" dist/HookshotBuilder.exe
+          # (a release holds the setup as LongshotBuilder.exe: builder/LongshotBuilder/Updater.cs)
+          cp "$RUNNER_TEMP/LongshotBuilder-Setup.exe" dist/LongshotBuilder.exe
           # (RecompLauncher installs this zip: the setup beside its recomplauncher.json, named for its system and processor)
-          python -I - "dist/Hookshot-$TAG-Windows-x64.zip" <<'PY'
+          python -I - "dist/Longshot-$TAG-Windows-x64.zip" <<'PY'
           import sys, zipfile
           with zipfile.ZipFile(sys.argv[1], "w", zipfile.ZIP_DEFLATED) as z:
-              z.write("dist/HookshotBuilder.exe", "HookshotBuilder.exe")
+              z.write("dist/LongshotBuilder.exe", "LongshotBuilder.exe")
               z.write("recomplauncher.json", "recomplauncher.json")
           PY
-          cat dist/hookshot-setup.txt
+          cat dist/longshot-setup.txt
           ls -l dist
 
       # (a release's or the nightly's files, signed as built by this run: gh attestation verify <file> -R <this repository>)
@@ -178,13 +178,13 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/HookshotBuilder.exe
-            dist/hookshot-setup.txt
-            dist/Hookshot-*-Windows-x64.zip
+            dist/LongshotBuilder.exe
+            dist/longshot-setup.txt
+            dist/Longshot-*-Windows-x64.zip
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: HookshotBuilder-windows
+          name: LongshotBuilder-windows
           path: dist/
           if-no-files-found: error
 
@@ -235,7 +235,7 @@ jobs:
           path: ${{ runner.temp }}/llvm
           key: ${{ steps.llvm.outputs.name }}
       - name: llvm-mingw
-        run: echo "HOOKSHOT_MINGW=$(python -I scripts/release_parts.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
+        run: echo "LONGSHOT_MINGW=$(python -I scripts/release_parts.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
       # The back end's compiled objects (nx2/build.py's object cache, vk-work/objcache: each object under the SHA-1 of its
       # source, its flags and the headers it can see), for pull requests, as the Linux AppImage workflow keeps its own: a
       # pull request compiles only the files its change reaches, not all of them (about 160 s here). Written after every
@@ -259,14 +259,14 @@ jobs:
           key: ${{ steps.objkey.outputs.key }}
           restore-keys: ${{ steps.objkey.outputs.prefix }}
       # (as scripts/linux/appimage.sh builds Linux's: the back end alone, no lift, no game)
-      - name: hookshot_vk.dll
+      - name: longshot_vk.dll
         env:
           RX_VK_ONLY: '1'
           RX_RELEASE: '1'
         run: |
           OOT_WORK="$RUNNER_TEMP/vk-work" RX_CPM="$GITHUB_WORKSPACE/_deps/cpm" \
             python -I nx2/build.py --standalone --jobs "$NUMBER_OF_PROCESSORS"
-          ls -l "$RUNNER_TEMP/vk-work/sa/build/hookshot_vk.dll"
+          ls -l "$RUNNER_TEMP/vk-work/sa/build/longshot_vk.dll"
       # (the object cache down to the objects this build used, as the Linux AppImage workflow prunes its own: each object
       # in sa/build/obj names its key in <obj>.sha1. Nothing goes when no stamp is found)
       - name: Object cache for pull requests
@@ -292,8 +292,8 @@ jobs:
           key: ${{ steps.objkey.outputs.key }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: hookshot_vk-windows
-          path: ${{ runner.temp }}/vk-work/sa/build/hookshot_vk.dll
+          name: longshot_vk-windows
+          path: ${{ runner.temp }}/vk-work/sa/build/longshot_vk.dll
           if-no-files-found: error
 
   # dav1d for the AV1 movies (issue 2316: the CPM cache's FFmpeg has none), made as scripts/windows/dav1d.sh makes it, with
@@ -323,14 +323,14 @@ jobs:
             "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
           echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
-          echo "HOOKSHOT_MINGW=$RUNNER_TEMP/$LLVM_MINGW" >> "$GITHUB_ENV"
+          echo "LONGSHOT_MINGW=$RUNNER_TEMP/$LLVM_MINGW" >> "$GITHUB_ENV"
       - name: dav1d
         run: scripts/windows/dav1d.sh "$RUNNER_TEMP/cpm"
       - name: host/dav1d_av1.c on it, under Wine
         run: |
           wine=$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)
           export WINEPREFIX="$RUNNER_TEMP/wine" WINEDEBUG=-all
-          python3 -I -B tests/test_dav1d_av1.py --cross "$HOOKSHOT_MINGW/bin/x86_64-w64-mingw32-clang" --run "$wine" \
+          python3 -I -B tests/test_dav1d_av1.py --cross "$LONGSHOT_MINGW/bin/x86_64-w64-mingw32-clang" --run "$wine" \
             --dav1d "$(ls -d "$RUNNER_TEMP"/cpm/dav1d/*)"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -340,8 +340,8 @@ jobs:
 
   release:
     name: Release assets
-    # (for every release, beside the Linux AppImage. Set vars.CI_RELEASE_WINDOWS to 'false' to upload HookshotBuilder.exe
-    # and hookshot-setup.txt by hand instead. On a push to main, to the nightly prerelease; not when the Release workflow
+    # (for every release, beside the Linux AppImage. Set vars.CI_RELEASE_WINDOWS to 'false' to upload LongshotBuilder.exe
+    # and longshot-setup.txt by hand instead. On a push to main, to the nightly prerelease; not when the Release workflow
     # calls this on a push to main: that is a release, and github.event_name and github.ref are the caller's)
     if: >-
       ((inputs.tag != '' || (startsWith(github.ref, 'refs/tags/') && github.ref_name != 'builder-parts'
@@ -369,7 +369,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: HookshotBuilder-windows
+          name: LongshotBuilder-windows
           path: dist
       # (named by their SHA-256: a part already there is the same file and is not uploaded again. Before the list, which
       # names them)
@@ -377,10 +377,10 @@ jobs:
         run: |
           if ! gh release view builder-parts >/dev/null 2>&1; then
             gh release create builder-parts --prerelease --latest=false --target "$GITHUB_SHA" --title builder-parts \
-              --notes "The parts HookshotBuilder-Setup.exe downloads, named by each release's hookshot-setup.txt."
+              --notes "The parts LongshotBuilder-Setup.exe downloads, named by each release's longshot-setup.txt."
           fi
           have=$(gh release view builder-parts --json assets --jq '.assets[].name')
-          for f in dist/HookshotBuilder-*.zip; do
+          for f in dist/LongshotBuilder-*.zip; do
             if grep -qxF "$(basename "$f")" <<<"$have"; then
               echo "$(basename "$f"): already there"
             else
@@ -393,7 +393,7 @@ jobs:
       # publish job)
       - name: Setup and its list to the release
         # (a push to main that is not a release: the nightly)
-        run: scripts/release_upload.sh "${RELEASE_TAG:-nightly}" dist/HookshotBuilder.exe dist/hookshot-setup.txt dist/Hookshot-*-Windows-x64.zip
+        run: scripts/release_upload.sh "${RELEASE_TAG:-nightly}" dist/LongshotBuilder.exe dist/longshot-setup.txt dist/Longshot-*-Windows-x64.zip
       - if: hashFiles('dist/SHA256SUMS') != ''
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

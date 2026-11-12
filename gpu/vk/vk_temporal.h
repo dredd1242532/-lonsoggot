@@ -103,9 +103,9 @@ struct TemporalFrame {
     float jitter[2]{};          // (the scene's sub-pixel offset this frame, in render pixels, x right and y down)
     bool reset = false;         // (no history: the first frame, or one after a gap or a camera cut the chain saw)
     float near_z = 0.1f, far_z = 1000.0f, fov_y = 1.0f;   // (the scene's projection's, when it is a plain perspective one)
-    float projection[16]{};     // (hookshot) the scene's projection without this frame's jitter: FSR 3.1's depth constants
-    uint32_t jitter_phases = 8; // (hookshot) the length of the jitter's sequence the host runs (dlss_jitter_phases)
-    /// (hookshot) depth holds 1 - d (the engine's fsr_depth, where the projection puts the near plane at 0: FSR 3.1). Anything
+    float projection[16]{};     // (longshot) the scene's projection without this frame's jitter: FSR 3.1's depth constants
+    uint32_t jitter_phases = 8; // (longshot) the length of the jitter's sequence the host runs (dlss_jitter_phases)
+    /// (longshot) depth holds 1 - d (the engine's fsr_depth, where the projection puts the near plane at 0: FSR 3.1). Anything
     /// else that reads this frame's depth (frame generation, other passes) must look here, not assume the plain depth
     bool depth_reversed = false;
 };
@@ -132,10 +132,10 @@ struct TemporalEngine {
     /// light, unclamped, and takes back linear; null or false: LDR colour, square-root encoded, clamped to 0..1 (an LDR
     /// engine fed more would misread it)
     bool (*hdr)() = nullptr;
-    /// (hookshot) The depth as FSR's own passes take it: reversed (1 at the near plane) where the game's projection puts the near
+    /// (longshot) The depth as FSR's own passes take it: reversed (1 at the near plane) where the game's projection puts the near
     /// plane at 0 (fsr3_math.h camera_from_projection's flip_depth). AMD FSR 3.1 (vk_fsr3.cpp): its passes are built for that
     bool fsr_depth = false;
-    /// (hookshot) An evaluation that fails is for that frame only (the network draws it, and the next frame starts a new
+    /// (longshot) An evaluation that fails is for that frame only (the network draws it, and the next frame starts a new
     /// history), not for good: FSR 3.1, whose constants come from the frame's stream
     bool retry = false;
 };

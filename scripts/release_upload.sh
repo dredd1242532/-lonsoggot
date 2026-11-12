@@ -19,8 +19,8 @@
 # meanwhile to a commit this one does not follow, so it never goes back; a run whose commit is older than the tag's
 # (or a re-run of an old one) changes nothing. Each platform's runs go one at a time (the workflows' concurrency), so
 # its files never go back either. The Linux files and the Windows files are each one commit's, named by it
-# (Hookshot-<version>-x86_64.AppImage, Hookshot-<version>-Windows-x64.zip, the tag in hookshot-linux.txt and
-# hookshot-setup.txt, which each platform's updaters read), but while main moves one platform's can be a commit or two
+# (Longshot-<version>-x86_64.AppImage, Longshot-<version>-Windows-x64.zip, the tag in longshot-linux.txt and
+# longshot-setup.txt, which each platform's updaters read), but while main moves one platform's can be a commit or two
 # behind the other's and the tag. Its files are replaced, an AppImage and .zsync named by an older commit are removed
 # once the new ones are there, and SHA256SUMS and the table are made again (the table is in its notes). rc, the latest
 # release candidate, is refused: it gets its files from a published release (scripts/release_rc.sh).
@@ -97,7 +97,7 @@ if [[ $tag == nightly ]]; then
     advance_nightly "$sha" || exit 0
     # (the same notes from every run: the two platforms' runs write them at different times, and each file names the
     # commit it was built from)
-    notes="The latest development build of main, made by CI after every push to main. Each file is named by the commit it was built from (\`Hookshot-<version>-x86_64.AppImage\`, \`Hookshot-<version>-Windows-x64.zip\`; the version is \`git describe\`'s, ending in \`-g<commit>\`). The Windows and Linux builds finish at different times, so while changes are being merged one can be a commit or two behind the other; the \`nightly\` tag is at the newest of them.
+    notes="The latest development build of main, made by CI after every push to main. Each file is named by the commit it was built from (\`Longshot-<version>-x86_64.AppImage\`, \`Longshot-<version>-Windows-x64.zip\`; the version is \`git describe\`'s, ending in \`-g<commit>\`). The Windows and Linux builds finish at different times, so while changes are being merged one can be a commit or two behind the other; the \`nightly\` tag is at the newest of them.
 
 It is untested and may break your saves or settings. For playing, use the [latest release](https://github.com/$GH_REPO/releases/latest).
 
@@ -108,6 +108,12 @@ $("$files" table nightly)"
     else
         gh release create nightly --verify-tag --prerelease --latest=false --title "$title" --notes "$notes" ||
             gh release edit nightly --prerelease --latest=false --title "$title" --notes "$notes" >/dev/null
+        # (a release just made is not in the list of releases at once: a repository's first nightly was made here and
+        # "had no release" a moment later. Looked for a few times before its files go to it)
+        for _ in 1 2 3 4 5 6; do
+            [[ -z $("$files" find nightly) ]] || break
+            sleep 3
+        done
     fi
     "$files" upload nightly "$@"
     new=()
@@ -115,8 +121,8 @@ $("$files" table nightly)"
     # (the AppImage and its .zsync, or the RecompLauncher zip, of an older commit, once this run has uploaded the new ones)
     gh release view nightly --json assets --jq '.assets[].name' | while read -r old; do
         case $old in
-            Hookshot-*-x86_64.AppImage | Hookshot-*-x86_64.AppImage.zsync) want="Hookshot-.*-x86_64\\.AppImage${old##*.AppImage}" ;;
-            Hookshot-*-Windows-x64.zip) want='Hookshot-.*-Windows-x64\.zip' ;;
+            Longshot-*-x86_64.AppImage | Longshot-*-x86_64.AppImage.zsync) want="Longshot-.*-x86_64\\.AppImage${old##*.AppImage}" ;;
+            Longshot-*-Windows-x64.zip) want='Longshot-.*-Windows-x64\.zip' ;;
             *) continue ;;
         esac
         printf '%s\n' "${new[@]}" | grep -qxF "$old" && continue
@@ -139,7 +145,12 @@ if [[ -z $info ]]; then
     fi
     # (the other workflow can make it between the find and the create: its release is then the one used)
     gh release create "$tag" --verify-tag --title "$tag" --generate-notes "${kind[@]}" >/dev/null || true
-    info=$("$files" find "$tag")
+    # (a release just made is not in the list of releases at once: scripts/release_rc.sh. Looked for a few times)
+    for _ in 1 2 3 4 5 6; do
+        info=$("$files" find "$tag")
+        [[ -z $info ]] || break
+        sleep 3
+    done
     [[ -n $info ]] || { echo "::error::$tag: its release could not be made" >&2; exit 1; }
 fi
 "$files" upload "$tag" "$@"

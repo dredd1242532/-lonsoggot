@@ -47,10 +47,10 @@ candidates=$(jq -r '[.[] | select((.draft | not) and (.tag_name | test("^v[0-9]+
 src= tag= files=
 while read -r id t; do
     [[ -n $id ]] || continue
-    files=$(assets "$id" | jq -c --arg a "Hookshot-$t-x86_64.AppImage" \
+    files=$(assets "$id" | jq -c --arg a "Longshot-$t-x86_64.AppImage" \
         '[.[] | select(.name == $a or .name == ($a + ".zsync")) | {id, name, digest}] | sort_by(.name)')
     if [[ $(jq length <<<"$files") == 2 ]]; then src=$id tag=$t; break; fi
-    echo "$t has no Hookshot-$t-x86_64.AppImage and .zsync: passed over"
+    echo "$t has no Longshot-$t-x86_64.AppImage and .zsync: passed over"
 done <<<"$candidates"
 if [[ -z $src ]]; then
     echo "no published release candidate or release has its AppImage and .zsync: $RC is left as it is"
@@ -74,7 +74,13 @@ if [[ -z $info ]]; then
     jq -n --arg t "$RC" --arg n "$TITLE" --arg b "$notes" \
         '{tag_name: $t, name: $n, body: $b, draft: false, prerelease: true, make_latest: "false"}' |
         gh api -X POST "repos/$GH_REPO/releases" --input - >/dev/null
-    info=$("$FILES" find "$RC")
+    # (a release just made is not in the list of releases at once: the first rc of a repository was made, not found a
+    # second later, and the job stopped with its release empty. Looked for a few times)
+    for _ in 1 2 3 4 5 6; do
+        info=$("$FILES" find "$RC")
+        [[ -z $info ]] || break
+        sleep 3
+    done
     [[ -n $info ]] || fail "$RC: its release could not be made"
 fi
 read -r id _ <<<"$info"
@@ -105,6 +111,6 @@ assets "$id" | jq -r '.[] | "\(.id) \(.name)"' | sort -k2,2r | while read -r ass
     gh api -X DELETE "repos/$GH_REPO/releases/assets/$asset" >/dev/null
     echo "$RC: $name removed"
 done
-jq -n --arg n "$TITLE" --arg b "$notes" '{name: $n, body: $b, draft: false, prerelease: true, make_latest: "false"}' |
+jq -n --arg t "$RC" --arg n "$TITLE" --arg b "$notes" '{tag_name: $t, name: $n, body: $b, draft: false, prerelease: true, make_latest: "false"}' |
     gh api -X PATCH "repos/$GH_REPO/releases/$id" --input - --jq '"\(.tag_name) (\(.id)): \(.html_url)"'
 echo "$RC holds $tag"

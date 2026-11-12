@@ -1,5 +1,5 @@
 """The sticks' dead zone is the player's: the Insert menu's "Stick dead zone" row (stick_dead_zone in
-hookshot_options.ini), issue 752.
+longshot_options.ini), issue 752.
 
 SDL and XInput share a circular dead zone so diagonal stick inputs retain their direction (#1480).
 The filter and the menu's row, labels and ini parsing are compiled alone (gcc, g++).
@@ -13,8 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/hookshot_env.h)
-ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "hookshot_env.h")
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 
 RUN_ALL_ARGS = ["--cc", "gcc", "--cxx", "g++"]
 
@@ -139,7 +139,7 @@ int main(void) {
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 enum MenuTab { TAB_CONTROLS };
-struct Options { int output_res = 0, vsync = 0, resolution = 0, fps_cap = 0, upscale = 0, dlss = 0, handheld = 0, mesh_mode = 0, ultrawide = 0, stick_dead_zone = 0, game_lang = 0; } opts;   // (ultrawide: the Aspect ratio row's key)
+struct Options { int output_res = 0, vsync = 0, resolution = 0, fps_cap = 0, upscale = 0, dlss = 0, handheld = 0, ultrawide = 0, stick_dead_zone = 0, game_lang = 0; } opts;   // (ultrawide: the Aspect ratio row's key)
 static int parse_output(const char* text) { return atoi(text); }   // (the Output row's own parse: not what this checks)
 ''' + block(menu, "struct Row {") + ";\n" + block(menu, "const char* tx_stick_dead_zone(") + "\n" + \
         "Row rows[] = {" + row.group(0) + "};\n" + block(menu, "const char* ini_key(") + r'''

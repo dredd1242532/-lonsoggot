@@ -131,19 +131,19 @@ def _available_gb():
 
 
 def _no_fork():
-    """No fork() here (Windows), or HOOKSHOT_LIFT_NO_FORK=1 (to try the Windows path elsewhere)"""
-    return os.environ.get("HOOKSHOT_LIFT_NO_FORK") == "1" or "fork" not in multiprocessing.get_all_start_methods()
+    """No fork() here (Windows), or LONGSHOT_LIFT_NO_FORK=1 (to try the Windows path elsewhere)"""
+    return os.environ.get("LONGSHOT_LIFT_NO_FORK") == "1" or "fork" not in multiprocessing.get_all_start_methods()
 
 
 def file_jobs():
-    """Processes for the per-file passes (split_big, edit_c) and for the emit: HOOKSHOT_LIFT_JOBS, else the cores this process
+    """Processes for the per-file passes (split_big, edit_c) and for the emit: LONGSHOT_LIFT_JOBS, else the cores this process
     may use (at most 16; each holds its run's texts and the pages of the lift it touches), and at most one per 2 GB of available
     memory (on Windows too: its available physical memory): a Steam Deck (16 GB) ran out with 8, and the system's out-of-memory
     handling stopped the lift ("lift.py stopped (signal 15): BrokenPipeError") or one worker (the update then sat at "jump tables"
     for good). The per-file workers take a file's path and read the file themselves, so they start as new processes (spawn) where
     they cannot be forked: the three passes over the 1.5 GB of C took ~30 s in one process on Windows"""
-    if os.environ.get("HOOKSHOT_LIFT_JOBS"):
-        return max(1, int(os.environ["HOOKSHOT_LIFT_JOBS"]))
+    if os.environ.get("LONGSHOT_LIFT_JOBS"):
+        return max(1, int(os.environ["LONGSHOT_LIFT_JOBS"]))
     try:
         n = len(os.sched_getaffinity(0))
     except AttributeError:
@@ -558,7 +558,7 @@ def _side_run(fn, conn):
 
 def start_side(fn):
     """fn() started in a forked process, beside what the lift does next; None where there is no fork or one process is asked for
-    (HOOKSHOT_LIFT_JOBS=1). end_side(side, fn) waits for it and gives its result"""
+    (LONGSHOT_LIFT_JOBS=1). end_side(side, fn) waits for it and gives its result"""
     if _no_fork() or emit_jobs() <= 1:
         return None
     ctx = multiprocessing.get_context("fork")

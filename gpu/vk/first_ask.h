@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// (hookshot) A draw whose pipeline no list named (a state first seen in play) used to be left out while a worker made the
+// (longshot) A draw whose pipeline no list named (a state first seen in play) used to be left out while a worker made the
 // pipeline, even where the driver's cache had it and answered in a fraction of a millisecond: a new game's opening drew 834
 // such pipelines, all from the driver's cache, none compiled, and still left 1,906 draws out. Now the draw first asks the
 // caches itself, without compiling, and goes on with the pipeline when they answer; only one that needs compiling goes to

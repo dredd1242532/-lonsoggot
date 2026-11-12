@@ -1,4 +1,4 @@
-// (hookshot) Work done one item at a time on a few threads, each item made, used and let go before the thread takes the
+// (longshot) Work done one item at a time on a few threads, each item made, used and let go before the thread takes the
 // next: no more than `threads` items are alive at once, however many there are (vk_draw.cpp precompile_warm: every noted
 // pipeline built into the pipeline cache and destroyed, where keeping them all ready needs more memory than some PCs have).
 // tests/test_warm_bounded.py.
@@ -43,7 +43,7 @@ size_t run(size_t n, unsigned threads, Work&& work, Stop&& stop, Tick&& tick) {
 }
 
 
-/// Whether a warm may leave the marker that says every noted pipeline is in the pipeline cache (hookshot_pipelines.bin.built),
+/// Whether a warm may leave the marker that says every noted pipeline is in the pipeline cache (longshot_pipelines.bin.built),
 /// after which a start loads at create calls and builds nothing itself. Only a warm that got to its end, and only in a process
 /// that plays: on NVIDIA the cache a --prepare-shaders process writes does not answer the asks of the play process that
 /// follows (0 of 32 of a sample; 3,720 of 3,880 pipelines "in no cache" in the first session, compiled in play with draws left

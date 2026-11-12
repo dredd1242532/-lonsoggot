@@ -1,5 +1,5 @@
 #version 450
-// (hookshot) HDR10 out (the Insert menu's HDR): the game's picture to PQ in Rec. 2020 for an HDR10 swapchain, graded by the HDR
+// (longshot) HDR10 out (the Insert menu's HDR): the game's picture to PQ in Rec. 2020 for an HDR10 swapchain, graded by the HDR
 // contrast row on the way. Scaled from its crop as the blit was.
 //  mode 0 (Expanded): the game's finished picture, SDR and sRGB-encoded. White in it is shown at the paper white (nits); its
 //         highlights are expanded towards the peak brightness, the brightest part of the picture reaching the peak, the rest at
@@ -13,7 +13,7 @@
 // back onto the peak instead (shoulder). With the top its own target the shoulder is nothing at 100%, so the grade moves on
 // smoothly from the picture as it is.
 //  Expanded: its white is expanded to the peak, and last the display's peak is the limit (by luminance, the hue kept).
-//  Native: the peak is the one the game is told (the HDR peak row, Hookshot's answer to its display query), which its own
+//  Native: the peak is the one the game is told (the HDR peak row, Longshot's answer to its display query), which its own
 //         light stays under; the grade is fitted under it. Light the game puts above it is not limited by the pass, as at 100%.
 // At contrast and exposure 1 nothing of it runs. Then PQ again.
 layout(local_size_x = 8, local_size_y = 8) in;

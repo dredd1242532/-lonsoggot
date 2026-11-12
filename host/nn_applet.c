@@ -51,7 +51,7 @@ static const char *desired_language(void) {
                 if ((unsigned char)p[0] == 0xEF && (unsigned char)p[1] == 0xBB && (unsigned char)p[2] == 0xBF) p += 3;   /* (a BOM: Notepad's UTF-8) */
                 while (*p == ' ' || *p == '\t') p++;
                 if (*p == '#' || *p == '\r' || *p == '\n' || !*p) continue;
-                /* (only a code the game has: a stray line was taken before, and the game stayed in English, Hookshot issue 75) */
+                /* (only a code the game has: a stray line was taken before, and the game stayed in English, Longshot issue 75) */
                 char code[32];
                 snprintf(code, sizeof code, "%s", p);
                 code[strcspn(code, " \t\r\n")] = 0;
@@ -88,14 +88,14 @@ HLE(_ZN2nn2oe18GetDesiredLanguageEv) {
    (MKW docked composes 3840 x 2160) */
 int hos_ini_option(const char *key, int otherwise);
 #define ini_option hos_ini_option
-/* (hookshot) An option's text in hookshot_options.ini, the game folder's (the Insert menu's choices, gpu/vk/vk_menu.cpp), the last
+/* (longshot) An option's text in longshot_options.ini, the game folder's (the Insert menu's choices, gpu/vk/vk_menu.cpp), the last
    line that sets it, its line end cut: whether there was one */
 static int ini_text(const char *key, char *out, size_t size) {
     char path[MAX_PATH];
     const DWORD n = hos_game_path_a(path, MAX_PATH);
     char *slash = n ? (strrchr(path, 92) ? strrchr(path, 92) : strrchr(path, 47)) : NULL;   /* (linux: '/'; the game folder's, not bin\\'s) */
     if (!slash || !size) return 0;
-    snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
+    snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "longshot_options.ini");
     FILE *f = fopen(path, "r");
     if (!f) return 0;
     char line[80];
@@ -110,7 +110,7 @@ static int ini_text(const char *key, char *out, size_t size) {
     fclose(f);
     return found;
 }
-int hos_ini_option(const char *key, int otherwise) {   /* (hookshot: the Insert menu's choice, gpu/vk/vk_menu.cpp; nn_vi.c reads it too) */
+int hos_ini_option(const char *key, int otherwise) {   /* (longshot: the Insert menu's choice, gpu/vk/vk_menu.cpp; nn_vi.c reads it too) */
     char text[80];
     return ini_text(key, text, sizeof text) ? atoi(text) : otherwise;
 }
@@ -119,7 +119,7 @@ static int handheld(void) {
     if (v < 0) v = getenv("HOS_HANDHELD") ? atoi(getenv("HOS_HANDHELD")) != 0 : ini_option("handheld_profile", 0) != 0;
     return v;
 }
-/* (hookshot) The Insert menu's Output resolution (output_res=, HOS_OUTPUT_RES over it), docked only: a size, "<width>x<height>",
+/* (longshot) The Insert menu's Output resolution (output_res=, HOS_OUTPUT_RES over it), docked only: a size, "<width>x<height>",
    each side a multiple of 8 (rounded down to one), at least 640 x 360, at most 5120 x 2880's pixels (the largest the render
    targets' pool, hos_rt_pool_size, was played at) and between 5:4 and 48:9 in shape (host/hos_main.c's screen shapes); anything
    else is the game's own size, said in the log. The menu offers 2048x1152 and the screen's display modes (gpu/vk/display_modes.h;
@@ -168,7 +168,7 @@ uint32_t hos_output_size(int height) {
     if (!output_mode()) return height ? 1440 : 2560;
     return height ? output_h : output_w;
 }
-/* (hookshot) The render targets' GPU pool (nx2/oot_patches.py), 0x13100000 bytes as shipped, for 2560 x 1440: a 3840x2160 3D at
+/* (longshot) The render targets' GPU pool (nx2/oot_patches.py), 0x13100000 bytes as shipped, for 2560 x 1440: a 3840x2160 3D at
    the 4K output ran out of it. Scaled with the output's pixels, or the widescreen picture's when it has more (host/hos_main.c:
    hos_wide_out, the output's height at the screen's shape: 7680 x 2160 for a 32:9 screen at the 4K output, twice the pixels the pool
    was scaled for, and the game crashed as Kokiri Forest loaded, a null pointer or "texture handle ids -1", issue 1031);
@@ -254,11 +254,11 @@ static uint64_t now_posix(void) {
 HLE(_ZN2nn4time23StandardUserSystemClock14GetCurrentTimeEPNS0_9PosixTimeE) { G64(ARG(0)) = now_posix(); RET(0); }
 HLE(_ZN2nn4time26StandardNetworkSystemClock14GetCurrentTimeEPNS0_9PosixTimeE) { G64(ARG(0)) = now_posix(); RET(0); }
 /* StandardSteadyClock::now() -> time_point (std::chrono, rep int64, period seconds): one register, x0.
-   (hookshot) It was a 24-byte SteadyClockTimePoint written through x8; OoT reads x0 and leaves x8 unset (it was 0:
+   (longshot) It was a 24-byte SteadyClockTimePoint written through x8; OoT reads x0 and leaves x8 unset (it was 0:
    the write faulted at guest 0). MKW does not import it. */
 HLE(_ZN2nn4time19StandardSteadyClock3nowEv) { RET((uint64_t)(hos_now_ns() / 1000000000LL)); }
 
-/* (hookshot) nn::socket::detail::Poll(pollfd* fds, unsigned long n, int timeout_ms): offline, no descriptor is ever
+/* (longshot) nn::socket::detail::Poll(pollfd* fds, unsigned long n, int timeout_ms): offline, no descriptor is ever
    ready. OoT's gRPC poll engine (nn.npln.GrpcDispatcher) calls it through a function pointer, past the socket
    imports the runtime stubs, and the SDK's own Poll aborted on the uninitialized socket layer. It waits out the
    timeout (an infinite one in 50 ms steps, which the poll loop takes as a spurious wake) and reports a timeout. */
@@ -276,7 +276,7 @@ static void socket_poll(Ctx *c) {
 HLE(_ZN2nn6socket6detail4PollEP6pollfdmi) { socket_poll(c); }
 HLE(_ZN2nn6socket6detail4PollEPNS0_6PollFdEmi) { socket_poll(c); }
 
-/* (hookshot) nn::account::EnsureNetworkServiceAccountIdTokenCacheAsync(AsyncContext*, UserHandle const&): offline,
+/* (longshot) nn::account::EnsureNetworkServiceAccountIdTokenCacheAsync(AsyncContext*, UserHandle const&): offline,
    so no network service account. The generic stub's 0 said the task started, and OoT's npln worker (main
    0x8214eac0) then waited on the AsyncContext nothing had set up. This failure (account module 124, description
    280) takes the game's error branch right after the call. */
@@ -284,7 +284,7 @@ HLE(_ZN2nn7account44EnsureNetworkServiceAccountIdTokenCacheAsyncEPNS0_12AsyncCon
     RET(124 | (280 << 9));
 }
 
-/* (hookshot) nn::nsd::GetEnvironmentIdentifier(EnvironmentIdentifier* out): char[8]; retail units say "lp1".
+/* (longshot) nn::nsd::GetEnvironmentIdentifier(EnvironmentIdentifier* out): char[8]; retail units say "lp1".
    OoT (main 0x8243f490) only checks for a "t-" test prefix. Left to the SDK it asks the nsd service over HIPC. */
 HLE(_ZN2nn3nsd24GetEnvironmentIdentifierEPNS0_21EnvironmentIdentifierE) {
     if (ARG(0)) { memset(GP(ARG(0)), 0, 8); memcpy(GP(ARG(0)), "lp1", 3); }
@@ -292,7 +292,7 @@ HLE(_ZN2nn3nsd24GetEnvironmentIdentifierEPNS0_21EnvironmentIdentifierE) {
 
 static void calendar(uint64_t out, uint64_t info, int64_t posix, int local) {
     time_t t = (time_t)posix;
-    struct tm tmv = {0};   /* (hookshot: a time the C library cannot convert left it as the stack had it) */
+    struct tm tmv = {0};   /* (longshot: a time the C library cannot convert left it as the stack had it) */
     if (local) localtime_s(&tmv, &t); else gmtime_s(&tmv, &t);
     /* CalendarTime { s16 year; s8 month, day, hour, minute, second; pad } */
     uint8_t ct[8] = {0};
@@ -362,10 +362,10 @@ HLE(_ZN2nn3err9ShowErrorENS_6ResultE) { hos_log("err: the game shows error %#x (
    send it to the prepo service. Reports are dropped. ---------------------------------------------------------- */
 HLE(_ZN2nn5prepo10PlayReport4SaveEv) { RET(0); }
 HLE(_ZN2nn5prepo10PlayReport4SaveERKNS_7account3UidE) { RET(0); }
-/* (hookshot) PlayReport::Send(Uid const&), SDK 22's: kept nowhere, as Save. Left to the SDK it opened the prepo
+/* (longshot) PlayReport::Send(Uid const&), SDK 22's: kept nowhere, as Save. Left to the SDK it opened the prepo
    service through sm: and aborted on the empty reply (OoT's PlayReporter thread, ~5 minutes into a game). */
 HLE(_ZN2nn5prepo10PlayReport4SendERKNS_7account3UidE) { RET(0); }
-/* (hookshot) prepo::AsyncContext: the report "sent" at once. GetCompletionEvent(SystemEvent* out) gives an event
+/* (longshot) prepo::AsyncContext: the report "sent" at once. GetCompletionEvent(SystemEvent* out) gives an event
    already signaled (the SDK's own aborted on the context the empty IPC reply left), GetResult success. */
 void hos_system_event_init(uint64_t key, int autoclear);   /* nn_os_sync.c */
 void hos_system_event_signal(uint64_t key);
@@ -409,7 +409,7 @@ HLE(_ZN2nn7account26GetNetworkServiceAccountIdEPNS0_23NetworkServiceAccountIdERK
 }
 /* nn::oe::GetCurrentGraphicsScale() -> float (docked/handheld render scale): 1.0 */
 HLE(_ZN2nn2oe23GetCurrentGraphicsScaleEv) {
-    /* (hookshot) HOS_GRAPHICS_SCALE=<f>: another scale, a test of whether the game sizes its picture by it (4K, issue 68) */
+    /* (longshot) HOS_GRAPHICS_SCALE=<f>: another scale, a test of whether the game sizes its picture by it (4K, issue 68) */
     static float scale = 0;
     static volatile LONG told;
     if (scale == 0) scale = getenv("HOS_GRAPHICS_SCALE") ? (float)atof(getenv("HOS_GRAPHICS_SCALE")) : 1.0f;

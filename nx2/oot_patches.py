@@ -673,7 +673,7 @@ def patch_scene_format(s):
     return s.replace('#include "a64.h"\n', '#include "a64.h"\n' + SCENE_FORMAT_DECL, 1)
 
 
-# (from TomShafford/Hookshot 55d68e8cd6 and 65c1998222) f_804566e0's two calls of f_80522050, the GPU memory a model's material
+# (from TomShafford/Longshot 55d68e8cd6 and 65c1998222) f_804566e0's two calls of f_80522050, the GPU memory a model's material
 # block is made with, made through host/oot_heap_retry.c hos_oot_gpu_alloc, which calls the game's own and tries a full heap's
 # failure again in the heap's parents. f_80522050's other callers stay as they are.
 GPU_ALLOC_SITES = (0x80456f1c, 0x80457098)   # (the calls' return addresses)

@@ -1,4 +1,4 @@
-/* (hookshot) Native mouse look (the Insert menu's "Mouse camera", off by default; HOS_MOUSE_NATIVE=1 or 0 overrides it):
+/* (longshot) Native mouse look (the Insert menu's "Mouse camera", off by default; HOS_MOUSE_NATIVE=1 or 0 overrides it):
    the captured mouse turns the player camera's own yaw and pitch, in degrees, with no dead zone, no response curve, no
    smoothing and no top speed, in place of the mouse as the right stick (nn_hid.c's mouse_stick).
 
@@ -34,8 +34,8 @@
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 int hos_mouse_take(int32_t *dx, int32_t *dy);                                   /* display.c */

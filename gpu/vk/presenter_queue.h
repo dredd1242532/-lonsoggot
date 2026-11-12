@@ -1,4 +1,4 @@
-// (hookshot) The presenter thread's queue (vk_replay.cpp, RX_VK_PRESENT_THREAD): which family and queue index create_device asks for.
+// (longshot) The presenter thread's queue (vk_replay.cpp, RX_VK_PRESENT_THREAD): which family and queue index create_device asks for.
 // A plain function over the queue families, so tests/presenter_queue_test.cpp checks it on NVIDIA's and RADV's layouts.
 #pragma once
 

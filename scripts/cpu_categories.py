@@ -16,8 +16,8 @@ wins. A category is "top/sub" (one level of subcategory; with a local --guest-ma
 SYSTEM_MODULES = r"(?i)^(ntdll|kernelbase|kernel32|win32u|user32|gdi32|ucrtbase|msvcrt|vcruntime\d*|ws2_32|combase|rpcrt4|advapi32|sechost|bcrypt|libc\.so.*|libpthread.*|ld-linux.*|libm\.so.*)(\.dll)?$"
 # (GPU drivers' user-mode modules)
 DRIVER_MODULES = r"(?i)^(amdvlk64|amdxc64|amdxx64|amdvlk32|nvoglv64|nvwgf2umx|nvgpucomp64|nvlddmkm|igvk64|igxelpicd64|ig\w*icd64|vulkan-1|libvulkan.*|libvulkan_radeon.*|libnvidia.*|radv.*|libdrm.*)(\.dll|\.so.*)?$"
-GAME_MODULES = r"^(hookshot\.exe|hookshot)$"
-VK_MODULES = r"^(hookshot_vk\.dll|hookshot_vk\.so)$"
+GAME_MODULES = r"^(longshot\.exe|longshot)$"
+VK_MODULES = r"^(longshot_vk\.dll|longshot_vk\.so)$"
 
 # (system calls that wait: a sample whose leaf is one of these is blocked, not on the CPU)
 BLOCKING_SYSCALLS = r"^(Nt|Zw)(WaitFor|DelayExecution|RemoveIoCompletion|SignalAndWait|UserMsgWaitForMultipleObjects|UserGetMessage|ReadFile$|DeviceIoControlFile$|FsControlFile$|AlpcSendWaitReceivePort)|^(futex|syscall|__futex|poll|epoll_wait|nanosleep|clock_nanosleep|pthread_cond_wait|pthread_cond_timedwait|sem_wait|read|recv)$"

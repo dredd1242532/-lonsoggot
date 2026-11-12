@@ -1,19 +1,19 @@
 """Save my pipeline list: the zip a player attaches to the "Submit your pipelines" issue (#2034), so that the pipelines their play
 built go into the list the next release builds before the game (nx2/pipeline_states.py, assets/pipeline_states/README.md).
 
-The zip holds two files and nothing else: the game folder's hookshot_pipeline_states.bin (checked first as
+The zip holds two files and nothing else: the game folder's longshot_pipeline_states.bin (checked first as
 nx2/pipeline_states.py --check checks a list: whole, of a format this build reads, holding pipelines) and
-hookshot_pipeline_report.txt, the issue's template filled in from the game folder: the version, the OS, the GPU and its driver
+longshot_pipeline_report.txt, the issue's template filled in from the game folder: the version, the OS, the GPU and its driver
 (from the game's last log), the output and render resolution, the upscaler, frame generation and HDR (from
-hookshot_options.ini) and the mods found in its mods folder. Where the player played is left for them to fill in. Nothing is
+longshot_options.ini) and the mods found in its mods folder. Where the player played is left for them to fill in. Nothing is
 uploaded: the player attaches the zip to the issue and pastes the template themselves.
 
 The game's Insert menu does the same in C++ (Debug tab, Save my pipeline list: gpu/vk/pipeline_share.h, vk_menu.cpp), and
-both builders through this file: the Linux one imports it (builder/linux/hookshot_builder.py), the Windows one runs it
-(builder/HookshotBuilder/MainWindow.xaml.cs, --json).
+both builders through this file: the Linux one imports it (builder/linux/longshot_builder.py), the Windows one runs it
+(builder/LongshotBuilder/MainWindow.xaml.cs, --json).
 
     python -I nx2/pipeline_share.py <game folder> [--out-dir <folder>] [--json]
-        the zip, hookshot-pipelines-<date>.zip, in --out-dir (default: the Downloads folder); prints its path and the template
+        the zip, longshot-pipelines-<date>.zip, in --out-dir (default: the Downloads folder); prints its path and the template
         (--json: one line, {"ok": true, "zip": ..., "template": ..., "pipelines": n} or {"ok": false, "error": ...})
 """
 import argparse
@@ -30,11 +30,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pipeline_states  # noqa: E402  (the list's checks: parse, strict)
 
 ISSUE = 2034
-ISSUE_URL = "https://github.com/NotRexed/Hookshot/issues/%d" % ISSUE
-LIST = "hookshot_pipeline_states.bin"
-REPORT = "hookshot_pipeline_report.txt"
+ISSUE_URL = "https://github.com/NotRexed/Longshot/issues/%d" % ISSUE
+LIST = "longshot_pipeline_states.bin"
+REPORT = "longshot_pipeline_report.txt"
 # (the issue's template, its lines in its order; gpu/vk/pipeline_share.h writes the same: tests/test_pipeline_share.py)
-FIELDS = ("Hookshot version", "OS, GPU and driver", "Output resolution", "Upscaler + render resolution", "Frame generation / HDR",
+FIELDS = ("Longshot version", "OS, GPU and driver", "Output resolution", "Upscaler + render resolution", "Frame generation / HDR",
           "Mods or texture packs", "Where you played (areas, dungeons, age, night/rain, ...)", "Pipelines")
 WHERE = FIELDS[6]
 NOTE = ("Attach this zip to a comment on %s and paste the lines below into it, with where you played filled in.\n"
@@ -42,7 +42,7 @@ NOTE = ("Attach this zip to a comment on %s and paste the lines below into it, w
         "code, game data or personal info) and this text.\n"
         % (ISSUE_URL, LIST))
 
-# (hookshot_options.ini's values as the menu names them: gpu/vk/vk_menu.cpp tx_upscaler, tx_framegen, tx_hdr, and
+# (longshot_options.ini's values as the menu names them: gpu/vk/vk_menu.cpp tx_upscaler, tx_framegen, tx_hdr, and
 # gpu/vk/upscaler_rows.h kPercent)
 UPSCALERS = ("Game's own", "NVIDIA DLSS", "NVIDIA DLAA", "AMD FSR 3.1", "AMD FSR 4", "AMD FSR 4 Native AA", "Off (no upscaling)")
 PERCENT = (0, 100, 75, 67, 50, 58, 33, 42, 83, 92)
@@ -92,7 +92,7 @@ def check_list(path):
 def read_ini(folder):
     values = {}
     try:
-        with open(os.path.join(folder, "hookshot_options.ini"), encoding="utf-8", errors="replace") as f:
+        with open(os.path.join(folder, "longshot_options.ini"), encoding="utf-8", errors="replace") as f:
             for line in f:
                 k, eq, v = line.strip().partition("=")
                 if eq and k:
@@ -110,7 +110,7 @@ def _int(values, key, default=0):
 
 
 def output_size(values):
-    """(width, height, words): the game's output as hookshot_options.ini sets it (vk_menu.cpp parse_output, shown_output)"""
+    """(width, height, words): the game's output as longshot_options.ini sets it (vk_menu.cpp parse_output, shown_output)"""
     if _int(values, "handheld_profile"):
         return HANDHELD[0], HANDHELD[1], "Handheld profile"
     text = values.get("output_res", "")
@@ -188,7 +188,7 @@ def mods_text(names):
 def _log_lines(folder):
     for d in (folder, os.path.join(folder, "bin")):
         try:
-            with open(os.path.join(d, "hookshot_log.txt"), encoding="utf-8", errors="replace") as f:
+            with open(os.path.join(d, "longshot_log.txt"), encoding="utf-8", errors="replace") as f:
                 return f.read(4 << 20).splitlines()
         except OSError:
             continue
@@ -196,14 +196,14 @@ def _log_lines(folder):
 
 
 def version_text(folder, log=None):
-    """The version the game's last run said (its log's first line: the version and its source), else hookshot_version.txt's"""
+    """The version the game's last run said (its log's first line: the version and its source), else longshot_version.txt's"""
     log = _log_lines(folder) if log is None else log
     for line in log[:5]:
-        m = re.search(r"\bhookshot (\S+(?: \(source [0-9a-f]+\))?)", line)
+        m = re.search(r"\blongshot (\S+(?: \(source [0-9a-f]+\))?)", line)
         if m:
             return m.group(1)
     try:
-        with open(os.path.join(folder, "hookshot_version.txt"), encoding="utf-8") as f:
+        with open(os.path.join(folder, "longshot_version.txt"), encoding="utf-8") as f:
             for line in f:
                 if line.startswith("version="):
                     return line[8:].strip()
@@ -289,7 +289,7 @@ def template(values):
 
 
 def zip_name(day=None):
-    return "hookshot-pipelines-%s.zip" % (day or datetime.date.today()).isoformat()
+    return "longshot-pipelines-%s.zip" % (day or datetime.date.today()).isoformat()
 
 
 def downloads_dir():

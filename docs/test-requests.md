@@ -38,7 +38,7 @@ You can take part with an agent (Claude Code or another) doing the work, or by h
    ```
 
    It opens git.magicbean.dev: click **Sign in with discord** and approve. The first time creates your account. The
-   session stays in your config folder (Linux `~/.config/hookshot/`, Windows `%APPDATA%\Hookshot\`), never in the
+   session stays in your config folder (Linux `~/.config/longshot/`, Windows `%APPDATA%\Longshot\`), never in the
    repository.
 4. **Check it works:**
 
@@ -107,7 +107,7 @@ Between `claim` and `done`:
 - **Results go on the PR**, as a comment: hardware, driver, OS, the commit you built, what you checked, numbers or the
   steps to reproduce a failure. The Discord message links to it.
 - **No game files or anything made from them** in comments or messages ([CONTRIBUTING.md](../CONTRIBUTING.md#the-rule-with-no-exceptions)).
-  Screenshots and lines from `hookshot_log.txt` are fine. No keys, local paths or personal details either.
+  Screenshots and lines from `longshot_log.txt` are fine. No keys, local paths or personal details either.
 
 ## Asking for a test
 

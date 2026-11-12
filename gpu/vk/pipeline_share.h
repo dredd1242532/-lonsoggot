@@ -1,9 +1,9 @@
-/* (hookshot) Save my pipeline list (the Insert menu's Debug tab, vk_menu.cpp): the zip a player attaches to the "Submit your
+/* (longshot) Save my pipeline list (the Insert menu's Debug tab, vk_menu.cpp): the zip a player attaches to the "Submit your
    pipelines" issue (#2034), as plain functions. No Vulkan, no menu, no files: tests/test_pipeline_share.py compiles this header.
    The builders make the same zip with nx2/pipeline_share.py: the same two files, the same checks of the list (nx2/pipeline_states.py
    --check), the same template lines.
 
-   The zip holds hookshot_pipeline_states.bin as the game wrote it and hookshot_pipeline_report.txt (the issue's template filled
+   The zip holds longshot_pipeline_states.bin as the game wrote it and longshot_pipeline_report.txt (the issue's template filled
    in), nothing else. Nothing is uploaded: the player attaches the zip to the issue and pastes the template. */
 #pragma once
 
@@ -15,11 +15,11 @@
 
 namespace mkwvk::pipeline_share {
 
-constexpr const char* kIssueUrl = "https://github.com/NotRexed/Hookshot/issues/2034";
-constexpr const char* kListName = "hookshot_pipeline_states.bin";
-constexpr const char* kReportName = "hookshot_pipeline_report.txt";
+constexpr const char* kIssueUrl = "https://github.com/NotRexed/Longshot/issues/2034";
+constexpr const char* kListName = "longshot_pipeline_states.bin";
+constexpr const char* kReportName = "longshot_pipeline_report.txt";
 // (the issue's template, its lines in its order: nx2/pipeline_share.py FIELDS, the same)
-constexpr const char* kFields[] = {"Hookshot version", "OS, GPU and driver", "Output resolution", "Upscaler + render resolution",
+constexpr const char* kFields[] = {"Longshot version", "OS, GPU and driver", "Output resolution", "Upscaler + render resolution",
                                    "Frame generation / HDR", "Mods or texture packs",
                                    "Where you played (areas, dungeons, age, night/rain, ...)", "Pipelines"};
 constexpr int kFieldCount = sizeof kFields / sizeof kFields[0];
@@ -56,7 +56,7 @@ inline std::string template_lines(const std::vector<std::string>& values) {
     }
     return out;
 }
-/// hookshot_pipeline_report.txt: a note on what to do with the zip, then the template
+/// longshot_pipeline_report.txt: a note on what to do with the zip, then the template
 inline std::string report_text(const std::string& lines) {
     return std::string("Attach this zip to a comment on ") + kIssueUrl +
            " and paste the lines below into it, with where you played filled in.\nThe zip holds only " + kListName +
@@ -92,10 +92,10 @@ inline std::string output_text(unsigned w, unsigned h, bool handheld, bool game_
     if (ultrawide && !handheld) extra += std::string(extra.empty() ? "" : ", ") + "Ultrawide on";
     return std::to_string(w) + "x" + std::to_string(h) + (extra.empty() ? "" : " (" + extra + ")");
 }
-/// hookshot-pipelines-<date>.zip
+/// longshot-pipelines-<date>.zip
 inline std::string zip_name(int year, int month, int day) {
     char b[48];
-    snprintf(b, sizeof b, "hookshot-pipelines-%04d-%02d-%02d.zip", year, month, day);
+    snprintf(b, sizeof b, "longshot-pipelines-%04d-%02d-%02d.zip", year, month, day);
     return b;
 }
 

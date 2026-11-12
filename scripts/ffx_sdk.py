@@ -1,6 +1,6 @@
 """AMD's FSR runtime for Vulkan (FSR SDK 2.4: FSR 4.1.2), for AMD FSR 4 in the Upscaler row (gpu/vk/vk_fsr4.cpp).
 
-AMD's files are not part of Hookshot and are not committed: they are AMD's, signed by AMD, under AMD's FSR SDK license
+AMD's files are not part of Longshot and are not committed: they are AMD's, signed by AMD, under AMD's FSR SDK license
 (the SDK's docs/license.md, fetched beside them as LICENSE-AMD-FSR-SDK.md). This fetches them from AMD's FidelityFX SDK
 repository at one pinned release, each file checked against its SHA-256, into <folder>:
   - amd_fidelityfx_loader_vk.dll (the loader the game calls) and amd_fidelityfx_upscaler_vk.dll (FSR 4 and FSR 3.1);
@@ -44,7 +44,7 @@ DLLS = [f[2] for f in FILES if f[2].endswith(".dll")]
 
 NOTICE = """\
 AMD FSR 4: this downloads AMD's FSR runtime for Vulkan (FSR SDK v2.4.0: FSR 4.1.2) from
-github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK. AMD's files are AMD's, not Hookshot's, signed by AMD and under AMD's
+github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK. AMD's files are AMD's, not Longshot's, signed by AMD and under AMD's
 FSR SDK license (saved as LICENSE-AMD-FSR-SDK.md beside them):
   """ + LICENSE_URL
 

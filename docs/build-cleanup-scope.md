@@ -8,7 +8,7 @@ non-Python launchers. Eligible processes must have positive command-line ownersh
 
 - `make_game.py` and `lift.py` require an explicit absolute `--work` argument matching the selected folder. The
   default is accepted only for this installation's absolute `make_game.py` entry point or the exact packaged shape
-  `<default home>/versions/<version>/HookshotBuilder/tools/nx2/make_game.py`. Packaged versions share that default
+  `<default home>/versions/<version>/LongshotBuilder/tools/nx2/make_game.py`. Packaged versions share that default
   work folder, so cleanup must recognize an interrupted build from a previous version after an update. A different
   home, sibling prefix, extra path component or selected custom work is not inferred from that shape. `build.py` gets its
   folder through `OOT_WORK`; an orphan's environment is unavailable in this snapshot, so it is preserved. A direct

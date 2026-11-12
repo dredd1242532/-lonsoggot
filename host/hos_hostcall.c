@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 #define HOS_HOSTCALL_BASE 0x06000000ULL
@@ -73,11 +73,11 @@ static volatile LONG ring_pos;
 
 void hos_setjmp_return(Ctx *c, uint64_t target);   /* hos_setjmp.c: a longjmp's BR to a setjmp site */
 int a64_call_miss(Ctx *c, uint64_t target) {
-    hos_setjmp_return(c, target);   /* (hookshot; does not return when it is one) */
+    hos_setjmp_return(c, target);   /* (longshot; does not return when it is one) */
     if (!target) {
-        /* (hookshot) a callback table entry zeroed at run time: OoT's UpdateTextBoxTextureThread reaches its text release trampoline
+        /* (longshot) a callback table entry zeroed at run time: OoT's UpdateTextBoxTextureThread reaches its text release trampoline
            with a null function pointer at the same cutscene point every session. 0 is never a real function; returning 1 turns the
-           tail call into a plain return. chrispository, Hookshot PR 55 */
+           tail call into a plain return. chrispository, Longshot PR 55 */
         static volatile LONG logged;
         if (InterlockedIncrement(&logged) <= 8)
             hos_log("skipped an indirect call to 0 (lr %#llx, thread %s)", (unsigned long long)c->x[30], hos_thread_name(hos_self()));

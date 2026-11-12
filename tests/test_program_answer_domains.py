@@ -12,8 +12,8 @@ import os
 import subprocess
 import tempfile
 
-# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/hookshot_env.h)
-ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "hookshot_env.h")
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 
 RUN_ALL_ARGS = ["--cxx", "clang++", "--headers", "{vulkan_headers}"]
 
@@ -32,7 +32,7 @@ def block(text, marker):
 
 FIXTURE = r'''
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Real Hookshot Program/Stage and Eden descriptors; only resource-boundary values are stubbed.
+// Real Longshot Program/Stage and Eden descriptors; only resource-boundary values are stubbed.
 #include <array>
 #include <cstdio>
 #include <cstdlib>

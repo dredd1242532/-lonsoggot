@@ -2,7 +2,7 @@
 
 Auto is what the renderer chose before the row (mailbox where the driver has it; on Windows immediate when it has no
 mailbox), On is FIFO and Off immediate. The row is saved as vsync= and no Quality preset sets it. The environment's
-switches apply where the mode is chosen (menu_vsync), so they never reach hookshot_options.ini. Compile menu_vsync with
+switches apply where the mode is chosen (menu_vsync), so they never reach longshot_options.ini. Compile menu_vsync with
 the menu's Options, run create_swapchain's own choice of mode over the lists drivers give (as on Windows and on Linux),
 and check the swapchain and present code by their text. No game or GPU is needed.
 
@@ -38,7 +38,7 @@ def block(text, marker):
 FIXTURE = r"""
 #include <cstdio>
 #include <cstdlib>
-#include "hookshot_env.h"
+#include "longshot_env.h"
 #ifdef _WIN32
 static int setenv(const char* name, const char* value, int) { return _putenv_s(name, value); }
 static int unsetenv(const char* name) { return _putenv_s(name, ""); }
@@ -97,7 +97,7 @@ VkPresentModeKHR choose(const std::vector<VkPresentModeKHR>& modes) {
 int main() {
     const VkPresentModeKHR I = VK_PRESENT_MODE_IMMEDIATE_KHR, M = VK_PRESENT_MODE_MAILBOX_KHR, F = VK_PRESENT_MODE_FIFO_KHR;
     const std::vector<VkPresentModeKHR> all{F, M, I}, no_mailbox{F, I}, fifo_only{F};
-    const bool windows = HOOKSHOT_TEST_WINDOWS;
+    const bool windows = LONGSHOT_TEST_WINDOWS;
     struct Case { int row; const std::vector<VkPresentModeKHR>* modes; VkPresentModeKHR want; } cases[] = {
         {0, &all, M}, {0, &no_mailbox, windows ? I : F}, {0, &fifo_only, F},   // (Auto: as before the row)
         {1, &all, F}, {1, &no_mailbox, F}, {1, &fifo_only, F},                 // (On: FIFO)
@@ -213,7 +213,7 @@ def main():
          "dlss_fg_frames does not leave a set of more frames than the runtime makes to the renderer's own")
 
     choice = swap[swap.index("    VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;"):swap.index("    VkSwapchainCreateInfoKHR ci{")]
-    choice = choice.replace("#ifdef _WIN32", "#if HOOKSHOT_TEST_WINDOWS")
+    choice = choice.replace("#ifdef _WIN32", "#if LONGSHOT_TEST_WINDOWS")
     with tempfile.TemporaryDirectory(prefix="vsync-choice-") as tmp:
         for windows in (0, 1):
             src = Path(tmp) / "choice.cpp"
@@ -222,10 +222,10 @@ def main():
                            .replace("/* FRAMEGEN */", framegen.group(0)).replace("/* DLSSG */", dlssg.group(0)),
                            encoding="utf-8")
             if Path(args.cxx).name.lower() in ("cl", "cl.exe", "clang-cl", "clang-cl.exe"):
-                command = [args.cxx, "/nologo", "/std:c++20", "/EHsc", "/DHOOKSHOT_TEST_WINDOWS=%d" % windows, str(src),
+                command = [args.cxx, "/nologo", "/std:c++20", "/EHsc", "/DLONGSHOT_TEST_WINDOWS=%d" % windows, str(src),
                            "/Fo" + str(Path(tmp) / "choice.obj"), "/Fe" + str(exe)]
             else:
-                command = [args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-DHOOKSHOT_TEST_WINDOWS=%d" % windows,
+                command = [args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-DLONGSHOT_TEST_WINDOWS=%d" % windows,
                            str(src), "-o", str(exe)]
             subprocess.run(command, cwd=tmp, check=True)
             subprocess.run([str(exe)], check=True)

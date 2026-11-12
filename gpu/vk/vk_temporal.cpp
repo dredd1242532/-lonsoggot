@@ -1,4 +1,4 @@
-// (hookshot) A temporal upscaler in place of OoT's gameplay upscale network: the frame chain (vk_temporal.h), shared by the
+// (longshot) A temporal upscaler in place of OoT's gameplay upscale network: the frame chain (vk_temporal.h), shared by the
 // engines that draw with it, NVIDIA DLSS (vk_dlss.cpp) and AMD FSR 4 (vk_fsr4.cpp).
 // The chain is hckrman101's, from their NVIDIA DLSS (#841): the camera, the inputs pass, the actor motion and the jitter's
 // state, moved here from vk_dlss.cpp unchanged in what they do, so that DLSS and FSR share them.
@@ -57,7 +57,7 @@
 #include "upscaler_rows.h"
 #include "vk_dlss.h"
 #include "vk_draw.h"
-#include "fsr3_math.h"   // (hookshot: FSR 3.1's depth constants from the projection)
+#include "fsr3_math.h"   // (longshot: FSR 3.1's depth constants from the projection)
 #include "vk_fsr3.h"   // (fsr3_wanted: AMD FSR 3.1 upscales with inputs of its own; fsr3_engine: on this chain)
 #include "vk_fsr4.h"
 #include "vk_menu.h"
@@ -96,7 +96,7 @@ int temporal_mode() {
     int v = opts.dlss;
     if (dlss > 0) v = dlss >= 2 ? ur::DLAA : ur::DLSS;   // (2 and up: DLAA, as RX_VK_DLSS was clamped before)
     else if (fsr4 > 0) v = fsr4 >= 2 ? ur::FSR4_AA : ur::FSR4;
-    // (hookshot) FSR 3.1, the row's 3 or RX_VK_FSR=1, is an engine of this chain (vk_fsr3.h fsr3_on_chain): its inputs are the
+    // (longshot) FSR 3.1, the row's 3 or RX_VK_FSR=1, is an engine of this chain (vk_fsr3.h fsr3_on_chain): its inputs are the
     // chain's, the skinned draws' motion in them. A switch above goes over the row's FSR 3.1 (fsr3_chosen asks
     // temporal_env_chosen); RX_VK_FSR=1 goes over them
     if (fsr3_on_chain() && fsr3_chosen()) return ur::FSR3;
@@ -216,7 +216,7 @@ struct State {
     std::atomic<bool> holding{false};   // (an engine's state, images or frees still to do: temporal_idle has something to let go)
 };
 State& st() {
-    // (never destroyed: Hookshot leaves through ExitProcess / exit() with the device alive, and `dead` may still hold an
+    // (never destroyed: Longshot leaves through ExitProcess / exit() with the device alive, and `dead` may still hold an
     // engine's state then (an FSR context), whose destructor would call into a library already gone)
     static State& s = *new State;
     return s;
@@ -708,7 +708,7 @@ bool temporal_scene_size(uint32_t width, uint32_t height) {
 
 MkwVkJitter temporal_jitter_sample() {
     static const bool off = env_switch("RX_VK_DLSS_JITTER") == 0;
-    static const bool fsr3_off = env_switch("RX_VK_FSR_JITTER") == 0;   // (hookshot: FSR 3.1's own switch, on the chain too)
+    static const bool fsr3_off = env_switch("RX_VK_FSR_JITTER") == 0;   // (longshot: FSR 3.1's own switch, on the chain too)
     State& s = st();
     const int mode = temporal_mode();
     if (off || mode == ur::GAME || (mode == ur::FSR3 && fsr3_off)) return {};
@@ -772,7 +772,7 @@ void temporal_idle() {
     std::lock_guard lk(s.mu);
     const uint64_t now = texture_frame_no();
     if (now - s.asked <= 120) return;   // (in use, or off for under 120 frames (2 s): kept, a row stepped through comes back at once)
-    // (hookshot, a stutter: kept too while DLSS or FSR 4 is still the Upscaler's choice. Each area change's loading screen has no
+    // (longshot, a stutter: kept too while DLSS or FSR 4 is still the Upscaler's choice. Each area change's loading screen has no
     // gameplay upscale for 2 s and more, and DLSS's feature let go then was made again at the next area's first frame: 44-78 ms
     // of the replay thread at every area entry (12 times in a 15-minute walk, 2026-11-10, #1520). Let go once the row leaves them.
     // RX_VK_DLSS_IDLE_RELEASE=1: let go after 120 frames unused, as before)
@@ -978,7 +978,7 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
         !make_image(cmd, s.output, VK_FORMAT_R16G16B16A16_SFLOAT, dw, dh, VK_IMAGE_USAGE_TRANSFER_DST_BIT))   // (FSR 3.1 copies in)
         return fail("its images were not made");
 
-    // (hookshot) the projection without this frame's jitter, for an engine that makes its depth constants from it (FSR 3.1), and
+    // (longshot) the projection without this frame's jitter, for an engine that makes its depth constants from it (FSR 3.1), and
     // its depth reversed for FSR's passes where the near plane is at 0 (fsr3_math.h): bit 3 of the prep's flags
     float projection[16];
     std::memcpy(projection, cam.projection, sizeof projection);
@@ -1060,7 +1060,7 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
              cam.far_z, cam.fov_y * 57.29578f);
     }
     if (!engine.e->evaluate(cmd, f)) {
-        if (engine.e->retry) {   // (hookshot: this frame only, TemporalEngine::retry; a new history next)
+        if (engine.e->retry) {   // (longshot: this frame only, TemporalEngine::retry; a new history next)
             s.last_frame = 0;
             return fail("its evaluation failed this frame");
         }

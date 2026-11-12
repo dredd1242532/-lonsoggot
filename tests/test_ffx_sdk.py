@@ -120,7 +120,7 @@ class MakeGameTests(unittest.TestCase):
         data = {p: ("file %s" % p).encode() for p, _, _ in ffx_sdk.FILES}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(ffx_sdk, "FILES", fake_table(data)), \
                 mock.patch.object(make_game, "ffx_script", return_value=ffx_sdk), \
-                mock.patch.dict(os.environ, {"HOOKSHOT_FFX_SDK": os.path.join(tmp, "sdk")}):
+                mock.patch.dict(os.environ, {"LONGSHOT_FFX_SDK": os.path.join(tmp, "sdk")}):
             game = os.path.join(tmp, "game")
             os.makedirs(game)
             self.assertIsNone(make_game.place_fsr_runtime(game))   # (nothing fetched: nothing placed)
@@ -178,10 +178,10 @@ class LicenseTests(unittest.TestCase):
 
 
 class BuilderTests(unittest.TestCase):
-    """The Windows Hookshot Builder: the AMD FSR 4 tick shows AMD's license, stays only on yes, and only then adds the flag
+    """The Windows Longshot Builder: the AMD FSR 4 tick shows AMD's license, stays only on yes, and only then adds the flag
     pair (as the NVIDIA DLSS tick does with NVIDIA's)"""
     def setUp(self):
-        folder = ROOT / "builder" / "HookshotBuilder"
+        folder = ROOT / "builder" / "LongshotBuilder"
         self.code = (folder / "MainWindow.xaml.cs").read_text(encoding="utf-8")
         self.xaml = (folder / "MainWindow.xaml").read_text(encoding="utf-8")
 

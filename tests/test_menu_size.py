@@ -62,9 +62,9 @@ static float width_of(int n, float px) { return n * std::ceil(px * 0.5f); }
 int main() {
     {   // (shrink to fit: at its size when it fits; else the largest half-point step that fits; 0 below the least)
         const float s = 1.5f, px = 15 * s;   // (Medium at 1080 lines)
-        auto release = [](float p) { return width_of(16, p); };   // ("Hookshot v2.0.12": as it was)
+        auto release = [](float p) { return width_of(16, p); };   // ("Longshot v2.0.12": as it was)
         CHECK(fit_px(px, 10 * s, 0.5f * s, 317, release) == px);
-        auto source = [](float p) { return width_of(35, p); };    // ("Hookshot v2.0.11-821-g7b81752-dirty")
+        auto source = [](float p) { return width_of(35, p); };    // ("Longshot v2.0.11-821-g7b81752-dirty")
         const float f = fit_px(px, 10 * s, 0.5f * s, 317, source);
         CHECK(f > 0 && f < px && source(f) <= 317 && source(f + 0.5f * s) > 317);   // (the largest step that fits)
         CHECK(std::fabs(f / (0.5f * s) - std::round(f / (0.5f * s))) < 1e-3f);    // (on a step)

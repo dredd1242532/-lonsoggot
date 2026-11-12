@@ -1,4 +1,4 @@
-// (hookshot) RX_VK_RECORDER: the command buffer calls as packets, step 1 of a recorder thread (the "sync" phase).
+// (longshot) RX_VK_RECORDER: the command buffer calls as packets, step 1 of a recorder thread (the "sync" phase).
 //
 // Every vkCmd* call vk_work.h routes here is copied into a packet: its value arguments, and every array and struct it points to (the
 // descriptor writes and the image/buffer/texel infos they point to, push constant bytes, vertex buffer arrays, the rendering info and

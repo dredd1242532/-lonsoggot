@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location("release_parts", ROOT / "scripts/r
 release_parts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release_parts)
 
-PREFIX = "HookshotBuilder/tools/cpm/"
+PREFIX = "LongshotBuilder/tools/cpm/"
 OLD = {"ffmpeg/9.0.2-windows-amd64/lib/avcodec.lib": b"authored ffmpeg",
        "vulkanheaders/v1.4.345/include/vulkan/vulkan.h": b"authored headers"}
 DAV1D = {"dav1d/1.5.4/include/dav1d/dav1d.h": b"authored dav1d header",
@@ -25,7 +25,7 @@ DAV1D = {"dav1d/1.5.4/include/dav1d/dav1d.h": b"authored dav1d header",
 
 class CpmAdd(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix="hookshot-cpm-add-")
+        temporary = tempfile.TemporaryDirectory(prefix="longshot-cpm-add-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.part = self.root / "authored-cpm.zip"
