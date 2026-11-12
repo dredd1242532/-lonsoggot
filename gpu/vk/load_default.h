@@ -33,8 +33,9 @@ inline Choice choose(const char* env, bool native_mesh, bool marker, bool compre
 /// RTX 3090, with other work taking its memory, one first use waited 261 ms (322 ms in the session) and the rule before this
 /// one (a single wait over 100 ms) took a healthy install to start. Now:
 /// - only waits longer than kLongMs count, so the few milliseconds each of a healthy session never add up, however long it is;
-/// - over kNowMs of them in one session: the marker at once (every measured session of the PC where loads at create do not
-///   work: 2.5 s at least);
+/// - over kNowMs of them in one session: the marker at once. The PC where loads at create do not work had tours of 2.5-4.7 s
+///   of waits, and also one session of 62.6 ms: it is taken back at its first session over kNowMs (the second of two there,
+///   at 2,559 ms), not always at its first;
 /// - over kStrikeMs: the marker only if the session before this one was over it too (a strike file says so, taken away at
 ///   each start: two sessions running, not two ever)
 constexpr double kLongMs = 20.0, kStrikeMs = 500.0, kNowMs = 2000.0;

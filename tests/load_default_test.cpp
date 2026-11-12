@@ -39,7 +39,9 @@ int main(int argc, char** argv) {
     // over 500 ms: a strike the first time, the marker when the session before was over it too
     CHECK(waits_verdict(500.1, false) == Waits::kStrike && waits_verdict(1999, false) == Waits::kStrike);
     CHECK(waits_verdict(500.1, true) == Waits::kStart && waits_verdict(2000, true) == Waits::kStart);
-    // the PC where loads at create do not work (RX 580: 2.5-4.7 s a tour): the marker in its first session
+    // the PC where loads at create do not work (RX 580: tours of 2.5-4.7 s, and one session of 62.6 ms followed by one of
+    // 2,559 ms): the marker in its first session over 2 s, nothing for the 62.6 ms one
+    CHECK(waits_verdict(62.6, false) == Waits::kFine);
     CHECK(waits_verdict(2557, false) == Waits::kStart && waits_verdict(3089, false) == Waits::kStart &&
           waits_verdict(4700, false) == Waits::kStart && waits_verdict(2000.1, false) == Waits::kStart);
     CHECK(waits_verdict(2000, false) == Waits::kStrike);
