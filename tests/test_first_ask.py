@@ -24,7 +24,8 @@ def check_source():
     if not body.index("budget.allow(texture_frame_no(), programs_frame_ms())") < ask < body.index("jobs_push("):
         raise SystemExit("the ask is not inside the frame's budget, or not before the pipeline goes to a worker")
     after = body[ask:body.index("jobs_push(")]
-    for needle in ("budget.spent(", "e->ready.store(true, std::memory_order_release);", "return remember(e);", "st_first_ask_over++"):
+    for needle in ("budget.spent(", "e->ready.store(true, std::memory_order_release);", "return remember(e);", "st_first_ask_over++",
+                   "budget.spent(us / 1000.0, had != VK_NULL_HANDLE);", "budget.stopped_by_misses_first()"):
         if needle not in after:
             raise SystemExit("graphics_pipeline's first ask no longer has: " + needle)
     # (this process's own cache is asked before the driver's disk cache: an in-memory answer is a fraction of the other)

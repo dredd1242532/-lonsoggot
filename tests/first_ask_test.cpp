@@ -54,6 +54,33 @@ int main() {
         d.spent(-1.0);   // (a clock that went backwards costs nothing and still counts)
         CHECK(d.asks == 1 && d.ms == 0 && d.allow(3, 16.7));
     }
+    {   // misses: asks no cache answers stop the frame's asks after three in a row, however long the frame; a cold driver
+        // cache costs a frame three asks, not its whole share
+        Budget b;
+        int n = 0;
+        while (b.allow(1, 376.0) && n < 1000) b.spent(0.4, false), n++;
+        CHECK(n == first_ask::kMissesInARow && n == 3 && b.ms < 1.3);
+        CHECK(b.stopped_by_misses_first() && !b.stopped_by_misses_first());   // (said once a frame)
+        CHECK(b.allow(2, 376.0) && !b.stopped_by_misses_first());             // (the next frame asks again)
+        // an answer begins the count again: two misses, a hit, two misses, a hit go on; three in a row stop
+        Budget c;
+        const bool seq[] = {false, false, true, false, false, true, false, false, false};
+        int began = 0;
+        for (bool answered : seq) {
+            if (!c.allow(5, 376.0)) break;
+            c.spent(0.3, answered), began++;
+        }
+        CHECK(began == 9 && !c.allow(5, 376.0) && c.stopped_by_misses_first());
+        // a frame stopped by its time, not by misses, is not counted as one
+        Budget d;
+        while (d.allow(1, 10.0)) d.spent(0.27, true);
+        CHECK(!d.stopped_by_misses_first());
+        // one ask is always allowed in a frame that has asked nothing, and the hits' counts above are unchanged
+        Budget e;
+        CHECK(e.allow(9, 0.0));
+        e.spent(0.4, false);
+        CHECK(e.allow(9, 16.7) && e.misses == 1);
+    }
     std::printf("first_ask: ok\n");
     return 0;
 }

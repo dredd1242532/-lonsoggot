@@ -1084,6 +1084,7 @@ void skip_report_impl(double frames) {
 }
 std::atomic<int64_t> st_pipelines, st_links, st_link_us, st_lib_hits, st_lib_cold, st_lib_built, st_lib_build_us;
 std::atomic<int64_t> st_first_asks, st_first_ask_hits, st_first_ask_over, st_first_ask_us;   // (first_ask.h)
+std::atomic<int64_t> st_first_ask_miss_frames;   // (a recording thread's frames whose asks stopped at misses in a row)
 std::atomic<int64_t> st_first_ask_ours, st_first_ask_ours_us, st_first_ask_driver, st_first_ask_driver_us, st_first_ask_worst_us;
 std::atomic<int64_t> st_pipeline_us;
 double st_wait_ms;
@@ -2244,7 +2245,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             const VkPipeline had = build_graphics(p, s, at, topo, -1, &needs_compiling);
             ask_start_first = false;
             const int64_t us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
-            budget.spent(us / 1000.0);
+            budget.spent(us / 1000.0, had != VK_NULL_HANDLE);
             st_first_asks++, st_first_ask_us += us;
             if (had && use_counters.made_how == 2) st_first_ask_ours++, st_first_ask_ours_us += us;
             else if (had) st_first_ask_driver++, st_first_ask_driver_us += us;
@@ -2258,6 +2259,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             }
         } else {
             st_first_ask_over++;
+            if (budget.stopped_by_misses_first()) st_first_ask_miss_frames++;
         }
     }
     // (linked here, from the libraries: the draw goes ahead, and the worker's full build replaces it when it is done. Not linked
@@ -9602,6 +9604,7 @@ void draw_stats5(int64_t* asks, int64_t* answered, int64_t* over_budget, double*
     *asks = st_first_asks.load(), *answered = st_first_ask_hits.load(), *over_budget = st_first_ask_over.load();
     *ask_ms = st_first_ask_us.load() / 1000.0;
 }
+int64_t draw_first_ask_miss_frames() { return st_first_ask_miss_frames.load(); }
 void draw_stats6(int64_t* ours, double* ours_ms, int64_t* drivers, double* drivers_ms, double* worst_ms) {
     *ours = st_first_ask_ours.load(), *ours_ms = st_first_ask_ours_us.load() / 1000.0;
     *drivers = st_first_ask_driver.load(), *drivers_ms = st_first_ask_driver_us.load() / 1000.0;
