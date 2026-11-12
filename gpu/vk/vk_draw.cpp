@@ -878,6 +878,10 @@ void play_cache_save() {
 /// it asks for is what the prepare built into pcache, an in-memory hit there; asked of the generation first, each would come
 /// from the driver's disk cache and be copied into the generation, and a session's play files would hold every pipeline again
 thread_local bool ask_start_first = false;
+// (precompile_warm's predicted pass, predict_run: how many of them the caches answered without compiling, and how many were compiled)
+std::atomic<bool> predict_counts{false};
+std::atomic<size_t> predict_answered{0}, predict_compiled{0};
+std::atomic<bool> predicted_here{false};   // (predict_run ran in this process already: a preparation done inside the game's own start)
 template <class CI>
 VkResult create_cached(VkResult (*create)(VkPipelineCache, const CI*, VkPipeline*), const CI* ci, VkPipeline* pl) {
     PlayCache* g = play_cache.load();
@@ -1071,6 +1075,7 @@ void skip_report_impl(double frames) {
 }
 std::atomic<int64_t> st_pipelines, st_links, st_link_us, st_lib_hits, st_lib_cold, st_lib_built, st_lib_build_us;
 std::atomic<int64_t> st_first_asks, st_first_ask_hits, st_first_ask_over, st_first_ask_us;   // (first_ask.h)
+std::atomic<int64_t> st_first_ask_ours, st_first_ask_ours_us, st_first_ask_driver, st_first_ask_driver_us, st_first_ask_worst_us;
 std::atomic<int64_t> st_pipeline_us;
 double st_wait_ms;
 
@@ -2224,10 +2229,17 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
             const auto t0 = std::chrono::steady_clock::now();
             bool needs_compiling = false;
             use_counters.made_how = 0;
+            // (this process's own cache first: an answer from memory is a fraction of one from the driver's disk cache, which
+            // is asked next. As the load at a create call and the stage libraries ask: create_cached)
+            ask_start_first = true;
             const VkPipeline had = build_graphics(p, s, at, topo, -1, &needs_compiling);
+            ask_start_first = false;
             const int64_t us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
             budget.spent(us / 1000.0);
             st_first_asks++, st_first_ask_us += us;
+            if (had && use_counters.made_how == 2) st_first_ask_ours++, st_first_ask_ours_us += us;
+            else if (had) st_first_ask_driver++, st_first_ask_driver_us += us;
+            if (us > st_first_ask_worst_us.load(std::memory_order_relaxed)) st_first_ask_worst_us = us;
             if (had) {
                 e->pipeline = had;
                 e->how.store(use_counters.made_how, std::memory_order_relaxed);
@@ -8475,6 +8487,27 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     });
     const bool all = done == total && computes_done == computes.size();
     static const bool prepare_only = env_on("HOOKSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
+    // (the predicted pipelines too, in the game's own process: the preparation built them, for the program variants no list
+    // names, but on NVIDIA only the driver's disk cache carries that over, and an answer from there costs about 3 ms where
+    // one from this process's cache costs a fraction of that: a new game's opening asked for 423 of them at their first
+    // draws, 2.8 ms each. Built again here, from the driver's cache, they are in the cache file every later start loads.
+    // The preparation's own process has just built them (predict_run is its step before this one). RX_VK_WARM_PREDICTED=0: not)
+    static const bool warm_predicted = [] { const char* v = getenv("RX_VK_WARM_PREDICTED"); return !v || !env_value_off(v); }();
+    const auto p0 = std::chrono::steady_clock::now();
+    // (not where this process has built them already: a preparation done inside the game's own start is predict_run before this)
+    const bool again = all && !prepare_only && warm_predicted && !prepare_stopped() && !predicted_here.load();
+    if (again) {
+        predict_counts = true;
+        predict_run(progress);
+        predict_counts = false;
+    }
+    const double predicted_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - p0).count();
+    if (again)
+        logf("vk: precompile: the predicted pipelines built again in the game's own process, into the cache it loads from: %zu "
+             "the caches answered without compiling, %zu compiled, in %.1f s", predict_answered.load(), predict_compiled.load(),
+             predicted_s);
+    else if (all && !prepare_only && warm_predicted && !prepare_stopped())
+        logf("vk: precompile: the predicted pipelines were built by this process already (its own preparation): not again");
     if (all && !prepare_stopped()) {
         pipeline_cache_save(true);   // (in the file before the marker says they are there)
         // (not by the preparation's own process: warm_bounded.h leaves_marker)
@@ -8483,10 +8516,10 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     }
     logf("vk: precompile: %zu noted pipelines of %zu programs and %zu compute pipelines of %zu compute programs built into the "
          "pipeline cache and let go (%zu and %zu not made, %zu whose program variant is not kept), on %u threads in %.1f s (the "
-         "compute ones %.1f s)%s", built.load(), progs.size(), computes_built.load(), computes.size(), failed.load(),
-         computes_failed.load(), no_program.load(), threads,
+         "compute ones %.1f s, the predicted ones after them %.1f s)%s", built.load(), progs.size(), computes_built.load(),
+         computes.size(), failed.load(), computes_failed.load(), no_program.load(), threads,
          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
-         std::chrono::duration<double>(std::chrono::steady_clock::now() - c0).count(),
+         std::chrono::duration<double>(p0 - c0).count(), predicted_s,
          !all || prepare_stopped() ? "; stopped before the end: the next start goes on"
          : prepare_only ? "; the preparation's own process: the first start of the game builds them again, from the driver's "
                           "cache, into the cache it then loads from" : "");
@@ -8899,7 +8932,15 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
                             first.lock();
                             if (pre->graphics_begun.load()) first.unlock();
                         }
-                        const VkPipeline pl = build_graphics(p, n->s, at, topo);
+                        // (the game's own process, precompile_warm: asked without compiling first, to say how many the
+                        // caches already had: those come from the driver's cache into this process's, the rest are compiled)
+                        VkPipeline pl = VK_NULL_HANDLE;
+                        if (predict_counts.load(std::memory_order_relaxed) && dev.vk13.pipelineCreationCacheControl) {
+                            bool needs_compiling = false;
+                            pl = build_graphics(p, n->s, at, topo, -1, &needs_compiling);
+                            (pl ? predict_answered : predict_compiled)++;
+                        }
+                        if (!pl) pl = build_graphics(p, n->s, at, topo);
                         pre->graphics_begun = true;
                         if (first.owns_lock()) first.unlock();
                         if (pl) vkDestroyPipeline(dev.device, pl, nullptr), pre->made++;
@@ -8977,6 +9018,7 @@ std::string predicted_sample_path() { return pipe_notes_path() + ".predicted"; }
 }
 void predicted_sample_write(const std::vector<std::unique_ptr<PipeNote>>& predicted) {
     predicted_this_run = true;
+    predicted_here = true;
     constexpr size_t kSample = 32;
     std::vector<PipeNote> pick;
     for (size_t i = 0; i < predicted.size() && pick.size() < kSample; i += std::max<size_t>(1, predicted.size() / kSample))
@@ -9485,6 +9527,11 @@ void draw_stats3(int64_t* pending_skips, int64_t* waits, double* wait_ms) {
 void draw_stats5(int64_t* asks, int64_t* answered, int64_t* over_budget, double* ask_ms) {
     *asks = st_first_asks.load(), *answered = st_first_ask_hits.load(), *over_budget = st_first_ask_over.load();
     *ask_ms = st_first_ask_us.load() / 1000.0;
+}
+void draw_stats6(int64_t* ours, double* ours_ms, int64_t* drivers, double* drivers_ms, double* worst_ms) {
+    *ours = st_first_ask_ours.load(), *ours_ms = st_first_ask_ours_us.load() / 1000.0;
+    *drivers = st_first_ask_driver.load(), *drivers_ms = st_first_ask_driver_us.load() / 1000.0;
+    *worst_ms = st_first_ask_worst_us.load() / 1000.0;
 }
 bool draw_stats4(int64_t* links, double* link_ms, int64_t* lib_hits, int64_t* lib_cold, int64_t* lib_built, double* lib_build_ms) {
     *links = st_links.load(), *link_ms = st_link_us.load() / 1000.0, *lib_hits = st_lib_hits.load(), *lib_cold = st_lib_cold.load();

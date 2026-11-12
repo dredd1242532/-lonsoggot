@@ -27,6 +27,10 @@ def check_source():
     for needle in ("budget.spent(", "e->ready.store(true, std::memory_order_release);", "return remember(e);", "st_first_ask_over++"):
         if needle not in after:
             raise SystemExit("graphics_pipeline's first ask no longer has: " + needle)
+    # (this process's own cache is asked before the driver's disk cache: an in-memory answer is a fraction of the other)
+    before = body[:ask]
+    if not before.rindex("ask_start_first = true;") > before.rindex("budget.allow(") or "ask_start_first = false;" not in after:
+        raise SystemExit("the first ask does not ask this process's own cache first")
     if "dev.vk13.pipelineCreationCacheControl" not in body[:ask]:
         raise SystemExit("the ask is made where the driver cannot be asked without compiling")
 

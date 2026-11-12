@@ -37,6 +37,13 @@ def check_source():
     # at create calls or to the keep-everything precompile; and a start that dropped the pipeline cache's files drops the marker)
     if warm.count("precompile_built_write(") != 2 or warm.index("pipeline_cache_save(true);") > warm.index("warm_bounded::leaves_marker("):
         raise SystemExit("precompile_warm writes the marker by another way than warm_bounded::leaves_marker, or before the cache is saved")
+    # (the predicted pipelines are built again in the game's own process, into the cache it loads from then on: after the noted
+    # and compute ones, before the cache is saved and the marker left, and never in the preparation's own process, whose step
+    # before this one has just built them)
+    again = warm.find("const bool again = all && !prepare_only && warm_predicted && !prepare_stopped() && !predicted_here.load();")
+    run_it = warm.find("predict_run(progress);")
+    if again < 0 or not warm.index("program_cache_compute_keys()") < again < run_it < warm.index("pipeline_cache_save(true);"):
+        raise SystemExit("precompile_warm does not build the predicted pipelines in the game's process before it saves the cache")
     if 'if (prepare_stopped() || env_on("HOOKSHOT_PREPARE_ONLY")) return;' not in run:
         raise SystemExit("a --prepare-shaders run goes on after its warm")
     if "if (pcache_drop_stale()) remove(precompile_built_path().c_str());" not in run or \
