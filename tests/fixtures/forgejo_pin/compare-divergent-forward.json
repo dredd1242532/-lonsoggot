@@ -1,0 +1,105 @@
+{
+  "kind": "recorded",
+  "method": "GET",
+  "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/compare/72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7...7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb?files=false&verification=false",
+  "authentication": "none",
+  "recorded_at": "2026-11-12T22:39:09Z",
+  "provenance": "Public unauthenticated GET via read; complete JSON response body retained without mutation. Schema-supported query controls omit unused file, stat and verification payloads.",
+  "body": {
+    "total_commits": 1,
+    "commits": [
+      {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+        "sha": "7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+        "created": "2026-11-12T22:23:47Z",
+        "html_url": "https://git.magicbean.dev/MagicBeanDev/Longshot/commit/7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+        "commit": {
+          "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+          "author": {
+            "name": "hckrman101",
+            "email": "hckrman101@noreply.git.magicbean.dev",
+            "date": "2026-11-12T22:23:47Z"
+          },
+          "committer": {
+            "name": "hckrman101",
+            "email": "hckrman101@noreply.git.magicbean.dev",
+            "date": "2026-11-12T22:23:47Z"
+          },
+          "message": "feat(menu): the Game frame rate cap, Descriptor reuse and Sampler cache apply in play (#7)\n\nThe three rows took a restart only because their values were read once at the start.\n\n- Game frame rate cap: host/nn_vi.c reads the row at each present (HOS_OPT_FPS_CAP, 53, through the\n  renderer's existing option callback; no MkwVkHost/MkwVkRenderer change), the vsync thread re-reads\n  its period each tick, and a cap brought down gives the game back its own limiter (+0xfc), its rate\n  (+0x2c8) and its step (hos_frame_seconds_bits). The FPS counter's line follows the row. HOS_FPS_MAX\n  still holds the cap for a run.\n- Descriptor reuse and Sampler cache: the menu tells vk_draw.cpp the rows at load and on each change\n  (menu_debug_rows). A draw keeps descriptors only from a build made with the same setting, so turning\n  reuse on never trusts a build that recorded no slot versions. RX_VK_DESC_REUSE and\n  RX_VK_SAMPLER_CACHE still hold them for a run.\n\nChecks: tests/test_frame_rate_cap_step.py gains the cap changed in play (up, down, Uncapped, back to\n60, and with HOS_FPS_STEP=0); tests/test_menu_env_on.py the Debug rows changed in play.\n\n---\nMoved from NotRexed/Hookshot#2900 (closed when the GitHub account was suspended).\n\nCo-authored-by: hckrman101 <239247847+hckrman101@users.noreply.github.com>\nReviewed-on: https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/7\n",
+          "tree": {
+            "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/trees/7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+            "sha": "7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb",
+            "created": "2026-11-12T22:23:47Z"
+          },
+          "verification": null
+        },
+        "author": {
+          "id": 1,
+          "login": "hckrman101",
+          "login_name": "",
+          "source_id": 0,
+          "full_name": "",
+          "email": "hckrman101@noreply.git.magicbean.dev",
+          "avatar_url": "https://git.magicbean.dev/avatars/f79d28a0b685ca503b7424ff79f98910b9ddcc94da6ced53a708a4ae7f82f5d6",
+          "html_url": "https://git.magicbean.dev/hckrman101",
+          "language": "",
+          "is_admin": false,
+          "last_login": "0001-01-01T00:00:00Z",
+          "created": "2026-11-12T02:52:53Z",
+          "restricted": false,
+          "active": false,
+          "prohibit_login": false,
+          "location": "",
+          "pronouns": "",
+          "website": "",
+          "description": "",
+          "visibility": "limited",
+          "followers_count": 0,
+          "following_count": 0,
+          "starred_repos_count": 0,
+          "username": "hckrman101"
+        },
+        "committer": {
+          "id": 1,
+          "login": "hckrman101",
+          "login_name": "",
+          "source_id": 0,
+          "full_name": "",
+          "email": "hckrman101@noreply.git.magicbean.dev",
+          "avatar_url": "https://git.magicbean.dev/avatars/f79d28a0b685ca503b7424ff79f98910b9ddcc94da6ced53a708a4ae7f82f5d6",
+          "html_url": "https://git.magicbean.dev/hckrman101",
+          "language": "",
+          "is_admin": false,
+          "last_login": "0001-01-01T00:00:00Z",
+          "created": "2026-11-12T02:52:53Z",
+          "restricted": false,
+          "active": false,
+          "prohibit_login": false,
+          "location": "",
+          "pronouns": "",
+          "website": "",
+          "description": "",
+          "visibility": "limited",
+          "followers_count": 0,
+          "following_count": 0,
+          "starred_repos_count": 0,
+          "username": "hckrman101"
+        },
+        "parents": [
+          {
+            "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/012dfc5136aa0fcb828c432b293e00b7e1a2d846",
+            "sha": "012dfc5136aa0fcb828c432b293e00b7e1a2d846",
+            "created": "0001-01-01T00:00:00Z"
+          }
+        ],
+        "files": null,
+        "stats": {
+          "total": 301,
+          "additions": 200,
+          "deletions": 101
+        }
+      }
+    ],
+    "files": []
+  }
+}

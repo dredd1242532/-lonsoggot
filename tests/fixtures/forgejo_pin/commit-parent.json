@@ -1,0 +1,45 @@
+{
+  "kind": "recorded",
+  "method": "GET",
+  "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e?stat=false&files=false&verification=false",
+  "authentication": "none",
+  "recorded_at": "2026-11-12T22:39:09Z",
+  "provenance": "Public unauthenticated GET via read; complete JSON response body retained without mutation. Schema-supported query controls omit unused file, stat and verification payloads.",
+  "body": {
+    "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+    "sha": "4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+    "created": "2026-11-12T14:44:59-05:00",
+    "html_url": "https://git.magicbean.dev/MagicBeanDev/Longshot/commit/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+    "commit": {
+      "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+      "author": {
+        "name": "Mooki",
+        "email": "7663497+mooki000@users.noreply.github.com",
+        "date": "2026-11-12T13:44:59-06:00"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-11-12T14:44:59-05:00"
+      },
+      "message": "test(saves): cover newest-first directory order in the late-link case (#2888)\n\n**What this is for:** keep the late-link regression from #2832 effective\non both creation-order and newest-first directory listings, as its\nauthor asked for on that pull request (the review found the same weak\nspot).\n\n## What changed\n\nIn the case \"a link to an entry that moves too\", half of the 36 absolute\nlinks are now made before `save/` exists and half after. Every existing\nassertion and every link stays; no product code changes.\n\n## How it was tested\n\nArch Linux, GCC 16.2.1 and Clang 23.1.3. The new test against the\nproduct source from before #2832 (`76101111`) and against main\n(`3723fd0b`), 30 runs a cell, passes/failures:\n\n| Product source + new test | btrfs GCC | btrfs Clang | tmpfs GCC |\ntmpfs Clang |\n|---|---:|---:|---:|---:|\n| Before #2832 | 0/30 | 0/30 | 0/30 | 0/30 |\n| Current-main base | 30/0 | 30/0 | 30/0 | 30/0 |\n\n- Listed unsorted, btrfs (creation order) and tmpfs (newest first) each\nput 18 of the added links before `save` and 18 after it. With #2832's\nown test the old code failed only on btrfs; now it fails on both.\n- This does not guarantee a late link for arbitrary hashed/name order; a\nname-hash model can still put every link before save. The added names\nretain broader coverage, not a guarantee.\n- The project's workflow, run on my fork before opening this:\n`tests/test_linux_saves_move.py` passes on Ubuntu and is skipped cleanly\non Windows as before; [the\nrun](https://github.com/mooki000/Hookshot/actions/runs/43276384898) is\nred only in two tests that are red on main itself today\n(`test_readme_menu_rows.py`, fixed by #2857; `test_wb_shadow_remake.py`\non Windows, fixed by #2868).\n- Complete game-free suite here: 500 passed, 2 failed, 20 skipped. The\ntwo: `test_readme_menu_rows.py` (main's, as above) and the updater\ndigest check (a .NET reference pack this PC lacks).\n\n**Not measured:** ext4/xfs or other real filesystem orders; Windows,\nwhere this check skips; a real game's first-start migration or real\nsaves.\n\nRefs #2832.\n\nAssisted-by: GPT-6 Astra\nCo-Authored-By: GPT-6 Astra <noreply@openai.com>\n\nCo-authored-by: GPT-6 Astra <noreply@openai.com>",
+      "tree": {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/trees/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+        "sha": "4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+        "created": "2026-11-12T14:44:59-05:00"
+      },
+      "verification": null
+    },
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/ee64a963b2ad6e127fbe79218f40898234d51b7f",
+        "sha": "ee64a963b2ad6e127fbe79218f40898234d51b7f",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": null,
+    "stats": null
+  }
+}

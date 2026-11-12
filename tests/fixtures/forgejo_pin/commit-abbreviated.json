@@ -1,0 +1,45 @@
+{
+  "kind": "recorded",
+  "method": "GET",
+  "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/e2a4d4539?stat=false&files=false&verification=false",
+  "authentication": "none",
+  "recorded_at": "2026-11-12T22:39:09Z",
+  "provenance": "Public unauthenticated GET via read; complete JSON response body retained without mutation. Schema-supported query controls omit unused file, stat and verification payloads.",
+  "body": {
+    "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/e2a4d45398ffba162f54026bb7e708a7157bbed9",
+    "sha": "e2a4d45398ffba162f54026bb7e708a7157bbed9",
+    "created": "2026-11-12T15:36:48-05:00",
+    "html_url": "https://git.magicbean.dev/MagicBeanDev/Longshot/commit/e2a4d45398ffba162f54026bb7e708a7157bbed9",
+    "commit": {
+      "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/e2a4d45398ffba162f54026bb7e708a7157bbed9",
+      "author": {
+        "name": "hckrman101",
+        "email": "239247847+hckrman101@users.noreply.github.com",
+        "date": "2026-11-12T15:19:20-05:00"
+      },
+      "committer": {
+        "name": "hckrman101",
+        "email": "239247847+hckrman101@users.noreply.github.com",
+        "date": "2026-11-12T15:36:48-05:00"
+      },
+      "message": "Rename the project to Longshot\n\nHookshot becomes Longshot everywhere: names, files and folders, binaries, HOOKSHOT_* environment variables, the\nsettings and save folders, and links. The translation tables and two tests are re-sorted for the new name, and the\nHDR shader header names the shader's new checksum (comments only; the compiled code is the same). New logo (the\nreadme, the builders' splash screens and the game's window icon) and the new Discord invite.\n",
+      "tree": {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/trees/e2a4d45398ffba162f54026bb7e708a7157bbed9",
+        "sha": "e2a4d45398ffba162f54026bb7e708a7157bbed9",
+        "created": "2026-11-12T15:36:48-05:00"
+      },
+      "verification": null
+    },
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+        "sha": "4dd972a85ed5291ba7747ead68fbc38cdd69ec8e",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": null,
+    "stats": null
+  }
+}

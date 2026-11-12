@@ -29,6 +29,10 @@ python -I scripts/test_requests.py request --pr 2711 --summary "Keep 8 GB cards 
 - `--notes`: for the tester (shown by `show`, not on Discord), 1 to 4 lines they can follow without reading the
   whole PR: where in the game, what to compare, what counts as a pass, which log lines or numbers to copy. Before and
   after (main against the PR) when it is about speed.
+- `--commit`: optional full SHA or 7–40 hexadecimal prefix. Omitted means the observed PR head. The script resolves
+  it to a full SHA with the public Forgejo API and accepts only that head or a proven ancestor, checking comparisons
+  in both directions. A missing, ambiguous, divergent or unproven commit refuses the request; no git-fetch backend
+  or additional credentials are used.
 - The rules of [CONTRIBUTING.md](../../../CONTRIBUTING.md) apply: no game files or anything made from them, no
   secrets or personal details.
 - The script refuses a second open request from you for the same PR and needs.
@@ -52,11 +56,17 @@ python -I scripts/test_requests.py show T-XXXX --json
 ```
 
 - Several people can test one request. `claims` lists who is testing it now (a claim clears by itself when its
-  tester stops renewing it); `results` has each tester's result (pass, fail or mixed) and `comment`, the link to their
-  comment on the PR. Read it:
+  tester stops renewing it); `claim_commits` and `claim_heads` record what each tester claimed.
+- Use **`current_results`**, not raw `results`, when saying the requested version has passed or failed. JSON
+  `results` retains recorded results; `current_results` selects those matching the active full `commit`.
+  Each result has the verdict and `comment`, the link to its PR comment. Read it:
   `python -I scripts/forge.py pr view <pr> --comments`.
-- Report it to the user in a few lines: who tested, on what, the result, the numbers or the failure. If it failed,
-  continue with the failure on the PR (reproduce, fix, push), then close the request and ask again with a new one.
+- Report who tested which commit, on what, the result, the numbers or the failure. After a fix is pushed, the
+  requester can keep the same request and select the new version with
+  `python -I scripts/test_requests.py update T-XXXX --commit <new-sha>`.
+  The API must prove the new pin belongs to the observed head. Old results are retained but are no longer current
+  for a different pin. Existing claims keep their old commit and head; a late result from one is historical.
+  Only the requester can update an open request. Close and ask separately when the hardware needs change.
 
 ## 3. Close it
 
@@ -65,7 +75,7 @@ the PR is merged or closed: `python -I scripts/test_requests.py cancel T-XXXX`. 
 
 ## The messages
 
-Each message in the room is one line led by the ID and the action, so people can also type them in Element:
+Each message in the room starts with the ID and action. These examples show the readable first lines:
 
 ```
 🧪 T-7KQ2 request: Keep 8 GB cards inside their memory budget
@@ -76,6 +86,16 @@ Needs: AMD RX 6000 or newer, Windows                (then the PR link, then the 
 🧪 T-7KQ2 done pass: https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/12#issuecomment-123
 🧪 T-7KQ2 cancel
 ```
+
+New request, claim, done and update messages end with the full-SHA pair `Commit: <sha>` then `Head: <sha>`.
+For an update, the first line is `<mark> T-7KQ2 update: <full-sha>`. The pair is metadata only at the end;
+`Commit:` or `Head:` earlier in notes stays notes. A new request records the selected commit and the observed PR
+head, not a moving branch name. Footerless legacy requests retain their old behavior, including requests generated
+by a relay that has not adopted pin footers.
+`claim --commit` and `done --commit` on a footerless card refuse; its requester must `update` it to introduce a pin.
+
+The CLI's offline checks do not exercise sign-in, live room posts, or the Discord relay's card rendering. Do not
+claim those services display or enforce the pin based only on an offline test result.
 
 Errors: exit code 3 is a refusal with the reason (not yours, already done); `not signed in` or `no longer valid`:
 sign in again; `cannot reach`: the server is down, tell the user.

@@ -1,0 +1,13 @@
+{
+  "kind": "recorded",
+  "method": "GET",
+  "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/compare/e2a4d45398ffba162f54026bb7e708a7157bbed9...4dd972a85ed5291ba7747ead68fbc38cdd69ec8e?files=false&verification=false",
+  "authentication": "none",
+  "recorded_at": "2026-11-12T22:39:09Z",
+  "provenance": "Public unauthenticated GET via read; complete JSON response body retained without mutation. Schema-supported query controls omit unused file, stat and verification payloads.",
+  "body": {
+    "total_commits": 0,
+    "commits": [],
+    "files": []
+  }
+}

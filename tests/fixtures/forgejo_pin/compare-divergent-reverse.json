@@ -1,0 +1,55 @@
+{
+  "kind": "recorded",
+  "method": "GET",
+  "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/compare/7afe6ae1b005ad4eb91dfcfb8545cdaac6bd1cfb...72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7?files=false&verification=false",
+  "authentication": "none",
+  "recorded_at": "2026-11-12T22:39:09Z",
+  "provenance": "Public unauthenticated GET via read; complete JSON response body retained without mutation. Schema-supported query controls omit unused file, stat and verification payloads.",
+  "body": {
+    "total_commits": 1,
+    "commits": [
+      {
+        "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+        "sha": "72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+        "created": "2026-11-12T17:25:29-05:00",
+        "html_url": "https://git.magicbean.dev/MagicBeanDev/Longshot/commit/72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+        "commit": {
+          "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+          "author": {
+            "name": "hckrman101",
+            "email": "239247847+hckrman101@users.noreply.github.com",
+            "date": "2026-11-12T17:21:37-05:00"
+          },
+          "committer": {
+            "name": "hckrman101",
+            "email": "239247847+hckrman101@users.noreply.github.com",
+            "date": "2026-11-12T17:25:29-05:00"
+          },
+          "message": "docs: credit NotRexed for Hookshot, and README.md, docs/BAKE.md, no changelog.txt\n\nThe rename to Longshot also rewrote NotRexed's credit (\"NotRexed: Longshot\") and\nparts of the project's history. Longshot is a fork of Hookshot, so say so.\n\n- README: Longshot is a fork of NotRexed's Hookshot (top and Credits); NotRexed\n  is credited for Hookshot; EvilOOT's link back to evilmfkr/Hookshot; the License\n  section names Hookshot's copyright next to the Longshot contributors'.\n- History back to Hookshot: CHANGELOG.md's four renamed entries and a note that\n  the entries up to 2.2.0-rc.1 are Hookshot's; TomShafford/Hookshot (a Hookshot\n  fork) in oot_heap_retry; the PROVENANCE notes; measured runs of Hookshot builds\n  in docs/cpu-profile.md and docs/saves.md; the Fritchii recipe's note.\n- readme.md is README.md, BAKE.md is docs/BAKE.md, with every reference.\n- changelog.txt is gone: Hookshot's 0.1.0 changelog is linked in its repository.\n",
+          "tree": {
+            "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/trees/72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+            "sha": "72345cf66b8fcb42b8ac6a981ef29ffd7f27fcd7",
+            "created": "2026-11-12T17:25:29-05:00"
+          },
+          "verification": null
+        },
+        "author": null,
+        "committer": null,
+        "parents": [
+          {
+            "url": "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/git/commits/012dfc5136aa0fcb828c432b293e00b7e1a2d846",
+            "sha": "012dfc5136aa0fcb828c432b293e00b7e1a2d846",
+            "created": "0001-01-01T00:00:00Z"
+          }
+        ],
+        "files": null,
+        "stats": {
+          "total": 141,
+          "additions": 68,
+          "deletions": 73
+        }
+      }
+    ],
+    "files": []
+  }
+}

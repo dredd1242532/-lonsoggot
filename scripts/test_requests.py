@@ -2,13 +2,15 @@
 #test-requests:magicbean.dev (copied to Discord, where each request shows who is testing it and the results).
 
     python -I scripts/test_requests.py request --pr 2711 --summary "Keep 8 GB cards inside their memory budget" \
-        [--needs "8 GB NVIDIA or AMD card, Windows"] [--notes "what to check, where in the game"]
+        [--needs "8 GB NVIDIA or AMD card, Windows"] [--notes "what to check, where in the game"] [--commit <sha>]
     python -I scripts/test_requests.py list [--all] [--mine] [--json]
     python -I scripts/test_requests.py show T-7KQ2 [--json]
-    python -I scripts/test_requests.py claim T-7KQ2 [--again]
+    python -I scripts/test_requests.py claim T-7KQ2 [--again] [--commit <confirmed-pin>]
     python -I scripts/test_requests.py renew [T-7KQ2]
     python -I scripts/test_requests.py release T-7KQ2
     python -I scripts/test_requests.py done T-7KQ2 --result pass|fail|mixed --comment <URL of your comment on the PR>
+        [--commit <tested-sha>]
+    python -I scripts/test_requests.py update T-7KQ2 --commit <sha>
     python -I scripts/test_requests.py cancel T-7KQ2
 
 It uses the sign-in of scripts/team_chat.py (run `team_chat.py login` once). Every message is one line that starts
@@ -34,6 +36,12 @@ Requests are for Longshot's pull requests on git.magicbean.dev. Only approved re
 may push to Longshot, or a maintainer put the "testing wanted" label on it. Anything else waits for a maintainer to add
 the label (the card on Discord says so, and list shows it last); this keeps strangers' code off testers' PCs until
 someone has looked at it. The script asks git.magicbean.dev, with the team sign-in.
+
+New cards pin a full commit SHA. A trailing Commit/Head footer records the requested pin and the observed PR head;
+earlier note lines stay notes. A moved head requires explicit confirmation of the SAME pin, never silently following
+the new head. Only the requester may update the pin. Claims remember their pin/head; done records the tested pin,
+refusing another claimed commit. After expiry/release give the full tested SHA explicitly. Earlier results remain in
+JSON results, but only matching-pin current_results are displayed or counted. Footerless cards retain the old rules.
 
 list puts first what most needs a tester: requests nobody has tested or is testing, then the ones being tested with no
 result yet, then the ones with results; oldest first within each. Exit code 3: the action was refused (closed, not
@@ -69,11 +77,67 @@ WRITERS = ("owner", "admin", "write")  # may push to Longshot: their PRs need no
 HISTORY_LIMIT = 50000  # messages read back; renews add one per tester every half hour
 EXIT_REFUSED = team_chat.EXIT_REFUSED
 
-LINE = re.compile(r"^%s\s*(T-[%s]{4})\s+(request|claim|renew|release|done|cancel)\b(?:\s+(pass|fail|mixed))?\s*:?\s*(.*)$"
+LINE = re.compile(r"^%s\s*(T-[%s]{4})\s+(request|claim|renew|release|done|cancel|update)\b(?:\s+(pass|fail|mixed))?\s*:?\s*(.*)$"
                   % (MARK, ID_CHARS))
 UNTIL = re.compile(r"until\s+(\d{4}-\d\d-\d\d)[ T](\d\d:\d\d)Z", re.I)
 PR_URL = re.compile(r"https://git\.magicbean\.dev/MagicBeanDev/Longshot/pulls/(\d+)")
 COMMENT_URL = re.compile(r"^https://git\.magicbean\.dev/MagicBeanDev/Longshot/pulls/(\d+)#issuecomment-\d+$")
+SHA = re.compile(r"[0-9a-fA-F]{7,40}")
+FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
+FOOTER = re.compile(r"(?:^|\n)Commit: ([0-9a-fA-F]{40})\nHead: ([0-9a-fA-F]{40})\Z")
+
+
+def pin_fields(text):
+    """Only the final reserved footer is metadata; earlier note lines stay notes."""
+    match = FOOTER.search(text)
+    return (text[:match.start()].rstrip(), match[1].lower(), match[2].lower()) if match else (text, None, None)
+
+
+def pin_footer(commit, head):
+    return "\nCommit: %s\nHead: %s" % (commit, head)
+
+
+def same_commit(candidate, commit):
+    return bool(isinstance(candidate, str) and SHA.fullmatch(candidate) and commit.startswith(candidate.lower()))
+
+
+def clear_claim(t, user):
+    for key in ("claims", "claim_commits", "claim_heads"):
+        t[key].pop(user, None)
+
+
+def current_results(t):
+    """Historical results remain in JSON, but do not satisfy a different pin."""
+    return {u: r for u, r in t["results"].items()
+            if not t.get("commit") or r.get("commit") == t["commit"]}
+
+
+def pr_commit(commit, head):
+    """Resolve a pin and prove membership using both Forgejo comparison directions."""
+    if not isinstance(head, str) or not FULL_SHA.fullmatch(head):
+        raise team_chat.ChatError("Forgejo did not return a full PR head SHA")
+    head = head.lower()
+    if commit is not None and (not isinstance(commit, str) or not SHA.fullmatch(commit)):
+        raise team_chat.ChatError("a commit must be 7 to 40 hexadecimal characters")
+    if commit is None or commit.lower() == head:
+        return head
+    commit = commit.lower()
+    try:
+        pin = forge_get("/git/commits/" + commit + "?stat=false&files=false&verification=false").get("sha")
+        if not isinstance(pin, str) or not FULL_SHA.fullmatch(pin) or not pin.lower().startswith(commit.lower()):
+            raise team_chat.ChatError("Forgejo did not resolve the requested commit")
+        pin = pin.lower()
+        if pin == head:
+            return pin
+        ahead = forge_get("/compare/%s...%s?files=false&verification=false" % (pin, head)).get("total_commits")
+        behind = forge_get("/compare/%s...%s?files=false&verification=false" % (head, pin)).get("total_commits")
+    except (urllib.error.URLError, OSError, ValueError, AttributeError) as error:
+        raise team_chat.ChatError("cannot verify the pinned commit on Forgejo: %s" % error) from None
+    # Unequal unrelated histories can return zero BOTH ways. One empty comparison
+    # is not ancestry proof; require positive evidence in the other direction.
+    if type(ahead) is not int or type(behind) is not int or ahead <= 0 or behind != 0:
+        raise team_chat.ChatError("the pin is not a verified ancestor of the PR head (diverged, newer, or unknown)")
+    return pin
 
 
 def parse(body):
@@ -98,7 +162,7 @@ def expire(t, ts):
     """Drop the claims that ran out by ts."""
     for user, until in sorted(t["claims"].items(), key=lambda kv: kv[1]):
         if until <= ts:
-            del t["claims"][user]
+            clear_claim(t, user)
             t["history"].append((until, user, "expired"))
 
 
@@ -112,6 +176,7 @@ def replay(events, now=None):
         if not p:
             continue
         tid, action, result, rest, more = p
+        more, commit, head = pin_fields(more)
         sender, ts = ev.get("sender"), ev.get("origin_server_ts", 0) / 1000
         t = tests.get(tid)
         if action == "request":
@@ -127,28 +192,43 @@ def replay(events, now=None):
                     notes.append(extra)
             tests[tid] = {"id": tid, "requester": sender, "requested": ts, "summary": rest, "needs": needs,
                           "pr": int(pr.group(1)) if pr else None, "notes": "\n".join(notes), "status": "open",
-                          "claims": {}, "results": {}, "history": [(ts, sender, action)]}
+                          "claims": {}, "claim_commits": {}, "claim_heads": {}, "results": {},
+                          "history": [(ts, sender, action)]}
+            if commit:
+                tests[tid].update(commit=commit, head=head, requested_head=head)
             continue
         if not t or t["status"] != "open":
             continue
         expire(t, ts)
         mine = sender in t["claims"]
         if action == "claim" or action == "renew" and mine:
+            if action == "claim" and t.get("commit") and commit != t["commit"]:
+                continue
+            if action == "claim" and commit:
+                t["claim_commits"][sender], t["claim_heads"][sender] = commit, head
             until = until_time(rest)
             if until is None or until <= ts:
                 until = ts + 60 * DEFAULT_TTL
             t["claims"][sender] = min(until, ts + 60 * MAX_TTL)
             action = "renew" if mine else "claim"
         elif action == "release" and mine:
-            del t["claims"][sender]
+            clear_claim(t, sender)
         elif action == "done" and result:
             link = COMMENT_URL.match(rest)
             if not link or t["pr"] and int(link.group(1)) != t["pr"]:
                 continue
-            t["claims"].pop(sender, None)
+            claimed = t["claim_commits"].get(sender)
+            if t.get("commit") and (not commit or claimed and commit != claimed):
+                continue
+            clear_claim(t, sender)
             t["results"][sender] = {"result": result, "comment": rest, "time": ts}
+            if commit:
+                t["results"][sender].update(commit=commit, head=head)
+        elif action == "update" and sender == t["requester"] and commit and rest == commit:
+            t.update(commit=commit, head=head, requested_head=head)
         elif action == "cancel" and sender == t["requester"]:
             t["status"], t["claims"] = "closed", {}
+            t["claim_commits"], t["claim_heads"] = {}, {}
         else:
             continue
         t["history"].append((ts, sender, action))
@@ -160,7 +240,7 @@ def replay(events, now=None):
 
 def need(t):
     """Sort key: what most needs a tester first; requests waiting for a maintainer last."""
-    return (t.get("approved") is False, bool(t["results"]), bool(t["claims"]), t["requested"])
+    return (t.get("approved") is False, bool(current_results(t)), bool(t["claims"]), t["requested"])
 
 
 def forge_get(path, token=None):
@@ -192,7 +272,7 @@ def pr_info(number):
         except (urllib.error.URLError, OSError, ValueError):
             pass
     return {"state": state, "labels": [label.get("name") for label in pr.get("labels") or []], "author": author,
-            "writer": writer}
+            "writer": writer, "head": (pr.get("head") or {}).get("sha")}
 
 
 def approved(info):
@@ -214,6 +294,9 @@ def annotate(tests):
         info = seen[t["pr"]]
         t["pr_state"] = info and info["state"]
         t["approved"] = info and approved(info)
+        if t.get("commit"):
+            t["head"] = info and info.get("head")
+            t["head_moved"] = t["head"] != t["commit"] if t["head"] else None
 
 
 def history(config, rid):
@@ -274,15 +357,18 @@ def describe(t, me=None):
         return "you" if user == me else user
     head = "%s  %s  %s/pulls/%s  %s" % (t["id"], t["status"].upper(), REPO, t["pr"], t["summary"])
     lines = [head, "    asked by %s on %s" % (who(t["requester"]), stamp(t["requested"]))]
+    if t.get("commit"):
+        lines.append("    commit: %s; current PR head: %s%s" % (
+            t["commit"], t.get("head") or "unknown", " (moved)" if t.get("head_moved") else ""))
     if t["needs"]:
         lines.append("    needs: " + t["needs"])
     if t["claims"]:
         lines.append("    being tested by " + ", ".join(who(u) for u in sorted(t["claims"])))
-    for user, r in sorted(t["results"].items(), key=lambda kv: kv[1]["time"]):
+    for user, r in sorted(current_results(t).items(), key=lambda kv: kv[1]["time"]):
         lines.append("    %s by %s: %s" % (r["result"], who(user), r["comment"]))
     if t.get("approved") is False:
         lines.append('    waiting for a maintainer to add the "%s" label on git.magicbean.dev: not claimable yet' % LABEL)
-    elif not t["claims"] and not t["results"] and t["status"] == "open":
+    elif not t["claims"] and not current_results(t) and t["status"] == "open":
         lines.append("    nobody has tested it yet")
     if t.get("pr_state") in ("merged", "closed"):
         lines.append("    the PR is %s" % t["pr_state"])
@@ -292,7 +378,7 @@ def describe(t, me=None):
 
 
 def public(t):
-    return {k: v for k, v in t.items() if k != "history"}
+    return dict({k: v for k, v in t.items() if k != "history"}, current_results=current_results(t))
 
 
 def find(tests, tid):
@@ -317,6 +403,8 @@ def cmd_request(args, config):
         if t["pr"] == pr and t["requester"] == config["user_id"] and t["status"] == "open" \
                 and t["needs"].lower() == needs.lower():
             return refuse("%s already asks for this" % t["id"])
+    info = pr_info(pr)
+    commit = pr_commit(args.commit, info.get("head"))
     tid = new_id(tests)
     text = "%s %s request: %s\n" % (MARK, tid, summary)
     if needs:
@@ -324,12 +412,8 @@ def cmd_request(args, config):
     text += "%s/pulls/%d" % (REPO, pr)
     if args.notes and args.notes.strip():
         text += "\n" + args.notes.strip()
-    send(config, rid, text)
+    send(config, rid, text + pin_footer(commit, info["head"]))
     print("asked for testing as %s" % tid)
-    try:
-        info = pr_info(pr)
-    except team_chat.ChatError:
-        return 0
     if not approved(info):
         print('note: #%d is not from a collaborator and has no "%s" label, so nobody can claim it until a maintainer '
               "adds the label on git.magicbean.dev" % (pr, LABEL))
@@ -367,8 +451,10 @@ def cmd_claim(args, config):
     t = find(tests, args.id)
     if t["status"] != "open":
         return refuse("%s is closed" % t["id"])
-    if me in t["results"] and not args.again:
-        return refuse("you already tested %s (%s); --again to test it again" % (t["id"], t["results"][me]["result"]))
+    if args.commit and not t.get("commit"):
+        return refuse("this legacy card has no pin to confirm; ask its requester to update it")
+    if me in current_results(t) and not args.again:
+        return refuse("you already tested %s (%s); --again to test it again" % (t["id"], current_results(t)[me]["result"]))
     if t["pr"]:
         info = pr_info(t["pr"])  # no answer from git.magicbean.dev: no claim
         if not approved(info):
@@ -376,7 +462,19 @@ def cmd_claim(args, config):
                           % (t["id"], t["pr"], LABEL))
         if info["state"] in ("merged", "closed"):
             return refuse("#%d is %s" % (t["pr"], info["state"]))
-    send(config, rid, "%s %s claim: %s" % (MARK, t["id"], until_line()))
+    footer = ""
+    if t.get("commit"):
+        if not t["pr"]:
+            return refuse("a pinned card must name its PR")
+        if args.commit and not same_commit(args.commit, t["commit"]):
+            return refuse("--commit must confirm the card's exact pin, not choose another")
+        head = info.get("head")
+        if head != t["commit"] and not args.commit:
+            return refuse("PR head moved; ask the requester to update, or explicitly confirm --commit " + t["commit"])
+        pin = pr_commit(t["commit"], head)
+        footer = pin_footer(pin, head)
+        print("build exactly " + pin)
+    send(config, rid, "%s %s claim: %s%s" % (MARK, t["id"], until_line(), footer))
     others = sorted(u for u in t["claims"] if u != me)
     print("claimed %s%s; renew while you test (`renew` renews all of yours)" % (
         t["id"], ", also being tested by " + ", ".join(others) if others else ""))
@@ -418,12 +516,27 @@ def cmd_done(args, config):
     t = find(tests, args.id)
     if t["status"] != "open":
         return refuse("%s is closed" % t["id"])
+    if args.commit and not t.get("commit"):
+        return refuse("this legacy card has no pin; report without --commit or ask its requester to update it")
     link = COMMENT_URL.match(url)
     if not link:
         return refuse("--comment must be the link to your comment on the PR (%s/pulls/<n>#issuecomment-...)" % REPO)
     if t["pr"] and int(link.group(1)) != t["pr"]:
         return refuse("that comment is on #%s, the request is for #%s" % (link.group(1), t["pr"]))
-    send(config, rid, "%s %s done %s: %s" % (MARK, t["id"], args.result, url))
+    footer = ""
+    if t.get("commit"):
+        me = config["user_id"]
+        claimed = t["claim_commits"].get(me)
+        commit = args.commit or claimed
+        if claimed and not same_commit(commit, claimed):
+            return refuse("--commit differs from the commit you claimed")
+        if claimed:
+            commit = claimed
+        if not commit or not FULL_SHA.fullmatch(commit):
+            return refuse("no active pinned claim; give the full --commit actually tested")
+        head = t["claim_heads"].get(me) or t["requested_head"]
+        footer = pin_footer(commit.lower(), head)
+    send(config, rid, "%s %s done %s: %s%s" % (MARK, t["id"], args.result, url, footer))
     print("marked %s done (%s)" % (t["id"], args.result))
     return 0
 
@@ -441,6 +554,20 @@ def cmd_cancel(args, config):
     return 0
 
 
+def cmd_update(args, config):
+    rid, tests = state(config)
+    t = find(tests, args.id)
+    if t["status"] != "open" or t["requester"] != config["user_id"]:
+        return refuse("only the requester can update an open card")
+    info = pr_info(t["pr"])
+    if info["state"] in ("merged", "closed"):
+        return refuse("the PR is " + info["state"])
+    commit = pr_commit(args.commit, info.get("head"))
+    send(config, rid, "%s %s update: %s%s" % (MARK, t["id"], commit, pin_footer(commit, info["head"])))
+    print("updated %s to %s; earlier results remain historical" % (t["id"], commit))
+    return 0
+
+
 def main(argv=None):
     team_chat.unicode_output()  # summaries and notes are anyone's text: no crash on Windows' code page in a pipe
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -450,6 +577,10 @@ def main(argv=None):
     p.add_argument("--summary", required=True, help="the change in one line, like a title")
     p.add_argument("--needs", help='what testing needs, one line, e.g. "AMD RX 6000 or newer, Linux"')
     p.add_argument("--notes", help="what to check and where (a few lines, for the tester)")
+    p.add_argument("--commit", help="commit to test (default: the current PR head)")
+    p = sub.add_parser("update", help="move your open card to another verified commit")
+    p.add_argument("id")
+    p.add_argument("--commit", required=True)
     p = sub.add_parser("list", help="open requests, what most needs a tester first (--all: closed ones too)")
     p.add_argument("--all", action="store_true")
     p.add_argument("--mine", action="store_true", help="only the ones you asked for, are testing or tested")
@@ -460,6 +591,7 @@ def main(argv=None):
     p = sub.add_parser("claim", help="start testing a request")
     p.add_argument("id")
     p.add_argument("--again", action="store_true", help="test a request you already reported on")
+    p.add_argument("--commit", help="explicitly confirm the existing pin when the PR head moved")
     p = sub.add_parser("renew", help="keep your claims (all of them, or one)")
     p.add_argument("id", nargs="?")
     p = sub.add_parser("release", help="stop testing without a result")
@@ -468,11 +600,12 @@ def main(argv=None):
     p.add_argument("id")
     p.add_argument("--result", required=True, choices=("pass", "fail", "mixed"))
     p.add_argument("--comment", required=True)
+    p.add_argument("--commit", help="commit actually tested (default: your active claim)")
     p = sub.add_parser("cancel", help="close your request")
     p.add_argument("id")
     args = parser.parse_args(argv)
     commands = {"request": cmd_request, "list": cmd_list, "show": cmd_show, "claim": cmd_claim, "renew": cmd_renew,
-                "release": cmd_release, "done": cmd_done, "cancel": cmd_cancel}
+                "release": cmd_release, "done": cmd_done, "cancel": cmd_cancel, "update": cmd_update}
     try:
         return commands[args.command](args, team_chat.session()) or 0
     except team_chat.ChatError as error:

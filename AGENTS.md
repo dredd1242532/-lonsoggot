@@ -130,14 +130,24 @@ A PR that needs a run on hardware you don't have (another GPU maker, OS, VRAM si
 request. The guide for people is [docs/test-requests.md](docs/test-requests.md).
 
 - **Asking** ([.claude/skills/request-testing/SKILL.md](.claude/skills/request-testing/SKILL.md), `/request-testing`):
-  `request --pr <n> --summary "..." --needs "..." --notes "..."` posts a request with an ID (`T-7KQ2`); `list --mine
-  --all` shows who is testing it and each result with a link to the tester's comment; `cancel` closes it. A request
+  `request --pr <n> --summary "..." --needs "..." --notes "..." [--commit <sha>]` posts a request with an ID
+  (`T-7KQ2`), pinned to a full commit (the observed PR head when omitted). `update T-7KQ2 --commit <sha>` lets only
+  its requester select a new pin without deleting old results. `list --mine --all` shows current-pin results with
+  links to the testers' comments; JSON keeps raw `results` and adds `current_results`. `cancel` closes it. A request
   can be picked up when the PR's author may push to Longshot, or a maintainer added the `testing wanted` label; the
   label alone also posts a request for the PR.
 - **Testing** ([.claude/skills/testing/SKILL.md](.claude/skills/testing/SKILL.md), `/testing`, or `/loop 30m
   /testing` to keep picking them up): take the first request in `list` that fits your hardware, `claim` it, `renew`
-  about every 30 minutes (a claim clears by itself after 90), test the PR, comment the results on it
-  (`forge.py pr comment`), then `done --result pass|fail|mixed --comment <link>`.
+  about every 30 minutes (a claim clears by itself after 90), build the full pinned **Commit**, comment the results
+  on the PR (`forge.py pr comment`), then `done --result pass|fail|mixed --comment <link>`. `claim` refuses a moved
+  head unless `--commit <pin>` explicitly confirms the old pin and public API comparisons still prove membership.
+  A claim saves both its commit and observed head; renewal does not retarget it. `done` defaults to that claim's
+  commit, and refuses a different `--commit`. Without an active claim, a pinned result needs an explicit full SHA.
+  Results completed for an old pin remain historical after an update, not current successes for the new code.
+  Footerless legacy requests keep their previous behavior without the new flag; `claim --commit` and
+  `done --commit` on those cards refuse until the requester introduces a pin with `update`. Pin checks use public
+  Forgejo GETs, not git fetch or another sign-in.
 
-Every message is one line led by the ID and the action (`🧪 T-7KQ2 claim: until 2026-11-12 16:40Z`); the room's
-messages are the record.
+Every message starts with the ID and the action (`🧪 T-7KQ2 claim: until 2026-11-12 16:40Z`); pinned request,
+claim, done and update messages end with `Commit: <full-sha>` then `Head: <full-sha>`. The room's messages are the
+record. Offline CLI checks do not exercise live sign-in, room posting or Discord card rendering.

@@ -1,0 +1,41 @@
+{
+  "kind": "mutation",
+  "provenance": "Artificial negative controls, not recorded server responses. Each case replaces or removes a field from the named real fixture body, or deliberately reuses it at another route. Transport errors are synthetic; no missing or ambiguous commit response is claimed to have been observed live.",
+  "commit_source": "commit-abbreviated.json",
+  "commit_cases": [
+    {"name": "missing sha", "remove": "sha"},
+    {"name": "null sha", "field": "sha", "value": null},
+    {"name": "numeric sha", "field": "sha", "value": 123},
+    {"name": "short sha", "field": "sha", "value": "e2a4d4539"},
+    {"name": "nonhex sha", "field": "sha", "value": "gggggggggggggggggggggggggggggggggggggggg"},
+    {"name": "different commit than requested prefix", "field": "sha", "value": "4dd972a85ed5291ba7747ead68fbc38cdd69ec8e"},
+    {"name": "object replaced with list", "body": []},
+    {"name": "object replaced with null", "body": null},
+    {"name": "object replaced with string", "body": "ambiguous commit"}
+  ],
+  "compare_source": "compare-forward.json",
+  "compare_cases": [
+    {"name": "missing total_commits", "remove": "total_commits"},
+    {"name": "null total_commits", "field": "total_commits", "value": null},
+    {"name": "string total_commits", "field": "total_commits", "value": "1"},
+    {"name": "boolean total_commits", "field": "total_commits", "value": true},
+    {"name": "negative total_commits", "field": "total_commits", "value": -1},
+    {"name": "fractional total_commits", "field": "total_commits", "value": 0.5},
+    {"name": "object replaced with list", "body": []},
+    {"name": "object replaced with null", "body": null}
+  ],
+  "unsafe_both_zero": {
+    "source": "compare-reverse.json",
+    "mutation": "Return this real zero-count response for both comparison routes of two unequal SHAs. It is a routing mutation, not a recorded unrelated-history result."
+  },
+  "prefix_resolution": {
+    "source": "commit-full.json",
+    "mutation": "Replay this real full-commit body at synthetically shortened 7- and 39-hex commit routes to exercise accepted input lengths. Only commit-abbreviated.json records an actual abbreviated endpoint."
+  },
+  "transport_cases": [
+    {"name": "missing commit", "status": 404},
+    {"name": "ambiguous commit conflict", "status": 409},
+    {"name": "ambiguous commit unprocessable", "status": 422},
+    {"name": "unavailable comparison", "status": 500}
+  ]
+}

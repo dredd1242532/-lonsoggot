@@ -22,6 +22,11 @@ updates itself:
 The colour says where it stands: blue nobody yet, yellow being tested, green passed, red a failure, orange mixed, grey
 closed. A 👀 reaction means someone is testing it, ✅ that results are in.
 
+New requests pin one full commit SHA. The card's terminal **Commit** and **Head** record the selected pin and the
+head observed when it was selected; a later push does not rewrite that footer. `show` and JSON also report the
+currently observed PR head (`head`, with the original in `requested_head`). The CLI's current results belong to the
+pin, not every result ever posted. Offline CLI checks do not establish how the live Discord card renders these fields.
+
 You can take part with an agent (Claude Code or another) doing the work, or by hand with four commands.
 
 ## Set up once (about 10 minutes)
@@ -74,8 +79,10 @@ python -I scripts/test_requests.py done T-7KQ2 --result pass --comment <link to 
 
 Between `claim` and `done`:
 
-1. Check out the PR in its own folder (`python -I scripts/forge.py pr checkout <number>`, then a worktree of the branch `pr/<number>`), build it as usual and
-   note the commit.
+1. Check out the PR in its own folder (`python -I scripts/forge.py pr checkout <number>`), then make a detached
+   worktree at the full **Commit** from `show`, not the moving `pr/<number>` branch. Check the worktree's
+   `git rev-parse HEAD` against that SHA before building. If the commit is unavailable, stop rather than substituting
+   the latest head.
 2. Do what the request's notes ask (`show` prints them); if they compare against `main`, build `main` the same way and
    run both under the same conditions.
 3. Comment on the PR (`python -I scripts/forge.py pr comment <number> --body-file <file>`, or on git.magicbean.dev),
@@ -84,13 +91,16 @@ Between `claim` and `done`:
    ```
    Test request T-7KQ2: pass
 
-   Hardware: RX 6700 XT 12 GB, Adrenalin 25.10.1, Windows 11. Built 1a2b3c4 (the PR head), against main 5d6e7f8.
+   Hardware: RX 6700 XT 12 GB, Adrenalin 25.10.1, Windows 11. Built <full pinned commit>, against main <full commit>.
    What I checked: Kakariko at night, 3 runs each.
    Result: 9.1 ms against 11.4 ms GPU time; no flicker after loads. Log: "[vram] budget 7.8 GB, used 6.9 GB".
    ```
 
 4. Copy the comment's link (`forge.py pr comment` prints it; on the site, the time stamp next to your name) and run `done` with `--result pass`, `fail`
-   or `mixed`.
+   or `mixed`. On a pinned request, omitted `--commit` means the commit saved in your active claim; an explicit
+   `--commit <sha>` must resolve to that same commit, not a different build.
+   Without an active claim, a pinned result requires an explicit full 40-hex `--commit` of the build actually tested;
+   an expired or released claim supplies no default.
 
 ## The rules
 
@@ -104,6 +114,14 @@ Between `claim` and `done`:
   hardware fits. Several people can test the same request, and every result counts.
 - **Claim before you test, one test at a time, and keep it alive.** A claim clears by itself after 90 minutes without
   a `renew`, so nobody waits on a test that stopped. Release as soon as you know you won't finish.
+- **A changed PR head needs a deliberate choice.** `claim` refuses when the observed head differs from the pin.
+  `claim T-7KQ2 --commit <pinned-sha>` explicitly confirms that you will test the old pin; the API must still prove it
+  belongs to the observed head's history. This is not permission to test the new head under the old pin. Ask the
+  requester to `update` the pin when the new code is what needs testing.
+- **Old results are not current results.** JSON `results` retains the recorded results; `current_results` selects
+  only those matching the active pin. Sorting, display and the already-tested check use `current_results`.
+  A claim already in progress keeps its commit and observed head across a request update. Its eventual result
+  remains historical if its commit no longer matches; renewing it does not move it to the new pin.
 - **Results go on the PR**, as a comment: hardware, driver, OS, the commit you built, what you checked, numbers or the
   steps to reproduce a failure. The Discord message links to it.
 - **No game files or anything made from them** in comments or messages ([CONTRIBUTING.md](../CONTRIBUTING.md#the-rule-with-no-exceptions)).
@@ -120,6 +138,28 @@ python -I scripts/test_requests.py list --mine --all          who is on it, and 
 python -I scripts/test_requests.py cancel T-7KQ2              close it: you have what you need
 ```
 
+`request --commit <sha>` selects a full SHA or a 7–40 hexadecimal prefix; without it the request pins the PR head.
+The script resolves prefixes through Longshot's public Forgejo API and checks comparisons **in both directions**.
+Only the exact head or a proven ancestor is accepted. Divergence, an unequal pair with zero commits in both
+directions, a missing or ambiguous commit and malformed API responses are not evidence of membership. There is no
+git-fetch backend or separate verification command for this check, and no extra credentials are needed.
+
+After pushing a new version, the requester can change the pin on the same request:
+
+```
+python -I scripts/test_requests.py update T-7KQ2 --commit <new-sha>
+```
+
+Only the requester can update an open request. The new pin must belong to the current observed PR head. Existing
+results are retained, but results for an old pin no longer satisfy the new one; testers who only tested the old pin
+do not need `--again` to take the new one. `--again` still deliberately repeats a result for the same pin.
+
+Request and update metadata ends with `Commit: <full-sha>` followed by `Head: <full-sha>`. Earlier lines with those
+names in notes are ordinary text, not metadata. Existing cards with **no footer** keep their old unpinned behavior;
+do not infer a commit for an old result or an automatically generated request that has no footer.
+`--commit` on a footerless legacy `claim` or `done` is refused rather than ignored; the requester must `update`
+the card to introduce a pin first. Omitting the new flag preserves the legacy behavior.
+
 **Or just label the PR.** Any open PR with the `testing wanted` label gets a request by itself within a few minutes,
 posted for its author with the PR's title (what to test then comes from the PR's description, so say it there). It
 closes again when the label comes off or the PR is merged or closed. If your PR isn't from a collaborator, ask a
@@ -129,7 +169,10 @@ and Linux) are clearer as separate requests.
 ## If something goes wrong
 
 - `not signed in` or `no longer valid`: run `python -I scripts/team_chat.py login` again.
-- `refused: you already tested ...`: pick another, or `claim --again` if the PR changed since.
+- `refused: you already tested ...`: pick another, or `claim --again` to deliberately retest the same pin.
+- A head/pin mismatch: use `show`, then explicitly confirm the existing pin with `claim --commit <pin>` or ask the
+  requester to update it. Do not work around a failed membership check.
 - `cannot reach`: the server is down; try later.
-- The messages in the room are one line each, led by the ID and the action (`🧪 T-7KQ2 claim: until 2026-11-12
-  16:40Z`); people can type them in Element too, and the script and Discord follow the same rules.
+- Messages in the room start with the ID and the action (`🧪 T-7KQ2 claim: until 2026-11-12 16:40Z`), followed by
+  any metadata lines. Request, claim, done and update records use the terminal full-SHA pair. Their readable first
+  lines stay unchanged; pin-aware rendering by the live Discord relay is separate from these offline CLI checks.

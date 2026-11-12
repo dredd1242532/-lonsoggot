@@ -25,14 +25,15 @@ python -I scripts/test_requests.py list          (open requests, what most needs
 python -I scripts/test_requests.py list --json
 ```
 
-`list` is already in the order to pick from: requests nobody has tested or is testing first, then ones someone is
-testing with no result yet, then ones that have results (oldest first within each), and last the ones waiting for a
-maintainer (`"approved": false`: not by a collaborator and not labelled `testing wanted`), which can't be claimed:
-skip them. Go down it and take the **first
-one this PC fits** (its needs: a request for "AMD RX 6000 or newer" is not for an RX 580 or an NVIDIA card; no needs
-means any PC). Skip the ones you are testing or already reported on (`claims` and `results` in the JSON name the
-testers), unless the PR changed since your result. If none fit, say so and stop. Show the user the pick (ID, summary,
-PR, needs, notes, who else is on it) and let them confirm, unless they told you to pick on your own.
+`list` is already in the order to pick from: requests nobody has tested at the current pin or is testing first, then
+ones being tested with no current result, then ones with current results (oldest first within each), and last the
+ones waiting for a maintainer (`"approved": false`: not by a collaborator and not labelled `testing wanted`), which
+can't be claimed: skip them. Go down it and take the **first one this PC fits** (its needs: a request for
+"AMD RX 6000 or newer" is not for an RX 580 or an NVIDIA card; no needs means any PC). Skip the ones you are testing
+or already reported on (`claims` and **`current_results`** in the JSON name the testers). Raw `results` also retains
+historical results for old pins; those do not mean the current pin was tested. If none fit, say so and stop. Show the
+user the pick (ID, summary, PR, needs, notes, full `commit`, observed `head`, who else is on it) and let them confirm,
+unless they told you to pick on your own.
 
 ## 3. Claim it
 
@@ -40,11 +41,16 @@ PR, needs, notes, who else is on it) and let them confirm, unless they told you 
 python -I scripts/test_requests.py claim T-XXXX
 ```
 
-- Others may be testing it too (the script says who); that's fine, each result counts. A refusal (exit code 3) means
-  the request is closed, or you already reported on it (`--again` only if the PR changed since).
+- Others may be testing it too; that's fine, each result counts. A refusal (exit code 3) can mean the request is
+  closed or you already reported on this pin (`--again` deliberately retests that same pin).
+- On a pinned request, `claim` refuses if the PR head has moved away from the pin. Only use
+  `claim T-XXXX --commit <pinned-sha>` if you deliberately mean to test that old pin; the public Forgejo API must
+  still prove it belongs to the observed head. Otherwise ask the requester to `update T-XXXX --commit <new-sha>`.
+  Do not substitute the newest head. A claim saves `claim_commits` and `claim_heads` per tester.
 - A claim lasts 90 minutes and then simply clears. **Keep it alive while you work:** run
   `python -I scripts/test_requests.py renew` (no ID: all your claims) about every 30 minutes, and at every pause in a
   long build or run. Nothing shows on Discord when you renew.
+  Renewal preserves the claim's commit and head even if the requester updates the card.
 - If you stop without a result (no time, the build fails for reasons unrelated to the PR, the user changes their
   mind): `release T-XXXX` straight away.
 
@@ -58,9 +64,11 @@ build, look at what the PR changes that runs on this PC (build and Python script
 downloads, deletes or reaches outside the repository); if something does what the PR doesn't explain, stop, release
 the claim and tell the user.
 
-1. Get the PR's head in its own folder, not on top of the user's work: `python -I scripts/forge.py pr checkout <pr>`
-   (it fetches the head as the branch, or jj bookmark, `pr/<pr>`), then `git worktree add --detach
-   ../Longshot-test-<pr> pr/<pr>`. Note the commit you built.
+1. Fetch the PR in its own folder, not on top of the user's work: `python -I scripts/forge.py pr checkout <pr>`.
+   For a pinned request, create `git worktree add --detach ../Longshot-test-<pr> <full-pinned-commit>` and check
+   `git rev-parse HEAD` there against the claim's commit before building. The fetched `pr/<pr>` branch can move;
+   it is not the test identity. Stop if the pin is unavailable. Footerless legacy requests remain unpinned:
+   use `pr/<pr>` for those and record the exact commit built.
 2. Build and run as in [docs/development.md](../../../docs/development.md) (*Use*, *Building*, *Running a test*). If
    the notes compare against main, build main the same way and run both under the same conditions, swapping the
    order once.
@@ -79,7 +87,7 @@ request's ID:
 ```
 Test request T-XXXX: pass | fail | mixed
 
-Hardware: <GPU, VRAM>, driver <version>, <OS>. Built <commit> (the PR head)<, against main <commit>>.
+Hardware: <GPU, VRAM>, driver <version>, <OS>. Built <full claimed commit><, against main <full commit>>.
 What I checked: ...
 Result: ... (numbers in a small table when comparing; the log lines that matter; screenshot links)
 ```
@@ -96,8 +104,16 @@ Then mark it done with that comment's link (the URL `forge.py pr comment` prints
 python -I scripts/test_requests.py done T-XXXX --result pass --comment https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/<pr>#issuecomment-<n>
 ```
 
-`--result` is `pass`, `fail` or `mixed`. The script checks the link is a comment on the request's PR. Discord then
-shows ✅ with the result and the link. Remove the test folder: `git worktree remove ../Longshot-test-<pr>`.
+`--result` is `pass`, `fail` or `mixed`. The script checks the link is a comment on the request's PR. On a pinned
+request, `done` defaults to the active claim's commit. Optional `--commit <sha>` must resolve to that same commit;
+it cannot change what you claimed. If the card moved to another pin while you worked, completing your old claim
+records a historical result, not a current result for the new code. Once a claim expires or is released, there is
+no implicit commit: a result without a claim requires an explicit **full 40-hex SHA** of the build actually tested.
+Footerless legacy requests keep their previous behavior. The result's link is intended for the Discord relay, but
+offline CLI tests do not exercise live sign-in, room posting or Discord card rendering.
+Remove only your test folder when finished: `git worktree remove ../Longshot-test-<pr>`.
+On a footerless legacy card, supplying `--commit` to `claim` or `done` refuses instead of ignoring the flag.
+The requester must introduce a pin with `update` first; commands without the new flag keep the legacy behavior.
 
 ## The testing loop
 

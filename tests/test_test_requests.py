@@ -25,6 +25,7 @@ spec.loader.exec_module(tr)
 
 T = "\N{TEST TUBE}"
 PR = "https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/2711"
+PR_HEAD = "e2a4d45398ffba162f54026bb7e708a7157bbed9"
 COMMENT = PR + "#issuecomment-123"
 FAILS = []
 ANN, BOB, CAT = ("@%s:magicbean.dev" % n for n in ("ann", "bob", "cat"))
@@ -143,7 +144,7 @@ FORGE = {}  # PR number -> what pr_info returns, or an exception to raise
 
 
 def fake_pr_info(number):
-    got = FORGE.get(number, {"state": "open", "labels": [], "author": "x", "writer": True})
+    got = FORGE.get(number, {"state": "open", "labels": [], "author": "x", "writer": True, "head": PR_HEAD})
     if isinstance(got, Exception):
         raise got
     return got
@@ -172,7 +173,8 @@ def test_commands():
                         "AMD  RX 6000+,  Linux", "--notes", "x")
     lines = sent[0].splitlines() if sent else []
     check(code == 0 and tr.LINE.match(lines[0]) and lines[0].endswith("request: Fix walls") and lines[1:] == [
-        "Needs: AMD RX 6000+, Linux", PR, "x"], "request: summary, needs, PR link, notes: %r" % sent)
+        "Needs: AMD RX 6000+, Linux", PR, "x", "Commit: " + PR_HEAD, "Head: " + PR_HEAD],
+          "request: summary, needs, PR link, notes, full pin footer: %r" % sent)
     code, sent, _ = run(events, "ann", "request", "--pr", PR, "--summary", "again", "--needs", "amd rx 6000+, linux")
     check(code == 3 and not sent, "the same open request twice is refused")
     code, sent, _ = run(events, "bob", "claim", "t-7kq2")
