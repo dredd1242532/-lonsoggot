@@ -4,7 +4,8 @@ Compile the real menu rows, set_row, menu_setting_set, preset, save and options-
 reader with hardware/UI stand-ins. Exercise every saved scale through every engine,
 including a restart while the game's own upscaler is selected. Auto (this PC) starts
 inactive; a separate case checks its fallback scaling and handover to manual choices
-with the real apply_auto and menu_auto_tune. No game or GPU.
+with the real apply_auto and menu_auto_tune. The four-row fixture still compiles
+the complete shared set_row; unrelated renderer actions must never run. No game or GPU.
 """
 import argparse
 import re
@@ -52,6 +53,9 @@ using namespace mkwvk;
 namespace ur = mkwvk::upscaler_rows;
 int failures = 0, checks = 0;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; std::fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); } } while (0)
+// set_row also dispatches Debug-row neighbours in the same product function.
+// None is among this fixture's four rows: reaching the renderer hook is a failure.
+void menu_debug_rows(int, int) { CHECK(false); }
 /* OPTIONS */
 /* AUTO_PRESET */
 Options opts;
