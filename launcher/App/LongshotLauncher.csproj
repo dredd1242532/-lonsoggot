@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Longshot Launcher's window (Avalonia): Windows and Linux. Its logic is launcher/Core -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>LongshotLauncher</AssemblyName>
+    <RootNamespace>LongshotLauncher</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- (the Windows program's icon: the Longshot logo the setup uses, builder/setup/longshot.ico) -->
+    <ApplicationIcon>../../builder/setup/longshot.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia"/>
+    <PackageReference Include="Avalonia.Desktop"/>
+    <PackageReference Include="Avalonia.Themes.Fluent"/>
+    <PackageReference Include="Avalonia.Wayland"/>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Core/LongshotLauncher.Core.csproj"/>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- (the 2.x Builder's own Inter and logo, not a copy: one set of files in the repository) -->
+    <AvaloniaResource Include="../../builder/LongshotBuilder/Fonts/Inter-*.ttf" Link="Assets/Fonts/%(Filename)%(Extension)"/>
+    <AvaloniaResource Include="../../assets/longshot.png" Link="Assets/longshot.png"/>
+  </ItemGroup>
+</Project>

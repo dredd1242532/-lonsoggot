@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "folder": "/home/player/Games/Longshot",
+  "version": "nightly-2025-1a2b3c4d",
+  "track": "nightly",
+  "default": true,
+  "settings": {
+    "nup": null,
+    "romfs": "/home/player/dump/romfs",
+    "exefs": "/home/player/dump/exefs",
+    "language": "de-DE",
+    "dlss": false,
+    "dlssLicense": true,
+    "fsr": false,
+    "fsrLicense": false,
+    "prepareShaders": false,
+    "memoryGb": null,
+    "jobs": null,
+    "work": null
+  }
+}
