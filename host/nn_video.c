@@ -740,7 +740,8 @@ static void dec_acquire(Ctx *c) {
     if (ARG(1)) G64(ARG(1)) = 0;
     if (!d) { RET(RESULT_NO_OUTPUT); return; }
     /* (the library aborts on any failure here: the hardware call waits for a picture. Up to ~100 ms for one decoded
-       by another thread's submission; then a free buffer as it was, so the caller is never refused) */
+       by another thread's submission, and ~500 ms for the first: on Windows a 4-thread CPU's first decode ran 426 ms
+       and the 100 ms wait handed the buffer out black. Then a free buffer as it was, so the caller is never refused) */
     /* (longshot, #1929) and no virtual core held through it: the decoding blocks (dav1d waits for its own frame
        threads), and with the core held the movie thread kept it 100-270 ms on Linux while a thread waiting for that core
        ran without one. It is taken again only once d->lock is let go, as in hos_cv_sleep: waiting for a core while
@@ -748,13 +749,14 @@ static void dec_acquire(Ctx *c) {
     const int away = hos_vcore_away();
     AcquireSRWLockExclusive(&d->lock);
     decode_pending(d);
-    /* (longshot) The wait is for a picture another thread's submission is about to bring, ~100 ms of it. It was 50 tries of a
+    /* (longshot) The wait is for a picture another thread's submission is about to bring. It was 50 tries of a
        2 ms sleep, and such a sleep takes 4-5 ms: 245-257 ms, on the thread a movie's end joins (title to game: the game's main
-       thread in hos_thread_join for a frame of ~250 ms, every start). Now by the clock, and none after a Stop or a Flush with
-       nothing submitted since: no picture is coming then. HOS_VIDEO_ACQUIRE_TRIES=1: 50 tries, as before */
+       thread in hos_thread_join for a frame of ~250 ms, every start). Now by the clock, ~100 ms, and none after a Stop or a Flush
+       with nothing submitted since: no picture is coming then. The first acquire waits ~500 ms: on Windows a 4-thread CPU's
+       first decode ran 426 ms and the 100 ms wait handed the buffer out black. HOS_VIDEO_ACQUIRE_TRIES=1: 50 tries, as before */
     static int by_tries = -1;
     if (by_tries < 0) by_tries = env_on("HOS_VIDEO_ACQUIRE_TRIES");
-    const int64_t wait_until = hos_now_ns() + 100000000;
+    const int64_t wait_until = hos_now_ns() + (d->acquires ? 100000000 : 500000000);
     for (int tries = 0; !d->qn && !d->eos && (by_tries ? tries < 50 : !d->stopped && hos_now_ns() < wait_until); tries++) {
         ReleaseSRWLockExclusive(&d->lock);
         hos_sleep_ns(2000000);
@@ -789,8 +791,11 @@ static void dec_acquire(Ctx *c) {
         return;
     }
     {   /* (longshot) The game takes one picture a frame, and the sound plays on: under 60 fps the movie fell behind its
-           sound (the intro "slow motion, audio ahead", issues 146 and 179). Pictures behind the movie's clock are skipped:
-           the next ones decoded, as the whole movie is submitted at once. HOS_VIDEO_NO_CATCHUP=1: as before */
+           sound (the intro "slow motion, audio ahead", issues 146 and 179). Pictures already decoded are skipped.
+           Decoding the next one in order to skip it is not, when that decode takes longer than the gap between
+           pictures: the clock gains the decode and the picture is thrown away, so the next acquire is further behind
+           (Windows, Intel UHD, 19.5 ms a picture against 16.7, skipped 1933 of 2221). A faster decoder still decodes
+           ahead and skips. HOS_VIDEO_NO_CATCHUP=1: nothing skipped */
         static int off = -1;
         if (off < 0) off = env_on("HOS_VIDEO_NO_CATCHUP");
         const int64_t now = hos_now_ns(), late = 25000000;   /* (a frame and a half at 60 fps) */
@@ -802,6 +807,9 @@ static void dec_acquire(Ctx *c) {
             if (d->queue[d->qhead].pts + late >= due) break;
             if (d->qn < 2) {
                 if (!d->phead) break;
+                const int64_t spacing = d->decoded > 1 ? (d->end_pts - d->first_pts) / (d->decoded - 1) : 0;
+                const int64_t each = d->decoded > 0 ? d->decode_ns / d->decoded : 0;
+                if (spacing > 0 && each > spacing) break;
                 decode_next(d);
                 continue;
             }
