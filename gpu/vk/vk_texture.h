@@ -26,7 +26,7 @@ struct Texture {
     VkImageType type = VK_IMAGE_TYPE_2D;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     VkImageUsageFlags usage = 0;
-    VkImageCreateFlags create_flags = 0;   // (hookshot: as its image was made, for the compaction's copy of it)
+    VkImageCreateFlags create_flags = 0;   // (longshot: as its image was made, for the compaction's copy of it)
     uint32_t width = 1, height = 1, depth = 1, levels = 1, layers = 1;   // the image's (after skip)
     uint32_t skip = 0;        // top levels of the texture left out (huge textures: RX_VK_TEX_MAX_DIM, _MAX_MB)
     // (a huge array kept whole as a sparse resident image instead: each layer gets device memory when it is first
@@ -44,7 +44,7 @@ struct Texture {
     bool cube = false;        // CUBE_COMPATIBLE
     bool astc = false;        // ASTC blocks decoded into RGBA8 (block_w x block_h)
     bool bc = false;          // (and kept as BC3 or BC7: big ones, re-encoded on the GPU after decoding; vk_texture.cpp)
-    bool bc_resized = false;  // (hookshot-amd: its BC image is a resized copy, uneven block levels on AMD; vk_texture.cpp)
+    bool bc_resized = false;  // (longshot-amd: its BC image is a resized copy, uneven block levels on AMD; vk_texture.cpp)
     int block_w = 1, block_h = 1, bpb = 0;   // the storage's blocks
     // the game's texture
     uint64_t gpu = 0, guest = 0, guest_size = 0;   // storage (GPU address, guest address, bytes)
@@ -54,14 +54,14 @@ struct Texture {
     // contents
     bool uploaded = false;    // from guest memory, as of upload_gen
     uint32_t upload_gen = 0;
-    uint64_t bc_retry_frame = 0;   // (hookshot) a BC3 image whose upload failed: tried again from this frame (vk_texture.cpp)
+    uint64_t bc_retry_frame = 0;   // (longshot) a BC3 image whose upload failed: tried again from this frame (vk_texture.cpp)
     uint64_t map_sig = 0;     // (a texture in a virtual pool: its pages' mapping when last uploaded)
     std::vector<uint64_t> page_map;   // (and each 64 KB page's guest address then: what a remap changed)
     struct Run { uint64_t off, guest, n; };   // (and its storage as runs of contiguous guest memory)
     std::vector<Run> runs;
     uint32_t runs_maps_gen = ~0u;             // (the GPU mappings' generation the runs were made at)
     bool gpu_written = false; // the GPU rendered, copied or stored into it: the image is the content
-    bool only_cleared = false; // (hookshot) all the GPU did was clear it: what the CPU writes after still counts (a font cache's glyphs)
+    bool only_cleared = false; // (longshot) all the GPU did was clear it: what the CPU writes after still counts (a font cache's glyphs)
     uint32_t gpu_gen = 0;     // (the memory generation when the GPU last wrote it: CPU writes after it are taken)
     bool released = false;    // its texture was finalized after the GPU wrote it: CPU writes count again
     uint32_t release_gen = 0;
@@ -143,7 +143,7 @@ int texture_segment_end(int index);
 uint32_t texture_epoch();
 /// Changes whenever a texture is destroyed (pointers to textures kept elsewhere go stale)
 uint64_t texture_destroy_generation();
-// (hookshot, RX_VK_FRAME_TRACE: time no other column has; totals in ns, the trace takes their differences)
+// (longshot, RX_VK_FRAME_TRACE: time no other column has; totals in ns, the trace takes their differences)
 int64_t texture_readback_wait_ns();   // (a read-back's submit and wait for the GPU: the write-backs before an eviction)
 int64_t texture_frame_ns();           // (texture_frame as a whole: each present's eviction, compaction and sweeps)
 /// The texture an NVN texture's storage is (made and uploaded at first use, uploaded again when the CPU wrote its
@@ -162,7 +162,7 @@ void copy_block_attachment(VkCommandBuffer cmd, const Texture& tex, VkImage bloc
                            bool to_attachment);
 VkImageView texture_view(Texture* tex, const nvn_tex* t, const nvn_view* v, VkImageViewType view_type, ViewUse use,
                          VkFormat* format_out = nullptr, VkFormat force_format = VK_FORMAT_UNDEFINED);
-/// (hookshot) The format rules texture_get and texture_view follow (vk_texture.cpp), shared with the pipeline state list
+/// (longshot) The format rules texture_get and texture_view follow (vk_texture.cpp), shared with the pipeline state list
 VkFormat image_format_of(VkFormat vf, bool astc_decoded);
 VkFormat view_format_of(VkFormat image, bool astc_decoded, bool bc, int view_nvn, ViewUse use, VkFormat force_format);
 /// The format a draw renders in on this device, into a texture of NVN format tex_nvn through a view of NVN format view_nvn
@@ -213,7 +213,7 @@ uint64_t texture_bytes();
 void full_barrier(VkCommandBuffer cmd, const char* why = "barrier (other)");
 /// Full barriers recorded and left out (RX_VK_BARRIER_DEDUPE_OFF=1: none), since the start
 void barrier_stats(int64_t* made, int64_t* left_out);
-/// (hookshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
+/// (longshot) Set around a draw's sampled-texture lookups (vk_draw.cpp): a new ASTC texture there may wait for a later frame
 /// once this frame's uploads passed their budget (texture_touch). Never for compute: a dispatch may bake what it reads once
 extern thread_local bool upload_defer_ok;
 /// A draw pass just ended on cmd (end_pass): pass_start_barrier knows nothing else ran after it
@@ -226,7 +226,7 @@ void pass_start_barrier(VkCommandBuffer cmd);
 /// Pass starts with the fragment-stage barrier, since the start
 int64_t pass_barriers_relaxed();
 void texture_stats(int64_t* uploads, int64_t* astc_gpu, int64_t* bytes_uploaded);
-/// (hookshot) whether texture_read_texels' walk of r at that row stride (0: the region's own) and its own image stride
+/// (longshot) whether texture_read_texels' walk of r at that row stride (0: the region's own) and its own image stride
 /// stays within avail bytes of the data it is given (overflow-checked: the stride is the game's)
 bool texels_fit(const nvn_tex* t, const NVNcopyRegion* r, uint64_t row, uint64_t avail);
 /// ReadTexels / WriteTexels: the CPU's copy of a region of the texture in guest memory (vk_texture.cpp)

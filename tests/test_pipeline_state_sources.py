@@ -106,7 +106,7 @@ class Committed(unittest.TestCase):
 
 class Tool(unittest.TestCase):
     def setUp(self):
-        self.d = Path(tempfile.mkdtemp(prefix="hookshot-state-sources-"))
+        self.d = Path(tempfile.mkdtemp(prefix="longshot-state-sources-"))
         self.src = self.d / "src"
 
     def tearDown(self):

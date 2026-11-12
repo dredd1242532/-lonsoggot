@@ -17,7 +17,7 @@ namespace mkwvk::bug_report {
 
 /// What a report is made of: the menu's part (version, gpu, options, game_dir) and this process's (fill_here)
 struct Inputs {
-    std::string version;   // HOOKSHOT_VERSION, as the log's first line has it
+    std::string version;   // LONGSHOT_VERSION, as the log's first line has it
     std::string gpu;       // the device the game runs on and its driver, as the form asks: "NVIDIA GeForce RTX 4090, NVIDIA 580.95.05"
     std::string options;   // the menu's rows that are not at their defaults, a "Name: value (default: value)" line each
     std::string system;    // CPU, RAM and system (system_text)

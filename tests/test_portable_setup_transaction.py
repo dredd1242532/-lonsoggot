@@ -52,7 +52,7 @@ int wmain(int argc, wchar_t **argv) {
     if (mode == 4 || mode == 5) {
         Part part = {0};
         strcpy(part.sha,"authored-checksum"); strcpy(part.dest,"."); strcpy(part.from,"-"); strcpy(part.to,"-");
-        strcpy(part.url,"https://invalid.example/HookshotBuilder-python-authored.zip");
+        strcpy(part.url,"https://invalid.example/LongshotBuilder-python-authored.zip");
         g_home.portable = mode == 4;
         return reuse_part(argv[2],"v-new",&part,argv[3]) == _wtoi(argv[4]) ? 0 : 22;
     }
@@ -101,20 +101,20 @@ int wmain(int argc, wchar_t **argv) {
         run(1, next_stage, fresh, 1)
         assert (fresh / "keep").read_text() == "standard candidate"
         versions = root / "versions"
-        old = versions / "v-old/HookshotBuilder/tools/python"
+        old = versions / "v-old/LongshotBuilder/tools/python"
         old.mkdir(parents=True)
         (old / "keep").write_text("original reusable part")
         (versions / "current.txt").write_text("v-old\n")
         (versions / "v-old/parts.txt").write_text("authored-checksum\n")
         candidate = versions / "v-new.part"
         run(4, versions, candidate, 1)
-        copied_part = candidate / "HookshotBuilder/tools/python/keep"
+        copied_part = candidate / "LongshotBuilder/tools/python/keep"
         assert old.is_dir() and copied_part.read_text() == "original reusable part"
         copied_part.write_text("isolated portable copy")
         assert (old / "keep").read_text() == "original reusable part"
         standard_candidate = versions / "standard.part"
         run(5, versions, standard_candidate, 1)
-        assert not old.exists() and (standard_candidate / "HookshotBuilder/tools/python/keep").read_text() == "original reusable part"
+        assert not old.exists() and (standard_candidate / "LongshotBuilder/tools/python/keep").read_text() == "original reusable part"
         print("portable setup transaction: 9 native scenarios passed; actual part reuse, source preservation, repair rollback")
 
 

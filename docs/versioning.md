@@ -1,6 +1,6 @@
 # Versioning and releases
 
-Hookshot follows [Semantic Versioning 2.0.0](https://semver.org/). Releases are made with
+Longshot follows [Semantic Versioning 2.0.0](https://semver.org/). Releases are made with
 [release-please](https://github.com/googleapis/release-please): the version and the changelog come from the
 [Conventional Commit](https://www.conventionalcommits.org/) titles of the pull requests merged into `main`.
 
@@ -16,13 +16,13 @@ the Release workflow's record job, once a version is published. The release pull
 `MAJOR.MINOR.PATCH`, with an optional prerelease suffix: `2.0.7`, `2.1.0`, `2.1.0-rc.1`. A release is tagged `v2.0.7`:
 the `v` belongs to the tag, not to the version. Build metadata is not used in tags.
 
-One version covers the whole project: the game (`hookshot.exe` / `hookshot`), the Vulkan back end, the lift pipeline
-and its scripts, Hookshot Builder and the Linux AppImage. They are built from the same commit and released together,
+One version covers the whole project: the game (`longshot.exe` / `longshot`), the Vulkan back end, the lift pipeline
+and its scripts, Longshot Builder and the Linux AppImage. They are built from the same commit and released together,
 so they never carry different versions.
 
 The "public" surface the rules protect is the command line of `make_game.py` and the builder, the `RX_` and `HOS_`
-switches, the files a build writes into a game folder (`hookshot_options.ini`, `hookshot_env.txt`, `language.txt`,
-`hookshot_version.txt`), saves, and the format of `hookshot_log.txt`. The C sources and internal headers are not an
+switches, the files a build writes into a game folder (`longshot_options.ini`, `longshot_env.txt`, `language.txt`,
+`longshot_version.txt`), saves, and the format of `longshot_log.txt`. The C sources and internal headers are not an
 API and may change in any release.
 
 ## Pull request titles decide the version
@@ -88,13 +88,13 @@ On every push to `main`:
    with the changelog entry as its notes.
 3. The same workflow calls the Linux AppImage and Windows builder workflows on the tag. The jobs that build the files
    sign their build provenance (below), and the release jobs attach them with `scripts/release_upload.sh`:
-   `Hookshot-v<version>-x86_64.AppImage`, its `.zsync` and `hookshot-linux.txt`; `HookshotBuilder.exe` (the setup),
-   `hookshot-setup.txt` and the RecompLauncher zip. New update parts go to the `linux-parts` and `builder-parts`
+   `Longshot-v<version>-x86_64.AppImage`, its `.zsync` and `longshot-linux.txt`; `LongshotBuilder.exe` (the setup),
+   `longshot-setup.txt` and the RecompLauncher zip. New update parts go to the `linux-parts` and `builder-parts`
    releases.
 4. The publish job adds `SHA256SUMS` and the "Which file do I download?" table under the notes
    (`scripts/release_files.sh finish`), checks that all the files are there and that `SHA256SUMS` lists every file
    with its digest, and publishes the draft as a prerelease. It is never "latest". Players on the Release track do not
-   see it; see *Update tracks* below. A release candidate's `HookshotBuilder.exe` installs that release candidate, and
+   see it; see *Update tracks* below. A release candidate's `LongshotBuilder.exe` installs that release candidate, and
    its AppImage's update information names the `rc` release (*The rc prerelease* below), so AppImageUpdate moves it on
    to the next release candidate and to its version's release, and never takes it back to an older release.
 5. The rc job copies the newest release candidate's or release's AppImage and `.zsync` to the `rc` prerelease.
@@ -106,7 +106,7 @@ since `rc.1`. There is no step to start a series: the first fix after a release 
 
 When a release candidate is good, start the Release workflow by hand on `main` (Actions > Release > Run workflow), with
 its tag (`v2.0.8-rc.2`), or empty for the newest release candidate. From the GitHub CLI:
-`gh workflow run release.yml -R NotRexed/Hookshot -f rc=v2.0.8-rc.2`.
+`gh workflow run release.yml -R NotRexed/Longshot -f rc=v2.0.8-rc.2`.
 
 Start it once. A Promote run is one at a time from its first job to its last, the builds and uploads included (the
 workflow's concurrency group): a second one started meanwhile waits, and once the first has published the version it
@@ -151,7 +151,7 @@ release". The release jobs of the Linux and Windows workflows never make a relea
 passed them: no draft there stops them.
 
 - **A tag has two releases** (a stray draft beside the published one, say): every script refuses it and names both ids.
-  Delete the one that is not meant (on its release page, or `gh api -X DELETE repos/NotRexed/Hookshot/releases/<id>`),
+  Delete the one that is not meant (on its release page, or `gh api -X DELETE repos/NotRexed/Longshot/releases/<id>`),
   then re-run the failed jobs.
 - **Promote says the version is already published**: it is. Nothing is built again; check that the record job ran
   (next item). A fix after it goes to the next release candidate.
@@ -184,7 +184,7 @@ moves forward: a run takes the nightly when its commit comes after the one the t
 still building, so it keeps up during a run of merges instead of waiting for `main` to be quiet. The tag is moved as a
 fast-forward, which GitHub refuses when the other platform's run has moved it past this commit meanwhile; a run of an
 older commit (or a re-run of an old one) leaves it alone. Each platform's files are one commit's and named by it (the
-AppImage and the RecompLauncher zip by their version, `hookshot-linux.txt` and `hookshot-setup.txt` by their tag, which
+AppImage and the RecompLauncher zip by their version, `longshot-linux.txt` and `longshot-setup.txt` by their tag, which
 is what each platform's updaters read), but the two builds finish at different times, so while `main` moves one
 platform's files can be a commit or two behind the other's; the tag is at the newest. Its new parts go to `linux-parts`
 and `builder-parts`, like a release's. Its AppImage's update information names the `nightly` release instead of
@@ -228,8 +228,8 @@ and git describe's `v2.1.0-rc.1-3-g1a2b3c4` the nightly (named with `--long`, so
 
 Choosing another track installs that track's newest build, an older version too (the builder asks first). The game's
 own update check (`host/hos_update.c`) follows the track of the folder's version. The same rules are in
-`builder/HookshotBuilder/Updater.cs`, `builder/linux/linux_update.py` and `tests/test_update_tracks.py`. A release
-candidate's and the nightly's `HookshotBuilder.exe` are built with `HOOKSHOT_SETUP_RELEASE`, so started with no `--tag`
+`builder/LongshotBuilder/Updater.cs`, `builder/linux/linux_update.py` and `tests/test_update_tracks.py`. A release
+candidate's and the nightly's `LongshotBuilder.exe` are built with `LONGSHOT_SETUP_RELEASE`, so started with no `--tag`
 they install their own release (`builder/setup/setup.c`).
 
 ## The files of a release
@@ -238,28 +238,28 @@ The names never change: the builder's update check, the setup and the Linux upda
 
 | File | For |
 |---|---|
-| `HookshotBuilder.exe` | Windows: the setup players download. It reads `hookshot-setup.txt` and downloads the rest |
-| `Hookshot-v<version>-x86_64.AppImage` | Linux and Steam Deck |
-| `hookshot-setup.txt` | the setup's and the Windows builder's update list (`builder/setup/setup.c`, `builder/HookshotBuilder/Updater.cs`) |
-| `hookshot-linux.txt` | the Linux updater's list (`builder/linux/linux_update.py`) |
-| `Hookshot-v<version>-x86_64.AppImage.zsync` | AppImageUpdate and Gear Lever, which update the AppImage itself |
-| `Hookshot-v<version>-Windows-x64.zip` | RecompLauncher: `HookshotBuilder.exe` and its `recomplauncher.json` (`.github/workflows/windows-builder.yml`). Windows players download `HookshotBuilder.exe` |
+| `LongshotBuilder.exe` | Windows: the setup players download. It reads `longshot-setup.txt` and downloads the rest |
+| `Longshot-v<version>-x86_64.AppImage` | Linux and Steam Deck |
+| `longshot-setup.txt` | the setup's and the Windows builder's update list (`builder/setup/setup.c`, `builder/LongshotBuilder/Updater.cs`) |
+| `longshot-linux.txt` | the Linux updater's list (`builder/linux/linux_update.py`) |
+| `Longshot-v<version>-x86_64.AppImage.zsync` | AppImageUpdate and Gear Lever, which update the AppImage itself |
+| `Longshot-v<version>-Windows-x64.zip` | RecompLauncher: `LongshotBuilder.exe` and its `recomplauncher.json` (`.github/workflows/windows-builder.yml`). Windows players download `LongshotBuilder.exe` |
 | `SHA256SUMS` | the SHA-256 of every other file, in `sha256sum`'s format |
 
 The release notes end with a short table of which file to download, and what the other files are for
 (`scripts/release_files.sh table`).
 
 The AppImage carries update information (`scripts/linux/appimage.sh`):
-`gh-releases-zsync|NotRexed|Hookshot|latest|Hookshot-*-x86_64.AppImage.zsync` for a release, `rc` in place of `latest`
+`gh-releases-zsync|NotRexed|Longshot|latest|Longshot-*-x86_64.AppImage.zsync` for a release, `rc` in place of `latest`
 for a release candidate and `nightly` for the nightly, the repository being the one CI runs in. appimagetool writes it into the image and makes the `.zsync`, whose file URL is the AppImage's name beside it on the
-same release. `./Hookshot-v<version>-x86_64.AppImage --appimage-updateinformation` prints it.
+same release. `./Longshot-v<version>-x86_64.AppImage --appimage-updateinformation` prints it.
 
 To check a download, put it beside `SHA256SUMS` and run `sha256sum -c --ignore-missing SHA256SUMS`. Every file,
 `SHA256SUMS` too, also has a build provenance attestation (`actions/attest-build-provenance`), signed by the workflow
 run that built it. With the GitHub CLI:
 
 ```
-gh attestation verify HookshotBuilder.exe -R NotRexed/Hookshot
+gh attestation verify LongshotBuilder.exe -R NotRexed/Longshot
 ```
 
 It passes only for a file built by this repository's workflows, and shows the commit and the run.
@@ -287,10 +287,10 @@ and released the same way as a release candidate, but release-please only follow
 | git tag | release-please (a release candidate), Promote (its version), or a tag pushed by hand; the source of truth |
 | `.release-please-manifest.json` | the release pull request, and the Release workflow's record job once a version is published |
 | `CHANGELOG.md` | the release pull request, and the record job |
-| `hookshot_log.txt` and the Insert menu | `nx2/version.py`: `HOOKSHOT_VERSION`, then `VERSION`/`version.txt`, then `git describe --tags --match "v[0-9]*"` |
-| `hookshot_version.txt` in a build | the `VERSION` file written when the tools are packaged (`nx2/make_game.py`) |
-| AppImage file name | a release's tag (`HOOKSHOT_VERSION`), else `git describe --tags --match "v[0-9]*"` (`scripts/linux/appimage.sh`) |
-| `HookshotBuilder.exe` | the MSBuild `Version` passed at publish time (`dotnet publish -p:Version=<version>`, the Windows builder workflow); the `csproj`'s `0.1.0` is only the default for a local build |
+| `longshot_log.txt` and the Insert menu | `nx2/version.py`: `LONGSHOT_VERSION`, then `VERSION`/`version.txt`, then `git describe --tags --match "v[0-9]*"` |
+| `longshot_version.txt` in a build | the `VERSION` file written when the tools are packaged (`nx2/make_game.py`) |
+| AppImage file name | a release's tag (`LONGSHOT_VERSION`), else `git describe --tags --match "v[0-9]*"` (`scripts/linux/appimage.sh`) |
+| `LongshotBuilder.exe` | the MSBuild `Version` passed at publish time (`dotnet publish -p:Version=<version>`, the Windows builder workflow); the `csproj`'s `0.1.0` is only the default for a local build |
 
 `nx2/version.py` also appends a fingerprint of the source files, `(source 1a2b3c4d)`. It is not a version: it tells
 two builds of the same release apart, and it is the only identifier a build from a modified checkout has.

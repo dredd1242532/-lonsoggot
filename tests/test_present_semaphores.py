@@ -8,8 +8,8 @@ import re
 import subprocess
 import tempfile
 
-# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/hookshot_env.h)
-ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "hookshot_env.h")
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 p = argparse.ArgumentParser(description=__doc__)
@@ -75,7 +75,7 @@ std::set<uint64_t> chains, retired;
 unsigned surfaces_destroyed=0;
 uint64_t next_chain=0;int create_result=0;bool bad_chain=false;
 struct CreateInfo {uint64_t oldSwapchain=0;unsigned imageUsage=1,minImageCount=4,flags=0;const void* pNext=nullptr;};
-// (hookshot: the overlays' mutable sRGB swapchain, vk_main.cpp: its format list, never used by these formats)
+// (longshot: the overlays' mutable sRGB swapchain, vk_main.cpp: its format list, never used by these formats)
 using VkFormat=int;
 constexpr int VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO=2, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT=16,
     VK_SWAPCHAIN_CREATE_MUTABLE_FORMAT_BIT_KHR=4;
@@ -115,7 +115,7 @@ void queue_flush_locked() {}
 void vkDeviceWaitIdle(int) {idle=true;}
 // (vk_replay.cpp's helper: held submits out, then the device idle; the real one also takes the present queue's own lock)
 void device_wait_idle_locked() {queue_flush_locked();vkDeviceWaitIdle(dev.device);}
-void swap_views_drop() {}   // (hookshot: the overlays' views, vk_main.cpp)
+void swap_views_drop() {}   // (longshot: the overlays' views, vk_main.cpp)
 void vkDestroySurfaceKHR(int, uint64_t surface, void*) {
     if (!surface || !chains.empty() || !live.empty() || !idle) bad_destroy=true;
     ++surfaces_destroyed;

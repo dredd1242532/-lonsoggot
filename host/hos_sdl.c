@@ -35,7 +35,7 @@ static HMODULE load_one(const char *dll) {   /* beside the executable, else the 
     while (n && path[n - 1] != '\\' && path[n - 1] != '/') n--;
     snprintf(path + n, sizeof path - n, "%s", dll);
     HMODULE m = n ? LoadLibraryA(path) : NULL;   /* (no folder: a bare name would search the current folder and PATH) */
-#ifdef _WIN32   /* (hookshot: else the system's, not the current folder's or PATH's) */
+#ifdef _WIN32   /* (longshot: else the system's, not the current folder's or PATH's) */
     return m ? m : LoadLibraryExA(dll, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 #else
     return m ? m : LoadLibraryA(dll);
@@ -135,7 +135,7 @@ void hos_sdl_hint(const char *name, const char *value) {
     if (version == 3) CALL(_Bool (*)(const char *, const char *), SetHint)(name, value);
     else CALL(int (*)(const char *, const char *), SetHint)(name, value);
 }
-/* (hookshot) a hint over the environment's own (SDL_HINT_OVERRIDE, 2 in both): a variable Steam sets for the games it
+/* (longshot) a hint over the environment's own (SDL_HINT_OVERRIDE, 2 in both): a variable Steam sets for the games it
    starts wins over SDL_SetHint. 0 when the SDL has no SDL_SetHintWithPriority */
 int hos_sdl_hint_override(const char *name, const char *value) {
     if (!hos_sdl_load() || !f.SetHintPriority) return 0;
@@ -181,7 +181,7 @@ void hos_sdl_relative_mouse(void *window, int on) {
     else CALL(int (*)(int), SetRelativeMouseMode)(on);
 }
 int hos_sdl_desktop_size(int *width, int *height) {
-    /* (hookshot) no SDL loaded (a windowless start: HOS_HEADLESS), so the screen is unknown. The menu asks while it runs
+    /* (longshot) no SDL loaded (a windowless start: HOS_HEADLESS), so the screen is unknown. The menu asks while it runs
        (MkwVkHost.screen_size, rx_backend.c), and SDL2's branch below would call an empty slot */
     if (!version) return 0;
     if (version == 3) {   /* (SDL_DisplayMode: displayID, format, w and h at 8 and 12 in screen units, pixel_density at
@@ -428,7 +428,7 @@ int hos_sdl_audio_channels(void) {
     return n > 0 ? n : 2;
 }
 
-/* ---- (hookshot) microphones: SDL3's recording devices, or SDL2's capture devices (the Linux AppImage carries SDL2): a
+/* ---- (longshot) microphones: SDL3's recording devices, or SDL2's capture devices (the Linux AppImage carries SDL2): a
    stream each opened, in the format asked for, read as the game asks ---- */
 static struct {
     void *GetDevices, *DeviceName, *Available, *GetData, *Clear, *Destroy;   /* (SDL3) */

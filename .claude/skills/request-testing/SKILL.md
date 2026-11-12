@@ -1,6 +1,6 @@
 ---
 name: request-testing
-description: Ask the team to test a Hookshot pull request on hardware you don't have (another GPU maker, OS, Steam Deck, 8 GB card), follow who is testing it, and read the results they post on the PR. Use when the user asks for testing on other hardware, says a PR needs a tester, asks whether anyone tested it or what the testers found, or wants to withdraw a request.
+description: Ask the team to test a Longshot pull request on hardware you don't have (another GPU maker, OS, Steam Deck, 8 GB card), follow who is testing it, and read the results they post on the PR. Use when the user asks for testing on other hardware, says a PR needs a tester, asks whether anyone tested it or what the testers found, or wants to withdraw a request.
 ---
 
 # Request testing
@@ -54,8 +54,8 @@ python -I scripts/test_requests.py show T-XXXX --json
 - Several people can test one request. `claims` lists who is testing it now (a claim clears by itself when its
   tester stops renewing it); `results` has each tester's result (pass, fail or mixed) and `comment`, the link to their
   comment on the PR. Read it:
-  `gh api repos/NotRexed/Hookshot/issues/comments/<number after #issuecomment->` (a review:
-  `gh api repos/NotRexed/Hookshot/pulls/<pr>/reviews/<number>`), or `gh pr view <pr> --comments`.
+  `gh api repos/NotRexed/Longshot/issues/comments/<number after #issuecomment->` (a review:
+  `gh api repos/NotRexed/Longshot/pulls/<pr>/reviews/<number>`), or `gh pr view <pr> --comments`.
 - Report it to the user in a few lines: who tested, on what, the result, the numbers or the failure. If it failed,
   continue with the failure on the PR (reproduce, fix, push), then close the request and ask again with a new one.
 
@@ -74,7 +74,7 @@ Needs: AMD RX 6000 or newer, Windows                (then the PR link, then the 
 🧪 T-7KQ2 claim: until 2026-11-12 16:40Z
 🧪 T-7KQ2 renew: until 2026-11-12 18:10Z
 🧪 T-7KQ2 release
-🧪 T-7KQ2 done pass: https://github.com/NotRexed/Hookshot/pull/2711#issuecomment-123
+🧪 T-7KQ2 done pass: https://github.com/NotRexed/Longshot/pull/2711#issuecomment-123
 🧪 T-7KQ2 cancel
 ```
 

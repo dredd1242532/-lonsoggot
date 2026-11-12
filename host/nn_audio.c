@@ -34,9 +34,9 @@
 #else
 #include "hos_sdl.h"
 #endif
-#include "hos_paths.h"   /* (the game folder: hookshot_options.ini, au_menu_output) */
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#include "hos_paths.h"   /* (the game folder: longshot_options.ini, au_menu_output) */
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 void hos_system_event_init(uint64_t key, int autoclear);
@@ -335,7 +335,7 @@ static void reverb_frame(Reverb *rv, Mix *m) {
     const float refl = rv->refl > -10000 ? mb_gain(rv->refl) : 0.0f;
     const float late = rv->reverb > -10000 ? mb_gain(rv->reverb) : 0.0f;
     const float dry = rv->dry;
-    /* (hookshot) the game's delays are any 64-bit TimeSpan: clamped as doubles, before they become ints, and from both
+    /* (longshot) the game's delays are any 64-bit TimeSpan: clamped as doubles, before they become ints, and from both
        sides (a negative late delay read before the line) */
     const double pre_f = (double)rv->refl_delay_ns * RATE / 1e9, late_f = (double)rv->late_delay_ns * RATE / 1e9;
     const int pre_d = pre_f > 0 ? (pre_f < REV_PRE / 2 - 1 ? (int)pre_f : REV_PRE / 2 - 1) : 0;
@@ -730,7 +730,7 @@ static void au_device_name(unsigned device, char *out, size_t size) {
 #endif
 }
 static uint64_t au_ms(void) { return (uint64_t)GetTickCount64(); }
-/* (hookshot) Which output Windows has as its default now (the waveOut mapper's preferred device, its number and name):
+/* (longshot) Which output Windows has as its default now (the waveOut mapper's preferred device, its number and name):
    a key that changes when the default does; 0 when unknown. A device opened as the default stays on that device when
    Windows moves its default (a Bluetooth headset gone and back), so the output section asks every second */
 #ifndef DRVM_MAPPER_PREFERRED_GET
@@ -791,7 +791,7 @@ static int au_device_channels(void) {
 #else
 static int au_device_channels(void) { return hos_sdl_audio_channels(); }
 #endif
-/* (hookshot) The Insert menu's Audio output (gpu/vk/vk_menu.cpp): audio_output= in hookshot_options.ini beside the game,
+/* (longshot) The Insert menu's Audio output (gpu/vk/vk_menu.cpp): audio_output= in longshot_options.ini beside the game,
    0 Auto, 1 Stereo, 2 5.1 (a number past them is the nearest, as the menu reads it). Read from the file, as
    host/nn_applet.c reads the Handheld profile: the game asks for its speakers only once, at its start */
 static int au_menu_output(void) {
@@ -799,7 +799,7 @@ static int au_menu_output(void) {
     const DWORD len = hos_game_path_a(path, MAX_PATH);
     char *slash = len ? (strrchr(path, 92) ? strrchr(path, 92) : strrchr(path, 47)) : NULL;   /* (linux: '/') */
     if (!slash) return 0;
-    snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "hookshot_options.ini");
+    snprintf(slash + 1, (size_t)(path + MAX_PATH - slash - 1), "longshot_options.ini");
     FILE *f = fopen(path, "r");
     if (!f) return 0;
     char line[80];
@@ -885,7 +885,7 @@ static void output_error(const char *operation, MMRESULT result) {
 static int out_next;           /* the next candidate: 0 = HOS_AUDIO_DEVICE, 1 = the default, 2.. = device n-2 */
 static uint64_t out_opened, out_stall_since;
 static unsigned out_played, out_peak, out_reported;
-/* (hookshot) A device gone (a Bluetooth headset off, the audio service restarted: "no driver", "invalid handle" from the
+/* (longshot) A device gone (a Bluetooth headset off, the audio service restarted: "no driver", "invalid handle" from the
    next call) is closed and the default opened again; none opening, the default is tried every second until one does.
    Opened as the default, the output follows Windows': its key (au_default_key) looked at every second, a change reopens
    there. Before, a call that failed this way was only logged, the same block tried again for good, and the game had no
@@ -1432,7 +1432,7 @@ HLE(_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE) {
    a handle only. The three words written into it before overwrote the 16 bytes after it: MKW keeps pool objects
    where those bytes are a heap's links (its "Sound" heap's free list broke). */
 static struct { uint64_t addr, size; int used; } au_pools[1024];
-/* (hookshot) the handle lives in the game's MemoryPoolType (guest memory): its index is checked against the table */
+/* (longshot) the handle lives in the game's MemoryPoolType (guest memory): its index is checked against the table */
 static int pool_index(uint64_t obj) {
     const int i = get_handle(obj, K_POOL);
     return i >= 0 && i < 1024 && au_pools[i].used ? i : -1;

@@ -1,6 +1,6 @@
 """The CPU report: where the game's CPU time goes, by category, thread and function, from all-thread sampled runs.
 
-    python -I scripts/cpu_report.py <run folder>... --maps <folder with hookshot.map, hookshot_vk.map> --out report.md
+    python -I scripts/cpu_report.py <run folder>... --maps <folder with longshot.map, longshot_vk.map> --out report.md
         [--csv <folder>] [--functions scripts/cpu_functions.json] [--readobj <llvm-readobj>] [--top 40] [--cover 0.9]
 
 A run folder holds the sampler's file (HOS_SAMPLE_ALL: `all.txt`, or `*_all.txt`), and, when the run was measured by
@@ -91,7 +91,7 @@ class Names:
     def __init__(self, maps_dir, readobj=None, game_detail=False):
         self.game_detail = game_detail   # (False: every lifted function is one row, LIFTED; no guest address is printed)
         self.syms = {}
-        for mod, mp in (("hookshot.exe", "hookshot.map"), ("hookshot_vk.dll", "hookshot_vk.map")):
+        for mod, mp in (("longshot.exe", "longshot.map"), ("longshot_vk.dll", "longshot_vk.map")):
             p = os.path.join(maps_dir, mp)
             if os.path.exists(p):
                 self.syms[mod] = load_map(p)
@@ -113,7 +113,7 @@ class Names:
         r = self.cache.get(frame)
         if r is None:
             mod, _, off = frame.rpartition("+")
-            if mod in ("hookshot", "hookshot_vk.so"):   # (a Linux capture: its ELF maps are not read, so do not mislabel it)
+            if mod in ("longshot", "longshot_vk.so"):   # (a Linux capture: its ELF maps are not read, so do not mislabel it)
                 raise SystemExit("a Linux capture (%s): cpu_report.py reads Windows captures with lld-link maps only" % mod)
             if mod not in self.syms and self.system.search(mod):
                 local = os.path.join(self.maps_dir, mod + ".map")
@@ -172,7 +172,7 @@ def nn_name(sym):
 
 
 def disp(sym):
-    """a function as the tables print it: the HLE entries Hookshot implements by their SDK name (nn::os::LockMutex)"""
+    """a function as the tables print it: the HLE entries Longshot implements by their SDK name (nn::os::LockMutex)"""
     return nn_name(sym) if sym.startswith(("imp__ZN", "_ZN")) else sym
 
 
@@ -214,7 +214,7 @@ def guest_trust(sym):
 
 
 OURS = ("game/", "runtime/", "os/", "render/", "tooling/", "unclassified")
-OUR_MODULES = ("hookshot.exe", "hookshot_vk.dll", "hookshot", "hookshot_vk.so")
+OUR_MODULES = ("longshot.exe", "longshot_vk.dll", "longshot", "longshot_vk.so")
 
 
 def is_ours(cat):
@@ -398,8 +398,8 @@ def machine(folder):
     log = os.path.join(folder, "game.log")
     if os.path.exists(log):
         for line in open(log, encoding="utf-8", errors="replace"):
-            if "hookshot v" in line and "version" not in info:
-                info["version"] = line.split("hookshot ", 1)[1].strip()
+            if "longshot v" in line and "version" not in info:
+                info["version"] = line.split("longshot ", 1)[1].strip()
             # (the device the renderer chose, logged with its features; "vk: device N:" lines list every device)
             m = re.search(r"vk: ([^;]+?, Vulkan \d+\.\d+, driver \w+); mesh shaders", line)
             if m and "gpu" not in info:
@@ -415,7 +415,7 @@ def machine(folder):
                                                               "RX_VK_PACE", "HOS_DYNRES", "HOS_OUTPUT_RES", "HOS_HANDHELD"))}
         if rendering:
             info["switches"] += " " + " ".join("%s=%s" % kv for kv in sorted(rendering.items()))
-    ini = os.path.join(folder, "hookshot_options.ini")   # (a runner may copy the game folder's options into the run)
+    ini = os.path.join(folder, "longshot_options.ini")   # (a runner may copy the game folder's options into the run)
     if os.path.exists(ini):
         opts = dict(l.strip().split("=", 1) for l in open(ini, encoding="utf-8", errors="replace") if "=" in l)
         info["menu"] = " ".join("%s=%s" % (k, opts[k]) for k in ("quality_preset", "frame_generation", "vsync", "dlss",
@@ -488,7 +488,7 @@ def main():
                    "come from these (sampling costs some fps); a run whose game clock is off 1.000 by more than 0.01 is "
                    "listed but left out of the medians")
     p.add_argument("--menu", default="", help="the Insert-menu options the runs used, when the run folders hold no "
-                   "hookshot_options.ini")
+                   "longshot_options.ini")
     p.add_argument("--machine", default="", help="a line naming the CPU, RAM, OS and driver version")
     p.add_argument("--into", help="write the report into this markdown file between <!-- MEASURED:<section> --> and "
                    "<!-- END MEASURED:<section> --> instead of --out")
@@ -532,8 +532,8 @@ def main():
     if not runs:
         raise SystemExit("no runs")
     if not any(m in names.syms and names.syms[m][0] for m in OUR_MODULES):
-        # (a Linux capture names hookshot / hookshot_vk.so, whose ELF maps this script does not read yet)
-        raise SystemExit("no linker map of hookshot.exe or hookshot_vk.dll in --maps: cpu_report.py reads Windows captures "
+        # (a Linux capture names longshot / longshot_vk.so, whose ELF maps this script does not read yet)
+        raise SystemExit("no linker map of longshot.exe or longshot_vk.dll in --maps: cpu_report.py reads Windows captures "
                          "with lld-link maps only")
 
     def share(run, view, key):   # (% of one core)
@@ -565,7 +565,7 @@ def main():
         w("The frame rate and CPU numbers of the scene. Sampling costs some frame rate, so these come from runs without it; "
           "the shares below come from the sampled runs.\n")
         if info.get("version") or info.get("gpu"):
-            w("- Hookshot %s; GPU %s%s" % (info.get("version", "?"), info.get("gpu", "?"), ("; " + a.machine) if a.machine else ""))
+            w("- Longshot %s; GPU %s%s" % (info.get("version", "?"), info.get("gpu", "?"), ("; " + a.machine) if a.machine else ""))
         if a.hashes and os.path.exists(a.hashes):
             w("- Binaries (sha256): " + ", ".join("`%s` %s" % (l.split()[1].lstrip("*"), l.split()[0][:16])
                                                  for l in open(a.hashes, encoding="utf-8") if l.strip()))
@@ -859,7 +859,7 @@ def main():
                 x["risk"], x["evidence"]))
         w("")
         if cdata.get("game_own"):
-            w("Large costs that are the game's own work (not Hookshot's to remove; for scale):\n")
+            w("Large costs that are the game's own work (not Longshot's to remove; for scale):\n")
             w("| what | % of a core | ms a frame | note |")
             w("|---|---|---|---|")
             for x in cdata["game_own"]:

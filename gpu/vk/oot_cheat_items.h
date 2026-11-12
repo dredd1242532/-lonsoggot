@@ -34,7 +34,7 @@
     OOT_ITEM("Nayru's Love", "Item_NayruLove", 0) \
     OOT_ITEM("Fairy Ocarina", "Item_Ocarina_Fairy", 0) \
     OOT_ITEM("Ocarina of Time", "Item_Ocarina_Time", 0) \
-    OOT_ITEM("Hookshot", "Item_Hookshot", 0) \
+    OOT_ITEM("Longshot", "Item_Longshot", 0) \
     OOT_ITEM("Longshot", "Item_Longshot", 0) \
     OOT_ITEM("Boomerang", "Item_Boomerang", 0) \
     OOT_ITEM("Lens of Truth", "Item_GlassTruth", 0) \
@@ -100,7 +100,7 @@
 /* (other spellings the game might use for the same item: logged once by the game side for checking) */
 #define OOT_CHEAT_ITEM_PROBES \
     "Item_Sword_Kokiri", "Item_Sword_Giant", "Item_Sword_Biggoron", "Item_Shield_Mirror", "Item_Range_Bow", \
-    "Item_Range_SlingShot", "Weapon_Range_Hookshot", "Weapon_Range_Longshot", "Weapon_Boomerang", "Weapon_Hammer", \
+    "Item_Range_SlingShot", "Weapon_Range_Longshot", "Weapon_Range_Longshot", "Weapon_Boomerang", "Weapon_Hammer", \
     "Item_HeavyBoot", "Item_HoverBoot", "Item_Mask_Keaton", "Item_Gauntlet_Silver", "Armor_GlassTruth", "Armor_Child_GlassTruth", "Armor_Adult_GlassTruth", \
     "Armor_Child_Gauntlet_Goron", "Item_Wallet_Small"
 

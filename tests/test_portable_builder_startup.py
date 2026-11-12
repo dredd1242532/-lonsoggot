@@ -22,26 +22,26 @@ def main():
     with tempfile.TemporaryDirectory(prefix="portable-wpf-cli-") as folder:
         root = Path(folder)
         project = root / "project"
-        shutil.copytree(ROOT / "builder/HookshotBuilder", project, ignore=shutil.ignore_patterns("bin", "obj"))
-        home = root / "Original ü, volume/HookshotBuilder"
-        app = home / "versions/v-authored/HookshotBuilder"
+        shutil.copytree(ROOT / "builder/LongshotBuilder", project, ignore=shutil.ignore_patterns("bin", "obj"))
+        home = root / "Original ü, volume/LongshotBuilder"
+        app = home / "versions/v-authored/LongshotBuilder"
         published = root / "published"
         # Exercise the shipped self-contained package, not a Debug app that depends on an installed Desktop runtime.
-        subprocess.run([args.dotnet, "publish", str(project / "HookshotBuilder.csproj"), "--configuration", "Release",
+        subprocess.run([args.dotnet, "publish", str(project / "LongshotBuilder.csproj"), "--configuration", "Release",
                         "-p:NuGetAudit=false", "--output", str(published), "--disable-build-servers", "-v", "quiet"], check=True)
         shutil.copytree(published, app)
-        marker = home / ".hookshot-portable"
-        marker.write_text("Hookshot Builder portable home v1\n", encoding="utf-8")
+        marker = home / ".longshot-portable"
+        marker.write_text("Longshot Builder portable home v1\n", encoding="utf-8")
         script = app / "tools/nx2/make_game.py"
         script.parent.mkdir(parents=True)
-        script.write_text('import os,json\nprint(json.dumps({"home":os.environ.get("HOOKSHOT_SETUP_BASE"),"portable":os.environ.get("HOOKSHOT_BUILDER_PORTABLE")}))\n', encoding="utf-8")
-        env = {k: v for k, v in os.environ.items() if k.upper() not in ("HOOKSHOT_SETUP_BASE", "HOOKSHOT_BUILDER_PORTABLE")}
+        script.write_text('import os,json\nprint(json.dumps({"home":os.environ.get("LONGSHOT_SETUP_BASE"),"portable":os.environ.get("LONGSHOT_BUILDER_PORTABLE")}))\n', encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k.upper() not in ("LONGSHOT_SETUP_BASE", "LONGSHOT_BUILDER_PORTABLE")}
         # A portable installation must start on a PC without .NET. Scope discovery to an owned empty folder;
         # publishing above still uses the SDK, while the actual app must use its packaged runtime below.
         runtime_root = root / "no-installed-runtime"
         runtime_root.mkdir()
         env.update(DOTNET_ROOT=str(runtime_root), DOTNET_ROOT_X64=str(runtime_root), DOTNET_MULTILEVEL_LOOKUP="0")
-        runtime = json.loads((app / "HookshotBuilder.runtimeconfig.json").read_text(encoding="utf-8"))["runtimeOptions"]
+        runtime = json.loads((app / "LongshotBuilder.runtimeconfig.json").read_text(encoding="utf-8"))["runtimeOptions"]
         assert "includedFrameworks" in runtime and "framework" not in runtime and "frameworks" not in runtime
         assert (app / "coreclr.dll").is_file() and (app / "PresentationFramework.dll").is_file()
         # The authored tools fixture uses the trusted interpreter running this check, not another PATH entry.
@@ -49,7 +49,7 @@ def main():
         scenarios = 0
         def run(overrides, valid, expected_home=None):
             nonlocal scenarios
-            result = subprocess.run([str(app / "HookshotBuilder.exe"), "--cli", "--authored-probe"],
+            result = subprocess.run([str(app / "LongshotBuilder.exe"), "--cli", "--authored-probe"],
                                     env=dict(env, **overrides), cwd=root, capture_output=True, text=True,
                                     encoding="utf-8", errors="replace", timeout=30,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
@@ -64,7 +64,7 @@ def main():
                 assert "Unhandled exception" not in result.stderr
                 assert not any(x.startswith("{") for x in result.stdout.splitlines())
             scenarios += 1
-        run({"HOOKSHOT_SETUP_BASE": str(home), "HOOKSHOT_BUILDER_PORTABLE": "1"}, True)
+        run({"LONGSHOT_SETUP_BASE": str(home), "LONGSHOT_BUILDER_PORTABLE": "1"}, True)
         run({}, True)
         short_path = ctypes.windll.kernel32.GetShortPathNameW
         short_path.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_wchar), ctypes.c_uint32]
@@ -74,18 +74,18 @@ def main():
         alias = Path(buffer.value) if 0 < length < len(buffer) else home
         alias_available = str(alias).lower() != str(home).lower()
         if alias_available:
-            run({"HOOKSHOT_SETUP_BASE": str(alias), "HOOKSHOT_BUILDER_PORTABLE": "1"}, True, alias)
+            run({"LONGSHOT_SETUP_BASE": str(alias), "LONGSHOT_BUILDER_PORTABLE": "1"}, True, alias)
         moved = root / "Relocated ü, volume"
         home.parent.rename(moved)
         app = moved / app.relative_to(home.parent)
-        home = moved / "HookshotBuilder"
-        marker = home / ".hookshot-portable"
+        home = moved / "LongshotBuilder"
+        marker = home / ".longshot-portable"
         run({}, True)
-        run({"HOOKSHOT_SETUP_BASE": "relative", "HOOKSHOT_BUILDER_PORTABLE": "1"}, False)
+        run({"LONGSHOT_SETUP_BASE": "relative", "LONGSHOT_BUILDER_PORTABLE": "1"}, False)
         marker.write_text("broken")
         run({}, False)
         marker.unlink()
-        run({"HOOKSHOT_SETUP_BASE": str(home), "HOOKSHOT_BUILDER_PORTABLE": "1"}, False)
+        run({"LONGSHOT_SETUP_BASE": str(home), "LONGSHOT_BUILDER_PORTABLE": "1"}, False)
         print("Published WPF startup: %d CLI/child/relocation/error scenarios passed; DOS alias exercised: %s" %
               (scenarios, alias_available))
 

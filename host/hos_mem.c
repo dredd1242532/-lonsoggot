@@ -1,8 +1,8 @@
 /* Guest memory map: the system region (our own objects), the heap, address regions.
    The whole 4 GB window is committed up front (hos_main.c), so "mapping" here is only bookkeeping and zeroing. */
 #include "hos.h"
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +57,7 @@ void hos_mem_init(uint64_t image_end) {
 
 uint64_t hos_region_floor(void) { return region_floor; }
 
-/* (hookshot, the control bridge: host/control.c) Whether [addr, addr + size) is wholly inside memory the runtime has
+/* (longshot, the control bridge: host/control.c) Whether [addr, addr + size) is wholly inside memory the runtime has
    mapped for the game: the image, the system region in use (our own objects), the heap, or an address region. A read or
    write outside it is refused, never faulted. The classes it may fall in (0 none): */
 enum { HOS_MEM_IMAGE = 1, HOS_MEM_SYSTEM, HOS_MEM_HEAP, HOS_MEM_REGION };
@@ -146,7 +146,7 @@ static void pages_mark_used_locked(uint64_t addr, uint64_t size) {
 }
 
 static void discard_pages(uint64_t addr, uint64_t size) {
-    if (!hos_guest_range(addr, size)) return;   /* (hookshot: guest pages only; Linux's discard zeroes what it is given) */
+    if (!hos_guest_range(addr, size)) return;   /* (longshot: guest pages only; Linux's discard zeroes what it is given) */
     const uint64_t lo = (addr + 0xFFF) & ~0xFFFULL, hi = (addr + size) & ~0xFFFULL;
     static int keep = -1;
     if (keep < 0) keep = env_on("HOS_KEEP_FREED_PAGES");
@@ -173,7 +173,7 @@ static void discard_pages(uint64_t addr, uint64_t size) {
 #endif
 }
 
-/* (hookshot) the address regions (hos_region_alloc's), at most cap of them into out ({start, end}); how many there are. For
+/* (longshot) the address regions (hos_region_alloc's), at most cap of them into out ({start, end}); how many there are. For
    host/prompts.c: where the game keeps its resources */
 int hos_regions(uint64_t (*out)[2], int cap) {
     LOCK();
@@ -212,7 +212,7 @@ void hos_mark_written(const void *p, size_t n) {
 }
 #endif
 
-/* (hookshot) a heap of size bytes ends below the address regions and the guest window's end (no wrap-around: the size
+/* (longshot) a heap of size bytes ends below the address regions and the guest window's end (no wrap-around: the size
    comes from the game). Also svc SetHeapSize's check (hos_svc.c) */
 int hos_heap_size_fits(uint64_t size) {
     const uint64_t limit = region_floor < HOS_SPACE_END ? region_floor : HOS_SPACE_END;
@@ -281,7 +281,7 @@ HLE(_ZN2nn2os17FreeAddressRegionEm) {
 HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
     HOS_TRACE_CALL("AllocateMemoryPages");
     const uint64_t a = ARG(0), n = ARG(1), end = a + n;
-    if (!hos_guest_range(a, n)) {   /* (hookshot: a range that wrapped around was zeroed whole, past the guest window) */
+    if (!hos_guest_range(a, n)) {   /* (longshot: a range that wrapped around was zeroed whole, past the guest window) */
         hos_log("AllocateMemoryPages(%#llx, %#llx): outside the guest window", (unsigned long long)a, (unsigned long long)n);
         RET(0xCA01);   /* svc::ResultOutOfMemory */
         return;
@@ -326,7 +326,7 @@ HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
 /* nn::os::FreeMemoryPages(unsigned long, unsigned long) -> Result */
 HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
     HOS_TRACE_CALL("FreeMemoryPages");
-    if (!hos_guest_range(ARG(0), ARG(1))) {   /* (hookshot: decommitted or discarded: guest pages only) */
+    if (!hos_guest_range(ARG(0), ARG(1))) {   /* (longshot: decommitted or discarded: guest pages only) */
         hos_log("FreeMemoryPages(%#llx, %#llx): outside the guest window", (unsigned long long)ARG(0), (unsigned long long)ARG(1));
         RET(0xCA01);
         return;

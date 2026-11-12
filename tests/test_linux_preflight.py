@@ -2,7 +2,7 @@
 
 All dependency answers and game bytes are authored. The production C probe is also
 compiled (not linked) with --cc gcc or --cc clang: CI needs no game linker.
-HOOKSHOT_LINUX_PREFLIGHT_SOURCE selects another checkout's nx2 sources for the
+LONGSHOT_LINUX_PREFLIGHT_SOURCE selects another checkout's nx2 sources for the
 exact same fail-before checks.
 """
 import argparse
@@ -21,7 +21,7 @@ from unittest import mock
 RUN_ALL_ARGS = ["--cc", "clang"]
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get("HOOKSHOT_LINUX_PREFLIGHT_SOURCE", ROOT))
+SOURCE = Path(os.environ.get("LONGSHOT_LINUX_PREFLIGHT_SOURCE", ROOT))
 COMPILER = None
 
 
@@ -38,7 +38,7 @@ class ReachedGame(Exception):
 
 class LinuxPreflightTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="hookshot-linux-preflight-")
+        self.temp = tempfile.TemporaryDirectory(prefix="longshot-linux-preflight-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.stack = contextlib.ExitStack()
@@ -149,9 +149,9 @@ class LinuxPreflightTests(unittest.TestCase):
         self.fail("builder returned without the authored stop")
 
     def headers(self, mode="cpm"):
-        packages = (("vulkanheaders", "vulkan/vulkan.h", "HOOKSHOT_VULKAN_HEADERS"),
-                    ("spirv-headers", "spirv/unified1/spirv.h", "HOOKSHOT_SPIRV_HEADERS"),
-                    ("vulkanmemoryallocator", "vk_mem_alloc.h", "HOOKSHOT_VMA_HEADERS"))
+        packages = (("vulkanheaders", "vulkan/vulkan.h", "LONGSHOT_VULKAN_HEADERS"),
+                    ("spirv-headers", "spirv/unified1/spirv.h", "LONGSHOT_SPIRV_HEADERS"),
+                    ("vulkanmemoryallocator", "vk_mem_alloc.h", "LONGSHOT_VMA_HEADERS"))
         roots = []
         for package, probe, env in packages:
             base = self.root / ("cache/" + package + "/001" if mode == "cpm" else "explicit/" + package)
@@ -174,7 +174,7 @@ class LinuxPreflightTests(unittest.TestCase):
         text = self.output.getvalue()
         self.assertEqual((result, self.events), (1, []), "main reached game work before the preflight: " + repr(self.events))
         for name in ("zstandard", "numpy", "Vulkan", "SPIR-V", "VMA", "libavcodec", "libswscale", "clang", "clang++",
-                     "isolated import path", "RX_CPM", "HOOKSHOT_VULKAN_HEADERS", "/usr/local", "pkg-config", "EMSDK", "PATH"):
+                     "isolated import path", "RX_CPM", "LONGSHOT_VULKAN_HEADERS", "/usr/local", "pkg-config", "EMSDK", "PATH"):
             self.assertIn(name, text)
         self.assertEqual(text.count("@@error"), 1)
         self.assertNotIn("@@stage read", text)
@@ -238,14 +238,14 @@ class LinuxPreflightTests(unittest.TestCase):
     def test_prebuilt_renderer_needs_no_renderer_headers(self):
         renderer = self.root / "prebuilt.so"
         renderer.write_bytes(b"authored renderer path")
-        os.environ["HOOKSHOT_VK_PREBUILT"] = str(renderer)
+        os.environ["LONGSHOT_VK_PREBUILT"] = str(renderer)
         self.assertEqual(self.invoke(), "game", self.output.getvalue())
         self.assertIn(mock.call("clang++"), self.find.call_args_list)   # a64emit still builds from source
 
     def test_source_prebuilt_still_needs_native_cpp_compiler(self):
         renderer = self.root / "prebuilt.so"
         renderer.write_bytes(b"authored renderer path")
-        os.environ["HOOKSHOT_VK_PREBUILT"] = str(renderer)
+        os.environ["LONGSHOT_VK_PREBUILT"] = str(renderer)
         self.cxx.unlink()
         self.assertEqual(self.invoke(), 1)
         self.assertIn("clang++", self.output.getvalue())
@@ -253,7 +253,7 @@ class LinuxPreflightTests(unittest.TestCase):
         self.assertEqual(self.events, [])
 
     def test_ngx_overrides_prebuilt_renderer(self):
-        os.environ["HOOKSHOT_VK_PREBUILT"] = str(self.root / "ignored.so")
+        os.environ["LONGSHOT_VK_PREBUILT"] = str(self.root / "ignored.so")
         self.build.NGX_SDK = str(self.root / "sdk")
         self.assertEqual(self.invoke(), 1)
         self.assertIn("SPIR-V", self.output.getvalue())
@@ -271,9 +271,9 @@ class LinuxPreflightTests(unittest.TestCase):
         self.cxx.unlink()   # the bundle carries a64emit too; no renderer or helper C++ compile
         renderer = self.root / "prebuilt.so"
         renderer.write_bytes(b"authored renderer path")
-        os.environ["HOOKSHOT_VK_PREBUILT"] = str(renderer)
+        os.environ["LONGSHOT_VK_PREBUILT"] = str(renderer)
         prefix = self.root / "ffmpeg"
-        os.environ["HOOKSHOT_FFMPEG"] = str(prefix)
+        os.environ["LONGSHOT_FFMPEG"] = str(prefix)
         for lib in self.build.FFMPEG_LIBS:
             for rel in ("lib/lib" + lib + ".a", "include/lib" + lib + "/" + lib + ".h"):
                 path = prefix / rel
@@ -289,7 +289,7 @@ class LinuxPreflightTests(unittest.TestCase):
         prefix = self.root / "ffmpeg"
         (prefix / "lib").mkdir(parents=True)
         (prefix / "lib/libavcodec.a").write_bytes(b"authored archive sentinel")
-        os.environ["HOOKSHOT_FFMPEG"] = str(prefix)
+        os.environ["LONGSHOT_FFMPEG"] = str(prefix)
         self.assertEqual(self.invoke(), 1)
         text = self.output.getvalue()
         for name in ("libswscale.a", "libswresample.a", "libavutil.a", "avcodec.h", "swscale.h", "swresample.h", "avutil.h"):
@@ -301,14 +301,14 @@ class LinuxPreflightTests(unittest.TestCase):
         self.modules_missing = {"capstone"}
         self.assertEqual(self.invoke(), 1)
         text = self.output.getvalue()
-        for name in ("capstone", "VMA", "invalid linker name", "HOOKSHOT_SYSROOT"):
+        for name in ("capstone", "VMA", "invalid linker name", "LONGSHOT_SYSROOT"):
             self.assertIn(name, text)
         self.assertEqual(self.events, [])
 
     def test_cross_build_uses_windows_toolchain_not_linux_packages(self):
         self.make.LINUX, self.make.CROSS = False, True
         os.environ["RX_TARGET"] = "windows"
-        os.environ["HOOKSHOT_MINGW"] = str(self.root / "mingw")
+        os.environ["LONGSHOT_MINGW"] = str(self.root / "mingw")
         self.pc_missing = {"libavcodec"}
         self.assertEqual(self.invoke(), "game", self.output.getvalue())
         self.assertFalse(any(cmd[0] == "pkg-config" for cmd in self.processes))

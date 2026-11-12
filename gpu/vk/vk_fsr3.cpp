@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 3.1's upscaler as our own dispatches over AMD's vendored passes, and its place in the gameplay upscale's
+// (longshot) AMD FSR 3.1's upscaler as our own dispatches over AMD's vendored passes, and its place in the gameplay upscale's
 // dispatch (fsr3_upscale, at the end); see vk_fsr3.h.
 //
 // The resource table and the per-pass binding lists are the SDK's, not ours: ffx_fsr3upscaler.cpp decides the formats and
@@ -241,7 +241,7 @@ bool make_image(Image& t, VkFormat format, uint32_t width, uint32_t height, uint
     ci.arrayLayers = 1;
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    // (hookshot: and a copy's source: the output's picture goes into vk_temporal.cpp's chain output, kChainEngine)
+    // (longshot: and a copy's source: the output's picture goes into vk_temporal.cpp's chain output, kChainEngine)
     ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     if (!create_image(ci, t.image, t.memory, false)) {
@@ -295,7 +295,7 @@ bool make_pipeline(Pipeline& p, const PassInfo& info) {
     ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main",
                 nullptr};
     ci.layout = p.layout;
-    // (hookshot, a stutter: through the pipeline cache kept across runs. Made with none, FSR 3.1's dozen passes were compiled
+    // (longshot, a stutter: through the pipeline cache kept across runs. Made with none, FSR 3.1's dozen passes were compiled
     // again at every start, inside the first upscaled frame: a 2.7 s first frame of play against 1.0 s without FSR, 2026-11-10)
     const VkResult made = shared_compute_pipeline(&ci, &p.pipeline);
     vkDestroyShaderModule(dev.device, m, nullptr);
@@ -788,7 +788,7 @@ bool fsr3_on_chain() {
 
 bool fsr3_wanted() { return !fsr3_on_chain() && fsr3_chosen(); }
 
-// ---- (hookshot) FSR 3.1 as an engine of the temporal chain (vk_temporal.cpp) ----
+// ---- (longshot) FSR 3.1 as an engine of the temporal chain (vk_temporal.cpp) ----
 // The chain's frame into the passes above: its colour (the network's input as it samples it), its depth reversed for FSR
 // (the chain's prep takes it so for an engine with fsr_depth), its motion toward the frame before in render pixels with the
 // skinned draws' own drawn over the camera's (vk_temporal.cpp actor_motion), and the jitter the host gave the camera. The

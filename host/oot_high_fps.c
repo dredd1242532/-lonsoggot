@@ -1,4 +1,4 @@
-/* (hookshot) The sound manager's job at 60 Hz and the physics solver's steps rounded up, under a Frame rate cap above 60: the
+/* (longshot) The sound manager's job at 60 Hz and the physics solver's steps rounded up, under a Frame rate cap above 60: the
    lifted f_80435300, f_838ceb80 and f_838cfc10 call these (nx2/oot_patches.py); host/oot_high_fps.h has why and the logic.
    HOS_FPS_LOG (on, by the switches' rule: =0 is off): what they do, every 600 calls. */
 #include "hos.h"
@@ -7,7 +7,7 @@
 #include <windows.h>
 #include <stdlib.h>
 
-#include "../gpu/vk/compat/hookshot_env.h" /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h" /* (env_on: the switches' one rule) */
 
 extern volatile uint32_t hos_frame_seconds_bits;   /* (host/nn_vi.c: the frame's seconds, 0 at a cap of 60) */
 

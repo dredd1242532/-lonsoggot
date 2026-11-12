@@ -1,4 +1,4 @@
-// (hookshot) The programs the driver's compiler faulted on, kept out of the driver for good (vk_draw.cpp build_graphics).
+// (longshot) The programs the driver's compiler faulted on, kept out of the driver for good (vk_draw.cpp build_graphics).
 //
 // guarded_graphics catches an access violation inside vkCreateGraphicsPipelines so that one draw is lost, not the game. On
 // AMD's Windows driver (amdvlk64.dll, driver 0x800161: issue 996) the fault leaves that program's compile unfinished inside
@@ -13,7 +13,7 @@
 //
 // So a program the driver faulted on is not asked of it again:
 // - in this run (Quarantine::begin answers kFaulted for it);
-// - in later runs on the same driver (hookshot_driver_faults.txt beside the executable, one "<vendor> <driver> <key>" line a
+// - in later runs on the same driver (longshot_driver_faults.txt beside the executable, one "<vendor> <driver> <key>" line a
 //   fault, read at the first build; a driver update tries them again).
 // Where the driver needs it, the builds of one program also run one at a time (serial): a second thread waits in
 // Quarantine::begin, outside the driver, and learns of the first one's fault there instead of being caught in the driver behind
@@ -31,7 +31,7 @@
 
 namespace driver_faults {
 
-/// A line of hookshot_driver_faults.txt: "<vendor> <driver version> <program key>", in hex
+/// A line of longshot_driver_faults.txt: "<vendor> <driver version> <program key>", in hex
 inline std::string line(uint32_t vendor, uint32_t driver, uint64_t key) {
     char b[64];
     snprintf(b, sizeof b, "%04x %08x %016llx\n", vendor, driver, (unsigned long long)key);

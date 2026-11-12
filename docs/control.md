@@ -9,21 +9,21 @@ through one connection, with replies. Presses are timed in frames, and every rep
   present), `gpu/vk/vk_menu.cpp` (the Insert menu's settings, through its own setter), `host/hos_thread.c` (log lines),
   `host/hos_main.c` (the start, and for OoT the current map and the debug teleport), `host/hos_mem.c` (guest memory's
   bounds), `host/nn_fs.c` (the save folder), `host/rx_backend.c` (the renderer's side, `MkwVkRenderer`).
-- The client is `scripts/hookshot_ctl.py` (standard library only).
-- Tests: `tests/test_control.py` (the bridge against a fake game) and `tests/test_hookshot_ctl.py` (the client against a
+- The client is `scripts/longshot_ctl.py` (standard library only).
+- Tests: `tests/test_control.py` (the bridge against a fake game) and `tests/test_longshot_ctl.py` (the client against a
   fake bridge).
 
 ## Turning it on
 
 ```
-HOS_CONTROL=/run/user/1000/hookshot/control.sock ./hookshot
+HOS_CONTROL=/run/user/1000/longshot/control.sock ./longshot
 ```
 
 It is off unless `HOS_CONTROL` is set. When it is on, the log says so once:
 `control: listening on <path> (HOS_CONTROL: ...)`. On Windows the value is a named pipe, `\\.\pipe\<name>`; a bare name
 gets that prefix.
 
-`hookshot_ctl.py launch <game folder>` starts a game folder this way. It makes a run folder of its own (mode 0700) and
+`longshot_ctl.py launch <game folder>` starts a game folder this way. It makes a run folder of its own (mode 0700) and
 puts the socket (`control.sock`), the log (`log.txt`) and the screenshots (`shots/`) there. It waits until the bridge
 answers, then prints the socket's path.
 
@@ -38,7 +38,7 @@ answers, then prints the socket's path.
 - **A folder of this user's.** The socket's folder has to be owned by the game's user and writable by no one else
   (not a shared `/tmp`): otherwise the bridge stays off and the log says why. Another user could otherwise put a link
   or a socket of theirs where the bridge binds, removes a stale socket, or writes a shot by a relative path.
-  `hookshot_ctl.py launch` makes such a folder (0700, in `$XDG_RUNTIME_DIR`). The path is always a file system path:
+  `longshot_ctl.py launch` makes such a folder (0700, in `$XDG_RUNTIME_DIR`). The path is always a file system path:
   there is no abstract socket name.
 - **Nothing in the way is replaced.** A file at the path that is not a socket is left alone and the bridge stays off. A
   socket that a live game answers on is left alone too. A stale one, left by a game that ended, is removed.
@@ -54,7 +54,7 @@ answers, then prints the socket's path.
   one short lock that the bridge never holds over I/O. A client that sends nonsense gets errors. A client that stops
   reading is dropped once 8 MB waits for it, and one that goes away mid-command has its presses let go.
 
-**The client trusts the game no further than it must.** `hookshot_ctl.py` may run outside a sandbox the game is in, so
+**The client trusts the game no further than it must.** `longshot_ctl.py` may run outside a sandbox the game is in, so
 what it does with the game's replies is checked: `slots --thumbs` takes only digit slot names and a bounded slice of
 that slot's `caption.sav`, and plain output shows control characters from the game (a log line's escape sequences) as
 `?`. `launch --save` refuses a save folder that holds links or anything but plain files and folders: a save from
@@ -187,12 +187,12 @@ step's end.
 `"wait": false`): `{"released": 3, "all": false}`. Another connected client's inputs stay. With `"all": true`, every
 client's. Presses that were waited on reply `cancelled`.
 
-An input sent with `"wait": false` stays queued after its client goes (so a one-shot `hookshot_ctl.py press --no-wait`
+An input sent with `"wait": false` stays queued after its client goes (so a one-shot `longshot_ctl.py press --no-wait`
 works) and is freed once it is over. An input that is waited on is let go when its client goes.
 
 **shot**: a PNG of the first present after the request, or after frame `after`. It is the size `RX_VK_SHOTS` writes
 (1280x720, or `RX_VK_SHOT_W` x `RX_VK_SHOT_H`); the reply's `width` and `height` are read from the file. `path` defaults to `shots/shot_<n>_f<frame>.png` in the socket's folder (made 0700). A relative path is
-taken from the socket's folder, not the game's (on Windows, where a pipe has no folder, from `%TEMP%\hookshot-control-<pipe name>\`, which also holds `shots\`). A shot is the game's own picture: the Insert menu and the FPS counter, drawn over it on the way to the window, are not in it. The file is written whole under another name, then renamed, so the
+taken from the socket's folder, not the game's (on Windows, where a pipe has no folder, from `%TEMP%\longshot-control-<pipe name>\`, which also holds `shots\`). A shot is the game's own picture: the Insert menu and the FPS counter, drawn over it on the way to the window, are not in it. The file is written whole under another name, then renamed, so the
 path in the reply is complete. The `timeout` default is 30 s. Shots need the Vulkan renderer.
 
 ```
@@ -215,7 +215,7 @@ path in the reply is complete. The `timeout` default is 30 s. Shots need the Vul
 | `map` | the map is `map` (any case; at once if it is); without `map`, the next change of map. The reply has `map` |
 
 **option_get**: the Insert menu's settings, or one of them by `name`. A name is the setting's key in
-`hookshot_options.ini` (`text_speed`) or its row's name (`"Text speed"`), in any case, with `-` taken as `_`. The
+`longshot_options.ini` (`text_speed`) or its row's name (`"Text speed"`), in any case, with `-` taken as `_`. The
 settings are the rows with a value that the menu shows on this PC (a row for what the GPU cannot run is not listed),
 not the section headings and not the Debug tab's tools. The bridge finds a row by its key each time: a key stays the
 same when rows come and go or are renamed, a place in the list does not. `restart` marks a row that takes effect at the
@@ -229,7 +229,7 @@ next start; `fixed`, one with nothing to choose on this PC (the menu shows it gr
 
 **option_set**: `name` and `value` (a number, or `true`/`false`). The value is set through the menu's own setter, as
 Left and Right set it: cut to the row's range, the Quality preset turned to Custom unless the row is one it leaves
-alone, a restart noted for the restart question, and kept in `hookshot_options.ini`. The rows the arrows step through
+alone, a restart noted for the restart question, and kept in `longshot_options.ini`. The rows the arrows step through
 a list of their own (the Upscaler, Render resolution, the output resolution) are walked in the arrows' order until they
 reach the value; one that none of their steps reach on this PC leaves them, the Quality preset and the rest as they
 were, and replies `failed`. A `fixed` row replies `failed` too. The reply has the value it had before and the setting as it is now. The menu's lock keeps a change apart from the menu's own frame.
@@ -311,12 +311,12 @@ removed.
 ## Saves
 
 **saves** (no opt-in needed: it lists files, reads no game memory): the folder the game's saves are mounted from
-(`<data>/hookshot/save/<user id>` on Linux), read on the bridge's thread. A slot the game is writing at that moment may
+(`<data>/longshot/save/<user id>` on Linux), read on the bridge's thread. A slot the game is writing at that moment may
 show a size or time between two writes. `unavailable` until the game has opened its saves.
 
 ```
 > {"id":50,"cmd":"saves"}
-< {"id":50,"ok":true,"frame":900,"path":"/tmp/run/data/hookshot/save/5a3c9e1f0b7d24680000000000000001","account":true,
+< {"id":50,"ok":true,"frame":900,"path":"/tmp/run/data/longshot/save/5a3c9e1f0b7d24680000000000000001","account":true,
    "option":true,"slots":[{"slot":"03","mtime":1762900000,"newest":true,"files":[{"name":"progress.sav","size":120724,
    "mtime":1762900000},{"name":"caption.sav","size":42239,"mtime":1762900000}],"caption":{"scene":"KokiriForest",
    "map":"KokiriForest/KokiriForest_Child","thumbnail":{"format":"jpeg","offset":1396,"size":40843}}}]}
@@ -365,7 +365,7 @@ the memory the runtime has mapped — the image, the system region in use, the h
 
 Reads and writes are done on the game thread, at a controller read, so a read is one frame's memory and a write lands
 between frames. `mem_read_many` reads all its ranges in that one pass, so they are consistent with each other. Every
-write is logged in `hookshot_log.txt` (`control: wrote N bytes to guest 0x...`).
+write is logged in `longshot_log.txt` (`control: wrote N bytes to guest 0x...`).
 
 A write to memory the GPU reads goes through the same soft write-watch the game's own CPU writes use (the page is marked
 and synced into the renderer's VRAM mirror on the next frame's memory sync), so it reaches the GPU like any other CPU
@@ -398,31 +398,31 @@ time): planned.
 ## The client
 
 ```
-export HOS_CONTROL=$(python -I scripts/hookshot_ctl.py launch ~/Games/Hookshot --data /tmp/oot-data --headless)
+export HOS_CONTROL=$(python -I scripts/longshot_ctl.py launch ~/Games/Longshot --data /tmp/oot-data --headless)
 # (a first start prepares the shaders before the first frame: the game reads no controller until then)
-python -I scripts/hookshot_ctl.py wait frame --frame 1 --timeout 900
+python -I scripts/longshot_ctl.py wait frame --frame 1 --timeout 900
 # (the title and the file select need A: press it until the save is loaded)
-until [ "$(python -I scripts/hookshot_ctl.py --json status | jq -r .state)" = play ]; do
-    python -I scripts/hookshot_ctl.py press A --frames 8; python -I scripts/hookshot_ctl.py wait present --frames 60
+until [ "$(python -I scripts/longshot_ctl.py --json status | jq -r .state)" = play ]; do
+    python -I scripts/longshot_ctl.py press A --frames 8; python -I scripts/longshot_ctl.py wait present --frames 60
 done
-python -I scripts/hookshot_ctl.py status
-python -I scripts/hookshot_ctl.py stick L 0 1 --frames 90 --exclusive
-python -I scripts/hookshot_ctl.py press A --frames 8
-python -I scripts/hookshot_ctl.py sequence '0:A/8,60:A/8'
-python -I scripts/hookshot_ctl.py sequence '0:LUP/2000,2:A' --hos       # HOS_INPUT_LIVE's line, as it is
-python -I scripts/hookshot_ctl.py shot out.png
-python -I scripts/hookshot_ctl.py option get
-python -I scripts/hookshot_ctl.py option set text_speed 3
-python -I scripts/hookshot_ctl.py teleport                              # the destinations
-python -I scripts/hookshot_ctl.py teleport 1 --arrive 30                # sent (or refused, and why), then arrived
-python -I scripts/hookshot_ctl.py age adult --arrive 30                 # the Debug tab's Switch age, then reloaded
-python -I scripts/hookshot_ctl.py release                               # this client's inputs and abandoned ones (--all)
-python -I scripts/hookshot_ctl.py watch --events present,state --log "hid:"
-python -I scripts/hookshot_ctl.py raw '{"cmd": "wait", "event": "frame", "frame": 9000}'
-python -I scripts/hookshot_ctl.py mem read 0x80000000 8               # needs HOS_CONTROL_MEM=ro or rw
-python -I scripts/hookshot_ctl.py mem read 0x1000000000 16 --format u32
-python -I scripts/hookshot_ctl.py mem write 0x1000000000 2a000000      # needs HOS_CONTROL_MEM=rw
-python -I scripts/hookshot_ctl.py quit
+python -I scripts/longshot_ctl.py status
+python -I scripts/longshot_ctl.py stick L 0 1 --frames 90 --exclusive
+python -I scripts/longshot_ctl.py press A --frames 8
+python -I scripts/longshot_ctl.py sequence '0:A/8,60:A/8'
+python -I scripts/longshot_ctl.py sequence '0:LUP/2000,2:A' --hos       # HOS_INPUT_LIVE's line, as it is
+python -I scripts/longshot_ctl.py shot out.png
+python -I scripts/longshot_ctl.py option get
+python -I scripts/longshot_ctl.py option set text_speed 3
+python -I scripts/longshot_ctl.py teleport                              # the destinations
+python -I scripts/longshot_ctl.py teleport 1 --arrive 30                # sent (or refused, and why), then arrived
+python -I scripts/longshot_ctl.py age adult --arrive 30                 # the Debug tab's Switch age, then reloaded
+python -I scripts/longshot_ctl.py release                               # this client's inputs and abandoned ones (--all)
+python -I scripts/longshot_ctl.py watch --events present,state --log "hid:"
+python -I scripts/longshot_ctl.py raw '{"cmd": "wait", "event": "frame", "frame": 9000}'
+python -I scripts/longshot_ctl.py mem read 0x80000000 8               # needs HOS_CONTROL_MEM=ro or rw
+python -I scripts/longshot_ctl.py mem read 0x1000000000 16 --format u32
+python -I scripts/longshot_ctl.py mem write 0x1000000000 2a000000      # needs HOS_CONTROL_MEM=rw
+python -I scripts/longshot_ctl.py quit
 ```
 
 Each command prints plain lines; `--json` prints the replies. `--sock` overrides `$HOS_CONTROL`. The exit status is 0
@@ -449,7 +449,7 @@ sets `XDG_DATA_HOME` for the run, so it plays from saves of its own. `--env NAME
 `tests/test_control.py` builds the bridge with a fake game and drives it over its real transport: the Unix socket on
 Linux, the named pipe on Windows (the CI's windows-2022 runner). On Windows it also checks the pipe's access control:
 another first instance of the name and a second bridge on it are refused, and the DACL, read back through a client's
-handle, is protected with a single ACE for the current user. `tests/test_hookshot_ctl.py` drives the client against a
+handle, is protected with a single ACE for the current user. `tests/test_longshot_ctl.py` drives the client against a
 fake bridge on the same transports.
 
 What is not tested is under Known limits.

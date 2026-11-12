@@ -1,4 +1,4 @@
-// (hookshot) Native matrix multiplies: OoT's networks (the movie upscaler, the gameplay TAAU) are HMMA.16816.F16
+// (longshot) Native matrix multiplies: OoT's networks (the movie upscaler, the gameplay TAAU) are HMMA.16816.F16
 // programs, which the shuffle expansion in lower_to_maxwell.h runs at a fraction of the speed. With
 // VK_KHR_cooperative_matrix offering 16x8x16 f16 on the subgroup, HMMA lowers to HMMA_nx2 and the SPIR-V back end
 // emits one OpCooperativeMatrixMulAddKHR, moving each lane's fragment registers in and out of its elements.
@@ -18,8 +18,8 @@
 #include "vk_internal.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
 #include <sirit/sirit.h>
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 
 namespace mkwvk {
@@ -337,13 +337,13 @@ bool test_multiply() {
 namespace {
 /// Without cooperative matrices (a GTX 1650, an RTX 2060 on some drivers, AMD and Intel cards): the same multiplies in a shader function on
 /// subgroup shuffles. The lowering refuses a matrix multiply it has no way to run, and the game's upscaling networks were then left out:
-/// the 3D scene came out black or as coloured noise, with the HUD over it (Hookshot issues 10 and 14)
+/// the 3D scene came out black or as coloured noise, with the HUD over it (Longshot issues 10 and 14)
 void software_multiplies(const char* why) {
     Shader::Backend::SPIRV::mma_software = true;
     dev.native_mma = true;
     logf("vk: matrix multiplies in software (%s)", why);
 }
-/// (hookshot, mma_layout.h global_table_loop) Intel's Mesa driver only for now (Mesa inlines DontInline; Windows not tried); env is
+/// (longshot, mma_layout.h global_table_loop) Intel's Mesa driver only for now (Mesa inlines DontInline; Windows not tried); env is
 /// RX_VK_GM_LOOP, 0 or 1 over the default. A table indexed by the loop's counter needs dynamic indexing of storage buffer arrays
 /// (tests/test_global_table_loop.py)
 bool table_loop_wanted(VkDriverId driver, bool dynamic_indexing, const char* env) {
@@ -365,12 +365,12 @@ void coopmat_init() {
     Shader::Backend::SPIRV::global_table_loop = table_loop_wanted(dev.driver_id, dev.features.shaderStorageBufferArrayDynamicIndexing,
                                                                   std::getenv("RX_VK_GM_LOOP"));
     if (Shader::Backend::SPIRV::global_table_loop) logf("vk: storage buffer tables searched in loops (RX_VK_GM_LOOP=0: written out)");
-    // (hookshot) the translation's vendor fixes (vk_vendor.h, dev.fixes): out-of-bounds texel fetches answer 0, NaN tests on bits
+    // (longshot) the translation's vendor fixes (vk_vendor.h, dev.fixes): out-of-bounds texel fetches answer 0, NaN tests on bits
     Shader::Backend::SPIRV::fetch_bounds = dev.fixes.fetch_bounds;
     // (dev.features.robustBufferAccess: on exactly when robustBufferAccess2 is, vk_main.cpp create_device)
     Shader::Backend::SPIRV::fetch_bounds_buffers = dev.fixes.fetch_bounds && !dev.features.robustBufferAccess;
     Shader::Backend::SPIRV::nan_bits = dev.fixes.nan_bits;
-    // (hookshot) RX_VK_MMA_SOFTWARE=1: HMMA_nx2 in a shader function on subgroup shuffles, no cooperative matrices
+    // (longshot) RX_VK_MMA_SOFTWARE=1: HMMA_nx2 in a shader function on subgroup shuffles, no cooperative matrices
     // (emit_spirv_warp.cpp, from Lichii): the lowering still gives HMMA_nx2 (dev.native_mma)
     if (const char* sw = std::getenv("RX_VK_MMA_SOFTWARE"); sw && std::atoi(sw)) {
         Shader::Backend::SPIRV::mma_software = true;
@@ -405,7 +405,7 @@ void coopmat_init() {
         return;
     }
     bool ok = measure_order() && test_multiply();
-    // (hookshot, diagnosis) RX_VK_MMA_A_ORDER / _B_ORDER / _C_ORDER=<n,n,...>: the element orders given instead of the
+    // (longshot, diagnosis) RX_VK_MMA_A_ORDER / _B_ORDER / _C_ORDER=<n,n,...>: the element orders given instead of the
     // measured ones (as if the console's fragments were laid out otherwise)
     const auto override_order = [&](const char* name, auto& order) {
         const char* e = std::getenv(name);

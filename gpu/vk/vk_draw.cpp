@@ -64,8 +64,8 @@
 #include "shaders/shadow_stab_comp_spv.h"
 #include "shaders/movie_upscale_comp_spv.h"
 #include "shader_recompiler/backend/spirv/mma_layout.h"
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 #include "vk_programs.h"
 #include "vk_pipelines.h"
@@ -79,7 +79,7 @@ const PointerEntry* pointer_table(const NvnState& s, int stage);
 uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uint32_t offset);   // (vk_shader.cpp)
 uint64_t sampler_registrations_generation();   // (vk_bank.cpp: sampler_for's cache)
 namespace {
-// ---- (hookshot) this file's per-thread objects that need a constructor or a destructor ----
+// ---- (longshot) this file's per-thread objects that need a constructor or a destructor ----
 // With llvm-mingw every use of such a thread_local calls the file's TLS init function, which saves registers, finds the
 // thread's TLS block and checks a guard byte however long ago the thread set them up: ~2.4% of the replay thread on a
 // Ryzen 9 3900X in Kokiri Forest (HOS_SAMPLE). Each one is reached through a plain thread_local pointer instead, which needs
@@ -115,7 +115,7 @@ T& tls_make(T*& slot) {
         return p ? *p : tls_make(name##_tls);                                         \
     }
 
-// ---- (hookshot) RX_VK_PROF_FINE=1: where a draw's time goes, finer than the frame line's phases, and what each draw does ----
+// ---- (longshot) RX_VK_PROF_FINE=1: where a draw's time goes, finer than the frame line's phases, and what each draw does ----
 // Off, each site is a test of one constant. On, a timed site reads the clock twice (~15 ns; the frame line's phases grow by the same, so
 // compare a run with it on to another with it on) and the sums are logged with the frame statistics, "a frame (fine)": the times in ms a
 // frame, the counts a draw. FT_*: the sections of the descriptor build (banks, c1, user uniform buffers, storage buffers, textures) and
@@ -718,7 +718,7 @@ void ensure_layout(Program& p) {
 VkPipelineCache pcache = VK_NULL_HANDLE;
 std::string pcache_path;
 std::atomic<int64_t> pcache_built_since_save{0};
-// (hookshot) The size of the cache's data when it was last read or written. The count above takes in every pipeline made
+// (longshot) The size of the cache's data when it was last read or written. The count above takes in every pipeline made
 // with the cache, the ones it already held too: the precompile's ~13,000 at each start, all found in the cache, made the
 // first check in play (present 300) write the whole cache again, 1.1 GB, at every start, the file the same 1146 MB each
 // time. On a SATA SSD that write took 4-10 s and left the disk's reads slow (10-450 ms) for the minutes after, the game's
@@ -741,7 +741,7 @@ PipelineCacheFile pcache_file_read(const std::string& path) {
 }
 std::string pcache_dir;
 
-// ---- (hookshot) What play makes goes into a cache of its own, one per save ----
+// ---- (longshot) What play makes goes into a cache of its own, one per save ----
 // pcache takes what the start-up builds and is then left as it was read. Every save in play wrote it whole again for what play had
 // added: NVIDIA's driver copies into the cache a pipeline is made with each pipeline it takes from its own disk cache, so a first
 // visit grew it at each new pipeline, and the save every 32 of them wrote 0.5-1.2 GB to add a few MB (497-539 MB written six times
@@ -931,10 +931,10 @@ bool pcache_no_save = false;   // (RX_VK_PCACHE_LOAD=0: pcache_init)
 // (RX_VK_PCACHE_LOAD=0, an A/B of what the file costs in memory: its 2.5 GB read whole and held by the driver. The cache
 // starts empty and is not saved; the driver's own shader cache is all there is)
 bool pcache_load_off() {
-    static const bool off = [] { const char* e = getenv("RX_VK_PCACHE_LOAD"); return e && env_value_off(e); }();   // (hookshot_env.h: 0/off/false/no)
+    static const bool off = [] { const char* e = getenv("RX_VK_PCACHE_LOAD"); return e && env_value_off(e); }();   // (longshot_env.h: 0/off/false/no)
     return off;
 }
-/// (hookshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp,
+/// (longshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp,
 /// which the program cache and the prepare record start over by): their pipelines can no longer be hit, and the file only grew,
 /// read whole at every start and held by the driver (pcache_stamp.h). Once a run, before the first of pcache_init and
 /// prepare_run: whether files went, so that prepare_run makes the stage libraries the warm pass kept in them again
@@ -988,7 +988,7 @@ struct Targets {
     VkImageView color_view[8]{};
     VkImage block_image[8]{};
     VkFormat color_format[8]{};
-    int color_view_nvn[8]{};   // (hookshot) the NVN format each is drawn in (view_nvn_format): the pipeline state list's
+    int color_view_nvn[8]{};   // (longshot) the NVN format each is drawn in (view_nvn_format): the pipeline state list's
     uint32_t color_level[8]{}, color_layer[8]{}, depth_level = 0, depth_layer = 0;   // (the levels and layers viewed)
     Texture* depth = nullptr;
     VkImageView depth_view = VK_NULL_HANDLE;
@@ -999,7 +999,7 @@ struct Targets {
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 };
 
-/// (hookshot) The colour output types a program is translated for: each target's, by its format (Shader::AttributeType). The draw's,
+/// (longshot) The colour output types a program is translated for: each target's, by its format (Shader::AttributeType). The draw's,
 /// and the pipeline state list's from the formats it maps the game's to (state_targets)
 void color_types_of(const Targets& at, uint8_t types[8]) {
     for (int i = 0; i < 8; i++) {
@@ -1019,7 +1019,7 @@ void color_types_of(const Targets& at, uint8_t types[8]) {
         }
     }
 }
-/// (hookshot) A mesh draw's topology (it has none of its own) and the topology a draw's pipeline is made with: the drawn one, or for
+/// (longshot) A mesh draw's topology (it has none of its own) and the topology a draw's pipeline is made with: the drawn one, or for
 /// the mesh fallback's program the points, lines or triangles its mesh program makes. The draw's, and the pipeline state list's
 constexpr VkPrimitiveTopology kMeshDrawTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 VkPrimitiveTopology pipeline_topology(const Program& p, VkPrimitiveTopology drawn) {
@@ -1033,14 +1033,14 @@ struct PipeEntry {
     std::atomic<uint8_t> how{0};   // (the census: how play made it, UseCounters::made_how; 0: before play, or not made)
 };
 std::unordered_map<uint64_t, std::unique_ptr<PipeEntry>> pipelines;   // (the replay thread's)
-// (hookshot) Pipelines made ahead of their first draw by the load at a program's create call (vk_programs.cpp), by their keys.
+// (longshot) Pipelines made ahead of their first draw by the load at a program's create call (vk_programs.cpp), by their keys.
 // `pipelines` is the replay's own and has no lock outside the parallel replay, so a background job puts what it made here and
 // the draw's lookup takes it the first time it asks for that key (graphics_pipeline)
 std::mutex kept_ready_mu;
 std::unordered_map<uint64_t, VkPipeline> kept_ready;
 std::atomic<size_t> kept_ready_n{0};
 int64_t st_draws, st_skipped, st_dispatches, st_passes, st_mesh, st_pending_skips, st_waits;
-// (hookshot) skips by the line that made them, reported with the frame statistics (draw_skip_report)
+// (longshot) skips by the line that made them, reported with the frame statistics (draw_skip_report)
 namespace {
 struct SkipSite { std::atomic<int> line{0}; std::atomic<int64_t> n{0}; int64_t last = 0; };
 SkipSite skip_sites[48];
@@ -1076,8 +1076,8 @@ bool depth_aspect(VkFormat f) {
     return is_depth_format(f) && f != VK_FORMAT_S8_UINT;
 }
 
-// (hookshot) The programs the driver faulted on (driver_faults.h): not asked of it again in this run, nor in later runs on the
-// same driver (hookshot_driver_faults.txt beside the executable). One program's builds go to the driver one at a time on AMD,
+// (longshot) The programs the driver faulted on (driver_faults.h): not asked of it again in this run, nor in later runs on the
+// same driver (longshot_driver_faults.txt beside the executable). One program's builds go to the driver one at a time on AMD,
 // where a build behind a faulted one hung (issue 996); other drivers keep building a program's variants in parallel.
 // RX_VK_DRIVER_FAULTS=0: off; =1: the default; =2: one at a time on every driver
 constexpr VkResult kDriverFault = (VkResult)-77;   // (what the guards below answer for a fault in the driver)
@@ -1090,7 +1090,7 @@ std::string driver_faults_path() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
     std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_driver_faults.txt";
+    return dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_driver_faults.txt";
 }
 driver_faults::Quarantine& fault_quarantine() {
     static driver_faults::Quarantine q;
@@ -1127,13 +1127,13 @@ void driver_fault_note(uint64_t key) {
     }
     fseek(f, 0, SEEK_END);   // (in append mode ftell says 0 until the first write, on Windows: the file's own end)
     if (ftell(f) == 0)
-        fputs("# Hookshot: programs the graphics driver's compiler faulted on, not asked of it again on that driver\n"
+        fputs("# Longshot: programs the graphics driver's compiler faulted on, not asked of it again on that driver\n"
               "# (gpu/vk/driver_faults.h). <vendor> <driver version> <program key>. Delete this file to try them again.\n", f);
     fputs(driver_faults::line(dev.props.vendorID, dev.props.driverVersion, key).c_str(), f);
     fclose(f);
 }
 
-// (hookshot) A driver's compiler that faults on a shader (amdvlk64.dll on a mesh program, Hookshot issue 26) costs that one draw, not the game
+// (longshot) A driver's compiler that faults on a shader (amdvlk64.dll on a mesh program, Longshot issue 26) costs that one draw, not the game
 std::atomic<int> st_driver_faults{0};
 /// (the faults caught below, counted: a driver can stop answering after one, and the preparation's watchdog says so, vk_main.cpp
 /// driver_faults)
@@ -1240,7 +1240,7 @@ VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl)
 VkResult cached_compute(const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     return create_cached(guarded_compute, ci, pl);
 }
-/// (hookshot) What a compute program's pipeline is made from: its one stage, pinned to 32 lanes where the GPU can, and its
+/// (longshot) What a compute program's pipeline is made from: its one stage, pinned to 32 lanes where the GPU can, and its
 /// layout (ensure_layout first). noopt: RX_VK_NOOPT is followed, as play's builds follow it (the precompile's do not)
 VkComputePipelineCreateInfo compute_pipeline_info(const Program& q, bool noopt) {
     VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
@@ -1254,7 +1254,7 @@ VkComputePipelineCreateInfo compute_pipeline_info(const Program& q, bool noopt) 
     if (noopt && noopt_on) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     return ci;
 }
-/// (hookshot) That pipeline asked of the caches without compiling (create_cached: the driver's own, then the start's): null when
+/// (longshot) That pipeline asked of the caches without compiling (create_cached: the driver's own, then the start's): null when
 /// neither has it, and where the driver cannot be asked that way
 VkPipeline compute_pipeline_cached(const Program& q, bool noopt) {
     if (!dev.vk13.pipelineCreationCacheControl) return VK_NULL_HANDLE;
@@ -1282,7 +1282,7 @@ uint32_t target_write_mask(const Program& p, const NvnState& s, int i) {
     return (s.chmask.mask >> (4 * i)) & 0xF & (all || !written ? 0xFu : (uint32_t)written);
 }
 thread_local const Program* cur_program = nullptr;   // (the draw's, for its dynamic write masks)
-/// (hookshot) What target_write_mask reads of a program, as one word: whether its fragment stage stores each output and which
+/// (longshot) What target_write_mask reads of a program, as one word: whether its fragment stage stores each output and which
 /// components it writes of it (6 bits each). Two programs with the same word make the same masks from the same state
 uint64_t program_wm_sig(const Program& p) {
     if (const int64_t known = p.wm_sig.load(std::memory_order_relaxed); known >= 0) return (uint64_t)known;
@@ -1299,8 +1299,8 @@ uint64_t program_wm_sig(const Program& p) {
     return sig;
 }
 
-// ---- (hookshot) The precompile, as TotK Recomp's (runtime/vk_pipeline.c vk_pipeline_prewarm, keys in pipeline-keys.bin): each
-// pipeline the game asks for is noted in hookshot_pipelines.bin, by what built it; a release build, before the game starts,
+// ---- (longshot) The precompile, as TotK Recomp's (runtime/vk_pipeline.c vk_pipeline_prewarm, keys in pipeline-keys.bin): each
+// pipeline the game asks for is noted in longshot_pipelines.bin, by what built it; a release build, before the game starts,
 // makes every kept program ready and builds every noted pipeline on all the CPUs (the driver's own cache, mkw_vk_pipelines.bin,
 // makes that quick), so that nothing is built during play. RX_VK_PRECOMPILE=1: in any build; =0: off. A build with
 // RX_RELEASE=1 (nx2/build.py) has it on. The notes are written in every build ----
@@ -1311,9 +1311,9 @@ std::string pipe_notes_path() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
     std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_pipelines.bin";
+    return dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_pipelines.bin";
 }
-/// (hookshot) hookshot_pipelines.bin.built: a precompile that got to its end built every note there was into the pipeline cache
+/// (longshot) longshot_pipelines.bin.built: a precompile that got to its end built every note there was into the pipeline cache
 /// (its stamp, and how many). RX_VK_LOAD=create loads pipelines from the caches alone, and only once this says they are there.
 /// What adds notes without building them (state_list_prepare) removes it; a note play adds was built by play, into its cache
 std::string precompile_built_path() { return pipe_notes_path() + ".built"; }
@@ -1321,20 +1321,20 @@ void precompile_built_write(size_t notes) {
     // (not by a --prepare-shaders run: on NVIDIA the pipeline cache that process writes does not answer the play process
     // ("kept 0 of 32"), so the first play after a preparation found none of the noted pipelines in a cache and compiled them
     // in play with draws left out. Left unwritten, the first play start builds them itself, and its cache does answer)
-    if (env_on("HOOKSHOT_PREPARE_ONLY")) return;
+    if (env_on("LONGSHOT_PREPARE_ONLY")) return;
     if (FILE* f = fopen(precompile_built_path().c_str(), "wb")) {
         const uint64_t rec[2] = {program_cache_stamp(), (uint64_t)notes};
         fwrite(rec, 8, 2, f);
         fclose(f);
     }
 }
-/// The notes of this build (hookshot_pipelines.bin), each pipeline once
-/// (hookshot) Targets a pipeline can be made with: at most 8 colour targets, a sample count Vulkan has, a topology it has.
+/// The notes of this build (longshot_pipelines.bin), each pipeline once
+/// (longshot) Targets a pipeline can be made with: at most 8 colour targets, a sample count Vulkan has, a topology it has.
 /// The notes and the state list are files: what they say is checked before a pipeline is made from it
 bool targets_ok(uint32_t n, uint32_t samples, uint32_t topo) {
     return n <= 8 && samples >= 1 && samples <= 64 && !(samples & (samples - 1)) && topo <= VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
 }
-/// (hookshot) Formats a pipeline can be made with: each colour target's none or one this device draws to, the depth target's
+/// (longshot) Formats a pipeline can be made with: each colour target's none or one this device draws to, the depth target's
 /// one it uses as depth. They come from the notes and the shareable state list, and any number reached the driver as a
 /// VkFormat (a crash in the shader preparation, at every start, until the file was deleted)
 bool formats_ok(uint32_t n, const uint32_t color[8], uint32_t has_depth, uint32_t depth) {
@@ -1349,7 +1349,7 @@ bool formats_ok(uint32_t n, const uint32_t color[8], uint32_t has_depth, uint32_
     return !has_depth || depth == VK_FORMAT_UNDEFINED ||
            (is_depth_format((VkFormat)depth) && supports(depth, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT));
 }
-/// (hookshot) a note read from hookshot_pipelines.bin: its counts in range, its booleans 0 or 1, and no host pointers (the
+/// (longshot) a note read from longshot_pipelines.bin: its counts in range, its booleans 0 or 1, and no host pointers (the
 /// render targets' objects of the run that wrote it mean nothing here)
 bool note_sane(PipeNote& n) {
     if (!targets_ok(n.n, n.samples, n.topo) || n.s.nvattr < 0 || n.s.nvattr > 16 ||
@@ -1437,7 +1437,7 @@ void pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targ
     if (note_file && noted.insert(key).second) fwrite(rec.get(), sizeof(PipeNote), 1, note_file), fflush(note_file);
 }
 
-// ---- (hookshot) The compute programs play dispatches, each key once, in hookshot_computes.bin beside the executable. The precompile
+// ---- (longshot) The compute programs play dispatches, each key once, in longshot_computes.bin beside the executable. The precompile
 // made every kept compute program ready and kept a pipeline for each: 10,328 of them, a few GB of RAM that grew a 16 GB PC out of memory
 // ("memory busted", out-of-memory crashes, Discord and issues 1228/1245, 2026-11-09), where play dispatches a few hundred. With the list
 // only those are kept ready; the rest stay on disk and are made when first dispatched, from the driver's and our pipeline cache (the
@@ -1455,7 +1455,7 @@ std::string computes_path() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
     std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_computes.bin";
+    return dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_computes.bin";
 }
 std::unordered_set<uint64_t> computes_read() {
     std::unordered_set<uint64_t> keys;
@@ -1480,7 +1480,7 @@ void compute_note(uint64_t key) {
     if (compute_note_file && computes_noted.insert(key).second) fwrite(&key, 8, 1, compute_note_file), fflush(compute_note_file);
 }
 
-// ---- (hookshot) The variants of compute programs play dispatches, each once, in hookshot_compute_variants.bin beside the
+// ---- (longshot) The variants of compute programs play dispatches, each once, in longshot_compute_variants.bin beside the
 // executable: a program's key and the variant's hash (Program::variant, the hash of its texture answers). A compute program
 // has up to 64 kept variants and which one a dispatch runs is only known from what is bound then; with RX_VK_LOAD=create the
 // variants this install's play ran before get their code and pipeline when the game makes the program (vk_programs.cpp), the
@@ -1489,7 +1489,7 @@ constexpr char kComputeVariantsMagic[8] = {'H', 'K', 'C', 'V', 'A', 'R', '1', 0}
 std::mutex compute_variant_mu;
 FILE* compute_variant_file = nullptr;
 std::unordered_set<uint64_t> compute_variants_noted;   // (mix(key, variant))
-std::string compute_variants_path() { return computes_path().substr(0, computes_path().size() - strlen("hookshot_computes.bin")) + "hookshot_compute_variants.bin"; }
+std::string compute_variants_path() { return computes_path().substr(0, computes_path().size() - strlen("longshot_computes.bin")) + "longshot_compute_variants.bin"; }
 std::vector<std::pair<uint64_t, uint64_t>> compute_variants_read() {
     std::vector<std::pair<uint64_t, uint64_t>> pairs;
     if (FILE* f = fopen(compute_variants_path().c_str(), "rb")) {
@@ -1516,13 +1516,13 @@ void compute_variant_note(uint64_t key, uint64_t variant) {
     }
 }
 
-// ---- (hookshot) The pipeline state list: each pipeline the game asks for, by what it is made of and nothing of the game's code
+// ---- (longshot) The pipeline state list: each pipeline the game asks for, by what it is made of and nothing of the game's code
 // (its stages' code keys, the vertex input and colour output types its program was translated for, the draw state baked into it), in
-// hookshot_pipeline_states.bin beside the executable. Unlike hookshot_pipelines.bin it is good for any build of the back end: when
+// longshot_pipeline_states.bin beside the executable. Unlike longshot_pipelines.bin it is good for any build of the back end: when
 // the shaders are prepared for a new one (prepare_run), every pipeline in it is noted for the precompile, its program translated
 // first when the seed's are not that one, so that a new release, or a new install with a list from someone else's play
-// (hookshot_pipeline_states_shipped.bin, nx2/make_game.py: merged from assets/pipeline_states/), builds them before the game and not in
-// play. Only hashes, formats and state: the stages themselves come from the player's own game (hookshot_shaders.bin).
+// (longshot_pipeline_states_shipped.bin, nx2/make_game.py: merged from assets/pipeline_states/), builds them before the game and not in
+// play. Only hashes, formats and state: the stages themselves come from the player's own game (longshot_shaders.bin).
 // Version 2 (HKSTATE2) holds what the game asked for, not what this GPU made of it: the targets' NVN formats (version 1 had the
 // Vulkan formats this device chose: decoded ASTC, widened formats), the draw's own topology and whether it was a mesh draw (not the
 // mesh fallback's topology), and the program variant's answers with its stages numbered as every GPU numbers them (the mesh
@@ -1532,7 +1532,7 @@ void compute_variant_note(uint64_t key, uint64_t variant) {
 // nothing bound makes (seed_plain_of: each texture as its instruction declares it), as lists converted from records that hold no
 // texture answers have them. Version 1 lists (a play folder's own from an older build) are still read.
 // A version 2 record of kind kCompute names a compute program play dispatched, by its compute stage's code key in code[0] and
-// nothing else (every other field 0): no pipeline state, a compute pipeline has none. It is the key hookshot_computes.bin holds,
+// nothing else (every other field 0): no pipeline state, a compute pipeline has none. It is the key longshot_computes.bin holds,
 // a hash of the game's stage like the others, the same on every GPU and with any settings. The record's size and the magic are
 // unchanged: lists without such records are what they were, and a build from before them drops one (its sample count, 0, is
 // not one a pipeline can have: targets_ok), so it never takes one for a graphics pipeline ----
@@ -1660,7 +1660,7 @@ std::vector<StateRec> state_list_read(const std::string& path, int* version = nu
                 if (r.nanswers > std::size(r.answers) || r.nquestions > std::size(r.questions) || r.nvattr > 16 ||
                     !targets_ok(r.n, r.samples, r.topo) || !formats_ok(r.n, r.color_format, r.has_depth, r.depth_format) ||
                     !state_v1_portable(r))
-                    continue;   // (hookshot: a pipeline is made from the rest: its counts must be ones it can have)
+                    continue;   // (longshot: a pipeline is made from the rest: its counts must be ones it can have)
                 out.push_back(r);
             }
         } else if (!memcmp(magic, kStateMagic2, 8) && size == sizeof(StateRec2)) {
@@ -1692,14 +1692,14 @@ std::vector<uint64_t> state_list_computes(const std::string& path) {
     return keys;
 }
 /// The compute programs the precompile keeps ready before play (precompile_run). which: RX_VK_PRECOMPILE_COMPUTES, null when not set.
-/// keys, each once: those this install's play dispatched (hookshot_computes.bin: learned) and those the shipped state list names
+/// keys, each once: those this install's play dispatched (longshot_computes.bin: learned) and those the shipped state list names
 /// (every one of them: a list is bounded where it is made, nx2/pipeline_states.py check and read_sent, never cut short here, where
 /// a program left out would only show as a stall in play; not when state_lists is false or which is "learned").
 /// all: every kept compute program instead:
 ///  - a first start, with nothing learned yet (and whenever nothing names any, or which is "all"). The shipped list names what
 ///    someone's play dispatched, not what this player's will: a program it misses would be loaded and its pipeline made at its
 ///    first dispatch, which a first start has never done. It costs that start the memory of every program (the comment at
-///    hookshot_computes.bin); from the second start on only the listed ones are kept, as before;
+///    longshot_computes.bin); from the second start on only the listed ones are kept, as before;
 ///  - which "listed" takes the shipped list's alone on a first start too: far less memory there, and a program the list
 ///    misses is made at its first dispatch.
 /// none: which is "none"
@@ -1716,7 +1716,7 @@ ComputePlan computes_plan(const char* which, bool state_lists) {
     plan.learned = plan.keys.size();
     if (state_lists && !plan.learned_only) {
         std::unordered_set<uint64_t> seen;
-        for (const uint64_t k : state_list_computes(state_list_path("hookshot_pipeline_states_shipped.bin")))
+        for (const uint64_t k : state_list_computes(state_list_path("longshot_pipeline_states_shipped.bin")))
             if (seen.insert(k).second) plan.shipped++, plan.fresh += plan.keys.insert(k).second;
     }
     const bool listed = which && !strcmp(which, "listed");
@@ -1729,10 +1729,10 @@ FILE* state_file = nullptr;
 std::unordered_set<uint64_t> state_seen;
 /// (state_mu held) the state list opened for this run's new pipelines, the records it holds hashed. precompile_run opens it before
 /// play: the first new pipeline in play read and hashed the whole list on the thread replaying, 8-18 ms. A version 1 list (an older
-/// build's) is kept as hookshot_pipeline_states_v1.bin, which the prepare reads too, and this build's records start a version 2 one.
+/// build's) is kept as longshot_pipeline_states_v1.bin, which the prepare reads too, and this build's records start a version 2 one.
 /// RX_VK_NO_STATE_LIST=1: never called
 void state_open_locked() {
-    const std::string path = state_list_path("hookshot_pipeline_states.bin");
+    const std::string path = state_list_path("longshot_pipeline_states.bin");
     bool keep = false;
     if (FILE* f = fopen(path.c_str(), "rb")) {
         char magic[8];
@@ -1746,7 +1746,7 @@ void state_open_locked() {
         }
         fclose(f);
         if (v1) {
-            const std::string old = state_list_path("hookshot_pipeline_states_v1.bin");
+            const std::string old = state_list_path("longshot_pipeline_states_v1.bin");
             remove(old.c_str());
             if (rename(path.c_str(), old.c_str()) == 0) logf("vk: state list: the version 1 list kept as %s", old.c_str());
         }
@@ -1756,7 +1756,7 @@ void state_open_locked() {
         const uint32_t size = sizeof(StateRec2);
         fwrite(kStateMagic2, 8, 1, state_file), fwrite(&size, 4, 1, state_file);
     }
-    // (the compute programs this install's play dispatched before, hookshot_computes.bin: in the list too, each once, so that
+    // (the compute programs this install's play dispatched before, longshot_computes.bin: in the list too, each once, so that
     // the list a player sends (Save my pipeline list) names them all, not only those of the runs since this build)
     if (state_file) {
         bool added = false;
@@ -1813,14 +1813,14 @@ void state_record_compute(uint64_t key) {
     if (!state_file) state_open_locked();
     if (state_file && state_seen.insert(h).second) fwrite(&r, sizeof r, 1, state_file), fflush(state_file);
 }
-/// (hookshot) The player's own state list as it is now, whole records only (state_mu held, so no record is half written): what
+/// (longshot) The player's own state list as it is now, whole records only (state_mu held, so no record is half written): what
 /// the menu's Save my pipeline list zips (vk_menu.cpp). *present: whether there is one
 std::string state_list_bytes(bool* present) {
     std::lock_guard lk(state_mu);
     if (state_file) fflush(state_file);
     std::string bytes;
     *present = false;
-    if (FILE* f = fopen(state_list_path("hookshot_pipeline_states.bin").c_str(), "rb")) {
+    if (FILE* f = fopen(state_list_path("longshot_pipeline_states.bin").c_str(), "rb")) {
         *present = true;
         char b[1 << 16];
         for (size_t n; (n = fread(b, 1, sizeof b, f)) > 0;) bytes.append(b, n);
@@ -1829,18 +1829,18 @@ std::string state_list_bytes(bool* present) {
     return bytes;
 }
 /// Every pipeline of the state lists (the player's own and the shipped one): its program translated
-/// when the program cache lacks it, then noted in hookshot_pipelines.bin for precompile_run to build. RX_VK_NO_STATE_LIST=1: off
+/// when the program cache lacks it, then noted in longshot_pipelines.bin for precompile_run to build. RX_VK_NO_STATE_LIST=1: off
 void state_list_prepare(void (*progress)(size_t done, size_t total), bool open_seed = false) {
     if (env_on("RX_VK_NO_STATE_LIST")) return;
     remove(precompile_built_path().c_str());   // (notes are added here without their pipelines: precompile_run builds them)
-    remove((pipe_notes_path().substr(0, pipe_notes_path().find_last_of("\\/") + 1) + "hookshot_load_start.txt").c_str());   // (a preparation: loads at create are tried again, load_default.h load_fallback_path)
+    remove((pipe_notes_path().substr(0, pipe_notes_path().find_last_of("\\/") + 1) + "longshot_load_start.txt").c_str());   // (a preparation: loads at create are tried again, load_default.h load_fallback_path)
     const auto t0 = std::chrono::steady_clock::now();
     int shipped_version = 0;
     // (the shipped list's compute programs are not pipelines to note: precompile_run keeps them ready, computes_plan)
-    std::vector<StateRec> recs = state_list_read(state_list_path("hookshot_pipeline_states_shipped.bin"), &shipped_version);
+    std::vector<StateRec> recs = state_list_read(state_list_path("longshot_pipeline_states_shipped.bin"), &shipped_version);
     const size_t shipped = recs.size();
     // (the player's own: this build's, and an older build's version 1 list, state_open_locked)
-    for (const char* own : {"hookshot_pipeline_states.bin", "hookshot_pipeline_states_v1.bin"})
+    for (const char* own : {"longshot_pipeline_states.bin", "longshot_pipeline_states_v1.bin"})
         for (const StateRec& r : state_list_read(state_list_path(own))) recs.push_back(r);
     if (recs.empty() || (open_seed && !seed_open())) return;
     // the programs: each once (by its stages and the types it was translated for)
@@ -1994,7 +1994,7 @@ void state_list_prepare(void (*progress)(size_t done, size_t total), bool open_s
     if (open_seed && !env_on("RX_VK_SEED_CHECK")) seed_close();
 }
 
-// ---- (hookshot) Stage libraries, as TotK Recomp's runtime/vk_pipeline.c: the part of a pipeline that costs is its shaders, and with
+// ---- (longshot) Stage libraries, as TotK Recomp's runtime/vk_pipeline.c: the part of a pipeline that costs is its shaders, and with
 // VK_EXT_graphics_pipeline_library they are built apart from what a draw adds (vertex layout, target formats). prepare_run builds
 // each program's two shader libraries once, for the driver's own cache to keep; a draw that needs a pipeline nothing has built gets
 // them back from that cache, links them on the spot, and draws at once. The worker's full build then takes over. Needs the blend,
@@ -2047,7 +2047,7 @@ void gpl_build_cold(const Program& p, const NvnState& s, const Targets& at, VkPr
 }
 /// cold: the keys of the pre-rasterization and fragment libraries this call found cold (0: not)
 VkPipeline gpl_link(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, uint64_t cold[2]) {
-    if (at.n < 0 || at.n > 8) return VK_NULL_HANDLE;   // (hookshot: at most 8 colour targets)
+    if (at.n < 0 || at.n > 8) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
     const uint64_t program = mix(p.key, p.variant);
     uint64_t input = (uint64_t)topology_class(topo) + 1;
     if (!p.mesh && !p.fallback) {
@@ -2106,7 +2106,7 @@ struct PipeFast {
 };
 thread_local PipeFast pipe_fast[2];
 
-/// (hookshot) the stage a graphics pipeline's vertex input comes from (a fallback program's first stage is a compute one)
+/// (longshot) the stage a graphics pipeline's vertex input comes from (a fallback program's first stage is a compute one)
 const Shader::Info* vertex_info(const Program& p) {
     for (const Stage& st : p.stages)
         if (st.vk_stage == VK_SHADER_STAGE_VERTEX_BIT) return &st.info;
@@ -2115,7 +2115,7 @@ const Shader::Info* vertex_info(const Program& p) {
 
 /// A graphics pipeline's key: what is baked into it (the rest is dynamic state)
 uint64_t pipeline_key(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo) {
-    if (at.n < 0 || at.n > 8) return 0;   // (hookshot: at most 8 colour targets)
+    if (at.n < 0 || at.n > 8) return 0;   // (longshot: at most 8 colour targets)
     uint64_t key = mix(mix(p.key, p.variant), (uint64_t)topology_class(topo) << 8 | (uint64_t)at.samples);
     const Shader::Info& vs = *vertex_info(p);
     if (!p.mesh && !p.fallback) {
@@ -2145,7 +2145,7 @@ uint64_t pipeline_key(const Program& p, const NvnState& s, const Targets& at, Vk
 
 PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, const uint8_t color_types[8]) {
     // the key: what is baked into it (the rest is dynamic state)
-    // (hookshot: and which variant: p.key is the same for all the variants of a program by its textures' types, and a draw of
+    // (longshot: and which variant: p.key is the same for all the variants of a program by its textures' types, and a draw of
     // one ran another's shaders under its own descriptors)
     uint32_t formats[8]{};
     uint32_t vattr[16]{}, divs[16]{};
@@ -2257,12 +2257,12 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
 /// shader, 3 fragment output
 /// cold: made only if the driver has it compiled already; set, and nothing made, when it would have had to compile
 VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, int part, bool* cold) {
-    if (at.n < 0 || at.n > 8) return VK_NULL_HANDLE;   // (hookshot: at most 8 colour targets)
+    if (at.n < 0 || at.n > 8) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
     const Shader::Info& vs = *vertex_info(p);
     const auto t0 = std::chrono::steady_clock::now();
     std::vector<VkPipelineShaderStageCreateInfo> stages;
     for (const Stage& st : p.stages) {
-        // (hookshot: the fallback's dispatches are not graphics stages. Only a fallback program's: with native mesh shaders
+        // (longshot: the fallback's dispatches are not graphics stages. Only a fallback program's: with native mesh shaders
         // the task and mesh stages are the pipeline's own, and a mesh program built without them was a fragment stage
         // alone, which drew none of its geometry and then lost the device, issue 640)
         if (p.fallback && (st.vk_stage & (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)))
@@ -2437,7 +2437,7 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
         // tables) hung the GPU when the driver's optimizer built them: a device lost one to four minutes into Kokiri, each time with
         // another of them first (RX 6600, issues 461 and 484); never in runs where they were built without it. They are built
         // without it on AMD. RX_VK_MESH_OPT=1: with it, as the others)
-        // (hookshot) Not on Mesa's RADV: there the task programs built without it run long enough to reset the GPU while the
+        // (longshot) Not on Mesa's RADV: there the task programs built without it run long enough to reset the GPU while the
         // save loads at the Great Deku Tree (Steam Deck OLED, RX 6800 XT; issue 1000). Built with it, that reset is gone; other
         // RADV hangs remain (issue 1000).
         static const bool amd = dev.props.vendorID == 0x1002 && dev.driver_id != VK_DRIVER_ID_MESA_RADV;
@@ -2468,7 +2468,7 @@ VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at
     // (measured: 21 of 21). gpl_libs_cached: RX_VK_GPL_NO_CACHE=1 keeps them out, as before. With our cache: through
     // graphics_with, so in play one compiled goes into the play generation, and an ask under the flag still goes to pcache)
     const bool lib_cached = (part == 1 || part == 2) && gpl_libs_cached();
-    // (hookshot) a program the driver faulted on is not asked of it again, and on AMD one program's builds go to it one at a
+    // (longshot) a program the driver faulted on is not asked of it again, and on AMD one program's builds go to it one at a
     // time, so a second build waits here and not inside the driver behind a faulted one (driver_faults.h, issue 996). A cold
     // probe does not wait: another build of its program under way is, for it, a compile that is required
     const bool gated = driver_faults_on();
@@ -2532,7 +2532,7 @@ VkSamplerAddressMode wrap(uint8_t w) {
     default: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     }
 }
-// (hookshot) The Anisotropic filtering row (opts.anisotropy): the samplers that filter linearly between texels and have mip
+// (longshot) The Anisotropic filtering row (opts.anisotropy): the samplers that filter linearly between texels and have mip
 // levels get at least n-times anisotropic filtering (the game's value if it asks for more; the device's limit if n is above it):
 // surfaces seen at a slant, the ground ahead above all, keep their detail. OoT asks for 1x or 2x (its log line below), which
 // at a PC's resolutions smears paths and floors a few metres off. 16x by default; Game's: what the game asks for
@@ -2548,7 +2548,7 @@ uint32_t aniso_override() {
     static const int env = getenv("RX_VK_ANISO") ? std::clamp(atoi(getenv("RX_VK_ANISO")), 0, 16) : -1;
     return env >= 0 ? (uint32_t)env : anisotropy_row();
 }
-// (hookshot) The upscalers' texture LOD bias. OoT draws its 3D at 3/4 of the output and gives its world's materials a LOD bias of
+// (longshot) The upscalers' texture LOD bias. OoT draws its 3D at 3/4 of the output and gives its world's materials a LOD bias of
 // -0.5 for that (sampler_make's log line). An upscaler that draws from another share adds to the samplers the game biases below 0
 // (upscaler_rows.h upscale_lod_bias_for): DLSS and DLAA NVIDIA's log2(render / output) - 1 in all (Quality -1.17 more, DLAA -0.58,
 // Auto -1), FSR 3.1 and FSR 4 log2(share / 0.75) below 75 %; 0 with the game's own upscale, Off and FSR 4's native AA.
@@ -2571,7 +2571,7 @@ VkSampler sampler_make(int id, bool compare);
 // ~48000 times a frame at 3000 draws. Now a thread's table by id and compare, good while no sampler registration's contents
 // changed (sampler_registrations_generation). RX_VK_SAMPLER_CACHE=0 turns off both this table and the parameters' cache inside
 // sampler_make; =1 or the Sampler cache row turns the parameters' cache on (this table stays on, as it is without the option)
-bool sampler_cache_on();   // (hookshot, RX_VK_SAMPLER_CACHE and the Sampler cache row: defined below with the descriptor fingerprint's)
+bool sampler_cache_on();   // (longshot, RX_VK_SAMPLER_CACHE and the Sampler cache row: defined below with the descriptor fingerprint's)
 VkSampler sampler_for(int id, bool compare) {
     static const bool on = !getenv("RX_VK_SAMPLER_CACHE") || atoi(getenv("RX_VK_SAMPLER_CACHE")) != 0;
     if (!on || id < 0 || id >= 4096) return sampler_make(id, compare);
@@ -2587,7 +2587,7 @@ VkSampler sampler_for(int id, bool compare) {
 VkSampler sampler_make(int id, bool compare) {
     nvn_samp_par p{};
     bool known = false;
-    if (sampler_cache_on()) {   // (hookshot: what an id holds stays cached with its version on this thread: resolving an id
+    if (sampler_cache_on()) {   // (longshot: what an id holds stays cached with its version on this thread: resolving an id
         static thread_local std::unordered_map<int, std::pair<uint32_t, nvn_samp_par>> seen;   // (that was not registered
         const uint32_t v = sampler_slot_version(id);                                            // (anew takes no lock)
         if (auto it = seen.find(id); it != seen.end() && it->second.first == v)
@@ -2638,7 +2638,7 @@ VkSampler sampler_make(int id, bool compare) {
                     p.minf == NVN_MIN_FILTER_NEAREST_MIPMAP_LINEAR) ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     ci.mipmapMode = (p.minf == NVN_MIN_FILTER_NEAREST_MIPMAP_LINEAR || p.minf == NVN_MIN_FILTER_LINEAR_MIPMAP_LINEAR)
                         ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    {   // (hookshot, issue 1117: blocky halos, smoke and fog shafts since v2.0.6, gone with every sampler linear. The nearest ones
+    {   // (longshot, issue 1117: blocky halos, smoke and fog shafts since v2.0.6, gone with every sampler linear. The nearest ones
         // named, with the game's own words for them; RX_VK_FORCE_LINEAR=1: every sampler linear, for the A/B)
         static const bool force_linear = env_on("RX_VK_FORCE_LINEAR");
         if (ci.magFilter == VK_FILTER_NEAREST || ci.minFilter == VK_FILTER_NEAREST) {
@@ -2687,7 +2687,7 @@ VkSampler sampler_make(int id, bool compare) {
             logf("vk: depth-compare sampler: the game's compare mode %u function %u -> compare %s op %d (filters min %d mag %d)",
                  p.cmp_mode, p.cmp_func, ci.compareEnable ? "on" : "off", (int)ci.compareOp, (int)ci.minFilter, (int)ci.magFilter);
     }
-    {   // (hookshot) A depth comparison through a nearest filter is one test a pixel: shadow edges in stair steps, the shadow map's
+    {   // (longshot) A depth comparison through a nearest filter is one test a pixel: shadow edges in stair steps, the shadow map's
         // texels as squares over Hyrule Field's hills (Discord, 2026-11-09). Linear, the GPU tests the four nearest texels and blends
         // them (percentage-closer filtering), the soft edge the console's picture has. RX_VK_SHADOW_PCF=0: the game's filter
         static const bool pcf = !getenv("RX_VK_SHADOW_PCF") || atoi(getenv("RX_VK_SHADOW_PCF")) != 0;
@@ -2810,7 +2810,7 @@ struct HandleHit {
     uint64_t tex_epoch;   // (the texture epoch it was last touched in)
 };
 TLS_OBJECT(handle_hits, std::unordered_map<uint64_t, HandleHit>)
-// (hookshot) RX_VK_TRACE_TEX=<w>x<h>,...: each draw sampling a texture of that size is logged with its state, every 30th frame, 600 lines: a
+// (longshot) RX_VK_TRACE_TEX=<w>x<h>,...: each draw sampling a texture of that size is logged with its state, every 30th frame, 600 lines: a
 // model that does not show is found by its textures, and whether the game draws it, and how, read from the line
 thread_local const Texture* trace_tex_hit = nullptr;
 thread_local uint32_t trace_tex_mask = 0;
@@ -2831,8 +2831,8 @@ bool trace_tex_wanted(const Texture* t) {
         if (t->width == want[i].first && t->height == want[i].second) trace_tex_mask |= 1u << i;
     return !want.empty() && trace_tex_mask == (1u << want.size()) - 1;   // (a draw with all of them)
 }
-thread_local VkFormat last_view_format = VK_FORMAT_UNDEFINED;   // (hookshot: RX_VK_LOG_IMG, the view last made)
-bool log_img_wanted(uint64_t key) {   // (hookshot) RX_VK_LOG_IMG=<key prefix,...>: its texture and image bindings, 8 times
+thread_local VkFormat last_view_format = VK_FORMAT_UNDEFINED;   // (longshot: RX_VK_LOG_IMG, the view last made)
+bool log_img_wanted(uint64_t key) {   // (longshot) RX_VK_LOG_IMG=<key prefix,...>: its texture and image bindings, 8 times
     static const char* want = getenv("RX_VK_LOG_IMG");
     if (!want) return false;
     char hex[24];
@@ -2952,7 +2952,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         }
         const bool grid_same = st.nvn_stage != 5 || !std::memcmp(c.grid, s.grid, sizeof c.grid);
         static const bool no_bank_cache = desc_reuse_level() == 0;   // (RX_VK_DESC_REUSE=never: filled every time)
-        // (hookshot) a graphics stage's c2 is made from its textures, samplers and images, its c0 from its storage buffers: it stands while
+        // (longshot) a graphics stage's c2 is made from its textures, samplers and images, its c0 from its storage buffers: it stands while
         // those do, whatever else was bound (a uniform buffer for each draw). RX_VK_BANK_GEN_OFF=1: while nothing at all was bound anew)
         static const bool stage_gen_off = env_on("RX_VK_BANK_GEN_OFF");
         const int bank_stage = std::clamp(st.nvn_stage, 0, kNvnStages - 1);
@@ -3112,17 +3112,17 @@ bool slow_desc_timing() {
     return on;
 }
 
-// (hookshot) one switch read two ways, like the Robust buffers row of vk_main.cpp: the environment variable says it for test
-// runs (any value, 0 off); else the row's line in hookshot_options.ini beside the game; else off.
-/// (the row's value in hookshot_options.ini, read before the menu has loaded it; the environment's switch first. def: no
+// (longshot) one switch read two ways, like the Robust buffers row of vk_main.cpp: the environment variable says it for test
+// runs (any value, 0 off); else the row's line in longshot_options.ini beside the game; else off.
+/// (the row's value in longshot_options.ini, read before the menu has loaded it; the environment's switch first. def: no
 /// file, no line, or a file older than options_version since (one whose line was only ever the old default, vk_menu.cpp
 /// load))
 bool menu_env_on(const char* env_name, const char* ini_key_name, bool def = false, int since = 0) {
-    if (const char* e = getenv(env_name)) return !env_value_off(e);   // (hookshot_env.h: the switches' one rule)
+    if (const char* e = getenv(env_name)) return !env_value_off(e);   // (longshot_env.h: the switches' one rule)
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);   // (the game folder, not bin beside the launcher: vk_paths.h)
     std::string ini(exe, n);
-    ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_options.ini";
+    ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "longshot_options.ini";
     const size_t klen = strlen(ini_key_name);
     int v = -1, version = 0;
     if (FILE* f = fopen(ini.c_str(), "r")) {
@@ -3136,7 +3136,7 @@ bool menu_env_on(const char* env_name, const char* ini_key_name, bool def = fals
     if (v < 0 || version < since) return def;
     return v != 0;
 }
-/// (hookshot) How far a draw keeps the descriptors (and the banks) of the draw before it, one switch for the three it had:
+/// (longshot) How far a draw keeps the descriptors (and the banks) of the draw before it, one switch for the three it had:
 ///   2  the Descriptor reuse row's On (the default since options_version 4): kept through registrations of the texture slots
 ///      it does not sample. What it does sample is checked by slot version, and the samplers by their registrations'
 ///      generation, instead of the global one every registration moves
@@ -3158,7 +3158,7 @@ int desc_reuse_level() {
     return level;
 }
 bool desc_slotgen_on() { return desc_reuse_level() == 2; }
-/// (hookshot) the Sampler cache row / RX_VK_SAMPLER_CACHE=1: what a sampler id holds is kept next to its version on the replay
+/// (longshot) the Sampler cache row / RX_VK_SAMPLER_CACHE=1: what a sampler id holds is kept next to its version on the replay
 /// thread, so resolving an id that was not registered anew takes no lock (the registrations' mutex contends with the texture streaming)
 bool sampler_cache_on() {
     static int on = -1;
@@ -3354,7 +3354,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 }
                 const uint64_t base = addr & ~(salign - 1);
                 uint64_t n = std::max<uint64_t>(((size + (addr - base)) + 3) & ~3ull, 16);
-                {   // (hookshot, RX_VK_SSBO_STRETCH=1: a read-only buffer bound to its pool's end, up to 64 MB. Lichii bf3f395c9: the grass's
+                {   // (longshot, RX_VK_SSBO_STRETCH=1: a read-only buffer bound to its pool's end, up to 64 MB. Lichii bf3f395c9: the grass's
                     // task and mesh programs read records 12-18 MB past a base whose size word said less, read 0 and culled every blade)
                     static const bool stretch = env_on("RX_VK_SSBO_STRETCH");
                     if (stretch && !d.is_written && addr && d.count == 1)
@@ -3372,7 +3372,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                         if (const uint64_t end = gpu_pool_end(base); end > base + n) wide_n = std::min(end - base, wide) & ~3ull;
                 }
                 const auto t0 = slow_desc_timing() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-                // (hookshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
+                // (longshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
                 // end are whatever the constant buffer holds there, bound only when they look like a buffer
                 const bool plausible = d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base));
                 BufferRef b = addr && plausible ? gpu_buffer_bind(base, n, d.is_written && !bare) : BufferRef{};
@@ -3406,7 +3406,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     const BufferRef w = gpu_buffer_bind(base, wide_n, false);
                     if (w && w.buffer == b.buffer && w.offset == b.offset) b = w, n = wide_n;
                 }
-                // (hookshot) all a program may write through it, past what is marked written (a bare entry's guessed range, the
+                // (longshot) all a program may write through it, past what is marked written (a bare entry's guessed range, the
                 // pointer table's, a wide binding's): not copied back, but a GPU write hazard for the readback refresh of a later
                 // recording in the submission (vk_memory.cpp memory_rb_refresh)
                 if (b && d.is_written && (bare || wide_n)) memory_note_gpu_write(base, n);
@@ -3437,7 +3437,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 static const int table_unlimited = env_on("RX_VK_LOG_TABLE");
                 if (d.count > 1 && table_track_open(table_told.load(std::memory_order_relaxed),
                                                     table_seen.load(std::memory_order_relaxed), table_unlimited)) {
-                    table_seen.fetch_add(1, std::memory_order_relaxed);   // (hookshot) a table entry bound one frame and not the next, 60 lines, then it stops looking
+                    table_seen.fetch_add(1, std::memory_order_relaxed);   // (longshot) a table entry bound one frame and not the next, 60 lines, then it stops looking
                     static std::mutex tm;
                     static std::unordered_map<uint64_t, std::pair<bool, uint64_t>> was;   // -> bound, its address
                     static int told;
@@ -3454,7 +3454,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     }
                     was[key] = {bound, addr};
                 }
-                {   // (hookshot) RX_VK_LOG_WRITEBACK=1: the programs that bind a big written storage buffer (each written
+                {   // (longshot) RX_VK_LOG_WRITEBACK=1: the programs that bind a big written storage buffer (each written
                     // range is copied back to guest memory at the submission's end), 40 of them
                     static const bool log_wb = env_on("RX_VK_LOG_WRITEBACK");
                     static int logged;
@@ -3659,7 +3659,7 @@ struct Pushed {
     VkPipelineLayout layout = VK_NULL_HANDLE;
     size_t n = 0;                                // (the writes as pushed)
     std::vector<std::vector<uint64_t>> writes;   // (each write's descriptors, as pushed; RX_VK_PUSH_STATE_OLD=1)
-    // (hookshot) the same in one vector of words and where each write's begin: a program change was a vector of vectors resized to the
+    // (longshot) the same in one vector of words and where each write's begin: a program change was a vector of vectors resized to the
     // new program's writes, each new one grown word by word (3 allocations a write, and the ones cut off freed: a dozen of each a draw)
     std::vector<uint64_t> words;
     std::vector<uint32_t> at;
@@ -3667,16 +3667,16 @@ struct Pushed {
 TLS_OBJECT(pushed, std::array<Pushed, 2>)   // [graphics, compute]
 } // namespace
 std::string state_list_snapshot(bool* present) { return state_list_bytes(present); }   // (vk_draw.h: the menu's)
-/// (hookshot) A compute pipeline of the back end's own, made elsewhere (vk_fsr3.cpp), through the pipeline cache the game's are kept
+/// (longshot) A compute pipeline of the back end's own, made elsewhere (vk_fsr3.cpp), through the pipeline cache the game's are kept
 /// in across runs (mkw_vk_pipelines.bin), as theirs are: in play through the play caches (create_cached), so that it does not grow
 /// the start's cache; before the cache is loaded, with none. (Outside the unnamed namespace: vk_fsr3.cpp links to it)
 VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeline* out) {
     return cached_compute(ci, out);
 }
-/// (hookshot) The driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute): the preparation's
+/// (longshot) The driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute): the preparation's
 /// watchdog says so (vk_main.cpp). Outside the unnamed namespace: vk_main.cpp links to it
 int driver_faults() { return st_driver_faults.load(std::memory_order_relaxed); }
-/// (hookshot) Whether predict_run or precompile_run went on and left workers inside the driver: the pipeline cache's save can wait
+/// (longshot) Whether predict_run or precompile_run went on and left workers inside the driver: the pipeline cache's save can wait
 /// on them, and so can exit() unloading the driver (vk_main.cpp, the --prepare-shaders run)
 std::atomic<bool> st_left_workers{false};
 void prepare_left_workers_note() { st_left_workers.store(true); }
@@ -4355,7 +4355,7 @@ int dyn_pack(const NvnState& s, const Targets& at, VkPrimitiveTopology topo, boo
     atb += (int)sizeof s.ds;
     std::memcpy(raw + atb, s.blend, sizeof s.blend);
     atb += (int)sizeof s.blend;
-    // (hookshot) what the program makes of the write masks, not the program: draws change program far more often than they change that,
+    // (longshot) what the program makes of the write masks, not the program: draws change program far more often than they change that,
     // and each program change worked the whole state out again. RX_VK_DYN_PROG_KEY=1: the program, as before)
     static const bool by_program = env_on("RX_VK_DYN_PROG_KEY");
     const uint64_t prog = by_program || !cur_program ? (uint64_t)(uintptr_t)cur_program : program_wm_sig(*cur_program);
@@ -4408,7 +4408,7 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
         d.sref[f] = s.stencil_ref[f] & 0xFF, d.scmp[f] = s.stencil_value_mask[f] & 0xFF, d.swm[f] = s.stencil_mask[f] & 0xFF;
     d.bias[0] = s.poly_offset[1], d.bias[1] = s.poly_offset[2], d.bias[2] = s.poly_offset[0];
     d.bias_en = s.poly.offset_en != 0;
-    {   // (hookshot) The characters' own shadow maps (square, depth only, 768 and less; 1e26755d projects them on the screen): their
+    {   // (longshot) The characters' own shadow maps (square, depth only, 768 and less; 1e26755d projects them on the screen): their
         // stored depth is moved away from the light, or they shadow themselves whole: Link and the ferns black in the shade, while
         // the ground behind them keeps their shadow. RX_VK_SHADOW_BIAS=<units>,<slope>; 0: as the game asks
         static float units = -1, slope = 0;
@@ -4456,7 +4456,7 @@ void dynamic_state(VkCommandBuffer cmd, const NvnState& s, const Targets& at, Vk
     d.dw = !sw().no_depth && depth && s.ds.dw;
     d.dop = compare_op(s.ds.df);
     if (fp) d.dt = true, d.dw = true, d.dop = VK_COMPARE_OP_ALWAYS;
-    {   // (hookshot) A colour pass after a depth pass tests EQUAL against what another program wrote. Intel's compiler does not give two
+    {   // (longshot) A colour pass after a depth pass tests EQUAL against what another program wrote. Intel's compiler does not give two
         // programs the same position to the last bit, and the ground came out in holes: the sky through them, a white forest.
         // A small margin towards the camera instead. RX_VK_EQ_BIAS=<units>, 0: as the game asks
         static const float eq_bias = getenv("RX_VK_EQ_BIAS") ? (float)atof(getenv("RX_VK_EQ_BIAS")) : dev.props.vendorID == 0x8086 ? 64.0f : 0.0f;
@@ -4708,7 +4708,7 @@ void clear_after_draws(VkCommandBuffer cmd) {
     end_pass(cmd);
 }
 
-/// (hookshot) The temporal upscalers' reactive mask (vk_reactive.h, RX_VK_REACTIVE=1): before the scene's transparent draws
+/// (longshot) The temporal upscalers' reactive mask (vk_reactive.h, RX_VK_REACTIVE=1): before the scene's transparent draws
 /// (reactive_policy.h: blended over it, tested against its depth without writing it) the scene's colour is copied, in a
 /// break of the pass. The scene is the B10G11R11 target with a depth of the size the upscaler last took, as its jitter is
 /// given (temporal_jitter_size, fsr3_inputs::jitter_size: 0 while neither draws). Not while AMD FSR 4 draws on the frame
@@ -4755,7 +4755,7 @@ uint16_t draw_hazards(VkCommandBuffer cmd, const Program& p, const NvnState& s, 
     for (int i = 0; i < at.n; i++)
         if (at.color[i] && target_write_mask(p, s, i)) writes |= (uint16_t)(1u << i);
     if (at.depth && s.ds.dw) writes |= 1u << 8;
-    {   // (hookshot: a draw that samples a target it writes itself reads it undefined in Vulkan (a feedback loop): named, a few times)
+    {   // (longshot: a draw that samples a target it writes itself reads it undefined in Vulkan (a feedback loop): named, a few times)
         static std::atomic<int> self_logged{0};
         if (self_logged.load(std::memory_order_relaxed) < 12)
             for (const Texture* t : gfx_sampled()) {
@@ -4966,7 +4966,7 @@ void trace_line(const char* fmt, ...) {
     while (pass_traces.size() > 8) pass_traces.erase(pass_traces.begin());
 }
 
-// (hookshot) RX_VK_PROBE=1 (replay is serial then): the centre texel of every colour target after each pass and of
+// (longshot) RX_VK_PROBE=1 (replay is serial then): the centre texel of every colour target after each pass and of
 // every written image after each dispatch, kept for the last 16 frames. At a flash (RX_VK_FLASH) the entries of that
 // frame that differ from both neighbours' are logged in order: the first is the pass that went wrong.
 namespace {
@@ -5337,7 +5337,7 @@ std::atomic<int64_t> world_drawn_at{0};
 // drawn behind the wheel only, not the pause menu or the map): no sides of ours then (vk_framegen.cpp wide_sides)
 std::atomic<int64_t> wheel_drawn_at{0};
 uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uint32_t offset);   // (vk_shader.cpp)
-// (hookshot) RX_VK_EXPOSURE_LOG=1: the final pass's exposure (c3+0x38 of its fragment stage, OoT's 73320e720a317817) at each
+// (longshot) RX_VK_EXPOSURE_LOG=1: the final pass's exposure (c3+0x38 of its fragment stage, OoT's 73320e720a317817) at each
 // frame, kept for exposure_log_dump when the frame log sees a white picture
 struct ExposureRing { int64_t present; uint32_t word; };
 std::mutex exposure_mu;
@@ -6030,7 +6030,7 @@ bool mesh_indirect_convert(VkCommandBuffer cmd, const DrawArgs& d) {
     return true;
 }
 } // namespace
-// (hookshot) NVN's indirect mesh draws hold (count, first) and Vulkan's (x, y, z): given as they were, every one drew y = first = 0 workgroups,
+// (longshot) NVN's indirect mesh draws hold (count, first) and Vulkan's (x, y, z): given as they were, every one drew y = first = 0 workgroups,
 // with no error. They are most of the game's vegetation: the forest's trees, ferns and grass (GPU culling writes their counts, so they can only
 // be moved on the GPU): each count is copied into this buffer of (count, 1, 1) just before its draw. The GPU runs the copies and draws in
 // order, so a slot used again is safe. A first other than 0 has no Vulkan counterpart.
@@ -6039,7 +6039,7 @@ VkBuffer mesh_args_buffer = VK_NULL_HANDLE;
 VmaAllocation mesh_args_alloc = nullptr;
 uint32_t* mesh_args_words = nullptr;
 uint64_t mesh_args_address = 0;   // (its device address: a task program reads its draw's first workgroup at + 12, + 16 per draw)
-// (hookshot) Indirect mesh draws' arguments, 16 bytes each as Vulkan takes them with the first after: {count, 1, 1, first}. NVN's are
+// (longshot) Indirect mesh draws' arguments, 16 bytes each as Vulkan takes them with the first after: {count, 1, 1, first}. NVN's are
 // {count, 0, 0, first}: as they lay, every foliage draw had no workgroups in y and z and drew nothing. Entry 0 stays {0, 1, 1, 0}: the
 // first of draws that have none
 bool mesh_args_ready() {
@@ -6087,7 +6087,7 @@ struct KeptVertex {
 };
 thread_local KeptVertex kept_vb[16];
 
-// ---- (hookshot, issue 640) a GPU without mesh shaders: the task and mesh stages as compute dispatches and a
+// ---- (longshot, issue 640) a GPU without mesh shaders: the task and mesh stages as compute dispatches and a
 // generated vertex stage, drawn through an ordinary graphics pipeline. Records and payloads live in two buffers a
 // recording thread reuses draw after draw (one pair, not one a program: see below); the commands are ordered, so each
 // dispatch runs after the last draw that read them.
@@ -6180,7 +6180,7 @@ bool fallback_compute_pipelines(Program& p) {
         if (!p.fallback_compute.empty()) return true;
         if (failed.count({p.key, p.variant})) return false;
     }
-    // (hookshot) none of its stages given to a compiler that would never finish one: RADV on GCN 1-4 grew past 25 GB on the two
+    // (longshot) none of its stages given to a compiler that would never finish one: RADV on GCN 1-4 grew past 25 GB on the two
     // biggest mesh programs and kept the memory on its thread (fallback_size_policy.h). Left out, as a refused one is below.
     // RX_VK_FALLBACK_PHI_LIMIT=<n>: another limit, 0 none
     static const uint32_t phi_limit = [] {
@@ -6250,7 +6250,7 @@ bool fallback_compute_pipelines(Program& p) {
     return true;
 }
 
-/// (hookshot) A fallback program's compute pipelines, compiled on a worker as a compute program's are (see dispatch()): made in
+/// (longshot) A fallback program's compute pipelines, compiled on a worker as a compute program's are (see dispatch()): made in
 /// the draw, AMD's compiler took up to 12 s on one, every recording thread stopped behind it, and the game froze in the first
 /// room with foliage (RX 5500M). The draw that starts the build waits up to 50 ms for it, which covers NVIDIA's compiles; a draw
 /// while it still compiles is left out, as a dispatch is. compute_state, which only compute programs use otherwise: 0 before, 1
@@ -6397,7 +6397,7 @@ void bind_index(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkInd
     last_ib = {b, (uint64_t)offset, (uint32_t)type, true};
 }
 
-/// (hookshot, a diagnostic for the temporal upscaler's motion: vk_temporal.cpp) RX_VK_DLSS_TRACE=<frames>: every that many frames, one frame's
+/// (longshot, a diagnostic for the temporal upscaler's motion: vk_temporal.cpp) RX_VK_DLSS_TRACE=<frames>: every that many frames, one frame's
 /// draws into targets of a size the upscaler can take as the scene (temporal_scene_size), logged: the program, its targets' formats, the geometry and the uniform buffers
 static void dlss_trace_draw(const NvnState& s, const Program& p, const DrawArgs& d, const Targets& at) {
     static const int every = getenv("RX_VK_DLSS_TRACE") ? atoi(getenv("RX_VK_DLSS_TRACE")) : 0;
@@ -6432,7 +6432,7 @@ static void dlss_trace_draw(const NvnState& s, const Program& p, const DrawArgs&
     logf("%s", line);
 }
 
-/// (hookshot) A skinned draw into the scene, for the temporal upscaler's actor motion (vk_temporal.cpp: DLSS's and FSR's). OoT's characters and the things that
+/// (longshot) A skinned draw into the scene, for the temporal upscaler's actor motion (vk_temporal.cpp: DLSS's and FSR's). OoT's characters and the things that
 /// move by themselves are indexed draws of one vertex stream: the position at attribute 0 (RGB32F or RGBA16F), the weights at 4
 /// (and 5, RGBA8), the joints at 6 (and 7, RGBA16UI or RGBA8UI), the bone palette in the vertex stage's uniform buffer 6 (NVN's
 /// binding 3: 3 x 4 matrices, a whole number of them) and the object's origin in its buffer 4 (binding 1, at 0x40)
@@ -6450,7 +6450,7 @@ static void skin_check(const NvnState& s, const Program& p, const DrawArgs& d, c
     k.formats = pos.fmt == NVN_FORMAT_RGBA16F ? dlss_actor::kHalfPosition : 0;
     for (int set = 0; set < 2 && 6 + set < s.nvattr; set++) {
         const nvn_va_st w = attr(4 + set), j = attr(6 + set);
-        // (hookshot) a second set of one influence: an R8 weight and an R8UI or R16UI joint (Link's draws: a fifth bone,
+        // (longshot) a second set of one influence: an R8 weight and an R8UI or R16UI joint (Link's draws: a fifth bone,
         // his cap's among them; left out, those vertices were skinned with part of their weight and their motion was wrong)
         if (set == 1 && w.fmt == NVN_FORMAT_R8 && (j.fmt == NVN_FORMAT_R8UI || j.fmt == NVN_FORMAT_R16UI) && !w.stream && !j.stream) {
             k.formats |= dlss_actor::kSingle << set;
@@ -6458,7 +6458,7 @@ static void skin_check(const NvnState& s, const Program& p, const DrawArgs& d, c
             k.weights[set] = w.offset, k.joints[set] = j.offset, k.sets = set + 1;
             break;
         }
-        // (hookshot) a rigid model on one bone: a joint and no weight (Navi's body, props, held items: a palette of one
+        // (longshot) a rigid model on one bone: a joint and no weight (Navi's body, props, held items: a palette of one
         // matrix, sometimes more); and two-bone skinning, RG8 weights with RG8UI joints (Navi's wings among them)
         if (set == 0 && !w.fmt && (j.fmt == NVN_FORMAT_R8UI || j.fmt == NVN_FORMAT_R16UI) && !j.stream) {
             k.formats |= (dlss_actor::kSingle | dlss_actor::kNoWeight) << set;
@@ -6663,7 +6663,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     const Targets at = bare_targets(s, targets(s));
     if (!at.width || !at.height) SKIP_HERE();
-    // (hookshot) the scene's camera and depth for the temporal upscalers: NVIDIA DLSS and AMD FSR 4 (vk_temporal.cpp) and AMD
+    // (longshot) the scene's camera and depth for the temporal upscalers: NVIDIA DLSS and AMD FSR 4 (vk_temporal.cpp) and AMD
     // FSR 3.1 (vk_fsr3_inputs.cpp). The vertex stage's uniform buffer 3 (NVN's binding 0)
     if (at.n && at.color[0] && at.depth) {
         temporal_note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
@@ -6679,11 +6679,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         cp = program_for(s, d.mesh ? ProgramKind::Mesh : ProgramKind::Graphics, types);
     }
     if (use.on) use.program(cp, cp && cp->ready.load(std::memory_order_acquire));
-    {   // (hookshot, a test) RX_VK_NO_MESH=1: task / mesh draws left out, to see what they draw; =2: the others left out
+    {   // (longshot, a test) RX_VK_NO_MESH=1: task / mesh draws left out, to see what they draw; =2: the others left out
         static const int no_mesh = getenv("RX_VK_NO_MESH") ? atoi(getenv("RX_VK_NO_MESH")) : 0;
         if ((no_mesh == 1 && d.mesh) || (no_mesh == 2 && !d.mesh)) return;
     }
-    if (!cp) {   // (hookshot) which draw has no program, 12 times: its stages' native code keys
+    if (!cp) {   // (longshot) which draw has no program, 12 times: its stages' native code keys
         static std::atomic<int> told{0};
         if (told++ < 12) logf("vk: a draw without a program (frame %llu); its code:%s", (unsigned long long)texture_frame_no(),
                               program_code_keys(s).c_str());
@@ -6694,7 +6694,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     if (cp->key == 0x1a7482c0ec9991eaULL) world_drawn_at.store(presents_now, std::memory_order_relaxed);
     if (cp->key == 0x02ff9920c2571cc2ULL) wheel_drawn_at.store(presents_now, std::memory_order_relaxed);
     if (skip_live(cp->key)) return;   // (EvilOOT, RX_VK_SKIP_FILE)
-    {   // (hookshot, RX_VK_SKIP_PROG=<key prefix,...>: draws too, their native code keys logged once; =-: none)
+    {   // (longshot, RX_VK_SKIP_PROG=<key prefix,...>: draws too, their native code keys logged once; =-: none)
         // (OoT's 53509044401d78d2, by default only while its targets have no view: 128 draws, once while an area loads, that render
         // the slices of two 64^3 BC4 noise volumes through raw RGBA16UI views. Those views were not made (no attachment usage) and
         // the pass ran over no target at the texels' 64 x 64: on about half the first starts the device was lost (7 of 14), and it
@@ -6734,7 +6734,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 return;
             }
     }
-    {   // (hookshot, RX_VK_SKIP_CODE=<code key prefix,...>: the draws of every program with a stage of that native code left out,
+    {   // (longshot, RX_VK_SKIP_CODE=<code key prefix,...>: the draws of every program with a stage of that native code left out,
         // decided once a program. RX_VK_SKIP_PROG names whole programs; a shared stage is in many. On the Steam Deck (RADV VANGOGH)
         // the GPU runs for seconds in the task/mesh programs that share the task shader 2c56dc1006942f74, a nested loop over a 2D
         // grid (a culling pass), until the kernel resets it at 10 s, in the Great Deku Tree and Kokiri Forest (issue 817). About
@@ -6777,7 +6777,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         st_waits++;
         st_wait_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     };
-    // (hookshot) RX_VK_TRANSLATE_WAIT_MS=<ms> (off unless set): a translation not ready, for a draw whose targets hold an
+    // (longshot) RX_VK_TRANSLATE_WAIT_MS=<ms> (off unless set): a translation not ready, for a draw whose targets hold an
     // earlier frame's picture, is waited for at most this long a frame in all, on each recording thread, without taking the
     // job onto this thread, and the draw is then left out of the frame. Waiting it out (#1573, the default) can bring back
     // the 0.2-3 s pauses at an area's first new programs on a cold program bank; leaving it out at once (RX_VK_PIPE_SKIP=2)
@@ -6912,14 +6912,14 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     // (the descriptors depend on the program, the bindings, the texture slots and the stream's uniform updates:
     // when none changed since the last draw, the set it pushed or bound stands)
-    // (hookshot) and no texture went since (texture_destroy_generation: an image evicted, or made again at another size or format,
+    // (longshot) and no texture went since (texture_destroy_generation: an image evicted, or made again at another size or format,
     // in the same recording): the set it pushed or bound named that texture's old views, which go once the GPU is past the texture's
     // last use, a use the reused set no longer counted. The draws after it sampled freed memory, whatever the driver put there next:
     // plants and fences glowing white on a Legion Go S, which RX_VK_DESC_REUSE=never took away (issue 1126)
     const uint64_t reg_gen = registrations_generation(), ub_gen = ub_generation();
     static const bool no_reuse = desc_reuse_level() == 0;   // (RX_VK_DESC_REUSE=never: every draw builds its own)
     const uint64_t dgen = texture_destroy_generation();
-    // (hookshot, issue 640: a mesh fallback draw also pushes the writes at the compute bind point, for its task and mesh
+    // (longshot, issue 640: a mesh fallback draw also pushes the writes at the compute bind point, for its task and mesh
     // dispatches, so they must be its own. A dispatch since its last draw built the compute program's over them: pushed
     // with the fallback's layout, its task and mesh stages read another program's buffers, and descriptors the push left
     // as they were: stale addresses, like the one RADV faulted on in Hyrule Field (#792))
@@ -7041,7 +7041,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_SCOPE(FT_HAZARD);
         begin_pass(cmd, at);
     }
-    probe_draw(s, p, pass().draws);   // (hookshot: RX_VK_PROBE)
+    probe_draw(s, p, pass().draws);   // (longshot: RX_VK_PROBE)
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
     pass().prog = p.key;
     if (!pass().first_prog) pass().first_prog = p.key;
@@ -7154,7 +7154,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (stats_query.cmd && gpu_dump_on) stats_query.state = &s, stats_query.prog = p.key;
     }
     if (d.mesh) {
-        if (p.fallback) {   // (hookshot: the generated vertex stage reads the records; one vertex a corner)
+        if (p.fallback) {   // (longshot: the generated vertex stage reads the records; one vertex a corner)
             vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
             st_mesh++;
             st_draws++, pass().draws++;
@@ -7214,7 +7214,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         if (d.indirect) {
             BufferRef cnt = d.count_addr ? gpu_buffer_bind(d.count_addr, 4, false) : BufferRef{};
             if (mesh_conv_buf) {   // (EvilOOT: the records as {count, 1, 1}, mesh_indirect_convert)
-                // (hookshot: as many records as mesh_indirect_convert wrote, not the game's maximum)
+                // (longshot: as many records as mesh_indirect_convert wrote, not the game's maximum)
                 const uint32_t conv_n = (uint32_t)std::clamp(d.max, 1, 4096);
                 if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                     vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_conv_buf, mesh_conv_off, cnt.buffer, cnt.offset, conv_n, 12);
@@ -7225,7 +7225,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 st_draws++, pass().draws++;
                 return;
             }
-            if (d.max < 0 || d.stride < 0) SKIP_HERE();   // (hookshot: the game's ints; a negative count was ~4e9 draws)
+            if (d.max < 0 || d.stride < 0) SKIP_HERE();   // (longshot: the game's ints; a negative count was ~4e9 draws)
             if (!mesh_args.buffer) {
                 mesh_args = gpu_buffer_bind(d.indirect, (uint64_t)std::max(d.max, 1) * std::max(d.stride, 12), false);
                 if (!mesh_args) SKIP_HERE();
@@ -7318,7 +7318,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     if (d.indexed && d.itype == 0 && !dev.index_uint8) SKIP_HERE();
     if (d.prim == NVN_DRAW_PRIMITIVE_QUADS) {   // (quads as two triangles each: indices made in the stream)
         if (d.indirect || d.count < 4) SKIP_HERE();
-        if (d.count > (1 << 24)) SKIP_HERE();   // (hookshot: 4M quads at most; the game's count sized host vectors of up to 16 GB)
+        if (d.count > (1 << 24)) SKIP_HERE();   // (longshot: 4M quads at most; the game's count sized host vectors of up to 16 GB)
         const uint32_t quads = (uint32_t)d.count / 4, unit = d.itype == 0 ? 1 : d.itype == 1 ? 2 : 4;
         std::vector<uint32_t> src(d.indexed ? (size_t)quads * 4 : 0);
         if (d.indexed) {
@@ -7347,7 +7347,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         return;
     }
     if (d.indirect) {
-        // (hookshot) the records the draw reads, at the stride it reads them with (20 for indexed draws), all bound; a
+        // (longshot) the records the draw reads, at the stride it reads them with (20 for indexed draws), all bound; a
         // negative count or stride from the game is no draw
         if (d.max < 0 || d.stride < 0) SKIP_HERE();
         const int ind_stride = std::max(d.stride, d.indexed ? 20 : 16);
@@ -7408,7 +7408,7 @@ struct DispatchClock {   // (a dispatch over 2 ms: logged, with where its time w
     }
 };
 
-/// (hookshot) OoT's neural upscaler (about 13 tensor-core compute passes a frame over storage-buffer feature maps,
+/// (longshot) OoT's neural upscaler (about 13 tensor-core compute passes a frame over storage-buffer feature maps,
 /// 1920x1080 in, 2560x1440 out) does not translate: its matrix multiplies and a few other native opcodes have no
 /// lowering. Its last pass reads the network's result, the input colour and a noise texture and writes the output
 /// image; left out, the output stays black under the UI drawn over it. Here a rejected compute pass that writes a
@@ -7473,7 +7473,7 @@ bool movie_upscale(VkCommandBuffer cmd, uint32_t in_handle, uint32_t out_handle,
     return true;
 }
 
-// (hookshot, issue 109) The movie upscaler's networks cost 12 ms a frame on an RTX 3050 and 83-93 ms on an RTX 4060 with a newer
+// (longshot, issue 109) The movie upscaler's networks cost 12 ms a frame on an RTX 3050 and 83-93 ms on an RTX 4060 with a newer
 // driver: the intro movie ran at 10 fps and the game never got past it. When a frame of few draws (a movie) takes over 40 ms
 // of GPU time (vk_replay.cpp), they are left out from then on, as on AMD: the linear upscale below, the same picture a little
 // softer. The gameplay networks are never left out. RX_VK_NETWORK_KEEP=all: never
@@ -7481,7 +7481,7 @@ std::atomic<bool> movie_networks_slow{false};
 bool gameplay_network(uint64_t key) { return key == 0xfd029a317a9a4b94ull || key == 0x9dc98871eb7fc101ull; }
 
 static movie_upscale_policy::Mode movie_upscale_mode() {
-    // Read on first dispatch, after host/hos_main.c has loaded hookshot_env.txt.
+    // Read on first dispatch, after host/hos_main.c has loaded longshot_env.txt.
     static const auto mode = movie_upscale_policy::parse(getenv("RX_VK_MOVIE_UPSCALE"));
     return mode;
 }
@@ -7539,7 +7539,7 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     if (!src || !dst || !src->image || !dst->image || (src->aspect | dst->aspect) != VK_IMAGE_ASPECT_COLOR_BIT || src->bc ||
         dst->bc || src->samples != VK_SAMPLE_COUNT_1_BIT || dst->samples != VK_SAMPLE_COUNT_1_BIT)
         return false;
-    // (hookshot) an upscale network that did not translate here (the Render resolution's fixed shares have one each, and on a
+    // (longshot) an upscale network that did not translate here (the Render resolution's fixed shares have one each, and on a
     // GPU without cooperative matrices they are left out): the temporal upscaler is offered it first, as temporal_stand_in
     // offers the networks that did translate, and so is FSR 3.1, as fsr3_stand_in. It takes only the scene into the picture;
     // anything else goes on below
@@ -7628,13 +7628,13 @@ bool upscale_stub(VkCommandBuffer cmd, const NvnState& s, uint64_t key) {
     return true;
 }
 
-/// (hookshot) OoT's gameplay TAAU network (fd029a317a9a4b94) stood in for: its input upscaled into its output
+/// (longshot) OoT's gameplay TAAU network (fd029a317a9a4b94) stood in for: its input upscaled into its output
 /// (shaders/taau_upscale.comp). The network's translation loses the blue channel, the yellow cast over every
 /// scene; with this the picture is right, without the network's temporal anti-aliasing.
 /// RX_VK_TAAU_KEYS=<program key prefixes,...> (default fd029a317a9a4b94; "-": none, the network runs)
 bool taau_key(uint64_t key) {
     // (the real network where the card runs it as the console does; on the software multiplies it cost most of a frame on AMD's cards, and a
-    // locked 60 with this in its place: Hookshot issue 52)
+    // locked 60 with this in its place: Longshot issue 52)
     static const char* keys = getenv("RX_VK_TAAU_KEYS") ? getenv("RX_VK_TAAU_KEYS")
                               : Shader::Backend::SPIRV::mma_software || env_on("RX_VK_NO_F16")
                                     ? "fd029a317a9a4b94" : "-";   // (RX_VK_NO_F16: vk_shader.cpp leaves the network out)
@@ -7772,7 +7772,7 @@ static bool typed_upscale(VkCommandBuffer cmd, VkImageView input_view, VkImageVi
     if (temporal) probe_image(cmd, out, level, 0, key, 't');
     return true;
 }
-/// (hookshot) AMD FSR 3.1 in place of the gameplay upscale network (vk_fsr3.cpp), and its frame interpolation's inputs from it
+/// (longshot) AMD FSR 3.1 in place of the gameplay upscale network (vk_fsr3.cpp), and its frame interpolation's inputs from it
 /// (vk_fsr3_inputs.cpp): the same dispatches as temporal_stand_in below, found the same way. true: FSR 3.1 wrote the output
 bool fsr3_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     if (p.stages.empty() || !fsr3_inputs::wanted()) return false;
@@ -7794,7 +7794,7 @@ bool fsr3_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
     return fsr3_upscale(cmd, p.key, gameplay_network(p.key), in, dw().imgs[0].imageView, out, dw().imgs[ntex].imageView, level);
 }
-/// (hookshot) A temporal upscaler (NVIDIA DLSS, AMD FSR 4: vk_temporal.cpp) in place of the gameplay upscale network, when
+/// (longshot) A temporal upscaler (NVIDIA DLSS, AMD FSR 4: vk_temporal.cpp) in place of the gameplay upscale network, when
 /// one is on and its inputs are as expected: the network's input as it samples it, its output's storage view
 bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
     // (the 4/3 network and the full-size pass by their keys; the game's other gameplay upscales, one network for each fixed
@@ -7824,7 +7824,7 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
     vertex_set.on = false, last_ib.on = false;
     return done;
 }
-/// (hookshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
+/// (longshot) The same for an upscale network that did not translate on this GPU (upscale_stub found its input, the largest
 /// texture it samples, and its output, the largest image it writes): the Render resolution row's fixed shares (67%
 /// 6676619641320ba7, 58%, 50% 72ba090c70fe2614, 33%) are cooperative-matrix networks, left out on a GPU that is not NVIDIA's or multiplies in
 /// software (vk_shader.cpp, RX_VK_NETWORK_KEEP), so
@@ -7881,7 +7881,7 @@ bool taau_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p) {
 }
 
 bool precompile_wanted() {
-#if defined(HOOKSHOT_RELEASE)
+#if defined(LONGSHOT_RELEASE)
     bool on = true;
 #else
     bool on = false;
@@ -7898,11 +7898,11 @@ std::string prepared_path() {
     char exe[MAX_PATH];
     const DWORD exe_n = game_module_path(exe, MAX_PATH);
     std::string path(exe, exe_n);
-    return path.substr(0, path.find_last_of("\\/") + 1) + "hookshot_prepared.bin";
+    return path.substr(0, path.find_last_of("\\/") + 1) + "longshot_prepared.bin";
 }
-// (hookshot) What the last prepare here was made for, in hookshot_prepared.bin: the translator (program_cache_stamp), and since the
+// (longshot) What the last prepare here was made for, in longshot_prepared.bin: the translator (program_cache_stamp), and since the
 // seed grows apart from it (4221050d: networks, the movie upscaler, the particle sets, 19 compute programs more) the seed it went
-// through (hookshot_shaders.bin), by a hash of its contents. By the translator alone, a folder prepared before such an update never
+// through (longshot_shaders.bin), by a hash of its contents. By the translator alone, a folder prepared before such an update never
 // prepared the new programs: each was translated in play when first met, 200-400 ms apiece. The seed is 500 MB and more: its hash is
 // taken again only when its size or write time is not the recorded one, and a hash that is still the same records the new time.
 // A write time says nothing of a write that came within its resolution of the one recorded (whole seconds from libstdc++'s
@@ -8046,7 +8046,7 @@ uint64_t warmed_stamp(bool libraries) {
     add(v, sizeof v);
     return h;
 }
-/// (hookshot) An update: every shader was prepared once here, for another translator. Each release changes the translator, and every
+/// (longshot) An update: every shader was prepared once here, for another translator. Each release changes the translator, and every
 /// update then held the game's start for the whole seed again (116k variants, minutes on most PCs: "shaders need to be prepared every
 /// update"). With RX_VK_PREPARE_BACKGROUND=1 only what the notes name is built before the game (precompile_run), the rest in play
 /// behind it (prepare_background)
@@ -8061,7 +8061,7 @@ bool prepare_is_update() {
     fclose(f);
     return read && have != program_cache_stamp();
 }
-/// (hookshot) The driver's part of the graphics and mesh programs: the two shader libraries of every kept program variant, whoever
+/// (longshot) The driver's part of the graphics and mesh programs: the two shader libraries of every kept program variant, whoever
 /// made it (the seed, a state list, play), each built once and let go, for the driver's own cache (see prepare_run). It walks the
 /// program cache, not the seed, so it needs no translation: the same pass serves a first prepare, stage libraries switched on
 /// later and a new driver. The programs the notes name go first (what play is known to use: a pass that is closed, or a driver
@@ -8159,7 +8159,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     PreparedFor prepared_for;
     double hash_ms = 0;
     const PrepareWhy why = prepare_check(path, seed_path(), program_cache_stamp(), &prepared_for, &hash_ms);
-    // (hookshot) the pipeline cache's files dropped at this start (pcache_drop_stale: another translator's, or a folder from
+    // (longshot) the pipeline cache's files dropped at this start (pcache_drop_stale: another translator's, or a folder from
     // before the stamp file) took the stage libraries the warm pass had kept in them: made again, whatever the record says,
     // once a run, by the start's own preparation (the background one in play leaves the driver's part to first use)
     static std::atomic<bool> rewarm_once{true};
@@ -8202,7 +8202,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     // (the translator is the same: what the program cache keeps stays, and seed_translate and seed_compute leave it out. The
     // programs the seed has gained are what is made)
     if (why == PrepareWhy::Seed)
-        logf("vk: the game's shader list (hookshot_shaders.bin) is not the one the shaders were prepared from: preparing again "
+        logf("vk: the game's shader list (longshot_shaders.bin) is not the one the shaders were prepared from: preparing again "
              "(only the programs not kept yet)");
     const size_t programs = seed_open();
     if (!programs) return false;
@@ -8223,7 +8223,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     }
     pcache_init();   // (once, here: the workers below build compute pipelines into it)
     std::atomic<size_t> next{0}, done{0}, made{0}, libs{0}, variants{0}, asking{0}, capped{0};
-    // (hookshot) The compute programs first: each is its texture variants, up to 64 translations and as many driver compiles, seconds
+    // (longshot) The compute programs first: each is its texture variants, up to 64 translations and as many driver compiles, seconds
     // to tens of seconds on one worker, where a graphics program is a few milliseconds. In the seed's order they were spread over its
     // second half, the last of them the seed's very last program: the other workers ran out of work and waited on the last few
     // (~20 s of a ~165 s prepare with fewer and fewer CPUs busy, 12 workers on a 24-thread PC). Taken first, the graphics programs
@@ -8236,7 +8236,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         for (size_t k = 0; k < programs; k++)
             if (!seed_is_compute(k)) order[at++] = (uint32_t)k;
     }
-    // (hookshot) compute pipelines too, for the driver's own cache: built in play they stopped the game while the driver compiled
+    // (longshot) compute pipelines too, for the driver's own cache: built in play they stopped the game while the driver compiled
     // them, seconds each for the culling programs (53caac5f: 6.5 s, 41 s inlined), which looked like a hang
     const auto warm_compute = [&](Program& p) {
         if (!warm_cs || taau_key(p.key)) return;
@@ -8269,7 +8269,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
             const size_t i = next++;
             if (i >= total) return;
             const size_t k = order[i / 3];
-            if (seed_is_compute(k)) {   // (hookshot) a compute program with each of its texture variants, each warmed
+            if (seed_is_compute(k)) {   // (longshot) a compute program with each of its texture variants, each warmed
                 if (i % 3 == 0) {
                     const SeedVariants v = seed_compute(k, 64, warm_compute);
                     made += v.variants != 0, variants += v.variants, asking += v.variants > 1, capped += v.capped && v.variants;
@@ -8281,7 +8281,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
             // they were built only for a program translated now)
             const auto t_prog = std::chrono::steady_clock::now();
             std::unique_ptr<Program> seeded = seed_program(k, (int)(i % 3));
-            {   // (hookshot: a program that took over a second to prepare is named, a few dozen times: the no-mesh fallback's first
+            {   // (longshot: a program that took over a second to prepare is named, a few dozen times: the no-mesh fallback's first
                 // start ran about 100 times slower than a mesh GPU's)
                 const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_prog).count();
                 static std::atomic<int> slow_logged{0};
@@ -8338,7 +8338,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     prepared_write(path, prepared_for);
     return true;
 }
-/// (hookshot) An update (prepare_is_update): the seed is prepared in play, behind the game, too late for the precompile; the pipelines
+/// (longshot) An update (prepare_is_update): the seed is prepared in play, behind the game, too late for the precompile; the pipelines
 /// of the state list are made now, before it, so that precompile_run builds them before the game as on a first start
 void state_list_run() {
     state_list_prepare(nullptr, true);
@@ -8352,7 +8352,7 @@ void prepare_background() {
     }).detach();
 }
 
-/// (hookshot) A line every 10 s while the preparation builds pipelines: their count and an estimate of the time left. The
+/// (longshot) A line every 10 s while the preparation builds pipelines: their count and an estimate of the time left. The
 /// pipeline steps wrote nothing to the log for 10-30 minutes on some AMD cards, and players pasted a log whose last lines (the
 /// vertex formats) looked like a hang (Discord 2026-11-10, "stuck on preparing shaders"); the Builder's bar moved, the log did not
 void prepare_progress_log(const char* what, size_t done, size_t total, std::chrono::steady_clock::time_point t0,
@@ -8365,7 +8365,7 @@ void prepare_progress_log(const char* what, size_t done, size_t total, std::chro
     if (done) logf("vk: %s: %zu of %zu pipelines in %.0f s, about %.0f s left", what, done, total, s, left);
     else logf("vk: %s: 0 of %zu pipelines in %.0f s (the driver compiles the first ones)", what, total, s);
 }
-/// (hookshot, RX_VK_LOAD=create) The first start after a preparation: every noted pipeline built into the pipeline cache and let
+/// (longshot, RX_VK_LOAD=create) The first start after a preparation: every noted pipeline built into the pipeline cache and let
 /// go, so that the loads at the programs' create calls find each one there and never meet a pipeline the prepare should have
 /// compiled. The precompile does the same by keeping them all ready, which is the memory RX_VK_LOAD=create is there to save
 /// and more than a 16 GB PC has (its precompile was killed at 23,407 of 35,870 pipelines under a 12 GB cap). Here each
@@ -8454,7 +8454,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         prepare_progress_log("compute pipelines", computes_done.load(), computes.size(), c0, log_at);
     });
     const bool all = done == total && computes_done == computes.size();
-    static const bool prepare_only = env_on("HOOKSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
+    static const bool prepare_only = env_on("LONGSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
     if (all && !prepare_stopped()) {
         pipeline_cache_save(true);   // (in the file before the marker says they are there)
         // (not by the preparation's own process: warm_bounded.h leaves_marker)
@@ -8472,7 +8472,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
                           "cache, into the cache it then loads from" : "");
 }
 
-/// (hookshot, RX_VK_LOAD=create) The start with nothing kept ready by a list: each note is only found, by its place in the file,
+/// (longshot, RX_VK_LOAD=create) The start with nothing kept ready by a list: each note is only found, by its place in the file,
 /// and its pipeline is made when the game makes its program (vk_programs.cpp); the compute programs the lists name are only
 /// named. What a start must still do itself is done: the caches and the two lists opened before play, and on a GPU without
 /// mesh shaders the mesh fallback's programs and their compute pipelines, which stay as they were (every one, before the title)
@@ -8547,7 +8547,7 @@ void precompile_at_create() {
 }
 
 void precompile_run(void (*progress)(size_t done, size_t total)) {
-    // (hookshot, RX_VK_LOAD=create: only once every note has been built into the pipeline cache, so that a load from the
+    // (longshot, RX_VK_LOAD=create: only once every note has been built into the pipeline cache, so that a load from the
     // caches alone never meets a pipeline the prepare should have compiled. The first start after a preparation builds them
     // there and lets each go, precompile_warm: before the game, and never more of them alive than workers)
     if (programs_load_at_create()) {
@@ -8557,7 +8557,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         if (precompile_covers_notes()) return precompile_at_create();
         // (the window was closed in it; or this is the preparation's own process, which leaves no marker: its warm filled
         // the driver's cache, the first start of the game warms again and loads at create calls from then on)
-        if (prepare_stopped() || env_on("HOOKSHOT_PREPARE_ONLY")) return;
+        if (prepare_stopped() || env_on("LONGSHOT_PREPARE_ONLY")) return;
     }
     const auto t0 = std::chrono::steady_clock::now();
     // (a start that dies in here would die in here every time, the notes being what it builds from: a player saw the console reach
@@ -8593,7 +8593,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     }
     std::unordered_set<uint64_t> wanted;
     for (const auto& n : notes) wanted.insert(n->prog);
-    // (the compute programs: those this install's play dispatched (hookshot_computes.bin) and those the shipped state list names,
+    // (the compute programs: those this install's play dispatched (longshot_computes.bin) and those the shipped state list names,
     // each once; every kept one on a first start, with nothing dispatched yet: computes_plan)
     const ComputePlan plan = computes_plan(getenv("RX_VK_PRECOMPILE_COMPUTES"), !env_on("RX_VK_NO_STATE_LIST"));
     if (!plan.all && !plan.none) wanted.insert(plan.keys.begin(), plan.keys.end());
@@ -8604,7 +8604,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         if (p.compute) {
             computes.push_back(&p);
             if (plan.keys.count(p.key)) listed_here.insert(p.key);
-        } else if (p.fallback) fallbacks.push_back(&p);   // (hookshot: the mesh fallback's compute pipelines too, before play)
+        } else if (p.fallback) fallbacks.push_back(&p);   // (longshot: the mesh fallback's compute pipelines too, before play)
     }, plan.all, true);
     // (a listed key with no program here: another game version's, or a program this install did not keep. Nothing is made of it)
     logf("vk: precompile: compute programs: %s (%zu keys listed: %zu in the shipped list, %zu dispatched in play here, %zu of the "
@@ -8736,10 +8736,10 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     predicted_check();
 }
 
-// (hookshot) The pipelines the notes predict for the programs no note names (vk_predict.cpp), after a prepare that prepared: each built
+// (longshot) The pipelines the notes predict for the programs no note names (vk_predict.cpp), after a prepare that prepared: each built
 // once for the driver's own cache and let go. Not into ours (mkw_vk_pipelines.bin, read whole at every start: ~40000 more pipelines made
-// it 1.7 GB), nor kept: each program is borrowed from hookshot_programs.bin for its pipelines and let go
-/// (hookshot) The preparation's three parts as the files on disk count them before it runs: PrepareBar's guesses, so that the bar
+// it 1.7 GB), nor kept: each program is borrowed from longshot_programs.bin for its pipelines and let go
+/// (longshot) The preparation's three parts as the files on disk count them before it runs: PrepareBar's guesses, so that the bar
 /// has every part in its total from the start. The seed's programs (its header); the pipelines the notes will predict, about one and
 /// a half a seed program (56,588 for 38,809 programs with the shipped list of 25,251 states); the pipelines the notes and state
 /// lists name, and the compute programs play dispatched
@@ -8763,8 +8763,8 @@ void prepare_guess(size_t out[3]) {
         out[0] = programs, out[1] = programs + programs / 2;
     }
     const int64_t notes = size_of(pipe_notes_path()), computes = size_of(computes_path());
-    const int64_t lists = std::max<int64_t>(0, size_of(state_list_path("hookshot_pipeline_states_shipped.bin")) - 12) +
-                          std::max<int64_t>(0, size_of(state_list_path("hookshot_pipeline_states.bin")) - 12);
+    const int64_t lists = std::max<int64_t>(0, size_of(state_list_path("longshot_pipeline_states_shipped.bin")) - 12) +
+                          std::max<int64_t>(0, size_of(state_list_path("longshot_pipeline_states.bin")) - 12);
     out[2] = (size_t)(std::max<int64_t>(0, notes - 16) / (int64_t)sizeof(PipeNote) + lists / (int64_t)sizeof(StateRec) +
                       std::max<int64_t>(0, computes - 8) / 8);
 }
@@ -8774,7 +8774,7 @@ void note_color_types(const PipeNote& n, uint8_t types[8]) {
 }
 
 void predicted_sample_write(const std::vector<std::unique_ptr<PipeNote>>& predicted);
-// (hookshot) The prediction under way: hookshot_pipelines.bin.predicting from its start to its end. A start closed (or ended) in it
+// (longshot) The prediction under way: longshot_pipelines.bin.predicting from its start to its end. A start closed (or ended) in it
 // left the rest of the predicted pipelines unbuilt for good: the next start found the programs prepared, so it skipped the
 // prediction, and play compiled them as they were drawn. With the marker there, the next start runs it again; what the driver
 // kept from the first try comes back from its cache at once (a second prediction over a full driver cache: 7.9 s for 43,414)
@@ -8835,7 +8835,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     auto& done = pre->done;
     auto& made = pre->made;
     auto& out_of_time = pre->out_of_time;
-    // (hookshot) No time budget by default: every predicted pipeline is built here, in the preparation, under its progress bar (the
+    // (longshot) No time budget by default: every predicted pipeline is built here, in the preparation, under its progress bar (the
     // start-up screen's and the builder's), not in play. RX_VK_PREDICT_S=<seconds> sets one: those not built by then are built in
     // play when first drawn. The budget (90 s) came when #1051 let the prediction find its programs again: ~28,000 pipelines, many
     // minutes before the game's first frame (20 with the CPU busy) with nothing on screen to say so, on half the CPUs below normal
@@ -8894,7 +8894,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     std::vector<std::thread> threads;
     const unsigned cpus = usable_cpus();
     for (unsigned i = 0; i < std::min(cpus, 64u); i++) threads.emplace_back(worker);
-    // (hookshot) Nothing finished for this long, on any worker (each pipeline counts as it finishes): the run goes on, the stuck
+    // (longshot) Nothing finished for this long, on any worker (each pipeline counts as it finishes): the run goes on, the stuck
     // workers left in the driver, the rest of the predicted pipelines built in play when first drawn. When:
     // - the driver faulted in this run (driver_faults: caught, and a driver can stop answering after one): wherever the run is;
     // - otherwise only once every program has been handed out, as precompile_run's guard: the last stragglers, never the bulk. A
@@ -8947,9 +8947,9 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     if (!gone_on) delete pre;
 }
 
-// ---- (hookshot) Whether the driver kept the predicted pipelines. predict_run builds them for the driver's own disk cache alone and
+// ---- (longshot) Whether the driver kept the predicted pipelines. predict_run builds them for the driver's own disk cache alone and
 // lets them go: on a driver without one, or with one too small (Windows NVIDIA takes its size from the control panel), minutes of the
-// preparation leave nothing, and nothing said so. A sample of them (hookshot_pipelines.bin.predicted) is asked of the driver at the
+// preparation leave nothing, and nothing said so. A sample of them (longshot_pipelines.bin.predicted) is asked of the driver at the
 // next start, without compiling, as play asks: "the driver kept N of M". Also the driver cache folder's size in the log ----
 namespace {
 bool predicted_this_run = false;   // (asked in the process that built them, the driver answers from memory: no check then)
@@ -9007,7 +9007,7 @@ void predicted_check() {
     if (predicted_this_run || env_on("RX_VK_NO_PREDICT_CHECK")) return;
     // (not in a --prepare-shaders run (vk_main.cpp prepare_only): it exits right after, and a detached thread still asking the
     // driver then would race the process's exit, its static destructors and the driver's teardown; the game's next start checks)
-    if (env_on("HOOKSHOT_PREPARE_ONLY")) return;
+    if (env_on("LONGSHOT_PREPARE_ONLY")) return;
     // (asking without compiling, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT, needs pipelineCreationCacheControl, as
     // the play caches' and the stage libraries' asks do: without it the flag is invalid and the "ask" would compile every one)
     if (!dev.vk13.pipelineCreationCacheControl) return;
@@ -9069,7 +9069,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         st_waits++;
         st_wait_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
-    if (!cp || cp->failed) {   // (hookshot) the program's resources, once a control section: what a rejected dispatch reads/writes
+    if (!cp || cp->failed) {   // (longshot) the program's resources, once a control section: what a rejected dispatch reads/writes
         static std::mutex mu2;
         static std::unordered_set<uint64_t> seen2;
         const uint64_t id = s.prog.sd[0].control;
@@ -9100,7 +9100,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             logf("%s", line);
         }
     }
-    if (cp && cp->failed) {   // (hookshot) which programs' dispatches are left out, once each, with their grids
+    if (cp && cp->failed) {   // (longshot) which programs' dispatches are left out, once each, with their grids
         static std::mutex mu;
         static std::unordered_set<uint64_t> seen;
         std::lock_guard lk(mu);
@@ -9121,7 +9121,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if ((!cp || cp->failed || slow_network) && upscale_stub(cmd, s, compute_code_key(s))) return void(st_dispatches++);
     if (slow_network) SKIP_HERE();   // (an earlier pass of the network: the stub is its last pass)
     if (!cp || !cp->ready.load(std::memory_order_acquire) || cp->failed) SKIP_HERE();
-    {   // (hookshot, RX_VK_SKIP_PROG=<key prefix,...>: those programs' dispatches left out, for diagnosis)
+    {   // (longshot, RX_VK_SKIP_PROG=<key prefix,...>: those programs' dispatches left out, for diagnosis)
         static const char* skip = getenv("RX_VK_SKIP_PROG");
         if (skip) {
             char hex[24];
@@ -9136,7 +9136,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     }
     dclock.key = cp->key;
     texture_watch_prog(cp->key);
-    {   // (hookshot, RX_VK_LOG_PUSH=<key prefix>: once, that program's push constants and the c0 words it reads)
+    {   // (longshot, RX_VK_LOG_PUSH=<key prefix>: once, that program's push constants and the c0 words it reads)
         static const char* want = getenv("RX_VK_LOG_PUSH");
         static bool done;
         char hex[24];
@@ -9405,7 +9405,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         }
 }
 
-// (hookshot) In the parallel replay's dry pass, in stream order on the replay thread: the images this draw or dispatch
+// (longshot) In the parallel replay's dry pass, in stream order on the replay thread: the images this draw or dispatch
 // writes marked as the GPU's (texture_written) before any worker runs. Workers record out of order, and that mark was
 // made as each reached its draw: one ahead of it sampled a render target or compute output as never written and
 // uploaded stale guest memory over it, an upload that runs after the earlier segment's work. Targets change address
@@ -9420,7 +9420,7 @@ void dry_mark_written(NvnState& s, bool compute, bool first) {
     static const bool off = env_on("RX_VK_NO_DRY_MARKS");
     if (off) return;
     if (!compute) {
-        // (hookshot) the targets as the draw before had them are skipped, within one dry pass only: `first` is the pass's first draw OR
+        // (longshot) the targets as the draw before had them are skipped, within one dry pass only: `first` is the pass's first draw OR
         // dispatch, so when a command buffer began with a dispatch its first draw was compared with the last draw of the dry pass
         // before, a frame ago. With the camera still the game's targets come back at the same addresses, the state matched, and
         // a target made again since (its texture retired at the present between) went unmarked: the later segment uploaded
@@ -9566,7 +9566,7 @@ void pipeline_cache_play() {
     programs_play_begin();   // (the census: what is made from here on is made in play)
 }
 
-// ---- (hookshot) What the programs' loader asks of the pipelines (vk_pipelines.h) ----
+// ---- (longshot) What the programs' loader asks of the pipelines (vk_pipelines.h) ----
 bool precompile_covers_notes() {
     uint64_t rec[2] = {0, 0};
     FILE* f = fopen(precompile_built_path().c_str(), "rb");
@@ -9651,7 +9651,7 @@ bool pipeline_keep_ready(uint64_t key, VkPipeline pl) {
 }
 std::string load_fallback_path() {
     const std::string notes = pipe_notes_path();
-    return notes.substr(0, notes.find_last_of("\\/") + 1) + "hookshot_load_start.txt";
+    return notes.substr(0, notes.find_last_of("\\/") + 1) + "longshot_load_start.txt";
 }
 void program_layout(Program& p) { ensure_layout(p); }
 std::vector<std::pair<uint64_t, uint64_t>> compute_variants_learned() { return compute_variants_read(); }
@@ -9732,7 +9732,7 @@ void pipeline_cache_save(bool force) {
 } // namespace mkwvk
 
 namespace mkwvk {
-/// (hookshot) n bytes copied into the recording's stream, as a buffer binding (vk_memory.cpp gpu_buffer_bind: a read whose pool is
+/// (longshot) n bytes copied into the recording's stream, as a buffer binding (vk_memory.cpp gpu_buffer_bind: a read whose pool is
 /// still being imported in the background); empty when there is no recording or no room
 BufferRef stream_copy(const void* src, uint64_t n) {
     if (!cur || !n) return {};

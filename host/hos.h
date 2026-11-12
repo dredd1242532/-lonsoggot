@@ -50,7 +50,7 @@ extern const char hos_main_build_id[];                 /* (gen/hos_image.c: main
 /* (oot-recomp) MKW's own hooks at fixed guest addresses (its frame pacer in nvn_native.c / nn_vi.c, its idle loop in
    hos_thread.c) run only when the lifted main is Mario Kart World's: any other game has other code there */
 int hos_game_is_mkw(void);
-#define HOS_GAME_TITLE "Hookshot"
+#define HOS_GAME_TITLE "Longshot"
 void hos_commit(uint64_t addr, uint64_t size);         /* (mkw_glue.c) guest pages made usable by host APIs */
 int hos_mem_region(uint64_t addr, uint64_t size);      /* (hos_mem.c) the control bridge: 0 if not wholly in mapped guest memory */
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
@@ -68,7 +68,7 @@ extern uint64_t hos_space_end;   /* web: the guest window ends where the host's 
 #else
 #define HOS_SPACE_END 0x8000000000ULL
 #endif
-/* (hookshot) host pointer of the n guest bytes at a, NULL unless all of them lie in the guest window. For addresses
+/* (longshot) host pointer of the n guest bytes at a, NULL unless all of them lie in the guest window. For addresses
    and sizes host code takes from guest memory or arguments before it reads or writes there: GP alone wraps around
    to any host address. */
 static inline void *hos_guest_range(uint64_t a, uint64_t n) {

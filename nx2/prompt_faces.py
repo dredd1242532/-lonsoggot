@@ -1,4 +1,4 @@
-"""(hookshot) The button-prompt faces: everything that differs between controllers, in one place (nx2/prompt_assets.py builds them).
+"""(longshot) The button-prompt faces: everything that differs between controllers, in one place (nx2/prompt_assets.py builds them).
 
 To add a face: an entry in FACES below, its HOS_PROMPT_* in gpu/vk/vk_api.h (in this order, after the Switch), its name in
 host/prompts.c's faces[], and the Insert menu's names for it (gpu/vk/vk_menu.cpp tx_prompts, pad_name;
