@@ -1,5 +1,6 @@
-"""scripts/oot_saves.py, game-free: finding every emulator's folders, importing and exporting, the backups, the guards.
-Temp folders only: HOME, XDG_DATA_HOME, APPDATA and LOCALAPPDATA all point into one.
+"""scripts/oot_saves.py, game-free: finding Hookshot's and every emulator's folders, importing and exporting, the backups,
+the guards, and the Hookshot import's checks (the launcher's). Temp folders and made-up saves only: HOME, XDG_DATA_HOME,
+APPDATA and LOCALAPPDATA all point into one.
 
 python -I -B tests/test_oot_saves.py
 """
@@ -8,6 +9,8 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import re
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -105,9 +108,14 @@ class Discovery(Case):
             with self.assertRaises(oot.Fail) as e:
                 oot.locate(oot.LONGSHOT, None, "--longshot")
             self.assertIn("--longshot", str(e.exception))
+            self.assertIn(str(self.home / "Games" / "Longshot"), str(e.exception))
             game = self.tmp / "Longshot"
             make_save(game / "user" / "save" / UID, b"W")
             self.assertEqual(oot.locate(oot.LONGSHOT, str(game), "--longshot")[1], {UID: str(game / "user" / "save" / UID)})
+            # (the builder's default game folder, when nothing is passed)
+            default = self.home / "Games" / "Longshot" / "user" / "save" / UID
+            make_save(default, b"D")
+            self.assertEqual(oot.locate(oot.LONGSHOT, None, "--longshot")[1], {UID: str(default)})
 
     def test_lichii_s_own_folder_first(self):
         # (Lichii from its build 150 on keeps %APPDATA%\\lichii, ~/.local/share/lichii; the others stay in Eden's)
@@ -258,16 +266,29 @@ class Copy(Case):
         self.assertTrue(backup.name.startswith("import-orchid-"))
         self.assertEqual(tree(backup), before)
 
-    def test_old_names_still_work(self):
-        code, out, err = self.run_main("to-lichii")
+    def test_old_names_are_gone(self):
+        # (to-lichii, to-longshot and --lichii were Hookshot-era spellings of export lichii, import lichii and --from/--to)
+        for argv in (["to-lichii"], ["to-longshot"], ["import", "--lichii", str(self.data / "eden")]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                oot.main(argv)
+        self.assertEqual(self.backup_dirs(), [])
+
+    def test_import_into_a_longshot_without_a_save(self):
+        # (Longshot never started: the save goes where it will look, save/<its one user id>, and there is nothing to back up)
+        shutil.rmtree(self.data / "longshot")
+        code, out, err = self.run_main("import", "lichii")
         self.assertEqual(code, 0, err)
-        self.assertEqual(tree(self.li), tree(self.hs))
-        make_save(self.li / "slot_02", b"X", slots=())
-        code, out, err = self.run_main("to-longshot", "--lichii", str(self.data / "eden"))
-        self.assertEqual(code, 0, err)
-        self.assertIn("slot_02", {Path(k).parts[0] for k in tree(self.hs)})
-        names = [b.name for b in self.backup_dirs()]
-        self.assertTrue(names[0].startswith("export-lichii-") and names[1].startswith("import-lichii-"), names)
+        made = self.data / "longshot" / "save" / oot.USER_ID
+        self.assertEqual(tree(made), tree(self.li))
+        self.assertEqual(self.backup_dirs(), [])
+        self.assertIn("there is no save there yet", out)
+
+    def test_export_never_makes_an_emulator_s_folder(self):
+        shutil.rmtree(self.data / "eden")
+        code, out, err = self.run_main("export", "lichii")
+        self.assertEqual(code, 1)
+        self.assertIn("no Lichii save found", err)
+        self.assertFalse((self.data / "eden").exists())
 
     def test_from_a_save_folder_and_a_data_folder(self):
         other = self.tmp / "backup of a save"
@@ -440,7 +461,8 @@ class Guard(Case):
     def test_every_process_name_on_windows(self):
         real = self.real()
         names = real.process_names()
-        for program in [real.LONGSHOT] + real.EMULATORS:
+        self.assertEqual(names["hookshot"], "Hookshot")
+        for program in [real.LONGSHOT] + real.OTHERS:
             self.assertTrue(program.processes, program.name)
             for p in program.processes:
                 self.assertIn(program.display, names[p])
@@ -453,7 +475,7 @@ class Guard(Case):
 
     def test_linux_processes_and_appimages(self):
         real = self.real()
-        procs = {"10": ("orchid", "/opt/orchid/orchid"), "11": ("AppRun", "/home/x/eglantine-linux-x86_64.AppImage"),
+        procs = {"9": ("hookshot", "/home/x/Games/Hookshot/hookshot"), "10": ("orchid", "/opt/orchid/orchid"), "11": ("AppRun", "/home/x/eglantine-linux-x86_64.AppImage"),
                  "12": ("ocarina", "./ocarina"), "13": ("bash", "/bin/bash")}
 
         def fake_open(path, *a, **k):
@@ -464,7 +486,127 @@ class Guard(Case):
         with mock.patch.object(real, "WINDOWS", False), \
              mock.patch.object(real.os, "listdir", return_value=list(procs) + ["self"]), \
              mock.patch("builtins.open", fake_open):
-            self.assertEqual(real.running_games(), ["NX2navi", "Orchid", "PokeDinner or Eglantine"])
+            self.assertEqual(real.running_games(), ["Hookshot", "NX2navi", "Orchid", "PokeDinner or Eglantine"])
+
+
+class Hookshot(Case):
+    """Hookshot, the project Longshot was forked from: the same files in the same layout under its own folders"""
+
+    def setUp(self):
+        super().setUp()
+        self.hk = self.data / "hookshot" / "save" / oot.USER_ID
+        make_save(self.hk, b"HK", slots=("slot_00", "slot_02"))
+
+    def test_user_id_is_the_host_s(self):
+        # (host/nn_applet.c's one user, as host/nn_fs.c names its save folder: high word, then low word, 16 hex digits each)
+        applet = (ROOT / "host" / "nn_applet.c").read_text(encoding="utf-8")
+        low, high = re.search(r"user_uid\[2\] = \{0x([0-9a-fA-F]{16})ULL, 0x([0-9a-fA-F]{16})ULL\}", applet).groups()
+        self.assertEqual(oot.USER_ID, (high + low).lower())
+        fs = (ROOT / "host" / "nn_fs.c").read_text(encoding="utf-8")
+        self.assertIn('"save\\\\%016llx%016llx", (unsigned long long)G64(ARG(1) + 8), (unsigned long long)G64(ARG(1))', fs)
+
+    def test_found_on_linux_and_listed(self):
+        self.assertEqual(oot.locate(oot.HOOKSHOT, None, "--hookshot"), (str(self.data / "hookshot"), {oot.USER_ID: str(self.hk)}))
+        self.assertIs(oot.program_named("Hookshot"), oot.HOOKSHOT)
+        code, out, err = self.run_main("list")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Hookshot: %s\n" % (self.data / "hookshot"), out)
+        self.assertIn("slot_02", out)
+
+    def test_found_on_windows_in_the_game_folder_and_its_version_folders(self):
+        games = self.home / "Games" / "Hookshot"
+        with mock.patch.object(oot, "WINDOWS", True):
+            with self.assertRaises(oot.Fail) as e:
+                oot.locate(oot.HOOKSHOT, None, "--hookshot")
+            self.assertIn("--hookshot", str(e.exception))
+            version = games / "v3.0.1" / "user" / "save" / oot.USER_ID   # (Hookshot's launcher: a folder per version)
+            make_save(version, b"V")
+            self.assertEqual(oot.locate(oot.HOOKSHOT, None, "--hookshot")[1], {oot.USER_ID: str(version)})
+            plain = games / "user" / "save" / oot.USER_ID                # (the 2.x builders' game folder)
+            make_save(plain, b"P")
+            self.assertEqual(oot.locate(oot.HOOKSHOT, None, "--hookshot")[1], {oot.USER_ID: str(plain)})
+
+    def test_import_copies_byte_for_byte_and_leaves_hookshot_alone(self):
+        before = tree(self.hk)
+        old = tree(self.hs)
+        code, out, err = self.run_main("import", "hookshot")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree(self.hs), before)
+        self.assertEqual(tree(self.hk), before)
+        (backup,) = self.backup_dirs()
+        self.assertTrue(backup.name.startswith("import-hookshot-"))
+        self.assertEqual(tree(backup), old)
+
+    def test_import_into_a_longshot_without_a_save(self):
+        shutil.rmtree(self.data / "longshot")
+        code, out, err = self.run_main("import", "hookshot")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree(self.data / "longshot" / "save" / oot.USER_ID), tree(self.hk))
+        self.assertEqual(self.backup_dirs(), [])
+
+    def test_export(self):
+        code, out, err = self.run_main("export", "hookshot")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree(self.hk), tree(self.hs))
+        (backup,) = self.backup_dirs()
+        self.assertTrue(backup.name.startswith("export-hookshot-"))
+        shutil.rmtree(self.data / "hookshot")
+        code, out, err = self.run_main("export", "hookshot")   # (no Hookshot save yet: made where Hookshot looks)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree(self.hk), tree(self.hs))
+
+    def test_folder_flags(self):
+        elsewhere = self.tmp / "Hookshot portable"
+        make_save(elsewhere / "save" / oot.USER_ID, b"E", slots=("slot_01",))
+        for flag in ("--hookshot", "--from"):
+            code, out, err = self.run_main("import", "hookshot", flag, str(elsewhere))
+            self.assertEqual(code, 0, err)
+            self.assertEqual(tree(self.hs), tree(elsewhere / "save" / oot.USER_ID))
+        code, out, err = self.run_main("import", "lichii", "--hookshot", str(elsewhere))
+        self.assertEqual(code, 1)
+        self.assertIn("--hookshot", err)
+
+    def test_windows_import_into_the_game_folder(self):
+        hk = self.home / "Games" / "Hookshot" / "user" / "save" / oot.USER_ID
+        make_save(hk, b"W")
+        game = self.home / "Games" / "Longshot"
+        with mock.patch.object(oot, "WINDOWS", True):
+            code, out, err = self.run_main("import", "hookshot")   # (no Longshot game folder: nowhere to put it)
+            self.assertEqual(code, 1)
+            self.assertIn("--longshot", err)
+            game.mkdir(parents=True)
+            code, out, err = self.run_main("import", "hookshot")
+            self.assertEqual(code, 0, err)
+        self.assertEqual(tree(game / "user" / "save" / oot.USER_ID), tree(hk))
+
+    def test_only_a_save_is_imported(self):
+        # (the launcher's checks, Core/HookshotSaves.cs: only save files, none empty or over 4 MB, a progress.sav per slot)
+        before = tree(self.hs)
+        for name, spoil, why in (
+                ("extra file", lambda d: (d / "notes.txt").write_bytes(b"x"), "notes.txt is not a save file"),
+                ("in a slot", lambda d: (d / "slot_00" / "x.bin").write_bytes(b"x"), "slot_00/x.bin is not a save file"),
+                ("empty", lambda d: (d / "account.sav").write_bytes(b""), "account.sav is empty"),
+                ("large", lambda d: (d / "slot_00" / "progress.sav").write_bytes(b"\0" * (oot.MAX_SAVE_FILE + 1)),
+                 "slot_00/progress.sav is too large"),
+                ("no progress", lambda d: (d / "slot_00" / "progress.sav").unlink(), "slot_00 has no progress.sav")):
+            with self.subTest(name):
+                folder = self.tmp / ("bad " + name)
+                make_save(folder / "save" / oot.USER_ID, b"B", slots=("slot_00",))
+                spoil(folder / "save" / oot.USER_ID)
+                code, out, err = self.run_main("import", "hookshot", "--hookshot", str(folder))
+                self.assertEqual(code, 1, out)
+                self.assertIn(why, err)
+                self.assertIn("Nothing was copied", err)
+                self.assertEqual(tree(self.hs), before)
+        self.assertEqual(self.backup_dirs(), [])
+
+    def test_refused_while_hookshot_runs(self):
+        self.running.return_value = ["Hookshot"]
+        before = tree(self.hs)
+        code, out, err = self.run_main("import", "hookshot")
+        self.assertEqual(code, 1)
+        self.assertIn("close Hookshot first", err)
+        self.assertEqual(tree(self.hs), before)
 
 
 if __name__ == "__main__":
