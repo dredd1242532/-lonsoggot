@@ -182,6 +182,7 @@ int main(void) {
     const int64_t before = clock_ns;
     r = acquire(1, 0, 1);
     check(r == 0 && sleeps == 20 && clock_ns - before == 100000000, "sleeps that take 5 ms: still 100 ms, not 50 tries (250 ms)");
+    prior_acquires = 0;
     stopped_now = 1;
     r = acquire(1, 0, 1);
     check(r == 0 && sleeps == 0 && dec.acquires == 1, "stopped and nothing submitted since: no wait, the buffer again at once");
