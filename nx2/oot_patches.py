@@ -488,6 +488,10 @@ WHOLE_SITES = (
     ("void f_832b2690(Ctx *__restrict A64_NOESC c) {@",
      "    c->x[8]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,0,3,c->fpcr,&c->fpsr);@",
      "c->x[19] + 0x265fc"),
+    # (the floor web's simulation steps: keep each object's fraction before the existing 0..3 clamp, issues 2667/2271)
+    ("void f_80652cb0(Ctx *__restrict A64_NOESC c) {@",
+     "    c->x[22]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,1,3,c->fpcr,&c->fpsr);@",
+     "c->x[19] + 2296"),
 )
 WHOLE_SITES = tuple((h.replace("@", "\n"), o.replace("@", "\n"), k) for h, o, k in WHOLE_SITES)
 WHOLE_MARK = "/* (the step's whole frames: nx2/oot_patches.py) */"
