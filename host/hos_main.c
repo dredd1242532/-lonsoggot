@@ -2069,9 +2069,35 @@ static void driver_cache_folder(void) {
         *p = '/';
     }
 }
+/* (longshot, linux) Room for the Vulkan back end's thread-local data in the static TLS block. longshot_vk.so is dlopen'ed, and glibc
+   gives a module loaded after the start a TLS block of its own per thread, found at every access through __tls_get_addr or a dynamic
+   TLS descriptor: on a Steam Deck 2.4% of the render thread was that call, with more in the accessors around it, for thousands of
+   accesses a draw. With room reserved for it (glibc.rtld.optional_static_tls, read only when a process starts) the loader puts the
+   module's ~48 KB in the static block, where its TLS descriptors (nx2/build.py, -mtls-dialect=gnu2) resolve to a constant offset.
+   So the game starts itself again once, first of all, with the tunable added to GLIBC_TUNABLES. Kept as it is: HOS_STATIC_TLS=0, a
+   GLIBC_TUNABLES that names the tunable already, or an exec that failed (the game goes on without it) */
+#define HOS_STATIC_TLS_ROOM 98304
+static void static_tls_room(char **argv) {
+    const char *off = getenv("HOS_STATIC_TLS");
+    if ((off && !strcmp(off, "0")) || getenv("HOS_STATIC_TLS_DONE")) return;
+    const char *was = getenv("GLIBC_TUNABLES");
+    if (was && strstr(was, "glibc.rtld.optional_static_tls")) return;
+    char tunables[2048];
+    const int n = snprintf(tunables, sizeof tunables, "%s%sglibc.rtld.optional_static_tls=%d", was && *was ? was : "",
+                           was && *was ? ":" : "", HOS_STATIC_TLS_ROOM);
+    if (n <= 0 || n >= (int)sizeof tunables) return;
+    char *keep = was ? strdup(was) : NULL;
+    setenv("HOS_STATIC_TLS_DONE", "1", 1);   /* (once: the game started again does not try again) */
+    setenv("GLIBC_TUNABLES", tunables, 1);
+    execv("/proc/self/exe", argv);
+    if (keep) setenv("GLIBC_TUNABLES", keep, 1);   /* (the exec failed: on as before) */
+    else unsetenv("GLIBC_TUNABLES");
+    free(keep);
+}
 int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
+    static_tls_room(argv);   /* (first: nothing has started yet) */
     load_longshot_env();
     driver_cache_room();
     driver_cache_folder();

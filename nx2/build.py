@@ -1180,7 +1180,12 @@ def main():
             with open(f, "rb") as src:
                 stamp.update(os.path.relpath(f, vk).replace("\\", "/").encode() + src.read().replace(bytes((13, 10)), bytes((10,))))
         shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % stamp.hexdigest()[:16]
-        vflags = target() + CPU + (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + [   # (longshot: the replay is the frame's limit now)
+        # (Linux: the back end's thread_local variables through TLS descriptors. It is dlopen'ed, so with the default model each access
+        # was a call of __tls_get_addr: 2.4% of the Steam Deck's render thread, with the accessors around it more. A descriptor of a
+        # module whose TLS the loader placed in the static block (host/hos_main.c static_tls_room) is a constant offset, as the
+        # executable's own are. RX_VK_TLS=gd: the default model, as before)
+        vk_tls = ["-mtls-dialect=gnu2"] if LINUX and os.environ.get("RX_VK_TLS", "gnu2") != "gd" else []
+        vflags = target() + CPU + (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + vk_tls + [   # (longshot: the replay is the frame's limit now)
             # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
             "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
             "-include", "string", "-include", "vector",

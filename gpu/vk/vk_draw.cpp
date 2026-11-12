@@ -2718,9 +2718,13 @@ VkSampler sampler_for(int id, bool compare) {
     static const bool on = !getenv("RX_VK_SAMPLER_CACHE") || atoi(getenv("RX_VK_SAMPLER_CACHE")) != 0;
     if (!on || id < 0 || id >= 4096) return sampler_make(id, compare);
     struct Entry { uint64_t gen; VkSampler s; };
-    static thread_local Entry table[2][4096];   // (gen 0: never filled; the generation starts at 1)
+    // (hookshot) on the heap, a thread's own: 128 KB of zeros in the module's TLS segment made it too big for the static TLS room
+    // the game reserves (host/hos_main.c static_tls_room), and every thread_local of the back end went through __tls_get_addr
+    struct Table { Entry e[2][4096]{}; };   // (gen 0: never filled; the generation starts at 1)
+    static thread_local std::unique_ptr<Table> table;
+    if (!table) table.reset(new Table());
     const uint64_t gen = sampler_registrations_generation();   // (read first: a registration after it makes the next call miss)
-    Entry& e = table[compare ? 1 : 0][id];
+    Entry& e = table->e[compare ? 1 : 0][id];
     if (e.gen == gen) return e.s;
     const VkSampler made = sampler_make(id, compare);
     if (made) e = {gen, made};   // (a failed creation is retryable without a new registration)
