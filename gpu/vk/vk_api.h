@@ -64,6 +64,14 @@ enum { HOS_OPT_HOLD_TOGGLE = 54 };
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* (longshot) the Insert menu's Restart with its Restart in place row on (host/oot_restart.c). The option reads what the menu
+   wants of the game's side: 0 nothing, HOS_RESTART_SAVE the game's own save before the restart. option_set carries the
+   game's side's word back: HOS_RESTART_GO (on with the restart: the game has saved, or no game is in play),
+   HOS_RESTART_REFUSED (the game takes no save here: the player decides), HOS_RESTART_SAVING (the request is taken), and
+   HOS_RESTART_WAIT + the seconds until the game takes one (+ 0: not known). */
+enum { HOS_OPT_RESTART_PLACE = 64 };
+enum { HOS_RESTART_SAVE = 1 };
+enum { HOS_RESTART_GO = 1, HOS_RESTART_REFUSED, HOS_RESTART_SAVING, HOS_RESTART_WAIT = 100 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
