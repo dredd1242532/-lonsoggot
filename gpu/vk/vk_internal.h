@@ -119,6 +119,27 @@ struct Device {
 };
 extern Device dev;
 
+/// (longshot) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once. An Arc
+/// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
+/// during the first scene's compiles (two frames in hookshot_vk.dll, and no "driver faulted compiling" line, so the
+/// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
+/// Other vendors, and Intel on other systems, are not held. RX_VK_NO_INTEL_SERIAL: side by side, as before.
+struct IntelDriverGate {
+    std::unique_lock<std::mutex> hold;
+    IntelDriverGate() {
+#ifdef _WIN32
+        static const bool off = env_on("RX_VK_NO_INTEL_SERIAL");
+        if (off || dev.props.vendorID != 0x8086) return;
+        static std::mutex mu;
+        static std::once_flag once;
+        std::call_once(once, [] {
+            logf("vk: Intel's compiler is entered by one thread (RX_VK_NO_INTEL_SERIAL: side by side)");
+        });
+        hold = std::unique_lock<std::mutex>(mu);
+#endif
+    }
+};
+
 /// (longshot) Where a storage buffer binding starts: the address rounded down to this, the shaders' offsets counted from there
 /// (vk_shader.cpp make_profile / host_info, the translator's ssbo_align_mask; vk_draw.cpp's descriptor writer). At least 16
 /// bytes, whatever the device allows: the translator reads 8- and 16-byte accesses through vector views (offset >> 3, >> 4),

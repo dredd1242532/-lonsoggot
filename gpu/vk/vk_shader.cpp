@@ -722,7 +722,8 @@ VkShaderModule make_module(const std::vector<uint32_t>& spirv) {
     ci.codeSize = spirv.size() * 4;
     ci.pCode = spirv.data();
     VkShaderModule m = VK_NULL_HANDLE;
-    vkCreateShaderModule(dev.device, &ci, nullptr, &m);
+    IntelDriverGate gate;
+    if (guarded_shader_module(&ci, &m) != VK_SUCCESS) return VK_NULL_HANDLE;
     return m;
 }
 
