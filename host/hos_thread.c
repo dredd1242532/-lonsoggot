@@ -5,6 +5,7 @@
    there. TPIDRRO_EL0 (thread-local region): 0x200 bytes; the SDK's nn::os keeps the current ThreadType* at
    +0x1F8, so lifted SDK code that reads it inline finds the same thread the HLE knows. */
 #include "hos.h"
+#include "hos_crash_record.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -300,6 +301,11 @@ static void log_flush(void) {}
 #endif
 
 void hos_log_flush(void) { log_flush(); }
+void hos_log_flush_crash(void) {
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    log_drain_raw();   /* never wait for the writer or allocate a batch after a fault */
+#endif
+}
 
 /* (longshot) A line's level as the log writes it: none for info, so the lines most of the log is stay as they were; "[trace] "
    after the thread's tag for the rest, which the launcher's log reads to show info and above unless asked for more */
@@ -316,6 +322,8 @@ static const char *log_level_tag(int level) {
 static void hos_vlog(int level, const char *fmt, va_list ap) {
     char buf[1024], line[1100];
     vsnprintf(buf, sizeof buf, fmt, ap);
+    if (!strncmp(buf, "vk: FATAL:", 10))
+        hos_crash_record_fatal(NULL, strstr(buf, "VK_ERROR_DEVICE_LOST") ? "device lost" : "Vulkan fatal");
     snprintf(line, sizeof line, "[hos %s] %s%s\n", cur ? cur->name : "host", log_level_tag(level), buf);
     extern volatile int hos_control_on;   /* (control.c: log lines for its subscribers) */
     if (hos_control_on) {
@@ -342,13 +350,14 @@ void hos_log_at(int level, const char *fmt, ...) {
 }
 
 void hos_fatal(Ctx *c, const char *fmt, ...) {
+    if (!c) c = hos_ctx();
+    hos_crash_record_fatal(c ? c->x : NULL, "hos_fatal");
     char buf[1024];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    if (!c) c = hos_ctx();
-    log_flush();
+    hos_log_flush_crash();
     fprintf(stderr, "[hos %s] FATAL: %s", cur ? cur->name : "host", buf);
     if (c) fprintf(stderr, " (lr %#llx sp %#llx)", (unsigned long long)c->x[30], (unsigned long long)c->x[31]);
     fprintf(stderr, "\n");
