@@ -488,9 +488,13 @@ def frames_checks(exe, tmp, quick=False):
     tiny_a, tiny_b = synth("text", 300, 11), synth("mesh", 300, 12)
     second = whole(compress(tiny_b, 3, True, same_b), len(tiny_b), dd)
     place(second[0], 0, same_b, "full")
-    calls, mem = run(exe, tmp, [whole(compress(tiny_a, 3, True, same_a), len(tiny_a), dd), second], pre=pre)
+    ops = [whole(compress(tiny_a, 3, True, same_a), len(tiny_a), dd), second]
+    calls, mem = run(exe, tmp, ops, pre=pre)
     chk(calls[1][5] == len(tiny_b) and mem[DST - BASE:DST - BASE + len(tiny_b)] == tiny_b,
         "whole: DDict made again in place (same ID and size): the second decode %#x" % calls[1][5])
+    off, room = run(exe, tmp, ops, mode="0", pre=pre)[1], max(len(tiny_a), len(tiny_b))
+    chk(mem[:DST - BASE] == off[:DST - BASE] and mem[DST - BASE + room:] == off[DST - BASE + room:],
+        "whole: DDict made again: memory outside the output room changed")
     # left to the lifted code, writing nothing: switch off, a raw dictionary, another format
     fmt = [(WORK + D_FORMAT, struct.pack("<I", 1))]
     for name, mode, x, pre in (("switch off", "0", whole(compress(small), len(small)), []),
