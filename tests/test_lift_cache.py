@@ -109,6 +109,7 @@ def main():
     check_lift_sources()
     check_compile_only()
     check_key_after_lift()
+    check_lift_env()
     print("ok: the lift key follows the game, the tools (the modules the lift imports), the hot list, the chunks and the settings")
 
 
@@ -186,6 +187,45 @@ def check_lift_sources():
                                                                             open(f, encoding="utf-8", errors="replace").read())]
     check("no module of the lift imports by a name made at run time, which lift_sources' walk cannot see (%s)" % dynamic, not dynamic)
 
+
+
+def check_lift_env():
+    """The key hashes the variables whose values change the lifted C (make_game.py LIFT_ENV_PREFIXES, LIFT_ENV_NAMES), not the
+    paths of what it reads by content (LIFT_PATH_ENV), nor the renderer's switches or RX_RELEASE, which the lift does not read;
+    and every variable the lift's sources read is one of these, or in LIFT_ENV_NOT_OUTPUT with why it changes nothing"""
+    import re
+    with tempfile.TemporaryDirectory(prefix="longshot-lift-env-") as d:
+        d = Path(d)
+        for top in ("a", "b"):
+            (d / top / "exefs").mkdir(parents=True)
+            (d / top / "work" / "image").mkdir(parents=True)
+            (d / top / "exefs" / "main").write_bytes(b"NSO0 one")
+            (d / top / "work" / "hot_funcs.txt").write_text("f_80000000\n")
+        exefs, work = str(d / "a" / "exefs"), str(d / "a" / "work")
+        env = lambda top: {"A64_HOT_CHUNK": "1", "OOT_WORK": str(d / top / "work"), "OOT_EXEFS": str(d / top / "exefs"),
+                           "OOT_ROMFS": str(d / top / "romfs"), "OOT_DUMP": str(d / top), "RX_RELEASE": "1",
+                           "A64_HOT_FUNCS": str(d / top / "work" / "hot_funcs.txt")}
+        clean = {k: v for k, v in os.environ.items() if not k.startswith(("A64_", "OOT_", "RX_", "SUYU_"))}
+        with mock.patch.dict(os.environ, clean, clear=True):
+            key = make_game.lift_key(exefs, work, env("a"))
+            check("the same game and inputs in other folders give the same key",
+                  make_game.lift_key(str(d / "b" / "exefs"), str(d / "b" / "work"), env("b")) == key)
+            check("RX_RELEASE does not change the key", make_game.lift_key(exefs, work, dict(env("a"), RX_RELEASE="")) == key)
+            for name, changes in (("RX_VK_NO_PROGRAM_CACHE", False), ("RX_MARCH", False), ("SUYU_RECOMP_STRICT", True),
+                                  ("RX_TARGET", True), ("A64_NO_VFPX", True)):
+                with mock.patch.dict(os.environ, {name: "1"}):
+                    check("%s in the environment %s the key" % (name, "changes" if changes else "leaves"),
+                          (make_game.lift_key(exefs, work, env("a")) != key) == changes)
+    read = re.compile(r"""(?:environ(?:\.get)?\(?\[?|getenv\(|env_on\(|env_int\()\s*["']([A-Z][A-Z0-9_]+)["']""")
+    names = {}
+    for f in make_game.lift_sources():
+        for m in read.finditer(open(f, encoding="utf-8", errors="replace").read()):
+            names.setdefault(m.group(1), os.path.relpath(f, ROOT))
+    check("the lift's sources read variables (%d)" % len(names), len(names) > 10)
+    unknown = sorted("%s (%s)" % (n, f) for n, f in names.items() if not make_game.lift_reads_env(n)
+                     and n not in make_game.LIFT_PATH_ENV and n not in make_game.LIFT_ENV_NOT_OUTPUT)
+    check("every variable the lift's sources read is in the key, a path hashed by content, or in LIFT_ENV_NOT_OUTPUT "
+          "(not yet: %s)" % ", ".join(unknown), not unknown)
 
 
 def check_compile_only():
