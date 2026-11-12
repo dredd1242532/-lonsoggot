@@ -67,6 +67,7 @@ enum {
 };
 
 static const char *const cat_names[COOP_CAT_N] = {"progress", "items", "songs", "quest", "keys", "rupees", "ammo"};
+// wire-protocol constants: a later rename of the project must not change these
 static const char SIG_MEMBER[] = "longshot-coop/4 member", SIG_SECTION[] = "longshot-coop/4 section", SIG_RULES[] = "longshot-coop/3 rules",
                   SIG_POOL[] = "longshot-coop/3 pool";
 _Static_assert(sizeof SIG_SECTION - 1 + 16 + 1 + 8 == SEC_PRE, "SEC_PRE is the section role's length and its fields");
@@ -697,6 +698,7 @@ unsigned coop_sync_ignored(const CoopSync *s) {
 
 static void derive(CoopSync *s) {
     uint8_t k[32];
+    // wire-protocol constants: a later rename of the project must not change these
     static const char offer[] = "longshot-coop/3 offer", sign[] = "longshot-coop/3 sign";
     coop_blake2b(k, sizeof k, s->seed, sizeof s->seed, offer, sizeof offer - 1);
     s->offer_k0 = get64(k), s->offer_k1 = get64(k + 8);

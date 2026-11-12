@@ -112,11 +112,13 @@ def random_secret():
 
 def room_locator(secret):
     """The relay's name of the room, and the key of the tags: BLAKE2b-128 keyed with the secret."""
+    # wire-protocol constants: a later rename of the project must not change these
     return hashlib.blake2b(b'longshot-coop/2 room', key=secret.encode('ascii'), digest_size=LOCATOR_LEN).digest()
 
 
 def message_key(secret):
     """The key that seals the players' messages (the relay never computes it; the tests and vectors do)."""
+    # wire-protocol constants: a later rename of the project must not change these
     return hashlib.blake2b(b'longshot-coop/2 messages', key=secret.encode('ascii'), digest_size=32).digest()
 
 

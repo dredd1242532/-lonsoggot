@@ -40,6 +40,7 @@
 
 // The engine's signing roles and the room context's derivation (coop_state.c), which the tests below use to make the
 // messages a member's game would sign.
+// wire-protocol constants: a later rename of the project must not change these
 static const char ROLE_SIGN[] = "longshot-coop/3 sign", ROLE_POOL[] = "longshot-coop/3 pool", ROLE_MEMBER[] = "longshot-coop/4 member",
                   ROLE_RULES[] = "longshot-coop/3 rules";
 #define ROOM_CTX(ctx, code) coop_blake2b(ctx, sizeof ctx, code, strlen(code), ROLE_SIGN, sizeof ROLE_SIGN - 1)

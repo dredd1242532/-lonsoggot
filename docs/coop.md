@@ -10,6 +10,18 @@ game's session (`host/coop.c`, `host/coop_net.c`): the game makes or joins a roo
 at start from its settings, and stays in it; and progress sync (`host/oot_coop.c`, [below](#progress-sync)): what one
 player's game gains, the others' games get.
 
+## Build compatibility
+
+Two matching Longshot builds can play together: use the same co-op protocol and progress schema, with the same
+supported game build. Hookshot builds using the `hookshot-coop/...` domains cannot play with Longshot builds using
+`longshot-coop/...`, even with the same room secret and relay. The domains produce different room locators,
+datagram authentication tags, message keys and signature contexts; progress sync also has its own
+`longshot-coop-sync/1 ` schema domain (including the final space). Matching Hookshot builds retain their own
+compatibility; changing only the displayed project name does not make different protocols compatible.
+
+The Longshot domains are now wire-protocol constants, not branding text. A later project rename must leave them
+unchanged. The byte vectors and exact-domain tests pin this boundary; do not regenerate them just for a rename.
+
 ## Running a relay
 
 ```

@@ -404,6 +404,7 @@ static int build_table(Ctx *c, uint64_t mgr) {
     /* the schema: this layer's version, the game's build, and the table (every hash with its category, type and limit),
        so that two builds that classify or limit differently do not merge (FNV-1a) */
     uint64_t sh = 0xcbf29ce484222325ull;
+    /* wire-protocol constants: a later rename of the project must not change these */
     for (const char *p = "longshot-coop-sync/1 "; *p; p++) sh = (sh ^ (uint8_t)*p) * 0x100000001b3ull;
     for (const char *p = hos_main_build_id; *p; p++) sh = (sh ^ (uint8_t)*p) * 0x100000001b3ull;
     for (int i = 0; i < G.nflags; i++) {

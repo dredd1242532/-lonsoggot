@@ -33,8 +33,8 @@ SECRET = 'H7K3WMBCDFGH234567'
 # (name, src, dst, session, counter, kind, message, payload)
 SEALED = [
     ('test', 3, 255, 0x0123456789abcdef, 0x00000001, 0xf0, '68656c6c6f',
-     '01efcdab8967452301010000003975ab159c9fccba4e4a544c6d2fa45f43eba232c501'),
-    ('empty', 1, 2, 0xfedcba9876543210, 0xffffffff, 0x03, '-', '011032547698badcfeffffffff6f0214f893b856af59776984af10f28b77'),
+     '01efcdab896745230101000000499fb7c92267be4347a81faed78fae2e3da22ebe9468'),
+    ('empty', 1, 2, 0xfedcba9876543210, 0xffffffff, 0x03, '-', '011032547698badcfeffffffff9e01bd7164cbddc742ef2c5d815f935ce8'),
 ]
 
 
@@ -280,9 +280,18 @@ class CodecTest(unittest.TestCase):
             self.assertIsNotNone(cr.normalize_secret(cr.random_secret()))
 
     def test_keys_are_the_documented_blake2b(self):
+        # wire-protocol constants: a later rename of the project must not change these
         self.assertEqual(cr.room_locator(SECRET), hashlib.blake2b(b'longshot-coop/2 room', key=SECRET.encode(), digest_size=16).digest())
         self.assertEqual(cr.message_key(SECRET), hashlib.blake2b(b'longshot-coop/2 messages', key=SECRET.encode(), digest_size=32).digest())
         self.assertNotEqual(cr.room_locator(SECRET), cr.message_key(SECRET)[:16])
+
+    def test_hookshot_domains_do_not_interoperate_with_longshot(self):
+        old_locator = hashlib.blake2b(b'hookshot-coop/2 room', key=SECRET.encode(), digest_size=16).digest()
+        old_key = hashlib.blake2b(b'hookshot-coop/2 messages', key=SECRET.encode(), digest_size=32).digest()
+        self.assertNotEqual(old_locator, cr.room_locator(SECRET))
+        self.assertNotEqual(old_key, cr.message_key(SECRET))
+        old_datagram = cr.pack(cr.T_PING, 1, 1, 0, 1, b'\0\0\0\0', old_locator)
+        self.assertFalse(cr.parse(old_datagram).verify(cr.room_locator(SECRET)))
 
     def test_the_tag_is_the_documented_keyed_blake2b(self):
         key = cr.room_locator(SECRET)

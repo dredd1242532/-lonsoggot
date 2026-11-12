@@ -56,6 +56,7 @@ void coop_secret_short(const char secret[COOP_SECRET_LEN], char out[8]) {
 // ---- keys and tags
 
 void coop_room_keys(const char secret[COOP_SECRET_LEN], uint8_t locator[COOP_KEY_LEN], uint8_t msg_key[COOP_MSG_KEY_LEN]) {
+    // wire-protocol constants: a later rename of the project must not change these
     static const char room[] = "longshot-coop/2 room", messages[] = "longshot-coop/2 messages";
     if (locator) crypto_blake2b_keyed(locator, COOP_KEY_LEN, (const uint8_t *)secret, COOP_SECRET_LEN, (const uint8_t *)room, sizeof room - 1);
     if (msg_key)
