@@ -12,7 +12,7 @@
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="LongshotIcon" SourceFile="../setup/longshot.ico" />
     <Property Id="ARPPRODUCTICON" Value="LongshotIcon" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/NotRexed/Longshot" />
+    <Property Id="ARPURLINFOABOUT" Value="https://git.magicbean.dev/MagicBeanDev/Longshot" />
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">

@@ -300,7 +300,7 @@ def desktop_exec(path):
     return '"%s"' % escaped.replace("%", "%%")
 
 
-APP_ID = "io.github.NotRexed.Longshot"   # (the game's window names itself so: host/posix/display_sdl.c's HOS_APP_ID)
+APP_ID = "dev.magicbean.Longshot"   # (the game's window names itself so: host/posix/display_sdl.c's HOS_APP_ID)
 
 
 def add_to_menu(folder):
