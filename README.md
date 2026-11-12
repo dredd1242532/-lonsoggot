@@ -107,7 +107,8 @@ frame rate: the game runs on more than this, and performance depends on the reso
 | **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
 
 Memory use depends on the build, driver and scene: recent Linux/NVIDIA runs used roughly
-13–17 GiB for the game alone, so even a 16 GB PC can need swap. Leave room for the desktop and other programs.
+13–19 GiB for the game alone (see [tested configurations](docs/tested-configurations.md)), so even a 16 GB PC can need
+swap. Leave room for the desktop and other programs.
 Swap can prevent an out-of-memory exit, but it is not extra RAM; heavy swapping can make the whole desktop unresponsive.
 
 **Drivers:** use an up-to-date graphics driver with Vulkan 1.3. On Linux, use Mesa or NVIDIA's driver. Linux examples
