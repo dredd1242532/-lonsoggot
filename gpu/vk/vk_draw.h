@@ -115,9 +115,10 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
 bool ub_read(uint64_t addr, void* dst, uint64_t n);
 
 /// (hookshot) vkCreate* that a driver's compiler can fault inside. A fault leaves that one out (result -77) instead of
-/// ending the process. On Windows, Intel's compiler is entered by one thread (IntelDriverGate).
-VkResult guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl);
-VkResult guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl);
-VkResult guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* m);
+/// ending the process. On Windows, Intel's compiler is entered by one thread (IntelDriverGate). The calls themselves
+/// live in vk_draw.cpp's unnamed namespace; these are the ones the other files link to.
+VkResult extern_guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl);
+VkResult extern_guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl);
+VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* m);
 
 } // namespace mkwvk

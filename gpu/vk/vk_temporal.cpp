@@ -346,11 +346,11 @@ bool make_pipeline(const uint32_t* code, size_t size, const VkDescriptorType* ty
     mi.codeSize = size, mi.pCode = code;
     VkShaderModule m{};
     IntelDriverGate gate;
-    if (guarded_shader_module(&mi, &m) != VK_SUCCESS) return undo();
+    if (extern_guarded_shader_module(&mi, &m) != VK_SUCCESS) return undo();
     VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", spec};
     ci.layout = layout;
-    const bool ok = guarded_compute(VK_NULL_HANDLE, &ci, &pipe) == VK_SUCCESS;
+    const bool ok = extern_guarded_compute(VK_NULL_HANDLE, &ci, &pipe) == VK_SUCCESS;
     vkDestroyShaderModule(dev.device, m, nullptr);
     return ok || undo();
 }
@@ -463,7 +463,7 @@ bool make_actor_pipeline() {
     for (int i = 0; i < 2; i++) {
         VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         mi.codeSize = size[i], mi.pCode = code[i];
-        if (guarded_shader_module(&mi, &m[i]) != VK_SUCCESS) return false;
+        if (extern_guarded_shader_module(&mi, &m[i]) != VK_SUCCESS) return false;
     }
     VkPipelineShaderStageCreateInfo stages[2]{};
     for (int i = 0; i < 2; i++) {
@@ -495,7 +495,7 @@ bool make_actor_pipeline() {
     gi.stageCount = 2, gi.pStages = stages;
     gi.pVertexInputState = &vi, gi.pInputAssemblyState = &ia, gi.pViewportState = &vp, gi.pRasterizationState = &rs;
     gi.pMultisampleState = &ms, gi.pColorBlendState = &cb, gi.pDynamicState = &ds, gi.layout = s.actor_layout;
-    const bool ok = guarded_graphics(VK_NULL_HANDLE, &gi, &s.actor) == VK_SUCCESS;
+    const bool ok = extern_guarded_graphics(VK_NULL_HANDLE, &gi, &s.actor) == VK_SUCCESS;
     for (VkShaderModule x : m) vkDestroyShaderModule(dev.device, x, nullptr);
     if (!ok) s.actor = VK_NULL_HANDLE, logf("vk: upscaler: the actor motion's pipeline was not made: camera motion alone");
     return ok;
