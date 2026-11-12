@@ -8,8 +8,10 @@ turned on gives it Shift and the press (B to V, LS keeping its other input) and 
 rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps theirs. The sources are checked for the
 rest: read_input reads Sprint's key and gamepad input, npad_states hands sprint_step the stick only with the row on, the
 menu has the rows, writes the pad_ line and runs the layout when the row changes or the Controls page resets.
-sprint_step is compiled alone: A only while steered, the stick let go for its first 120 ms (A down with Link standing: no
-roll), the key held, the gamepad input a toggle that ends when Link stops and wants a new press while he moves.
+sprint_step is compiled alone: A only while steered, the key held, the gamepad input a toggle that ends when Link stops and
+wants a new press while he moves, hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), and with
+HOS_SPRINT_STILL_MS the stick let go as it starts. nx2/oot_patches.py patch_sprint_press runs on lifted text: the mask goes
+between the pair that makes "pressed" and its store, in the two controllers' updates only, once.
 python -I -B tests/test_sprint.py   (needs a C and a C++ compiler)
 """
 import os
@@ -189,38 +191,50 @@ STEP_MAIN = r"""
 #include <string.h>
 #include <stdint.h>
 enum { B_A = 0 };
+volatile uint32_t hos_sprint_press_mask;
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 static uint64_t b;
 static int32_t st[4];
-static void step(int held, int steered, int menu, int64_t ms) {
-    b = 0, st[0] = steered ? 30000 : 0, st[1] = 0;
+static void step_a(int held, int steered, int menu, int64_t ms, int own_a) {
+    b = own_a ? 1 : 0, st[0] = steered ? 30000 : 0, st[1] = 0;
     sprint_step(&b, st, held, steered, menu, ms * 1000000);
 }
+static void step(int held, int steered, int menu, int64_t ms) { step_a(held, steered, menu, ms, 0); }
 #define RUNS (b & 1)
 #define STILL (st[0] == 0)
-int main(void) {
-    /* the key: A while held and steered; the stick let go for the first 120 ms, then back with A held */
-    step(SPRINT_KEY, 0, 0, 0);       CHECK(!RUNS);   /* standing: nothing */
-    step(SPRINT_KEY, 1, 0, 1000);    CHECK(RUNS && STILL);
-    step(SPRINT_KEY, 1, 0, 1100);    CHECK(RUNS && STILL);
-    step(SPRINT_KEY, 1, 0, 1130);    CHECK(RUNS && !STILL);
-    step(0, 1, 0, 1200);             CHECK(!RUNS && !STILL);   /* let go: walks */
-    step(SPRINT_KEY, 1, 0, 1300);    CHECK(RUNS && STILL);     /* again: a new start */
-    step(SPRINT_KEY, 1, 1, 1500);    CHECK(!RUNS);             /* not with the menu open */
+#define MASK hos_sprint_press_mask
+int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "still")) {   /* HOS_SPRINT_STILL_MS=120: the stick let go for the first 120 ms */
+        step(SPRINT_KEY, 1, 0, 1000);    CHECK(RUNS && STILL);
+        step(SPRINT_KEY, 1, 0, 1100);    CHECK(RUNS && STILL);
+        step(SPRINT_KEY, 1, 0, 1130);    CHECK(RUNS && !STILL);
+        step(0, 1, 0, 1200);             CHECK(!RUNS && !STILL);
+        step(SPRINT_KEY, 1, 0, 1300);    CHECK(RUNS && STILL);     /* again: a new start */
+        if (!fails) printf("PASS still\n");
+        return fails != 0;
+    }
+    /* the key: A while held and steered, the stick as it is; the press mask A's bit while it is Sprint's A */
+    step(SPRINT_KEY, 0, 0, 0);       CHECK(!RUNS && !MASK);   /* standing: nothing */
+    step(SPRINT_KEY, 1, 0, 1000);    CHECK(RUNS && !STILL && MASK == 1);
+    step(SPRINT_KEY, 1, 0, 1100);    CHECK(RUNS && !STILL && MASK == 1);
+    step_a(SPRINT_KEY, 1, 0, 1150, 1);   CHECK(RUNS && MASK == 0);   /* the player's own A too: theirs */
+    step(SPRINT_KEY, 1, 0, 1180);    CHECK(RUNS && MASK == 1);
+    step(0, 1, 0, 1200);             CHECK(!RUNS && !STILL && !MASK);   /* let go: walks */
+    step_a(0, 1, 0, 1250, 1);        CHECK(RUNS && !MASK);    /* (the player's own A: not Sprint's) */
+    step(SPRINT_KEY, 1, 1, 1500);    CHECK(!RUNS && !MASK);   /* not with the menu open */
     step(0, 1, 0, 1600);
     /* the gamepad input: a toggle while steered */
-    step(SPRINT_PAD, 1, 0, 2000);    CHECK(RUNS && STILL);
-    step(0, 1, 0, 2050);             CHECK(RUNS && STILL);     /* let go: still runs */
-    step(0, 1, 0, 2200);             CHECK(RUNS && !STILL);
+    step(SPRINT_PAD, 1, 0, 2000);    CHECK(RUNS && !STILL && MASK == 1);
+    step(0, 1, 0, 2050);             CHECK(RUNS && MASK == 1);   /* let go: still runs */
     step(SPRINT_PAD, 1, 0, 2300);    CHECK(RUNS);              /* held on: no change */
     step(0, 1, 0, 2400);             CHECK(RUNS);
-    step(0, 0, 0, 2500);             CHECK(!RUNS);             /* stopped: off */
+    step(0, 0, 0, 2500);             CHECK(!RUNS && !MASK);    /* stopped: off */
     step(0, 1, 0, 2600);             CHECK(!RUNS);             /* moving again: wants a new press */
     step(SPRINT_PAD, 0, 0, 2700);    CHECK(!RUNS);             /* pressed standing: nothing */
     step(SPRINT_PAD, 1, 0, 2800);    CHECK(!RUNS);             /* (still the same press) */
     step(0, 1, 0, 2900);
-    step(SPRINT_PAD, 1, 0, 3000);    CHECK(RUNS && STILL);     /* a new press while moving */
+    step(SPRINT_PAD, 1, 0, 3000);    CHECK(RUNS && MASK == 1);   /* a new press while moving */
     if (!fails) printf("PASS\n");
     return fails != 0;
 }
@@ -245,6 +259,69 @@ class SprintStepTests(unittest.TestCase):
             env = {k: v for k, v in os.environ.items() if k != "HOS_SPRINT_STILL_MS"}
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30, env=env)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            run = subprocess.run([str(binary), "still"], text=True, capture_output=True, timeout=30,
+                                 env=dict(env, HOS_SPRINT_STILL_MS="120"))
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+
+# (the controllers' update as the lifter writes it, cut down: the pair that makes "pressed" and "released", then the store)
+LIFTED = '''#include "a64.h"
+void f_8038a220(Ctx *__restrict A64_NOESC c) {
+    c->x[8]=recomp_load32(c,c->x[19] + 276);
+    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[28])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
+    { uint64_t _r = (c->x[28] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
+    { uint64_t _b=c->x[19]; int64_t _o=8; recomp_stp32(c,(_b+_o),c->x[9],c->x[8]); }
+}
+void f_834a3680(Ctx *__restrict A64_NOESC c) {
+    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[21])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
+    { uint64_t _r = (c->x[21] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
+    { uint64_t _b=c->x[19]; int64_t _o=8; recomp_stp32(c,(_b+_o),c->x[9],c->x[8]); }
+}
+void f_80000000(Ctx *__restrict A64_NOESC c) {
+    { uint64_t _r = (c->x[8] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[28])) << 0))); _r &= 0xFFFFFFFFULL; c->x[9] = _r; }
+    { uint64_t _r = (c->x[28] & ~((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }
+}
+'''
+
+
+class SprintPressPatchTests(unittest.TestCase):
+    """nx2/oot_patches.py patch_sprint_press on lifted text: the mask after the pair in the two functions, nowhere else"""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "nx2"))
+        import oot_patches
+        self.p = oot_patches
+
+    def test_patch(self):
+        out, n = self.p.patch_sprint_press(LIFTED)
+        self.assertEqual(n, 2)
+        self.assertEqual(out.count(self.p.SPRINT_MASK), 2, "the mask is not in both controllers' update")
+        self.assertEqual(out.count(self.p.SPRINT_DECL), 1)
+        for head in self.p.SPRINT_HEADS:
+            body = out[out.index(head):]
+            body = body[:body.index("\n}\n")]
+            self.assertLess(body.index("c->x[9] = _r; }"), body.index(self.p.SPRINT_MASK), "the mask before pressed is made")
+            self.assertLess(body.index(self.p.SPRINT_MASK), body.index("recomp_stp32"), "the mask after the store")
+        other = out[out.index("void f_80000000"):]
+        self.assertNotIn("hos_sprint_press_mask", other, "a function that is not the controllers' update was patched")
+        again, n2 = self.p.patch_sprint_press(out)
+        self.assertEqual((again, n2), (out, 2), "a second run changes the code")
+
+    def test_drifted(self):
+        """an anchor that is not there leaves the code as it was, and the count says so (report() warns)"""
+        drifted = LIFTED.replace("c->x[28]", "c->x[27]")
+        out, n = self.p.patch_sprint_press(drifted)
+        self.assertEqual(n, 1)
+        self.assertNotIn("f_8038a220(Ctx *__restrict A64_NOESC c) {\n    c->x[8]=recomp_load32(c,c->x[19] + 276);\n" +
+                         self.p.SPRINT_MASK, out)
+        self.assertEqual(self.p.patch_sprint_press("#include \"a64.h\"\n"), ("#include \"a64.h\"\n", 0))
+
+    def test_host_side(self):
+        hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
+        self.assertIn("volatile uint32_t hos_sprint_press_mask;", hid, "the host has no press mask for the patch")
+        patches = (ROOT / "nx2" / "oot_patches.py").read_text(encoding="utf-8")
+        self.assertIn('counts["sprint press"] += n', patches, "patch_file does not run the patch")
+        self.assertIn('total["sprint press"] != len(SPRINT_HEADS)', patches, "report() does not warn when it is missing")
 
 
 if __name__ == "__main__":

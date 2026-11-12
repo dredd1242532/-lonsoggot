@@ -863,18 +863,24 @@ static int pad_sprint_down(void) {
     return down ? SPRINT_PAD : 0;
 }
 
-/* Sprint: the game's run is A held while Link moves, but A pressed while he moves is a roll. So a sprint starts with A pressed
-   and the left stick let go for a moment (HOS_SPRINT_STILL_MS, 120 ms; 0 none: A as he moves, the roll), then the stick
-   comes back with A still held: the run. Its key (Shift) runs while it is held; its gamepad input (the left stick's press)
-   is a toggle, pressed once while Link moves, it runs until the stick comes back to the middle, and then wants a new press.
+/* Sprint: the game's run is A held while Link moves, but A pressed while he moves is a roll, and A pressed in front of
+   someone or something talks, opens or picks up. So Sprint holds A, and while it is Sprint that holds it
+   hos_sprint_press_mask is A's bit: nx2/oot_patches.py patch_sprint_press leaves that bit out of what the game's
+   controllers count as pressed this frame. The game sees A held, its run, and never pressed: no roll, no action. Its key
+   (Shift) runs while it is held; its gamepad input (the left stick's press) is a toggle, pressed once while Link moves, it
+   runs until the stick comes back to the middle, and then wants a new press. The player's own A while it runs is theirs
+   (the mask 0), but A is held already then, so it is no new press: no roll while sprinting.
+   HOS_SPRINT_STILL_MS=<ms> (a game without the patch): the stick let go for that long as Sprint starts, so A goes down
+   with Link standing, the earlier way round the roll (0, the default, none).
    held: SPRINT_KEY | SPRINT_PAD as read now; steered: the left stick pushed; now: hos_now_ns. Only while the menu is shut. */
+volatile uint32_t hos_sprint_press_mask;
 static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steered, int menu_open, int64_t now) {
     static int was_pad, latched, running, still_ms = -1;
     static int64_t started;
     if (still_ms < 0) {
         const char *e = getenv("HOS_SPRINT_STILL_MS");
-        still_ms = e && *e ? atoi(e) : 120;
-        if (still_ms < 0 || still_ms > 2000) still_ms = 120;
+        still_ms = e && *e ? atoi(e) : 0;
+        if (still_ms < 0 || still_ms > 2000) still_ms = 0;
     }
     const int pad = !!(held & SPRINT_PAD);
     if (!steered || menu_open) latched = 0;
@@ -883,9 +889,12 @@ static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steer
     const int want = steered && !menu_open && (latched || (held & SPRINT_KEY));
     if (!want) {
         running = 0;
+        __atomic_store_n(&hos_sprint_press_mask, 0, __ATOMIC_RELAXED);
         return;
     }
     if (!running) running = 1, started = now;
+    /* (the player's own A down too: theirs, as a press of theirs is) */
+    __atomic_store_n(&hos_sprint_press_mask, (*buttons >> B_A & 1) ? 0u : 1u, __ATOMIC_RELAXED);
     *buttons |= 1ULL << B_A;
     if (now - started < (int64_t)still_ms * 1000000) stick[0] = stick[1] = 0;   /* (A goes down with Link standing: no roll) */
 }

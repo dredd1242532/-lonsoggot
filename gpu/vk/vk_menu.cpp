@@ -1287,7 +1287,8 @@ Row rows[] = {
      "Stops the camera gradually turning toward the direction you move, useful with native mouse look. Off keeps the "
      "game's standard behavior. Manual camera controls and recentering still work.", nullptr, false, true},
     {TAB_CONTROLS, "Sprint", &opts.sprint, 0, 1, 1, tx_onoff,
-     "Link runs while you move: Shift held, or the left stick pressed once until you stop, without the roll. Turning it "
+     "Link runs while you move: Shift held, or the left stick pressed once until you stop, without rolling, talking or "
+     "picking things up. Turning it "
      "on changes your controls: Shift moves from B to Sprint (B goes to V) and the left stick's press from LS to Sprint. "
      "Turning it off puts them back. Controls you rebound yourself are left alone.", nullptr, false, true},
     {TAB_CONTROLS, "Mouse sensitivity", &opts.mouse_sens, 10, 500, 10, tx_sens,
@@ -3279,7 +3280,8 @@ void draw_controls(ui::Ctx& c) {
                        : page_row ? page_row->help
                        : sel_i < kControls && controls[sel_i].button == HOS_KEY_SPRINT
                            ? "Link runs while you move: the key while it is held, the gamepad button pressed once until you "
-                             "stop, without the roll. Only with the Controls tab's Sprint row on, which gives it Shift and the "
+                             "stop, without rolling, talking or picking things up. Only with the Controls tab's Sprint row on, "
+                             "which gives it Shift and the "
                              "left stick's press. Enter binds; Delete clears it."
                                   : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
                                     "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "

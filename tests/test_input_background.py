@@ -80,7 +80,7 @@ def main():
     cheat_state = re.search(r"^static uint64_t flight_input;\nstatic uint64_t free_camera_axes;\nstatic int free_camera_height;\n"
                             r"static int move_stick_held;[^\n]*\nstatic int sprint_now;", hid, re.M).group(0)
     cheat_state += "\n" + block(hid, "enum { SPRINT_KEY") + ";\n" + block(hid, "static int pad_sprint_down(")   # (Sprint)
-    cheat_state += "\n" + block(hid, "static void sprint_step(")   # (npad_states': A held, without the roll)
+    cheat_state += "\nvolatile uint32_t hos_sprint_press_mask;\n" + block(hid, "static void sprint_step(")   # (npad_states': A held, without the roll)
     cheat_spies = """
 volatile int hos_oot_live_action;
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }
