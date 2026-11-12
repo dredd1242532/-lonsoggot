@@ -70,8 +70,10 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 
 ## Install and play
 
-The game does not come ready-made: Longshot Builder builds it on your PC from your copy. You do this once. After that
-you start the game from its launcher, which also updates it.
+The game does not come ready-made: it is built on your PC from your copy. The **[Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)** does it
+for you: it installs this version's Longshot Builder (checked against the release's signed checksums), builds the game, starts
+it, and keeps it and itself up to date. Longshot's first version will be **v3.0.0**; the launcher's first will be
+**v1.0.0** (its numbers are its own).
 
 ### What you need
 
@@ -87,47 +89,36 @@ you start the game from its launcher, which also updates it.
 - 16 GB of RAM or more. A run uses about 10 GB.
 - About 60 GB free while building, on an SSD if you can: a hard drive makes the build much slower. You can build on one
   anyway; the builder says so first.
-- An internet connection for the download. Nothing else to install: the builder brings its own compiler and tools.
+- An internet connection for the download. Nothing else to install: the builder the launcher installs brings its own
+  compiler and tools.
 
 ### On Windows
 
-For a portable install on an external SSD, run the downloaded setup with `--portable`; see
-[Portable Longshot Builder](docs/windows-portable-builder.md) for folder, move and repair behavior.
-
-1. Open the [latest release](https://github.com/NotRexed/Hookshot/releases/latest) and download `LongshotBuilder.exe`.
-2. Run it. It downloads the rest of Longshot Builder (about 500 MB), checks it, and opens it.
-3. Pick your game. The builder looks for `.nup` files in your Downloads, Desktop and Documents folders and lists them
-   under **Found on this PC**. Not listed? Press **Browse…**, drop the file on the window, or choose
-   **romfs and exefs folders**. The builder checks that it is the right version.
-4. Under **Install the game to**, keep the folder (`Games\Longshot` in your user folder) or press **Change**. Choose
-   the **Game language**.
-5. Press **Build the game**. It takes about 10 to 45 minutes, depending on your CPU and memory. You can use your PC in
-   the meantime.
-6. When it says **Your game is ready**, press **Play**. The **Desktop shortcut** and **Start menu entry** boxes are
-   ticked: untick them if you don't want them.
-
-Next time, start the game from the Longshot shortcut, or `longshot.exe` in the game folder. That is the launcher: it
-has **Play**, and **Update** when a newer release is out.
+1. Download `LongshotLauncher-<version>-windows-x64.exe` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and run it. It is one
+   program; nothing else to install.
+2. Press **Build the game** and pick the channel: **Stable** for playing.
+3. Pick your game. The launcher looks for `.nup` files in your Downloads, Desktop and Documents folders; not listed? Point
+   it at the file or at the `romfs` and `exefs` folders. It checks that it is the right version, while that version's
+   builder downloads.
+4. Choose where the game goes (`Games\Longshot` in your user folder by default), the language and the options.
+5. Press **Build**. It takes about 10 to 45 minutes, depending on your CPU and memory.
+6. Press **Play**. The launcher can also make desktop and Start menu shortcuts.
 
 The first start prepares the game's shaders, which takes a while. Later starts are faster.
 
+For a portable install on an external SSD, see [Portable Longshot Builder](docs/windows-portable-builder.md).
+
 ### On Linux
 
-1. Open the [latest release](https://github.com/NotRexed/Hookshot/releases/latest) and download
-   `Longshot-<version>-x86_64.AppImage`. It is Longshot Builder with everything it needs inside.
+1. Download `LongshotLauncher-<version>-x86_64.AppImage` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases).
 2. Allow it to run as a program. In most file managers: right-click it, open **Properties**, and turn on
    "Allow executing file as program" (the words differ between desktops). Or in a terminal:
-   `chmod +x Longshot-*-x86_64.AppImage`.
-3. Double-click it. The Longshot Builder window opens.
-4. Under **Game files**, choose **.nup file** or **romfs and exefs**, then press **Browse** to pick them. The builder
-   checks the version.
-5. Under **Save the game to**, keep `~/Games/Longshot` or choose another folder. Choose a **Language**.
-6. Press **Build**. It takes about 10 to 45 minutes, depending on your CPU and memory.
-7. When it says "Your game is ready", press **Play**.
+   `chmod +x LongshotLauncher-*-x86_64.AppImage`.
+3. Double-click it, and build the game as on Windows above (the game goes to `~/Games/Longshot` by default).
 
-The game is also added to your applications menu as "Longshot". That entry, and `longshot` in the game folder, open the
-launcher: **Play**, and **Update** when a newer release is out. Keep the AppImage where it is: the launcher uses it to
-update.
+The launcher can add the game to your applications menu as "Longshot". Each Longshot version's builder is also released
+alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases): Longshot Builder with everything it needs
+inside, for building without the launcher.
 
 When the desktop gives the launcher its own systemd service, **Play** waits up to two seconds for the game's
 separate scope before closing the window. If that hand-off fails, it cancels that attempt before starting the
@@ -156,11 +147,10 @@ Do not run the game as root or make the device world-writable.
 
 ### Updating
 
-When a new release is out, the launcher says "Update available". Press **Update**: in `longshot.exe` on Windows, or in
-`longshot` (or the AppImage) on Linux. It downloads only the parts that changed and builds the game again in the same
-folder. The build files of the last build are gone by then (see [Where the files go](#where-the-files-go)), so an
-update takes about as long as the first build. Your saves and settings are kept. What changed is on the
-[Releases page](https://github.com/NotRexed/Hookshot/releases).
+The launcher checks for updates when it starts. When a newer version is out on a build's channel, it offers **Update**:
+it installs that version's builder (only the parts that changed are downloaded) and builds the game again from the game
+files the build kept. It updates itself the same way, from its own releases. The builders and the game no longer look
+for updates themselves. What changed is on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
 
 <details>
 <summary>What an update keeps and replaces, and updating from the command line</summary>
@@ -177,23 +167,24 @@ To be safe, copy your saves somewhere first: the `user` folder in the game folde
 
 The game files the first build read are kept in the game folder, so an update does not need your `.nup` again.
 
-From a clone: `git pull`, then `python -I nx2/make_game.py --update <game folder>`. The Linux AppImage does the same
-with `--update <game folder>`.
+From a clone: `git pull`, then `python -I nx2/make_game.py --update <game folder>`. A builder does the same with
+`--update <game folder>` (with its own version).
 
 </details>
 
 ### Latest development build
 
-Want a fix before it is in a release? The
-[latest development build](https://github.com/NotRexed/Hookshot/releases/tag/nightly) is made from `main` after every
-change, with the same files as a release. It is untested and may break your saves or settings: copy them first (see
-above).
+Want a fix before it is in a release? Choose the **Nightly** channel in the launcher: it is built from `main` after every
+change, and the newest five stay on the releases page. It is untested and may break your saves or settings: copy them
+first (see above). **Release candidate** is the next version, before it is released. To go back, build a version
+from the **Stable** channel.
 
-- **Windows:** download `LongshotBuilder.exe` from it and start it from a terminal as `LongshotBuilder.exe --tag nightly`
-  (without `--tag nightly` it installs the latest release instead).
-- **Linux:** download `Longshot-<version>-x86_64.AppImage` from it and use it as above.
+### Another way: RecompLauncher
 
-To go back, install the [latest release](https://github.com/NotRexed/Hookshot/releases/latest) the usual way.
+Each version also ships the files [RecompLauncher](https://recomplauncher.com) installs (`recomplauncher.json`, in
+`LongshotBuilder-<version>-windows-x64.zip` and in the Linux AppImage). RecompLauncher finds releases on GitHub only, and
+Longshot's are on git.magicbean.dev, so for now add a downloaded file to it by hand
+([docs/releases.md](docs/releases.md#recomplauncher)).
 
 ### Where the files go
 
@@ -216,11 +207,12 @@ To go back, install the [latest release](https://github.com/NotRexed/Hookshot/re
 Longshot uploads nothing about you or your PC. It reads no browser data, passwords or session keys. Everything it does on
 the network or with other programs:
 
-- **Downloads from GitHub only.** The builder and the updater ask `api.github.com` which release is the latest, and download
-  that release's files from this repository's Releases on `github.com` (the setup lists, the build parts, the Linux AppImage
-  parts and the shared pipeline list). With **DLSS** ticked in the builder, NVIDIA's DLSS library comes from
-  `github.com/NVIDIA/DLSS`. The game checks for a newer release on `api.github.com` at start; set
-  `LONGSHOT_NO_UPDATE_CHECK=1` to turn that off.
+- **Downloads from git.magicbean.dev.** The Longshot Launcher reads the release lists of Longshot and of the launcher on
+  git.magicbean.dev, downloads a version's files from its release, and checks every file against the SHA-256 the
+  release's signed `SHA256SUMS` gives. The Windows builder's tools come from the links `tools.lock` gives (their makers'
+  releases, or Longshot's `tools` release), checked the same way. With **DLSS** on, NVIDIA's DLSS library comes from `github.com/NVIDIA/DLSS`; the
+  builder's own compiler and tools come from their makers' releases (llvm-mingw, Python), checked by SHA-256 too. The game
+  itself checks for nothing at start.
 - **Your Discord status, through the Discord app on this PC.** While Discord runs, the game shows "Playing Longshot" with
   the time played. It does this the way every game does: through the Discord app's own local connection, a named pipe on
   Windows and the socket `discord-ipc-0` in `$XDG_RUNTIME_DIR` (or `$TMPDIR`, or `/tmp`) on Linux. What it sends is
@@ -233,8 +225,9 @@ the network or with other programs:
 - On Linux the game starts through a small script (`play-diagnostics.sh`). It keeps the game's first error messages in
   `longshot_startup.log` in the game folder, using a private temporary folder there that it removes when the game exits.
 
-Only download Longshot from this repository's [Releases](https://github.com/NotRexed/Hookshot/releases). Each release
-lists its files' checksums in `SHA256SUMS`. A copy from anywhere else may not be ours.
+Only download Longshot from [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev. Each version's
+files are named, with their SHA-256, in its `SHA256SUMS`, signed by the release key, which the launcher checks. A copy from
+anywhere else may not be ours.
 
 ### If something goes wrong
 

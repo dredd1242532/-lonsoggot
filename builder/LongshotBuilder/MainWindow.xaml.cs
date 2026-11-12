@@ -14,7 +14,7 @@ using Microsoft.Win32;
 namespace LongshotBuilder;
 
 /// The installer: one 960x600 window. It opens with the longshot in the middle while it looks for the game files, then walks
-/// through Game files > Build > Play. The game's update offer (Updater.cs) opens the same window on its update screen.
+/// through Game files > Build > Play. --update <folder> (Updater.cs) opens the same window on its update screen.
 public partial class MainWindow : Window
 {
     const long NeededBytes = 45L << 30;   // (measured 2026-11-09: the game data 24.4 GB, the shader caches ~8 GB, the game 0.4 GB, the build files ~5 GB at their peak; the rest headroom)
@@ -55,9 +55,6 @@ public partial class MainWindow : Window
         WorkerBox.SelectedIndex = 0;
         MemoryBox.ItemsSource = BuildMemory.Choices(BuildMemory.TotalGb());
         MemoryBox.SelectedIndex = 0;
-        TrackBox.ItemsSource = TrackNames;
-        TrackBox.SelectedIndex = Array.IndexOf(TrackIds, Track);
-        TrackBox.SelectionChanged += TrackChanged;
         clock.Tick += (_, _) => Tick();
         Drop += Dropped;
         SourceInitialized += (_, _) =>
@@ -120,7 +117,6 @@ public partial class MainWindow : Window
         ShowMain();
         if (Environment.GetEnvironmentVariable("LONGSHOT_UI_PREVIEW") is { Length: > 0 } preview) { Preview(preview); return; }
         CheckAll();
-        latestTag = Environment.GetEnvironmentVariable("LONGSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
         RefreshMode();
     }
 
@@ -146,17 +142,15 @@ public partial class MainWindow : Window
             OutPath.Text = folder;
             FillDumps();
             CheckAll();
-            latestTag ??= Environment.GetEnvironmentVariable("LONGSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
         }
         Refresh();
     }
 
-    // ================= what the button does: build, update the game, play it, or get the newer builder =================
-    // (as NX2navi's launcher: whatever version the player opens, it checks the latest release and says what is there)
+    // ================= what the button does: build, update the game to these tools, or play it =================
+    // (the builder does not look for newer versions: the Longshot Launcher installs and updates it, docs/releases.md)
 
-    enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder }
+    enum Mode { Build, UpdateGame, UpToDate }
     Mode mode = Mode.Build;
-    string? latestTag, updateTarget;
     bool sourcePicked;   // (the player chose game files here: a build from them, even over a game that is up to date)
 
     /// The release a game folder was built with (its longshot_version.txt), when it keeps its game files for updates
@@ -178,31 +172,23 @@ public partial class MainWindow : Window
         if (BuildButton == null || updating || runner != null) return;
         var game = OutPath.Text.Length > 2 ? GameVersion(OutPath.Text) : null;
         var builder = Tools.Find()?.Version;
-        // (the newest release known: GitHub's, else this builder's own. v2.0.0 took a GitHub that did not answer for "up to date")
-        updateTarget = Updater.Target(latestTag, builder, Track);
-        if (game != null && updateTarget != null && game != updateTarget && !sourcePicked) mode = Mode.UpdateGame;
+        // (a game built with other tools than these is built again with these; newer ones come from the launcher)
+        if (game != null && builder != null && game != builder && !sourcePicked) mode = Mode.UpdateGame;
         else if (game != null && !sourcePicked) mode = Mode.UpToDate;
-        else if (latestTag != null && builder != null && builder != updateTarget) mode = Mode.UpdateBuilder;
         else mode = Mode.Build;
         switch (mode)
         {
             case Mode.UpdateGame:
                 FilesTitle.Text = "Update available";
-                FilesSub.Text = $"Longshot {updateTarget} is available. Your game is {game}: Update builds it again from the game files kept in " +
+                FilesSub.Text = $"This builder is Longshot {builder}. Your game is {game}: Update builds it again from the game files kept in " +
                                 "its folder, compiling only what changed.";
                 BuildButton.Content = "Update";
                 break;
             case Mode.UpToDate:
                 FilesTitle.Text = "Your game is up to date";
-                FilesSub.Text = latestTag == null
-                    ? $"Your game is {game}, as this builder. GitHub did not answer, so newer versions could not be checked."
-                    : $"{game} is the latest version. Pick game files below only to build it again from scratch.";
+                FilesSub.Text = $"Your game is {game}, as this builder. Newer versions come with the Longshot Launcher. " +
+                                "Pick game files below only to build it again from scratch.";
                 BuildButton.Content = "Play";
-                break;
-            case Mode.UpdateBuilder:
-                FilesTitle.Text = "Build your game";
-                FilesSub.Text = $"Longshot Builder {updateTarget} is available (this one is {builder}): update it first, then build.";
-                BuildButton.Content = "Update builder";
                 break;
             default:
                 FilesTitle.Text = "Build your game";
@@ -233,19 +219,18 @@ public partial class MainWindow : Window
         LaunchVersion.Text = (game != null ? $"Longshot {game}" : "Longshot") + " · " + folder;
         LaunchPlay.IsEnabled = File.Exists(GameExe(folder));
         ShowPage(LaunchPage);
-        latestTag = Environment.GetEnvironmentVariable("LONGSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
-        updateTarget = Updater.Target(latestTag, Tools.Find()?.Version, Track);   // (GitHub's newest, else this builder's own)
-        if (updateTarget == null) LaunchStatus.Text = "Could not check for updates (GitHub did not answer)";
-        else if (game != null && game != updateTarget && GameVersion(folder) != null)
+        var builder = Tools.Find()?.Version;   // (newer versions come from the Longshot Launcher: this builder offers its own)
+        if (builder == null) LaunchStatus.Text = "The Longshot Launcher keeps your game up to date";
+        else if (game != null && game != builder && GameVersion(folder) != null)
         {
-            LaunchStatus.Text = $"Update available: {updateTarget}";
+            LaunchStatus.Text = $"This builder is {builder}: Update builds the game with it";
             LaunchStatus.Foreground = new SolidColorBrush(Color.FromRgb(0xB9, 0xC8, 0xFF));
             LaunchStatus.FontWeight = FontWeights.SemiBold;
             LaunchUpdate.Visibility = Visibility.Visible;
         }
-        else if (game != null && game != updateTarget)
-            LaunchStatus.Text = $"{updateTarget} is out: build this folder again with the Longshot Builder to get it";
-        else LaunchStatus.Text = latestTag == null ? "Up to date with this builder (GitHub did not answer)" : "Up to date";
+        else if (game != null && game != builder)
+            LaunchStatus.Text = $"This builder is {builder}: build this folder again with it to get it";
+        else LaunchStatus.Text = "Up to date with this builder. The Longshot Launcher keeps it up to date";
     }
 
     /// (a folder built before it kept its game files has a version too: only shown)
@@ -277,41 +262,8 @@ public partial class MainWindow : Window
 
     void LaunchUpdateClick(object sender, RoutedEventArgs e)
     {
-        if (OlderOk(GameVersion(launchFolder))) Updater.UpdateFolder(this, launchFolder, updateTarget, fetched: false, named: Switching);
+        Updater.UpdateFolder(this, launchFolder);
     }
-
-    // ---- the update track (Updater.cs): the one chosen in the Track menu, saved; by default these tools' own ----
-    static readonly string[] TrackIds = { Updater.Release, Updater.Candidate, Updater.Nightly };
-    static readonly string[] TrackNames = { "Release", "Release candidate", "Nightly" };
-    string? chosenTrack;
-    string Track
-    {
-        get
-        {
-            if (chosenTrack != null) return chosenTrack;
-            var saved = BuilderSettings.Load(SettingsPath)?.Track;
-            return saved != null && TrackIds.Contains(saved) ? saved : Updater.TrackOf(Tools.Find()?.Version);
-        }
-    }
-    /// (a track other than these tools' own: its newest is installed, even an older version)
-    bool Switching => Track != Updater.TrackOf(Tools.Find()?.Version);
-
-    async void TrackChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (TrackBox.SelectedIndex < 0 || TrackIds[TrackBox.SelectedIndex] == Track) return;
-        chosenTrack = TrackIds[TrackBox.SelectedIndex];
-        SaveSettings();
-        latestTag = null;
-        RefreshMode();
-        latestTag = await Updater.LatestTag(Track);
-        RefreshMode();
-    }
-
-    /// (going to an older version, from another track: asked first)
-    bool OlderOk(string? have) =>
-        !Switching || !Updater.Newer(have, updateTarget) ||
-        MessageBox.Show(this, $"{updateTarget} is older than {have}, the version you have now. Install {updateTarget}?", "Longshot",
-                        MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 
     void LaunchPlayClick(object sender, RoutedEventArgs e)
     {
@@ -463,8 +415,7 @@ public partial class MainWindow : Window
                                           Fsr = FsrTick.IsChecked == true,
                                           FsrLicense = fsrLicense,
                                           PrepareLater = PrepareTick.IsChecked != true,
-                                          MemoryGb = MemoryBox.SelectedItem is int gb ? gb : null,
-                                          Track = chosenTrack ?? BuilderSettings.Load(SettingsPath)?.Track };
+                                          MemoryGb = MemoryBox.SelectedItem is int gb ? gb : null };
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(s));
         }
@@ -847,26 +798,13 @@ public partial class MainWindow : Window
     {
         switch (mode)
         {
-            case Mode.UpdateGame:   // (the kept game files; the newer builder first when this one is older)
-                if (!OlderOk(GameVersion(OutPath.Text))) return;
+            case Mode.UpdateGame:   // (the kept game files, built again with these tools)
                 SaveSettings();
-                Updater.UpdateFolder(this, OutPath.Text, updateTarget, fetched: false, named: Switching);
+                Updater.UpdateFolder(this, OutPath.Text);
                 return;
             case Mode.UpToDate:
                 finished = OutPath.Text;
                 Play(sender, e);
-                return;
-            case Mode.UpdateBuilder:
-                if (!OlderOk(Tools.Find()?.Version)) return;
-                SaveSettings();
-                BuildButton.IsEnabled = false;
-                BuildButton.Content = "Getting the new builder…";
-                try { await Updater.RunLatestSetup(this, Array.Empty<string>(), updateTarget, Switching); }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, ex.Message + " You can also download LongshotBuilder.exe from the releases page.", "Longshot");
-                    RefreshMode();
-                }
                 return;
         }
         SaveSettings();
@@ -1360,20 +1298,11 @@ public partial class MainWindow : Window
 
     void Back(object sender, RoutedEventArgs e) => ToFiles();
 
-    /// The setup (LongshotBuilder-Setup.exe beside this app) checks every part against its checksum and downloads the missing ones
-    void Repair(object sender, RoutedEventArgs e)
-    {
-        var setup = System.IO.Path.Combine(AppContext.BaseDirectory, "LongshotBuilder-Setup.exe");
-        if (File.Exists(setup))
-        {
-            Process.Start(new ProcessStartInfo(setup, "--repair") { UseShellExecute = false, WorkingDirectory = AppContext.BaseDirectory });
-            Application.Current.Shutdown();
-            return;
-        }
-        Process.Start(new ProcessStartInfo("https://github.com/NotRexed/Longshot/releases/latest") { UseShellExecute = true });
-    }
+    /// The builder's own files are the Longshot Launcher's to check and install again (it checks every part against its
+    /// checksum): its releases page, where the launcher is
+    void Repair(object sender, RoutedEventArgs e) => Updater.OpenLauncherReleases();
 
-    // ================= the update (Updater.cs): the game started this app with --update <folder> =================
+    // ================= the update (Updater.cs): --update <folder>, the folder built again with these tools =================
 
     CancellationTokenSource? download;
 

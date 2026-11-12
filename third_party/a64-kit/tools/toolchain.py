@@ -8,15 +8,16 @@ def emsdk():
 
 
 def windows():
-    """(longshot) the game is built for Windows: on Windows, or with RX_TARGET=windows on another system (a cross build, with
-    llvm-mingw's release for that system in LONGSHOT_MINGW)"""
+    """(hookshot) the game is built for Windows: on Windows, or with RX_TARGET=windows on another system (a cross build, with
+    llvm-mingw's release for that system in HOOKSHOT_MINGW)"""
     return os.name == "nt" or os.environ.get("RX_TARGET", "").lower() == "windows"
 
 
 def mingw(host=False):
-    """(longshot) LONGSHOT_MINGW=<llvm-mingw folder>: Windows builds with that toolchain's clang, headers and libraries (the GNU ABI
+    """(hookshot) HOOKSHOT_MINGW=<llvm-mingw folder>: Windows builds with that toolchain's clang, headers and libraries (the GNU ABI
     on the UCRT), as TotK Recomp's installer does: nothing of Visual Studio or the Windows SDK is needed. Empty: the MSVC target.
     host: for a tool the build itself runs (zbic, a64emit), which a cross build makes for this PC, not for Windows"""
+    # (longshot) the variable is LONGSHOT_MINGW, as the rest of Longshot's build sets it (Hookshot's was HOOKSHOT_MINGW)
     return os.environ.get("LONGSHOT_MINGW", "") if windows() and not (host and os.name != "nt") else ""
 
 

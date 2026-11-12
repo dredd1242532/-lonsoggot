@@ -1,0 +1,131 @@
+# Longshot's releases (docs/releases.md; how to make one: RELEASING.md). The same workflow as MagicBeanDev/LongshotLauncher's,
+# but for what is built: here the two builders.
+#
+#   a push to main       the nightly: nightly-<commits since the fork>-<commit>, a pre-release
+#   a tag vX.Y.Z-rc.N    a release candidate, a pre-release (the rc channel)
+#   a tag vX.Y.Z         a stable (the stable channel, and rc too). Longshot's first is v3.0.0
+#
+# 1. version: the version's name; a tag is checked first (scripts/release.py check-tag: its form, on main, above every
+#    release, and as high as the commits since the last stable call for). A refused tag builds nothing.
+# 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
+# 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
+#    then a draft release with every file, published last: until then no launcher sees it. A nightly also prunes the
+#    nightlies past the newest 5. Nothing is committed back to the repository.
+#
+# Secrets (RELEASING.md, One-time setup): RELEASE_SIGNING_KEY (the release key's private PEM) and RELEASE_TOKEN (a token that
+# may write this repository's releases and tags). Variable: FORGEJO_UPLOAD_API, the API's address without Cloudflare in
+# front, when a file is larger than its 100 MB upload limit.
+name: Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: The version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.name.outputs.tag }}
+      ref: ${{ steps.name.outputs.ref }}
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: name
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          git fetch -q --tags origin main
+          ref=$(git rev-parse HEAD)
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            tag=${GITHUB_REF#refs/tags/}
+            python3 -I scripts/release.py check-tag "$tag" --main origin/main
+          else
+            tag=$(python3 -I scripts/release.py nightly-name)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "$tag, from $ref"
+
+  linux:
+    name: Linux builder
+    needs: version
+    uses: ./.forgejo/workflows/build-linux.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.ref }}
+
+  windows:
+    name: Windows builder
+    needs: version
+    uses: ./.forgejo/workflows/build-windows.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.ref }}
+
+  publish:
+    name: Sign and publish
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ needs.version.outputs.tag }}
+      REF: ${{ needs.version.outputs.ref }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      FORGEJO_UPLOAD_API: ${{ vars.FORGEJO_UPLOAD_API }}
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: https://data.forgejo.org/forgejo/download-artifact@v4
+        with:
+          name: Longshot-linux-x86_64
+          path: files
+      - uses: https://data.forgejo.org/forgejo/download-artifact@v4
+        with:
+          name: LongshotBuilder-windows
+          path: files
+      - name: The files
+        run: |
+          git fetch -q --tags origin
+          # (every tool the Windows builder needs is in tools.lock: RELEASING.md, One-time setup)
+          python3 -I scripts/tools.py check --require
+          cp tools.lock files/
+          ls -l files
+          test -f "files/Longshot-$TAG-x86_64.AppImage" && test -f "files/LongshotBuilder-$TAG-windows-x64.zip"
+      - name: SHA256SUMS, signed
+        env:
+          KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [[ -n $KEY ]] || { echo "::error::no RELEASE_SIGNING_KEY secret (RELEASING.md, One-time setup)"; exit 1; }
+          python3 -I scripts/release.py sums files/* --out files/SHA256SUMS
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/key.pem"
+          python3 -I scripts/release.py sign files/SHA256SUMS --key "$RUNNER_TEMP/key.pem" --out files/SHA256SUMS.sig
+          rm -f "$RUNNER_TEMP/key.pem"
+          # (checked with the key the launcher is built with, not the one just used: a key it does not trust stops here)
+          python3 -I scripts/release.py verify files/SHA256SUMS --files files
+          cat files/SHA256SUMS
+      - name: The notes
+        run: |
+          export GIT_CLIFF=$(python3 -I scripts/release.py git-cliff "$RUNNER_TEMP/cliff")
+          python3 -I scripts/release.py notes "$TAG" --out notes.md
+          cat notes.md
+      - name: Publish
+        run: python3 -I scripts/release.py publish "$TAG" --target "$REF" --notes notes.md files/*
+      - name: Prune the nightlies
+        if: startsWith(needs.version.outputs.tag, 'nightly-')
+        run: python3 -I scripts/release.py prune --keep 5

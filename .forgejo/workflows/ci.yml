@@ -1,4 +1,5 @@
-# Every game-free check, on every pull request to main and every push to it: tests/run_all.py runs each
+# The checks of every pull request to main and every push to it (docs/releases.md, "CI"): the pull request's title, and every
+# game-free check: tests/run_all.py runs each
 # tests/test_*.py and nx2/test_*.py (all of them, even after a failure), the C++ unit tests under gpu/vk/tests and a
 # byte-compile of every tracked Python file, and writes a table of them to the run's summary. A check that needs a GPU,
 # the game or MSVC says so, and why, in its own file (RUN_ALL_SKIP). No game data is involved.
@@ -6,7 +7,7 @@
 # one job, and every check is in exactly one of them. Windows' own build checks (MSVC, the Builder) are in its part 1.
 # On Linux the C and C++ compiles go through ccache (the compilers in its PATH), with the cache main's runs leave
 # (actions/cache: read by every run, written only by a push to main, so a pull request never writes what another reads).
-name: Game-free source regressions
+name: CI
 
 on:
   push:
@@ -23,6 +24,39 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # (a squash-merged pull request's title is its commit on main, a line of the next release's notes, and what decides the next
+  # version: a Conventional Commit, by scripts/forge.py's TITLE, which `forge.py pr create` checks too. Only the title is
+  # read, from the event: the pull request's code is not run for it)
+  title:
+    name: Conventional Commit title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: The title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 -I - <<'PY'
+          import importlib.util, os, re, sys
+          spec = importlib.util.spec_from_file_location("forge", "scripts/forge.py")
+          forge = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(forge)
+          title = os.environ["TITLE"]
+          # (Forgejo's work-in-progress prefixes, WORK_IN_PROGRESS_PREFIXES' default: WIP: and [WIP], any case)
+          title = re.sub(r"^\s*(?:wip:|\[wip\])\s*", "", title, flags=re.I)
+          if not forge.TITLE.match(title):
+              print("::error::the title must be a Conventional Commit, type(scope): description, with the type one of %s "
+                    "(CONTRIBUTING.md, Pull request titles): %r" % (", ".join(forge.TITLE_TYPES), title))
+              sys.exit(1)
+          print("ok: %s" % title)
+          PY
+
   python:
     name: Python source checks (${{ matrix.os }}${{ matrix.shard != '1/1' && format(', part {0}', matrix.shard) || '' }})
     strategy:
@@ -41,26 +75,26 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # (the versions scripts/linux/deps.sh builds the Vulkan back end with)
       - name: Check out pinned SPIR-V headers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: KhronosGroup/SPIRV-Headers
           ref: 04f10f650d514df88b76d25e83db360142c7b174 # vulkan-sdk-1.4.341.0
           path: _deps/spirv-headers
           persist-credentials: false
       - name: Check out pinned Vulkan headers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: KhronosGroup/Vulkan-Headers
           ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
           path: _deps/vulkan-headers
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       # (the packages tests import: nx2/test_nup_codec.py's zstandard; tests/test_prompt_guide_lines.py's Pillow and numpy,
@@ -92,7 +126,7 @@ jobs:
           echo "key=$prefix$RECOMPILER" >> "$GITHUB_OUTPUT"
       - if: runner.os == 'Linux'
         id: ccache-restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
@@ -144,7 +178,7 @@ jobs:
           if errorlevel 1 exit /b 1
       - name: Set up .NET for Windows Builder checks
         if: ${{ !cancelled() && runner.os == 'Windows' }}
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        uses: https://github.com/actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '8.0.x'
       - name: Check Windows Builder worker delivery
@@ -168,7 +202,7 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: ccache --show-stats
       - if: ${{ !cancelled() && runner.os == 'Linux' && github.event_name == 'push' && steps.ccache-restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
@@ -182,11 +216,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check out pinned SPIR-V headers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: KhronosGroup/SPIRV-Headers
           ref: 496543121ce6419f23d6fa5d7194ba66c36212d2
@@ -208,7 +242,7 @@ jobs:
           echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
           echo "key=$prefix$RECOMPILER" >> "$GITHUB_OUTPUT"
       - id: ccache-restore
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: https://github.com/actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
@@ -266,7 +300,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: ccache --show-stats
       - if: ${{ !cancelled() && github.event_name == 'push' && steps.ccache-restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: https://github.com/actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
           key: ${{ steps.ccache.outputs.key }}
@@ -277,7 +311,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # (the release's own binary, checked against its published SHA-256; shellcheck from the runner image checks the

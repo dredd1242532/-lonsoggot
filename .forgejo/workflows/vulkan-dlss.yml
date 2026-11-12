@@ -26,7 +26,7 @@ on:
       - 'nx2/build.py'
       - 'nx2/make_game.py'
       - 'scripts/ngx_sdk.py'
-      - '.github/workflows/vulkan-dlss.yml'
+      - '.forgejo/workflows/vulkan-dlss.yml'
   pull_request:
     paths:
       - 'gpu/vk/vk_dlss*'
@@ -44,7 +44,7 @@ on:
       - 'nx2/build.py'
       - 'nx2/make_game.py'
       - 'scripts/ngx_sdk.py'
-      - '.github/workflows/vulkan-dlss.yml'
+      - '.forgejo/workflows/vulkan-dlss.yml'
   workflow_dispatch:
 
 permissions:
@@ -65,43 +65,43 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check out pinned Vulkan headers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: KhronosGroup/Vulkan-Headers
           ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
           path: _deps/cpm/vulkanheaders/v1.4.345
           persist-credentials: false
       - name: Check out pinned SPIR-V headers
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: KhronosGroup/SPIRV-Headers
           ref: 04f10f650d514df88b76d25e83db360142c7b174 # vulkan-sdk-1.4.341.0
           path: _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0
           persist-credentials: false
       - name: Check out pinned VulkanMemoryAllocator
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
           ref: 1d8f600fd424278486eade7ed3e877c99f0846b1 # v3.3.0
           path: _deps/cpm/vulkanmemoryallocator/v3.3.0
           persist-credentials: false
       - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: llvm-mingw version
         id: llvm
-        run: echo "name=$(python -I scripts/release_parts.py llvm-mingw --name)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name)" >> "$GITHUB_OUTPUT"
+      - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm
           key: ${{ steps.llvm.outputs.name }}
       - name: llvm-mingw
-        run: echo "LONGSHOT_MINGW=$(python -I scripts/release_parts.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
+        run: echo "LONGSHOT_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
       - name: NVIDIA's DLSS SDK (headers and nvsdk_ngx_s.lib)
         run: python -I scripts/ngx_sdk.py --platform windows --build-only --accept-nvidia-license "$RUNNER_TEMP/ngx-sdk"
       - name: longshot_vk.dll with NVIDIA DLSS and AMD FSR 4
