@@ -81,7 +81,7 @@ int wmain(int argc, wchar_t **argv) {
     CHECK(g_home_ok && !wcscmp(g_home.root,argv[3]));
     CHECK(g_home.portable == (mode != 3));
     wchar_t inherited[MAX_PATH];
-    CHECK(GetEnvironmentVariableW(L"HOOKSHOT_SETUP_BASE",inherited,MAX_PATH) && !wcscmp(inherited,argv[3]));
+    CHECK(GetEnvironmentVariableW(L"LONGSHOT_SETUP_BASE",inherited,MAX_PATH) && !wcscmp(inherited,argv[3]));
     if (mode == 1) CHECK(hb_home_marked(g_home.root)==1);
     if (mode == 0) {
         CHECK(launch_installed(L"--update authored-game --fetched"));
@@ -102,11 +102,11 @@ int wmain(int argc, wchar_t **argv) {
                         "-municode", "-I" + str(ROOT / "builder/setup"), str(c), "-o", str(exe)], check=True)
         tree = root / "Portable ü, tree"
         tree.mkdir()
-        home = tree / "HookshotBuilder"
+        home = tree / "LongshotBuilder"
         profile = root / "authored AppData"
         setup = tree / "Setup.exe"
         import os
-        env = {k: v for k, v in os.environ.items() if k.upper() not in ("HOOKSHOT_SETUP_BASE", "HOOKSHOT_BUILDER_PORTABLE")}
+        env = {k: v for k, v in os.environ.items() if k.upper() not in ("LONGSHOT_SETUP_BASE", "LONGSHOT_BUILDER_PORTABLE")}
         count = 0
         def run(module, expected, mode, overrides=None):
             nonlocal count
@@ -114,9 +114,9 @@ int wmain(int argc, wchar_t **argv) {
                            env=dict(env, **(overrides or {})), cwd=root, check=True)
             count += 1
         run(setup, home, 1)
-        installed = home / "versions/v-authored/HookshotBuilder"
+        installed = home / "versions/v-authored/LongshotBuilder"
         installed.mkdir(parents=True)
-        (installed / "HookshotBuilder.exe").write_text("authored; never executed")
+        (installed / "LongshotBuilder.exe").write_text("authored; never executed")
         for name in re.findall(r'L"([^\"]+)"', function(source, "static int builder_ready(")):
             (installed / name).write_bytes(b"authored startup component; never executed")
         (home / "versions/current.txt").write_text("v-authored\n")
@@ -126,27 +126,27 @@ int wmain(int argc, wchar_t **argv) {
         run(setup, home, 5)
         runtime.write_bytes(b"authored startup component restored")
         run(setup, home, 0)
-        run(installed / "HookshotBuilder-Setup.exe", home, 0)
-        run(root / "downloaded-setup.exe", home, 0, {"HOOKSHOT_SETUP_BASE": str(home), "HOOKSHOT_BUILDER_PORTABLE": "1"})
+        run(installed / "LongshotBuilder-Setup.exe", home, 0)
+        run(root / "downloaded-setup.exe", home, 0, {"LONGSHOT_SETUP_BASE": str(home), "LONGSHOT_BUILDER_PORTABLE": "1"})
         game = tree / "Game"
         game.mkdir()
-        (game / ".hookshot_builder_home").write_text("../HookshotBuilder", encoding="utf-8")
-        (game / "hookshot_version.txt").write_text("version=v-authored\nbuilder_local=1\n")
-        run(game / "hookshot.exe", home, 0)
+        (game / ".longshot_builder_home").write_text("../LongshotBuilder", encoding="utf-8")
+        (game / "longshot_version.txt").write_text("version=v-authored\nbuilder_local=1\n")
+        run(game / "longshot.exe", home, 0)
         moved = root / "Relocated ü, tree"
         tree.rename(moved)
-        home, game = moved / "HookshotBuilder", moved / "Game"
-        run(game / "hookshot.exe", home, 0)
-        (game / ".hookshot_builder_home").unlink()
-        run(game / "hookshot.exe", home, 2)
-        run(root / "standard-setup.exe", profile / "HookshotBuilder", 3)
-        run(root / "downloaded-setup.exe", home, 2, {"HOOKSHOT_SETUP_BASE": "relative"})
-        run(root / "downloaded-setup.exe", home, 2, {"HOOKSHOT_SETUP_BASE": str(profile), "HOOKSHOT_BUILDER_PORTABLE": "1"})
+        home, game = moved / "LongshotBuilder", moved / "Game"
+        run(game / "longshot.exe", home, 0)
+        (game / ".longshot_builder_home").unlink()
+        run(game / "longshot.exe", home, 2)
+        run(root / "standard-setup.exe", profile / "LongshotBuilder", 3)
+        run(root / "downloaded-setup.exe", home, 2, {"LONGSHOT_SETUP_BASE": "relative"})
+        run(root / "downloaded-setup.exe", home, 2, {"LONGSHOT_SETUP_BASE": str(profile), "LONGSHOT_BUILDER_PORTABLE": "1"})
         readonly = root / "write-protected fixture"
         readonly.mkdir()
-        run(root / "downloaded-setup.exe", readonly, 4, {"HOOKSHOT_SETUP_BASE": str(readonly)})
-        assert not (readonly / ".hookshot-portable").exists()
-        marker = home / ".hookshot-portable"
+        run(root / "downloaded-setup.exe", readonly, 4, {"LONGSHOT_SETUP_BASE": str(readonly)})
+        assert not (readonly / ".longshot-portable").exists()
+        marker = home / ".longshot-portable"
         marker.write_text("broken")
         run(moved / "Setup.exe", home, 2)
         assert not profile.exists(), "No persistent AppData writes expected during fixture startup"

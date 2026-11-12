@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text;
-using HookshotBuilder;
+using LongshotBuilder;
 
 static class Program
 {
@@ -20,8 +20,8 @@ static class Program
     {
         var fixture = Path.GetFullPath(args[0]);
         var volume = Path.Combine(fixture, "authored volume é, one");
-        var root = Path.Combine(volume, "HookshotBuilder");
-        var app = Path.Combine(root, "versions", "v-authored", "HookshotBuilder");
+        var root = Path.Combine(volume, "LongshotBuilder");
+        var app = Path.Combine(root, "versions", "v-authored", "LongshotBuilder");
         var standard = Path.Combine(fixture, "standard");
         Directory.CreateDirectory(app);
         File.WriteAllText(Path.Combine(root, BuilderHome.Marker), BuilderHome.MarkerText + "\n", new UTF8Encoding(false));
@@ -44,17 +44,17 @@ static class Program
         Refuses(() => BuilderHome.Resolve(standard, app, standard, true), "Missing portable marker silently fell back.");
         Refuses(() => BuilderHome.Resolve(Path.GetPathRoot(root)! + new string('x', 270), app, standard), "Unrepresentable native root accepted.");
 
-        Environment.SetEnvironmentVariable("HOOKSHOT_SETUP_BASE", root);
-        Environment.SetEnvironmentVariable("HOOKSHOT_BUILDER_PORTABLE", "1");
+        Environment.SetEnvironmentVariable("LONGSHOT_SETUP_BASE", root);
+        Environment.SetEnvironmentVariable("LONGSHOT_BUILDER_PORTABLE", "1");
         Check(BuilderHome.Base == root && BuilderHome.Portable, "Actual process context chose another home.");
         Check(Storage.Base == root && Storage.NgxSdk == Path.Combine(root, "ngx-sdk") && Storage.FfxSdk == Path.Combine(root, "ffx-sdk"), "Storage/SDKs escaped the home.");
         Check(Storage.Work == root, "Default work escaped the home.");
-        Check(BuilderHome.DefaultGame == Path.Combine(volume, "Hookshot"), "Default game escaped the portable volume.");
+        Check(BuilderHome.DefaultGame == Path.Combine(volume, "Longshot"), "Default game escaped the portable volume.");
         var child = new ProcessStartInfo("authored-child-never-started");
-        child.Environment["HOOKSHOT_SETUP_BASE"] = Path.Combine(fixture, "stale unrelated home");
-        child.Environment["HOOKSHOT_BUILDER_PORTABLE"] = "0";
+        child.Environment["LONGSHOT_SETUP_BASE"] = Path.Combine(fixture, "stale unrelated home");
+        child.Environment["LONGSHOT_BUILDER_PORTABLE"] = "0";
         BuilderHome.PassTo(child);
-        Check(child.Environment["HOOKSHOT_SETUP_BASE"] == root && child.Environment["HOOKSHOT_BUILDER_PORTABLE"] == "1", "Child context was not passed.");
+        Check(child.Environment["LONGSHOT_SETUP_BASE"] == root && child.Environment["LONGSHOT_BUILDER_PORTABLE"] == "1", "Child context was not passed.");
 
         var game = Path.Combine(volume, "Games", "authored game");
         var saved = BuilderHome.SavePath(game);
@@ -70,12 +70,12 @@ static class Program
 
         var moved = Path.Combine(fixture, "authored volume é, moved");
         Directory.Move(volume, moved);
-        var newRoot = Path.Combine(moved, "HookshotBuilder");
-        var next = BuilderHome.Resolve(null, Path.Combine(newRoot, "versions", "v-authored", "HookshotBuilder"), standard);
+        var newRoot = Path.Combine(moved, "LongshotBuilder");
+        var next = BuilderHome.Resolve(null, Path.Combine(newRoot, "versions", "v-authored", "LongshotBuilder"), standard);
         Check(next.Root == newRoot && next.Portable, "Fresh direct start after relocation chose another home.");
         Check(BuilderHome.LoadPath(next, saved) == Path.Combine(moved, "Games", "authored game"), "Relocated choice kept its old prefix.");
         File.WriteAllText(Path.Combine(newRoot, BuilderHome.Marker), "not a portable marker");
-        Refuses(() => BuilderHome.Resolve(null, Path.Combine(newRoot, "versions", "v-authored", "HookshotBuilder"), standard), "Invalid marker silently chose AppData.");
+        Refuses(() => BuilderHome.Resolve(null, Path.Combine(newRoot, "versions", "v-authored", "LongshotBuilder"), standard), "Invalid marker silently chose AppData.");
         File.WriteAllBytes(Path.Combine(newRoot, BuilderHome.Marker), new byte[] { 0xff });
         Refuses(() => BuilderHome.Resolve(newRoot, app, standard), "Malformed marker accepted.");
         File.WriteAllText(Path.Combine(newRoot, BuilderHome.Marker), BuilderHome.MarkerText + new string('x', 10000));

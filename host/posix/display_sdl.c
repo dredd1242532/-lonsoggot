@@ -12,8 +12,8 @@
 #include "../hos.h"
 #include "../hos_sdl.h"
 
-/* (the window's app id: the applications menu's entry names it as its StartupWMClass, builder/linux/hookshot_builder.py) */
-#define HOS_APP_ID "io.github.NotRexed.Hookshot"
+/* (the window's app id: the applications menu's entry names it as its StartupWMClass, builder/linux/longshot_builder.py) */
+#define HOS_APP_ID "io.github.NotRexed.Longshot"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,8 +22,8 @@
 #include "../display_pointer.h"
 #include <math.h>
 #include <limits.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../../gpu/vk/compat/longshot_env.h"
 #endif
 
 int rx_start(void *hwnd);
@@ -167,7 +167,7 @@ static DWORD WINAPI renderer_main(void *p) {
     return 0;
 }
 
-/* (hookshot) host/display.c's: the game's first work for the GPU waits for the renderer (nvn_native.c), so nothing it submits while
+/* (longshot) host/display.c's: the game's first work for the GPU waits for the renderer (nvn_native.c), so nothing it submits while
    the shaders are prepared is lost. Without a window the renderer starts on the game's own thread, before this is asked */
 void hos_renderer_wait(void) {
     { const char *e = getenv("HOS_NO_RENDERER_WAIT"); if (e && atoi(e) != 0) return; }
@@ -227,7 +227,7 @@ int hos_display_init(void) {
     }
     const char *env_class = getenv("HOS_WM_CLASS");
     const char *app_id = (env_class && env_class[0]) ? env_class : HOS_APP_ID;
-    hos_sdl_identity(window_title("Hookshot"), app_id);
+    hos_sdl_identity(window_title("Longshot"), app_id);
     hos_sdl_hint("SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR", "0");
     hos_sdl_hint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
     /* (bundled SDL tries x11 before wayland. NVIDIA's X11 surface has no mailbox, and an immediate
@@ -287,12 +287,12 @@ void hos_display_loop(void) {
     }
     vk_window.window = window;
     hos_posix_window[0] = 1;
-    {   /* the window's icon: hookshot.png beside the game (make_game.py puts it there), for X11 and the compositors that
+    {   /* the window's icon: longshot.png beside the game (make_game.py puts it there), for X11 and the compositors that
            take one from the window; the others find it through the menu entry */
         char png[MAX_PATH];
         DWORD n = GetModuleFileNameA(NULL, png, MAX_PATH);
         while (n && png[n - 1] != '/') n--;
-        snprintf(png + n, sizeof png - n, "hookshot.png");
+        snprintf(png + n, sizeof png - n, "longshot.png");
         hos_sdl_icon(window, png);
     }
     if (getenv("HOS_FULLSCREEN") && atoi(getenv("HOS_FULLSCREEN"))) set_fullscreen(1);

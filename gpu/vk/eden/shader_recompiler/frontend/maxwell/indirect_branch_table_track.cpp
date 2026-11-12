@@ -11,8 +11,8 @@
 #include "shader_recompiler/frontend/maxwell/indirect_branch_table_track.h"
 #include "shader_recompiler/frontend/maxwell/opcodes.h"
 #include "shader_recompiler/frontend/maxwell/translate/impl/load_constant.h"
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 
 namespace Shader::Maxwell {

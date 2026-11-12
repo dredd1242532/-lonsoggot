@@ -2,16 +2,16 @@
 // game's style: vk_ui.h), so it costs nothing while closed and it never touches the game's picture, nor what frame interpolation
 // sees. The FPS counter and the start-up screen are drawn the same way. F1 always opens and closes it, Insert too by default.
 // Up and Down choose, Left and Right change, Esc closes; the game gets no keyboard input while it is open.
-// (hookshot) A gamepad's Home button, or Select and Start together, opens it too; the D-pad chooses and changes, the button
+// (longshot) A gamepad's Home button, or Select and Start together, opens it too; the D-pad chooses and changes, the button
 // the Switch's A is bound to changes too (and opens a page), the one B is bound to goes back (vk_menu_keys.h). The game gets no gamepad input while it is open either.
 // Its Controls page binds the Switch's buttons to gamepad inputs and keys.
-// (hookshot) The mouse is free while it is open (the window lets it go: WM_APP + 8, host/display.c and
+// (longshot) The mouse is free while it is open (the window lets it go: WM_APP + 8, host/display.c and
 // host/posix/display_sdl.c): the row under the cursor is selected, a click on a tab shows it, on a value's left or right
 // half changes it down or up, on a toggle flips it, on a slider's track sets it (or drag it); the wheel scrolls the rows
 // (never a value, wherever the cursor is); a right click is Esc. On the Cheats page and its lists a click is Enter (on a
 // choice's or an amount's left or right half, Left or Right) and a right click goes back. The drawing records each control's
 // place and the mouse is tested against that (vk_menu_hit.h).
-// (hookshot) The rows that take a restart (Row::restart) are tagged "After restart" while their value is not the one the game
+// (longshot) The rows that take a restart (Row::restart) are tagged "After restart" while their value is not the one the game
 // started with, and the Graphics tab's help lists them. Closing the menu then asks whether to restart now (menu_restart.h):
 // Later keeps the saved settings for the next start and is not asked again until they change; Restart now saves and
 // closes the window as the player would, and the game starts again (WM_APP + 9: host/hos_relaunch.c).
@@ -52,8 +52,8 @@
 #include "menu_restart.h"
 #include "vk_menu_i18n.h"
 #include "display_modes.h"   // (the Aspect ratio and Output resolution rows: the screen's sizes and their shapes)
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 #include "pipeline_share.h"   // (Save my pipeline list: the zip for issue 2034)
 #ifndef _WIN32   // (Save my pipeline list: the desktop's programs. On Windows, shell32 and ole32 are loaded when it is used)
@@ -68,8 +68,8 @@
 extern char** environ;
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
-#ifndef HOOKSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
-#define HOOKSHOT_VERSION "unknown"
+#ifndef LONGSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
+#define LONGSHOT_VERSION "unknown"
 #endif
 
 namespace mkwvk {
@@ -86,9 +86,9 @@ enum MenuTab {
     TAB_CONTROLS = 3,
     TAB_DEBUG = 4,   // (the OoT debug tools of #785, a tab of their own)
     TAB_COUNT = 5,
-    TAB_MOTION = TAB_COUNT,   // (hookshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
+    TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
-    TAB_PAGE = TAB_MOTION + 1   // (hookshot: the Controls page's rows, above its grid; no tab shows them)
+    TAB_PAGE = TAB_MOTION + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
 };
 
 struct Row {
@@ -145,7 +145,7 @@ const char* tx_fps_cap(int v) {
     static const char* const t[] = {"60 (the console's)", "90", "120", "144", "165", "240", "Uncapped"};
     return t[v < 0 ? 0 : v > 6 ? 6 : v];
 }
-// (hookshot) Motion controls: the choice, and whether a connected controller has a gyroscope (host/pad_sdl.c). Either can be
+// (longshot) Motion controls: the choice, and whether a connected controller has a gyroscope (host/pad_sdl.c). Either can be
 // chosen whatever is connected: a pad plugged in later is read when it comes
 const char* tx_gyro(int v) {
     const int status = host && host->gyro_status ? host->gyro_status() : -1;
@@ -365,7 +365,7 @@ namespace dm = display_modes;
 // display modes and its own size, each side rounded down to 8, those the game accepts, with the common sizes of the shapes
 // they have, 1440p, 4K and 5K at 16:9 on a 1080p screen too, by width then height; HOS_DISPLAY_MODES=<w>x<h>,... for a run;
 // where they are not known, the sizes offered before: 1920x1080, 2560x1440, 3840x2160, 5120x1440, 5120x2880), then, last,
-// a size of the player's own from hookshot_options.ini (output_res=<width>x<height>, host/nn_applet.c hos_output_parse: the
+// a size of the player's own from longshot_options.ini (output_res=<width>x<height>, host/nn_applet.c hos_output_parse: the
 // same rules) when it is none of them. The ini keeps the size, not the choice's number: output_res=3840x2160
 constexpr Out kGameOutput{2048, 1152};
 // (the sizes offered before the screen's: output_res=0 to 5 as saved then, and where the screen's are not known, by width then
@@ -746,7 +746,7 @@ const char* tx_gpu(int v) {
     return buf;
 }
 const char* tx_pad_layout(int v);
-// (hookshot) the Microphone row: Off, the system's default, or one of the host's microphones (host/nn_audio_in.c: the
+// (longshot) the Microphone row: Off, the system's default, or one of the host's microphones (host/nn_audio_in.c: the
 // ocarina's input streams), told to the host by its name (host->mic_select) whenever it changes. The chosen one is kept by
 // its name, mic_want, also while it is unplugged: the row then has one more entry for it, "<name> (not connected)", the
 // host lets the default stand in and opens it again once it is back, and the name stays in the ini. In the ini the name is
@@ -764,7 +764,7 @@ size_t text_char_start(const std::string& text, size_t at) {
 }
 std::string mic_key(const char* name) {
     std::string k(name ? name : "");
-    for (char& c : k)   // (a device's name goes into hookshot_options.ini: a line break in it would add lines there)
+    for (char& c : k)   // (a device's name goes into longshot_options.ini: a line break in it would add lines there)
         if ((unsigned char)c < 0x20 || c == 0x7f) c = ' ';
     if (k.size() > kMicNameKept) k = k.substr(0, text_char_start(k, kMicNameKept));
     // (and no spaces at the end: a saved line's end, made one above, and those an older build saved with the name)
@@ -808,7 +808,7 @@ const char* hn_mic(int v, int variant) {
     return missing ? "Not plugged in: Default stands in until it is back." : "This microphone, by its name. A change applies at once.";
 }
 const char* tx_rumble(int v) { return v ? tx_percent(v) : "Off"; }
-// (hookshot) Menu size: how large the overlays are drawn (vk_ui.h unit), Medium unless the player chooses Small or Large. It
+// (longshot) Menu size: how large the overlays are drawn (vk_ui.h unit), Medium unless the player chooses Small or Large. It
 // was Auto by default, Large in fullscreen at 1080 lines and up while a controller opened the menu: the menu changed size with
 // the input that opened it, and the version in its banner no longer fitted. An options file's menu_size=0 (that Auto): Medium
 constexpr float kVersionMinPt = 10;   // (the banner's version at Small and Medium: shrunk to fit, no smaller than this, in points)
@@ -822,12 +822,12 @@ const char* tx_stick_dead_zone(int v) {
     static const char* t[] = {"Default (24%)", "5%", "10%", "15%", "20%", "30%"};
     return (unsigned)v < 6 ? t[v] : t[0];
 }
-// (hookshot) Audio output: the speakers the game mixes for, read once at its start (host/nn_audio.c au_menu_output)
+// (longshot) Audio output: the speakers the game mixes for, read once at its start (host/nn_audio.c au_menu_output)
 const char* tx_audio_output(int v) {
     static const char* t[] = {"Auto", "Stereo", "5.1"};
     return (unsigned)v < 3 ? t[v] : t[0];
 }
-// (hookshot) the motion's deadzone: the console's three zero-drift modes, the rate under which the pad counts as still
+// (longshot) the motion's deadzone: the console's three zero-drift modes, the rate under which the pad counts as still
 const char* tx_deadzone(int v) {
     static const char* t[] = {"Low", "Standard", "High"};
     return t[v < 0 ? 0 : v > 2 ? 2 : v];
@@ -841,7 +841,7 @@ const char* tx_preset(int v) {
                               "Auto (this PC)"};
     return t[std::min(std::max(v, 0), 6)];
 }
-// (hookshot) The VRAM budget row's choices: the texture and mirror budgets in MB (0: Auto, the renderer's own rule). The presets'
+// (longshot) The VRAM budget row's choices: the texture and mirror budgets in MB (0: Auto, the renderer's own rule). The presets'
 // budgets are among them (preset_vram_budget), so a preset sets the row, and the row can also be chosen on its own (null and
 // Gummi, #dev-work 2026-11-10: the presets were the only way to set a limit)
 constexpr int kVramBudgets = 8;
@@ -873,7 +873,7 @@ void sync_preset_budgets(int p) {
 // 3840 x 2160 window at that preset's picture, 2048 x 1152 or the handheld profile's 1536 x 864: same frame, mean |Laplacian|
 // of the window and of the picture, on the slider's steps)
 void env_release(const int* value);   // (below: a row the environment held, set by the menu from now on)
-// (hookshot) the Quality preset "Auto (this PC)", kAutoPreset: the profile menu_auto_for_gpu chose for this PC (auto_settings.h)
+// (longshot) the Quality preset "Auto (this PC)", kAutoPreset: the profile menu_auto_for_gpu chose for this PC (auto_settings.h)
 ::auto_settings::Choice auto_choice;   // (tier 0: no profile yet, before the card is known)
 uint64_t auto_for = 0;               // (the fingerprint of the hardware the options' Auto settings were chosen for: auto_for=)
 uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
@@ -988,7 +988,7 @@ const char* hn_framegen(int v, int variant) {
     return b[std::clamp(v, 2, 8)];
 }
 MENU_HINTS(hn_pace, 0, "As soon as it is ready.", "At an even interval: less stutter, at up to one frame of delay.")
-/// (hookshot) Who made the made frames lately (vk_framegen.cpp framegen_maker), with Frame generation on; nullptr: none made.
+/// (longshot) Who made the made frames lately (vk_framegen.cpp framegen_maker), with Frame generation on; nullptr: none made.
 /// One name each, "<engine> FG", on the Frame generation by row and the FPS counter alike
 const char* framegen_maker_name() {
     if (opts.framegen < 1) return nullptr;
@@ -1089,7 +1089,7 @@ const char* hn_output_res(int v, int variant) {
         "Larger than your screen: drawn bigger, then scaled down to the window. Sharper, and slower. The game's render "
         "targets get a bigger GPU pool, so a full-size 3D fits.",
         "Smaller than your screen: faster, and scaled up to the window.",
-        "Your own size, from output_res= in hookshot_options.ini."};
+        "Your own size, from output_res= in longshot_options.ini."};
     if (variant >= 0) return variant < (int)std::size(t) ? t[variant] : nullptr;
     v = output_choice(v);
     if (!v) return t[0];
@@ -1124,9 +1124,9 @@ const char* tx_wide_menus(int v) {
 MENU_HINTS(hn_wide_menus, 0, "The menus stretched over the whole screen, as before.",
            "The menus in the middle 16:9; beside them, what the game draws there, out of focus.",
            "The menus in the middle 16:9; black beside them.")
-/// (the ASTC as RGBA8 row's line while RX_VK_ASTC_RGBA8 holds it: the old readme's way, still in some hookshot_env.txt files)
+/// (the ASTC as RGBA8 row's line while RX_VK_ASTC_RGBA8 holds it: the old readme's way, still in some longshot_env.txt files)
 const char* hn_astc_rgba8(int, int variant) {
-    return variant <= 0 && getenv("RX_VK_ASTC_RGBA8") ? "Set by RX_VK_ASTC_RGBA8 (hookshot_env.txt or the environment): remove that line to choose here."
+    return variant <= 0 && getenv("RX_VK_ASTC_RGBA8") ? "Set by RX_VK_ASTC_RGBA8 (longshot_env.txt or the environment): remove that line to choose here."
                                        : nullptr;
 }
 MENU_HINTS(hn_robust, 0, "On, on every card.", "Can be faster on some NVIDIA cards.", "Always on.")
@@ -1284,7 +1284,7 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Menu language", &opts.menu_lang, 0, i18n::lang_count(), 1, tx_menu_lang, "The language of this menu.",
      hn_menu_lang, false, true},
     {TAB_GAMEPLAY, "Discord status", &opts.discord, 0, 1, 1, tx_onoff,
-     "Shows \"Playing Hookshot\" and the time played in your Discord status, while Discord runs on this PC.", nullptr, false,
+     "Shows \"Playing Longshot\" and the time played in your Discord status, while Discord runs on this PC.", nullptr, false,
      true},
     {TAB_GAMEPLAY, "Skip opening", &opts.skip_opening, 0, 1, 1, tx_onoff,
      "Skips the new-game opening (the story movie and Navi waking Link) and leaves later cutscenes, the Deku Tree "
@@ -1333,15 +1333,15 @@ Row rows[] = {
     {TAB_MOTION, "Motion deadzone", &opts.gyro_deadzone, 0, 2, 1, tx_deadzone,
      "How slow a turn counts as none, the console's three settings: Standard is its own. High steadies a pad that jitters "
      "when held still; Low keeps the smallest movements.", nullptr, false, true},
-    {TAB_CONTROLS, "Motion", nullptr, 0, 0, 0, nullptr,   // (hookshot: opens the Motion page, the TAB_MOTION rows)
+    {TAB_CONTROLS, "Motion", nullptr, 0, 0, 0, nullptr,   // (longshot: opens the Motion page, the TAB_MOTION rows)
      "Motion controls: aiming with the controller's gyroscope, its sensitivity and its inverts."},
-    // (hookshot) the Controls page's own rows, above its grid (TAB_PAGE: no tab shows them)
+    // (longshot) the Controls page's own rows, above its grid (TAB_PAGE: no tab shows them)
     {TAB_PAGE, "Layout preset", &opts.pad_layout, 0, 3, 1, tx_pad_layout,
      "Which face button is which. Binding one yourself on the Controls page makes it Custom.", hn_pad_layout, false, true},
     {TAB_PAGE, "Button prompts", &opts.prompts, 0, HOS_PROMPT_N, 1, tx_prompts,
      "The button icons the game shows, in its texts and menus: those of this controller, for the buttons your controls "
      "put each action on.", hn_prompts, true, true},
-    {TAB_CONTROLS, "Controls", nullptr, 0, 0, 0, nullptr,   // (hookshot: opens its page)
+    {TAB_CONTROLS, "Controls", nullptr, 0, 0, 0, nullptr,   // (longshot: opens its page)
      "The layout preset, the button prompts, and which gamepad button and which keys press each of the Switch's "
      "buttons."},
     {TAB_CONTROLS, "Menu shortcut", &opts.menu_shortcut, 0, 2, 1, tx_menu_shortcut,
@@ -1382,7 +1382,7 @@ Row rows[] = {
     {TAB_DEBUG, "Movement speed", nullptr, 0, 0, 0, nullptr,
      "How fast Link walks, runs and swims, as a multiple of his own speed. Choose with Left or Right.", nullptr, false, true, 11},
     {TAB_DEBUG, "Developer", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
-    // (hookshot, first under the heading: debug_rows lists only those) the zip for the "Submit your pipelines" issue: share_pipeline_list, pipeline_share.h
+    // (longshot, first under the heading: debug_rows lists only those) the zip for the "Submit your pipelines" issue: share_pipeline_list, pipeline_share.h
     {TAB_DEBUG, "Save my pipeline list", nullptr, 0, 0, 0, nullptr,
      "Helps remove first-load stutter for everyone: saves the pipelines your play built (shader hashes and draw state, no game "
      "data) with a filled-in report as a zip in Downloads, copies the report and opens the \"Submit your pipelines\" issue. "
@@ -1399,7 +1399,7 @@ Row rows[] = {
     {TAB_DEBUG, "ASTC as RGBA8", &opts.astc_rgba8, 0, 1, 1, tx_onoff,
      "Big ASTC textures kept as decoded RGBA8 instead of re-encoded to BC3: a workaround for texture artifacts seen on some AMD "
      "cards (issues 57 and 1006). Takes far more video memory. Applies after restart.", hn_astc_rgba8, true, true},
-    // (hookshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
+    // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
      "version, where you are, your graphics card and driver, CPU, RAM and system, the options and switches you changed), the logs "
@@ -1585,7 +1585,7 @@ const char* cheat_button_text(int i) {
 constexpr int kRows = sizeof rows / sizeof rows[0];
 
 int ultrawide_read = 1;   // (ultrawide= as read: saved again while HOS_OUTPUT_RES holds the Output resolution and the row is as it was)
-/// (hookshot) The Aspect ratio and Output resolution rows' ends from the screen's sizes and the player's own (known once the
+/// (longshot) The Aspect ratio and Output resolution rows' ends from the screen's sizes and the player's own (known once the
 /// options and HOS_OUTPUT_RES are read), and the Aspect ratio of the size chosen: a size of a shape of its own is that shape,
 /// a 16:9 one is the monitor's shape or 16:9, as ultrawide= says (menu_init, before restart_init: what the run starts with)
 void outputs_sync() {
@@ -1695,7 +1695,7 @@ bool menu_refresh = false;
 int marquee_pos = 0, marquee_max = 0;
 int64_t marquee_next = 0;
 constexpr int64_t kMarqueeStep = 150000000LL, kMarqueeRest = 1200000000LL;   // (ns)
-// (hookshot) the mouse (menu_tick): the tab strip's part under the cursor (a tab 0 to TAB_COUNT - 1, TAB_COUNT the previous,
+// (longshot) the mouse (menu_tick): the tab strip's part under the cursor (a tab 0 to TAB_COUNT - 1, TAB_COUNT the previous,
 // TAB_COUNT + 1 the next; -1 none); the slider held with the left button (its row in the tab, -1 none)
 int hover_tab = -1;
 int drag_row = -1;
@@ -1705,9 +1705,9 @@ bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &
 bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
-// (hookshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
+// (longshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
 // player's own value while the row still holds the environment's; once the player changes the row, theirs is kept. (These
-// were copied into the row and the next save wrote them into hookshot_options.ini, so a test run's switch stayed for good)
+// were copied into the row and the next save wrote them into longshot_options.ini, so a test run's switch stayed for good)
 struct EnvOverride {
     int* value;
     int saved, forced;
@@ -1751,7 +1751,7 @@ std::string ini_path() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
     std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1) + "hookshot_options.ini";
+    return dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_options.ini";
 }
 const char* ini_key(const Row& r) {
     if (r.value == &opts.output_res) return "output_res";   // (host/nn_applet.c reads it at the start)
@@ -1769,7 +1769,7 @@ const char* ini_key(const Row& r) {
     k[n] = 0;
     return k;
 }
-// (hookshot) the controls, kept by the host (host/nn_hid.c reads them back from here): pad_<button>, key_<button>
+// (longshot) the controls, kept by the host (host/nn_hid.c reads them back from here): pad_<button>, key_<button>
 const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", "r", "zl", "zr", "plus", "minus",
                                            "left", "up", "right", "down", "move_up", "move_down", "move_left",
                                            "move_right", "cam_up", "cam_down", "cam_left", "cam_right",
@@ -1809,7 +1809,7 @@ int detect_pad_layout() {
     if (a == HOS_PAD_SOUTH && b == HOS_PAD_EAST && x == HOS_PAD_NORTH && y == HOS_PAD_WEST) return 2;
     return 3;
 }
-// (hookshot) the row's choice to the host: off, the default, or a microphone by its name (and its place in the host's list,
+// (longshot) the row's choice to the host: off, the default, or a microphone by its name (and its place in the host's list,
 // -1 while it is unplugged: of two with one name, the one chosen). Unplugged, the name is the kept one, cut: the host takes
 // a name that starts with it
 void mic_tell_host() {
@@ -1822,7 +1822,7 @@ void mic_row_ends() {
     for (Row& r : rows)
         if (r.value == &opts.mic) r.hi = 1 + mic_listed + (mic_missing ? 1 : 0);
 }
-// (hookshot) the microphones listed again (one plugged in since shows up), the row on mic_want's: the one at the row's place
+// (longshot) the microphones listed again (one plugged in since shows up), the row on mic_want's: the one at the row's place
 // when it still has that name (two microphones of one name: the second stays chosen), else the first of that name, else
 // its "(not connected)" entry while it is unplugged
 void refresh_mics() {
@@ -1859,7 +1859,7 @@ void save() {
     // (one writer at a time: the present's thread, the game's (menu_option_set) and the control bridge's, menu_setting_set)
     static std::mutex save_mu;
     std::lock_guard lk(save_mu);
-    // (hookshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
+    // (longshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
     std::string kept, others;
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
@@ -1898,7 +1898,7 @@ void save() {
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
-        if (!mic_want.empty()) fprintf(f, "microphone_device=%s\n", mic_want.c_str());   // (hookshot: also while it is unplugged)
+        if (!mic_want.empty()) fprintf(f, "microphone_device=%s\n", mic_want.c_str());   // (longshot: also while it is unplugged)
         // (not a row: the budgets Custom keeps. 0 too: with a preset on, the VRAM budget row chosen by the player, which the next
         // start must not take back to the preset's)
         fprintf(f, "memory_budget=%d\n", opts.budget);
@@ -1928,7 +1928,7 @@ void save() {
     }
 }
 
-/// (hookshot) The Button prompts row: a new face shows at once where the game has every part of the prompts from
+/// (longshot) The Button prompts row: a new face shows at once where the game has every part of the prompts from
 /// host/prompts.c, nothing to restart for then; else, as the other restart rows, at the next start
 void prompts_at_once(const Row& r) {
     if (r.value == &opts.prompts && host && host->prompts_live &&
@@ -1937,15 +1937,15 @@ void prompts_at_once(const Row& r) {
 }
 
 
-// ---- (hookshot) Save my pipeline list (the Debug tab, under Developer): hookshot_pipeline_states.bin and the "Submit your pipelines" issue's
+// ---- (longshot) Save my pipeline list (the Debug tab, under Developer): longshot_pipeline_states.bin and the "Submit your pipelines" issue's
 // template, filled in from this run, zipped into the Downloads folder (pipeline_share.h; the builders do the same with
 // nx2/pipeline_share.py). Then the report on the clipboard, the folder shown and the issue opened in the browser, where the platform
 // has them; never with HOS_HEADLESS (no screen to show them on). Nothing is uploaded: the player attaches the zip ----
 namespace ps = pipeline_share;
 std::string share_said;    // (the help box's line after a save: where the zip went and what to do, or why there is none)
 std::string share_value;   // (the row's value after a save: Saved, or Not saved)
-constexpr const char* kShareSaidLongest = "Saved hookshot-pipelines-2026-12-31.zip (123456 pipelines) in Downloads. The report "
-    "is in the zip. Open github.com/NotRexed/Hookshot/issues/2034 and attach the zip to a comment, then paste the report and say "
+constexpr const char* kShareSaidLongest = "Saved longshot-pipelines-2026-12-31.zip (123456 pipelines) in Downloads. The report "
+    "is in the zip. Open github.com/NotRexed/Longshot/issues/2034 and attach the zip to a comment, then paste the report and say "
     "where you played.";   // (measure_help: the help box's room)
 std::string share_saved;   // (the first sentence: the zip's name, its pipelines and its folder)
 std::atomic<bool> share_busy{false};   // (the worker is copying and opening: presses wait for it)
@@ -1955,7 +1955,7 @@ void share_finish() {
     const int r = share_result.exchange(-1);
     if (r < 0) return;
     share_said = share_saved + ((r & 1) ? "The report is copied. " : "The report is in the zip. ") +
-                 ((r & 2) ? "Issue 2034 is open in your browser: attach" : "Open github.com/NotRexed/Hookshot/issues/2034 and attach") +
+                 ((r & 2) ? "Issue 2034 is open in your browser: attach" : "Open github.com/NotRexed/Longshot/issues/2034 and attach") +
                  " the zip to a comment, then paste the report and say where you played.";
     share_busy.store(false);
     menu_refresh = true;
@@ -2024,7 +2024,7 @@ std::string share_os() {
 #endif
 }
 #ifdef _WIN32
-/// A function of shell32 or ole32, loaded at its first use: hookshot_vk.dll imports only kernel32, user32, gdi32, advapi32 and the
+/// A function of shell32 or ole32, loaded at its first use: longshot_vk.dll imports only kernel32, user32, gdi32, advapi32 and the
 /// UCRT (the DLSS workflow's import check), and these two are needed only here
 FARPROC share_proc(const wchar_t* dll, const char* name) {
     HMODULE m = LoadLibraryExW(dll, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -2220,7 +2220,7 @@ bool share_write(const std::string& path, const std::string& data) {
 /// frame generation and HDR as the menu has them now, and the mods
 std::vector<std::string> share_values(long long pipelines, bool v2, long long computes) {
     std::vector<std::string> v(ps::kFieldCount);
-    v[0] = HOOKSHOT_VERSION;
+    v[0] = LONGSHOT_VERSION;
     v[1] = share_os() + "; " + dev.props.deviceName + ", driver " + driver_text();
     const Out o = shown_output();
     v[2] = ps::output_text(o.w, o.h, opts.handheld != 0, output_choice(opts.output_res) == 0, aspect_follows_host(opts.ultrawide));
@@ -2336,7 +2336,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         v = step_output_choice(*r.value, dir);
         if (v == *r.value) return;
     }
-    // (hookshot) the VRAM budget row steps past 2.2 GB: the Minimum (4GB) preset's, too few textures on a bigger card (a 12 GB
+    // (longshot) the VRAM budget row steps past 2.2 GB: the Minimum (4GB) preset's, too few textures on a bigger card (a 12 GB
     // card's walk made 2-3 times as many textures again as at Auto, 1% lows of 5-7 fps; hckrman101, #dev-work). The preset still
     // sets it, and the row shows it then
     if (r.value == &opts.vram_budget && v == kVramMinimumOnly) v += dir;
@@ -2361,7 +2361,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
             opts.resolution = ur::snap_render(upscaler(), opts.resolution);
             env_release(&opts.resolution);
         }
-        if (r.value == &opts.vram_budget) {   // (hookshot: set on the row, the budget is the player's, on any card)
+        if (r.value == &opts.vram_budget) {   // (longshot: set on the row, the budget is the player's, on any card)
             opts.budget = 0;
             vram_budget_sync();
         }
@@ -2371,13 +2371,13 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
             opts.preset = 0; // Custom
         }
     }
-    if (r.value == &opts.mic && can_mic()) mic_chosen();   // (hookshot)
-    // (hookshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
+    if (r.value == &opts.mic && can_mic()) mic_chosen();   // (longshot)
+    // (longshot: the samplers made again, at once: their anisotropy, and the upscalers' LOD bias, vk_draw.cpp upscale_lod_bias)
     if (r.value == &opts.anisotropy || r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.preset)
         samplers_changed();
     if (r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.dlss_model)
         temporal_reset_failure();
-    prompts_at_once(r);   // (hookshot)
+    prompts_at_once(r);   // (longshot)
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
         restart_values(now);
@@ -2386,7 +2386,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (keep) save();
 }
 
-// ---- (hookshot) the Controls page: what presses each of the Switch's buttons, a gamepad input and up to two keys ----
+// ---- (longshot) the Controls page: what presses each of the Switch's buttons, a gamepad input and up to two keys ----
 struct Control {
     int button;   // HOS_SW_*, or HOS_KEY_* (keys only)
     const char* name;
@@ -2777,7 +2777,7 @@ std::string restart_line(ui::Ctx& c, float px, float width) {
     return line;
 }
 
-/// (hookshot) The Debug tab's order: the tools' rows by their group (Row::cheat), Up and Down walking them so; Inventory item
+/// (longshot) The Debug tab's order: the tools' rows by their group (Row::cheat), Up and Down walking them so; Inventory item
 /// and Change quantity are not shown (the Inventory page edits every amount)
 struct DebugGroup { const char* title; int from, to; };   // (debug_tools_order[from, to))
 constexpr int debug_tools_order[] = {0, 1, 11, 9, 10, 8, 2, 3, 7, 4};
@@ -2812,7 +2812,7 @@ int debug_step(int sel, int dir) {
     if (at == n) return order[0];
     return order[(at + n + dir) % n];
 }
-/// (hookshot) The Debug tab's rows from top down to bottom, sel selected: Debug tools across the top; the tools under their
+/// (longshot) The Debug tab's rows from top down to bottom, sel selected: Debug tools across the top; the tools under their
 /// headings, Player in the first column and Travel and Camera & world in the second when two fit (else one under another);
 /// the Developer rows across the foot. Each value cell a column's width, so their edges line up. The hits are the tab's row
 /// numbers, as the list's: menu_tick's clicks and keys are the other tabs'
@@ -2920,7 +2920,7 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     c.d->PopClipRect();
 }
 
-// (hookshot) the Gameplay tab's Bug report: the rows not at their defaults, as the menu shows them, for its "Changes from the
+// (longshot) the Gameplay tab's Bug report: the rows not at their defaults, as the menu shows them, for its "Changes from the
 // defaults"
 std::string changed_rows_text() {
     static const Options defaults{};
@@ -2949,7 +2949,7 @@ void bug_report_save() {
     if (host && host->log_flush) host->log_flush();   // (the log's queued lines into the file first)
     bug_report::Inputs in;
     bug_report::fill_here(in);
-    in.version = HOOKSHOT_VERSION;
+    in.version = LONGSHOT_VERSION;
     in.gpu = device_report_text();
     in.options = changed_rows_text();
     const std::string ini = ini_path();
@@ -2971,7 +2971,7 @@ const char* bug_report_cell() {
 /// Under its help once saved: where the report is and what to do with it (the game opens nothing: no browser or file manager is
 /// sure to be there, as on a Steam Deck in Game Mode)
 std::string bug_report_saved_text(const std::string& folder) {
-    return "Saved in the game folder as " + folder + ". To send it, open github.com/NotRexed/Hookshot/issues, choose New issue and "
+    return "Saved in the game folder as " + folder + ". To send it, open github.com/NotRexed/Longshot/issues, choose New issue and "
            "Game problem, copy report.txt's answers into the form and drag the folder's files into it: on Windows from File "
            "Explorer, on Linux from a file manager (on a Steam Deck, in Desktop Mode).";
 }
@@ -3061,7 +3061,7 @@ void draw_options(ui::Ctx& c) {
     }
     {   // (which build, at the banner's left, so a report can say it without opening the log; the release alone when the whole
         // line would run into the tabs)
-        std::string ver = std::string("Hookshot ") + HOOKSHOT_VERSION;
+        std::string ver = std::string("Longshot ") + LONGSHOT_VERSION;
         const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s;
         const auto width = [&](float p) { return ui::size_of(c.f.body, p, ver.c_str()).x; };
         if (width(px) > room && ver.find(" (") != std::string::npos) ver.resize(ver.find(" ("));
@@ -3952,7 +3952,7 @@ void draw_startup(ui::Ctx& c) {
     ImTextureData* logo = ui::logo(&aspect);
     if (logo) c.d->AddImage(logo->GetTexRef(), ImVec2(cx - lh * aspect * 0.5f, top), ImVec2(cx + lh * aspect * 0.5f, top + lh));
     float y = top + lh + 16 * s;
-    ui::spaced(c, c.f.heading, 42 * k, ImVec2(cx, y), ui::rgba(246, 232, 204), "HOOKSHOT", 6 * k);
+    ui::spaced(c, c.f.heading, 42 * k, ImVec2(cx, y), ui::rgba(246, 232, 204), "LONGSHOT", 6 * k);
     ui::flourish(c, cx - 190 * k, cx + 190 * k, y + 66 * k, ui::kAccent);
     ui::text_centre(c, c.f.body, 14.5f * k, ImVec2(cx, y + 78 * k), ui::kDim, v.version.c_str());
     if (!v.title.empty()) {
@@ -3996,7 +3996,7 @@ void draw_startup(ui::Ctx& c) {
 
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 
-// (hookshot, #1886) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
+// (longshot, #1886) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
 // (fsr4_probe), FSR 3.1's GPU check. They were asked at the menu's first open, on the frame's thread, and NGX's start
 // alone held that frame about 3 s (an RTX 5080 at 4K; 2.9 s here): the game stood still and its sound ran on, out of
 // step with a cutscene. Now asked once on a thread of their own while the start-up screen shows, where nobody waits on
@@ -4024,7 +4024,7 @@ void startup_screen(const StartupView* view) {
         return;
     }
     StartupView v = *view;
-    if (v.version.empty()) v.version = version_text(HOOKSHOT_VERSION);   // ("v2.0.5"; "v2.0.5 dev" between releases)
+    if (v.version.empty()) v.version = version_text(LONGSHOT_VERSION);   // ("v2.0.5"; "v2.0.5 dev" between releases)
     {
         std::lock_guard lk(startup_mu);
         startup = v;
@@ -4040,7 +4040,7 @@ void menu_init() {
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
     bool has_options = false;
-    bool has_vram_budget = false;   // (hookshot: a file from before the VRAM budget row: its preset's, memory_budget's)
+    bool has_vram_budget = false;   // (longshot: a file from before the VRAM budget row: its preset's, memory_budget's)
     bool has_memory_budget = false;   // (a file from before memory_budget: its preset's)
     const char* cheats = getenv("HOS_OOT_CHEATS");
     cheats_env = cheats && !strcmp(cheats, "1");
@@ -4083,7 +4083,7 @@ void menu_init() {
             }
             if (!strcmp(line, "memory_budget")) opts.budget = std::min(std::max(atoi(eq + 1), 0), 5), has_memory_budget = true;
             has_vram_budget |= !strcmp(line, "vram_budget");
-            if (!strcmp(line, "microphone_device")) {   // (hookshot: the microphone, by its name)
+            if (!strcmp(line, "microphone_device")) {   // (longshot: the microphone, by its name)
                 mic_want = mic_key(eq + 1);
             }
         }
@@ -4152,7 +4152,7 @@ void menu_init() {
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 
-/// (hookshot) The Quality preset "Auto (this PC)", once the card is chosen (vk_main.cpp pick_device): the profile auto_settings.h
+/// (longshot) The Quality preset "Auto (this PC)", once the card is chosen (vk_main.cpp pick_device): the profile auto_settings.h
 /// picks from the hardware. A first start (no options file yet) starts on it. With Auto on, the profile is applied when the
 /// hardware it was chosen for changes (another card, its memory, the screen's size, a build with or without DLSS or FSR 4):
 /// the fingerprint is kept in the options file (auto_for=). Changing a row yourself comes back to Custom, and then nothing here
@@ -4288,7 +4288,7 @@ bool fps_take(int64_t now, int64_t shown, int64_t game, int64_t* next, int64_t* 
     return have;
 }
 
-// (hookshot) the rows' values and the options file, kept apart between menu_tick (the present's thread), menu_option_set
+// (longshot) the rows' values and the options file, kept apart between menu_tick (the present's thread), menu_option_set
 // (the game's) and the control bridge's menu_setting and menu_setting_set (its own thread). Recursive: a setter reached from
 // inside menu_tick's frame on the same thread does not lock itself out
 std::recursive_mutex menu_mu;
@@ -4315,9 +4315,9 @@ void menu_option_set(int id, int value) {
     save();
 }
 
-// ---- (hookshot) the control bridge's option_get and option_set (host/control.c, docs/control.md) ----
+// ---- (longshot) the control bridge's option_get and option_set (host/control.c, docs/control.md) ----
 // The settings rows (a value, not a heading or a debug tool, shown on this PC: row_shown), found by their key in
-// hookshot_options.ini (ini_key), which stays the same while rows come and go or are renamed. The bridge calls these from
+// longshot_options.ini (ini_key), which stays the same while rows come and go or are renamed. The bridge calls these from
 // its own thread: menu_mu keeps them apart from menu_tick (the present's thread) and from menu_option_set (the game's)
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
@@ -4366,7 +4366,7 @@ bool walk_to(State state, At at, Step step, int limit) {
     return false;
 }
 
-/// (hookshot) The Quality preset Auto (this PC)'s measured tuning in play (auto_settings.h tune): each of the replay's 120-present
+/// (longshot) The Quality preset Auto (this PC)'s measured tuning in play (auto_settings.h tune): each of the replay's 120-present
 /// windows (vk_replay.cpp), the Render resolution one step lighter while frames are missed with the GPU over 90% of the cap's
 /// frame time, or one heavier while the cap holds with the GPU under 50%, up to the best mode that still upscales (never
 /// native); at most two steps (kept across restarts, auto_steps=), then done for this PC (auto_tuned=). The CPU holding the
@@ -4485,7 +4485,7 @@ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
     return 1;
 }
 
-/// (hookshot) the mouse on the inventory: a section tab chooses it, a card the item (a click selects it, it does not edit),
+/// (longshot) the mouse on the inventory: a section tab chooses it, a card the item (a click selects it, it does not edit),
 /// the page arrows turn the page with the choice, the action button and the amount's halves act; the wheel turns the page
 /// shown and leaves the choice where it is; a right click goes back
 void inventory_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool& changed) {
@@ -4506,7 +4506,7 @@ void inventory_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool&
         changed |= inventory_page != was;
     }
 }
-/// (hookshot) the mouse on the teleport list: a click on a card selects it (Travel, or confirm, goes), the Travel button
+/// (longshot) the mouse on the teleport list: a click on a card selects it (Travel, or confirm, goes), the Travel button
 /// goes; the wheel scrolls the cards and leaves the choice where it is; a right click goes back
 void teleport_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool& changed) {
     const menu_hit::Hit hit = hits.at((float)mx, (float)my);
@@ -4569,7 +4569,7 @@ void cheat_press(int i, const bool* press, bool& changed) {
     }
 }
 
-/// (hookshot) The Game language row's choice written to language.txt once the player leaves the row (another row, page or
+/// (longshot) The Game language row's choice written to language.txt once the player leaves the row (another row, page or
 /// tab, or the menu closed), not at each step on the way to it. When it cannot be written (a read-only folder) the row goes
 /// back to what language.txt says, so it never shows a language that was not saved
 void game_lang_tick() {
@@ -4589,7 +4589,7 @@ void game_lang_tick() {
     }
 }
 
-/// (hookshot) The screen the window is on, followed while the game runs (every 30 presents): moved to another monitor, or its
+/// (longshot) The screen the window is on, followed while the game runs (every 30 presents): moved to another monitor, or its
 /// desktop size changed, the sizes it has that are not offered yet (its modes, its own size, the common sizes of their shapes)
 /// join the Output resolution's choices after the player's own, so the numbers chosen keep their sizes; the Aspect ratio row
 /// keeps the shape it is at (the list can gain one), and so do the run's start and the restart question's. HOS_DISPLAY_MODES:
@@ -4662,7 +4662,7 @@ void menu_tick() {
         held[i] = down;
         if (press[i]) pad_last = false;   // (the keys: their names in the prompts)
     }
-    // (hookshot) the gamepads, by position: Home, or Select and Start together, as Insert; the D-pad as the arrows; the
+    // (longshot) the gamepads, by position: Home, or Select and Start together, as Insert; the D-pad as the arrows; the
     // buttons the Switch's A and B are bound to as Enter and Esc, as in the game (vk_menu_keys.h; with the Nintendo layout A
     // is the right face button), not while a binding waits for its button
     static uint32_t pad_held = 0;
@@ -4700,7 +4700,7 @@ void menu_tick() {
         if (force) pad_last = !strcmp(force, "pad");
     }
     auto pad = [&](int p) { return listening != 1 && (pad_press >> p & 1) != 0; };
-    // (hookshot) a DualShock 4's or DualSense's touchpad click is F1: it opens and closes the menu as the key does
+    // (longshot) a DualShock 4's or DualSense's touchpad click is F1: it opens and closes the menu as the key does
     if (pad(HOS_PAD_TOUCHPAD)) press[6] = true;
     if (host && host->binding)   // (A and B as bound now: the Controls page or the Layout preset can change them)
         menu_keys::confirm_back(host->binding(HOS_BIND_PAD, HOS_SW_A, 0), host->binding(HOS_BIND_PAD, HOS_SW_B, 0), &pad_confirm,
@@ -4748,7 +4748,7 @@ void menu_tick() {
     if (press[12] && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) tab_left = true, tab_right = false;
     bool changed = menu_refresh;
     menu_refresh = false;
-    // (hookshot) the mouse, while the menu is open: the cursor in the window image's pixels (mx, my), tested against the
+    // (longshot) the mouse, while the menu is open: the cursor in the window image's pixels (mx, my), tested against the
     // controls as last drawn (hits, vk_menu_hit.h), whether it moved since the last frame, and its clicks and wheel since then
     MkwVkPointer ptr{};
     int mx = -1, my = -1;
@@ -4793,7 +4793,7 @@ void menu_tick() {
         if (open_now.load()) dlss_probe(), fsr4_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
     }
-    if (open_now.load() && page == 5) {   // (hookshot) the restart question: Later (the default) or Restart now
+    if (open_now.load() && page == 5) {   // (longshot) the restart question: Later (the default) or Restart now
         if (mouse) {   // (a button under the cursor chosen, a click on it pressed, a right click is Later; no list: the wheel does nothing)
             const menu_hit::Hit hit = hits.at((float)mx, (float)my);
             if (hit.part == menu_hit::kButton && (moved || ptr.pressed) && hit.index != ask_sel) ask_sel = hit.index, changed = true;
@@ -4810,7 +4810,7 @@ void menu_tick() {
             open_now = false, page = 0, tune_mode = false, changed = true;
             PostMessageA(app_window(), WM_APP + 9, 0, 0);
         }
-    } else if (open_now.load() && page == 1) {   // (hookshot) the Controls page
+    } else if (open_now.load() && page == 1) {   // (longshot) the Controls page
         using enum menu_hit::CtlColumn;
         if (!can_bind()) {
             static int warned;
@@ -5071,7 +5071,7 @@ void menu_tick() {
             changed = true;
         }
     }
-    {   // (hookshot) the window lets the mouse go while the menu is open, and takes it back after (host/display.c)
+    {   // (longshot) the window lets the mouse go while the menu is open, and takes it back after (host/display.c)
         static bool told = false;
         const bool now_open = open_now.load();
         if (!now_open) {

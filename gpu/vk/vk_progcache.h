@@ -1,4 +1,4 @@
-// (hookshot) The program cache's state and reads, shared by vk_shader.cpp (the translator, which saves what it makes and reads
+// (longshot) The program cache's state and reads, shared by vk_shader.cpp (the translator, which saves what it makes and reads
 // back what it has made) and vk_progcache.cpp (the cache itself, outside the translator stamp: see there)
 #pragma once
 #include <atomic>
@@ -71,7 +71,7 @@ void program_cache_load(uint64_t key, std::vector<std::unique_ptr<Program>>& var
 /// The kept variants of key read from the file (in: a handle on it, used under mu when given) and made ready, to variants
 void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vector<DiskRecord>& recs,
                         std::vector<std::unique_ptr<Program>>& variants);
-// ---- (hookshot) The load when the game makes a program (vk_programs.cpp): the records by position, one at a time ----
+// ---- (longshot) The load when the game makes a program (vk_programs.cpp): the records by position, one at a time ----
 /// Whether a program of that key is kept and not read in yet
 bool program_cache_has(uint64_t key);
 /// Every such key now (the index's own copy: a create call on the game's thread then takes no lock a disk read holds)
@@ -92,7 +92,7 @@ bool program_cache_complete_unshared(Program& p, FILE* in);   // (program_cache_
 std::string program_cache_path();
 
 // (vk_shader.cpp's, for the cache)
-uint64_t translator_stamp();   // (the translator and what it is told: HOOKSHOT_SHADER_STAMP, the GPU, the environment)
+uint64_t translator_stamp();   // (the translator and what it is told: LONGSHOT_SHADER_STAMP, the GPU, the environment)
 VkShaderModule make_module(const std::vector<uint32_t>& spirv);
 uint64_t answers_hash(const Program& p);
 bool answers_fit(const Program& p, const std::vector<Program::Answer>& answers);

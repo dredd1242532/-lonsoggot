@@ -47,7 +47,7 @@ import build_emit  # noqa: E402
 
 # The spawned workers run this file again (as __mp_main__) before anything else: they must load the translator the parent
 # built in its temporary folder, not build one under third_party/ (the parent sets the variable once it has built it)
-DLL = os.environ.get("HOOKSHOT_TEST_A64EMIT")
+DLL = os.environ.get("LONGSHOT_TEST_A64EMIT")
 if DLL:
     build_emit.build = lambda force=False: DLL
 
@@ -198,18 +198,18 @@ class SpawnEmitTests(unittest.TestCase):
         cxx = fpx.compiler(ARGS.cxx, "CXX", ("clang++", "g++", "c++"), "clang++")
         if not cxx:
             raise unittest.SkipTest("no C++ compiler")
-        cls.tmp = tempfile.TemporaryDirectory(prefix="hookshot-spawn-emit-")
+        cls.tmp = tempfile.TemporaryDirectory(prefix="longshot-spawn-emit-")
         dll = os.path.join(cls.tmp.name, "a64emit.dll" if os.name == "nt" else "liba64emit.so")
         fpx.build([cxx, "-std=c++20", "-O0", "-shared", "-Wno-everything", "-o", dll,
                    os.path.join(str(ROOT), "third_party", "a64-kit", "lift", "a64emit.cpp")]
                   + fpx.target_flags(cxx, cls.tmp.name) + ([] if os.name == "nt" else ["-fPIC"]), "a64emit")
-        os.environ["HOOKSHOT_TEST_A64EMIT"] = dll   # (inherited by the spawned workers: see the top of this file)
+        os.environ["LONGSHOT_TEST_A64EMIT"] = dll   # (inherited by the spawned workers: see the top of this file)
         build_emit.build = lambda force=False: dll
         cls.dll = dll
 
     @classmethod
     def tearDownClass(cls):
-        os.environ.pop("HOOKSHOT_TEST_A64EMIT", None)
+        os.environ.pop("LONGSHOT_TEST_A64EMIT", None)
         import a64emit
         if a64emit._lib is not None:   # (unloaded, so the folder can go)
             import _ctypes

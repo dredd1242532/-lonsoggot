@@ -3,8 +3,8 @@ and renderer thread, "<ms> <name>|<frames>" (module+offset, leaf first).
 
     python -I scripts/crit.py work/runs/<run>_all.txt [top]
 
-A thread is blocked at an instant when its leaf is outside hookshot.exe / hookshot_vk.dll (on Linux hookshot /
-hookshot_vk.so) and the innermost frame of Hookshot's under it is a wait (prof.WAIT_FRAMES: a condition variable, a
+A thread is blocked at an instant when its leaf is outside longshot.exe / longshot_vk.dll (on Linux longshot /
+longshot_vk.so) and the innermost frame of Longshot's under it is a wait (prof.WAIT_FRAMES: a condition variable, a
 sleep, a fence, the present); running otherwise, libc's copies and the driver's own work included. RX_MAPS=<folder>: another build's linker maps, or on Linux the game folder (its binaries' symbols). Prints each thread's running share;
 then for the instants when no game thread runs (the frame waits on something outside the game's CPU work): what each
 thread waits in and what the renderer's threads do; then for the instants when the main thread is blocked: how many
@@ -79,7 +79,7 @@ def main():
                 waits["%s: %s" % (th, guest_frame(frames))] += 1
             if not is_game(th):
                 vk["%s %s: %s" % (th, "runs" if r else "waits", frames[0] if not r else
-                                  next((f for f in frames if f.startswith("hookshot_vk:")), frames[0]))] += 1
+                                  next((f for f in frames if f.startswith("longshot_vk:")), frames[0]))] += 1
     for k, c in waits.most_common(top):
         print("  %5.1f%%  %s" % (100.0 * c / max(1, len(idle)), k))
     print("  (renderer threads then)")

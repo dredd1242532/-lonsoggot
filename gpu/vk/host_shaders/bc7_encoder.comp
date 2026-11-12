@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 Douglas F
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// NOT a Nintendo file, and nothing in it comes from the game. Hookshot's own BC7 encoder, compiled to
+// NOT a Nintendo file, and nothing in it comes from the game. Longshot's own BC7 encoder, compiled to
 // bc7_encoder_comp_spv.h by scripts/host_shaders.py (glslang, vulkan1.1).
 //
 // BC7 (mode 6) encoder for the Vulkan back end's big ASTC textures (vk_texture.cpp).

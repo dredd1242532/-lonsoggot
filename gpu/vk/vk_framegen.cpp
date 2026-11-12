@@ -37,8 +37,8 @@
 #include "shaders/fg_scale_pq_comp_spv.h"   // (fg_scale.comp with FG_SCALE_PQ: an RGB10A2 destination)
 #include "shaders/fg_synth_comp_spv.h"
 #include "shaders/hdr_encode_comp_spv.h"
-#ifndef HOOKSHOT_ENV_H   // (env_on: the switches' one rule)
-#include "hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
+#include "longshot_env.h"
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -115,7 +115,7 @@ struct ScaleState {
     bool pq = false;        // (the images above are RGB10A2, for pq, else RGBA8)
 } scale;
 
-struct HdrState {   // (hookshot) the HDR10 pass (framegen_hdr)
+struct HdrState {   // (longshot) the HDR10 pass (framegen_hdr)
     bool init = false, failed = false;
     Pipe pipe;
     Img out;
@@ -126,7 +126,7 @@ int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// (hookshot) Frame generation's Auto (the menu's 1): a frame for each refresh of the display, no more. Each game frame
+// (longshot) Frame generation's Auto (the menu's 1): a frame for each refresh of the display, no more. Each game frame
 // is given the display's refreshes that fall between it and the game's frame before (on the game's own timeline, a
 // refresh period apart), and each of them a frame made at its place between the two: 45 fps on a 60 Hz display makes one
 // frame for every three of the game's (3 of 4 shown are made, at 3/4, 1/2, 1/4), on 120 Hz two or three a frame; at
@@ -398,7 +398,7 @@ void pass(VkCommandBuffer cmd, const Pipe& p, std::initializer_list<std::pair<Vk
     full_barrier(cmd);
 }
 
-// (hookshot) The display thread's wait for a frame's time, on a high-resolution timer. sleep_for rests on the system timer,
+// (longshot) The display thread's wait for a frame's time, on a high-resolution timer. sleep_for rests on the system timer,
 // whose 1 ms (timeBeginPeriod) Windows 11 does not keep for a process whose window it takes as unseen: with the presents
 // no longer blocking (a present queue of their own) the thread slept before most frames and woke up to 20 ms after their time.
 void wait_until_near(int64_t ns) {
@@ -449,7 +449,7 @@ void display_main() {
             memset(hist, 0, sizeof hist);
             stat = {0, 0, 0, j.at};
         }
-        // (hookshot) The pacer. The game hands over frames 12 to 28 ms apart around a mean of 19, and shown as they came that
+        // (longshot) The pacer. The game hands over frames 12 to 28 ms apart around a mean of 19, and shown as they came that
         // was the stutter, whatever the frame rate. Every frame now has its place on an even line, the recent frame time
         // apart, a frame early waiting for it: never more than one game frame behind what the game handed over, and a line
         // that has fallen behind what came starts again from now. RX_VK_PACE=0: as they come.
@@ -458,7 +458,7 @@ void display_main() {
         const int shown = timed ? j.set->shown : j.set->made + 1;
         const int64_t step = interval / std::max(shown, 1);
         if (timed) menu_note_frame(true, 0);   // (the overlay's game rate: Auto counts each game frame, given a refresh or not)
-        // (hookshot) Present ahead (#1702; RX_VK_PRESENT_AHEAD=0: off). Each frame's copy into the window was submitted at its
+        // (longshot) Present ahead (#1702; RX_VK_PRESENT_AHEAD=0: off). Each frame's copy into the window was submitted at its
         // time, behind the game's next frame on the same queue, and shown only once that frame's rendering was done: at 2x the
         // game's own frames reached the screen ~3 ms after the made ones, 5.7 and 11 ms apart instead of 8.3 (PresentMon, RTX
         // 5080, 60 fps), and a VRR display's refresh changed every frame (flicker on OLED). Now a set's copies go to the GPU
@@ -515,7 +515,7 @@ void display_main() {
     }
 }
 
-// (hookshot) The last sets' makers (framegen_maker): each framegen_record notes its set's on the replay thread; the menu's
+// (longshot) The last sets' makers (framegen_maker): each framegen_record notes its set's on the replay thread; the menu's
 // thread reads the counts. A ring of kMakerSets, the counts of each maker in it
 constexpr int kMakerSets = 64;
 std::atomic<int> maker_count[4] = {kMakerSets, 0, 0, 0};
@@ -706,7 +706,7 @@ VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint
 
 VkImageView framegen_scaled_view() { return scale.scaled.view; }
 
-/// (hookshot) The Insert menu's HDR: src's crop to a dw x dh HDR10 image (PQ, Rec. 2020, 10 bits), to be copied into an HDR10
+/// (longshot) The Insert menu's HDR: src's crop to a dw x dh HDR10 image (PQ, Rec. 2020, 10 bits), to be copied into an HDR10
 /// swapchain's image as the SDR picture is (shaders/hdr_encode.comp); null when it cannot be made (then the SDR picture;
 /// Native's scaled picture, else black).
 /// src is the SDR picture, expanded, or with pq the game's own HDR10 picture (Native); either graded by the HDR contrast row
@@ -757,7 +757,7 @@ VkImage framegen_made_image(uint32_t* w, uint32_t* h) {
     return fg.recorded->frame[0].image;
 }
 
-/// (hookshot) The made frame of a 2x set by AMD FSR 3.1's frame interpolation (vk_fsr3fi.h), from this frame's colour and
+/// (longshot) The made frame of a 2x set by AMD FSR 3.1's frame interpolation (vk_fsr3fi.h), from this frame's colour and
 /// the scene's depth and motion (vk_fsr3_inputs.h): 1 when it made it into set.frame[0], 0 when it did not (no inputs this
 /// present, a reset, anything not made), which leaves the set to the interpolation below. sequence: framegen_record's count
 /// of its presents (one it did not hand over, a gap among them, makes the next one a reset: vk_fsr3fi.h Inputs::sequence)
@@ -876,7 +876,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         fg.recorded_at = now;
         return true;
     }
-    // (hookshot) NVIDIA DLSS Frame Generation through NGX where it runs and the Frame generation by row asks for it (vk_dlss.cpp):
+    // (longshot) NVIDIA DLSS Frame Generation through NGX where it runs and the Frame generation by row asks for it (vk_dlss.cpp):
     // every made frame of the set, from the scene's own depth, motion and camera. A set it does not make goes on below as before
     // (asked every present: turned off, it lets its feature go)
     if (m > 1) {
@@ -886,7 +886,7 @@ bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t
         set->made = dlss_fg_frames(cmd, fg.frames[cur].image, fg.frames[cur].view, uw, uh, m - 1, outs, views, blend, sequence);
     }
     FgMaker maker = set->made ? FgMaker::Dlss : FgMaker::None;
-    // (hookshot) At 2x, AMD FSR 3.1's frame interpolation where it runs; it makes the midpoint only, so 3x and more (and Auto,
+    // (longshot) At 2x, AMD FSR 3.1's frame interpolation where it runs; it makes the midpoint only, so 3x and more (and Auto,
     // above) stay with the interpolation below, as does any present it does not take
     if (set->made == 0 && blend && m == 2 && fsr3fi::frames_wanted()) set->made = fsr3fi_frame(cmd, *set, cur, uw, uh, sequence);
     if (maker == FgMaker::None && set->made) maker = FgMaker::Fsr3;

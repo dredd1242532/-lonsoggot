@@ -1,4 +1,4 @@
-// (hookshot) Workarounds for one GPU vendor's or driver's behaviour, chosen from the device's properties alone: who made it
+// (longshot) Workarounds for one GPU vendor's or driver's behaviour, chosen from the device's properties alone: who made it
 // (vendorID), whose driver it runs (driverID, and driverInfo where a driver names its compiler) and what kind of GPU it is.
 // vendor_fixes() is plain code with no Vulkan calls, so tests/test_vendor_fixes.py runs it on made-up devices: each fix on
 // the GPUs it is for and on no other, and NVIDIA's driver with none of them (the GPU every row of the game was checked on).
@@ -22,7 +22,7 @@ struct VendorFacts {
 
 struct VendorFixes {
     // Out-of-bounds texel fetches answered with zero in the shader (emit_spirv_image.cpp EmitImageFetch). Vulkan leaves such a
-    // fetch undefined without robustImageAccess, which Hookshot does not turn on; NVIDIA's GPUs (the Switch 2's among them)
+    // fetch undefined without robustImageAccess, which Longshot does not turn on; NVIDIA's GPUs (the Switch 2's among them)
     // return zero (measured on an RTX 3090: every texture type, past each edge, the last level and the last sample). The ground fog's shader reads depth at points projected off screen near the edges, and on AMD (RX 9070) those
     // pixels took the other branch: a pale stepped box at the left, right and top edges. Every GPU but NVIDIA's. RX_VK_FETCH_BOUNDS
     bool fetch_bounds = false;
@@ -33,7 +33,7 @@ struct VendorFixes {
     // RX_VK_NAN_BITS
     bool nan_bits = false;
     // Gathers nudged by 1/512 of a texel, so that the four texels a gather picks match Maxwell's at texel edges
-    // (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which Hookshot had never turned on). Eden and Lichii turn it on
+    // (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which Longshot had never turned on). Eden and Lichii turn it on
     // for these drivers (the AMD and Intel ones, and the mobile ones Eden runs on): shadow edges drawn as dashed lines without it.
     // RX_VK_GATHER_OFFSET
     bool gather_offset = false;

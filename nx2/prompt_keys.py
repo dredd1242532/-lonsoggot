@@ -1,10 +1,10 @@
-"""(hookshot) The keyboard face of the button prompts: which icon each key and the sticks show, and the code points they take
+"""(longshot) The keyboard face of the button prompts: which icon each key and the sticks show, and the code points they take
 (nx2/prompt_draw.py draws them, from Kenney's Input Prompts Keyboard & Mouse font, CC0, third_party/kenney_input_keyboard: the
 keys whose names are words and the mouse's buttons drawn there).
 
 The font (nx2/prompt_assets.py faces_font) has, beside the faces' icons, the icon of each key at KEY_BASE + its key code (past
 every face's code points: PAD_BASE + FACE_CODES x HOS_PROMPT_N). On the keyboard face host/prompts.c points each Switch button's
-code point at the icon of the first key bound to it (hookshot_options.ini key_<button>, the Controls page), as the pad faces point
+code point at the icon of the first key bound to it (longshot_options.ini key_<button>, the Controls page), as the pad faces point
 them at their pad input's. A text rewritten after a change while the game runs (host/prompts.c text_code) gets a code of its own
 for each Switch button and key it shows, given out as they come from SLOT_BASE: SLOTS codes no font of the game has (the CJK fonts
 use most of the private use area), each pointed at its key's icon when given out.
@@ -40,7 +40,7 @@ def kenney_name(code):
     return n[1:] if n.startswith("/") else "keyboard_" + n
 
 
-# hookshot's default keys for the Switch's buttons, in HOS_SW_* order (A B X Y LS RS L R ZL ZR Plus Minus Left Up Right Down): the
+# longshot's default keys for the Switch's buttons, in HOS_SW_* order (A B X Y LS RS L R ZL ZR Plus Minus Left Up Right Down): the
 # first of each button's keys (host/nn_hid.c key_default), the icons the font has before host/prompts.c points them at the controls
 DEFAULT = [0x45, 0x10, 0x20, 0x01, 0x11, 0x43, 0x51, 0x52, 0x5A, 0x58, 0x09, 0x4D, 0x31, 0x32, 0x33, 0x34]
 
@@ -56,7 +56,7 @@ MICE = {0x01: "left", 0x02: "right", 0x04: "middle"}
 LABEL_FONT = "Font2/Scalable/ClarimoUDPE-DemiBold.Nin_Ounce_NVN2.bfotf.zs"   # (the game's own: read from the romfs at the build)
 
 
-# ---- the sticks: the game's stick icons (L or R, with the ways they mean) as the keys that move (WASD: hookshot's defaults,
+# ---- the sticks: the game's stick icons (L or R, with the ways they mean) as the keys that move (WASD: longshot's defaults,
 # host/nn_hid.c key_default) and the mouse that turns the camera. In a text after a change while the game runs, each one's code
 # is rewritten to the face's: STICK_KEYS + its place on the keyboard face, STICK_GAME + its place (the game's own icon) on the
 # rest (host/prompts.c stick_code[]; U+F8C0..U+F8DF, in none of the game's fonts)

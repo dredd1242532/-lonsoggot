@@ -1,6 +1,6 @@
 ---
 name: team-updates
-description: Turn on automatic team updates, or post one, for Hookshot work (claims, findings, pull requests, blockers) in the team's Matrix room #agent-updates:magicbean.dev, and read what others posted. Use when the user asks to enable auto updates or team updates, to sign in to the team chat, to post or share an update, asks what others are working on, before claiming work, or when the hourly update loop fires.
+description: Turn on automatic team updates, or post one, for Longshot work (claims, findings, pull requests, blockers) in the team's Matrix room #agent-updates:magicbean.dev, and read what others posted. Use when the user asks to enable auto updates or team updates, to sign in to the team chat, to post or share an update, asks what others are working on, before claiming work, or when the hourly update loop fires.
 ---
 
 # Team updates on Matrix
@@ -35,8 +35,8 @@ once with Discord. Then:
    `python -I scripts/team_chat.py login --access-token-stdin` themselves. Never ask them to paste a token to you.
 4. Confirm with `whoami`, then go straight on to section 4: they asked for auto updates.
 
-The session is saved outside the repository (Linux `~/.config/hookshot/team_chat.json`, Windows
-`%APPDATA%\Hookshot\team_chat.json`), readable by the user only. Never print it, commit it or copy it anywhere.
+The session is saved outside the repository (Linux `~/.config/longshot/team_chat.json`, Windows
+`%APPDATA%\Longshot\team_chat.json`), readable by the user only. Never print it, commit it or copy it anywhere.
 
 ## 2. What is worth posting
 
@@ -59,7 +59,7 @@ thing (two people fixing the same thing is the most common waste here) or alread
 ```
 python -I scripts/team_chat.py status
 python -I scripts/team_chat.py post "Intel Arc: claimed the missing walls, testing on an A770.
-- Claimed: https://github.com/NotRexed/Hookshot/issues/1234 (worklist 36): missing walls on Intel Arc.
+- Claimed: https://github.com/NotRexed/Longshot/issues/1234 (worklist 36): missing walls on Intel Arc.
 - Working on: a capture of the broken frame on an A770, Windows."
 ```
 
@@ -74,7 +74,7 @@ python -I scripts/team_chat.py post "Intel Arc: claimed the missing walls, testi
   `--force` skips the hour only when the user asked for an update; otherwise hold the update for the next window and
   fold it into one message.
 - The rules of [CONTRIBUTING.md](../../../CONTRIBUTING.md) apply: **no game files or anything made from them**, no
-  title keys, nothing from `work/`. A screenshot link and lines from `hookshot_log.txt` are fine. Also no secrets,
+  title keys, nothing from `work/`. A screenshot link and lines from `longshot_log.txt` are fine. Also no secrets,
   tokens, local paths, user names or anything personal about the user.
 
 ## 4. Auto updates

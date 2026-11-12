@@ -86,7 +86,7 @@ class Homeserver:
                 body = self.body()
                 if path == "/_matrix/client/v3/login":
                     assert body == {"type": "m.login.token", "token": "one-time",
-                                    "initial_device_display_name": "Hookshot agent"}, body
+                                    "initial_device_display_name": "Longshot agent"}, body
                     return self.reply(200, {"access_token": "secret-token", "user_id": "@alice:magicbean.dev",
                                             "device_id": "DEV"})
                 if path == "/_matrix/client/v3/join/" + ALIAS and self.authorized():
@@ -129,7 +129,7 @@ def main():
     home = Homeserver()
     folder = tempfile.mkdtemp(prefix="team_chat_")
     try:
-        with mock.patch.dict(os.environ, {"HOOKSHOT_TEAM_CHAT_DIR": folder}):
+        with mock.patch.dict(os.environ, {"LONGSHOT_TEAM_CHAT_DIR": folder}):
             code, _, err = run(chat, "post", "too early")
             assert code == 1 and "not signed in" in err, err
 

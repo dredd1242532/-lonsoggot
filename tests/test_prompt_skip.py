@@ -1,7 +1,7 @@
 """Game-free prompt-cache proofs, using authored files and only replacing the expensive drawing.
 
 python -I -B tests/test_prompt_skip.py
-HOOKSHOT_PROMPT_TEST_SOURCE=/path/to/main/nx2 python -I -B tests/test_prompt_skip.py
+LONGSHOT_PROMPT_TEST_SOURCE=/path/to/main/nx2 python -I -B tests/test_prompt_skip.py
 The unchanged-build case also runs against old make_game.py: it fails because the drawing runs twice.
 """
 import ast
@@ -18,7 +18,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get("HOOKSHOT_PROMPT_TEST_SOURCE", ROOT / "nx2"))
+SOURCE = Path(os.environ.get("LONGSHOT_PROMPT_TEST_SOURCE", ROOT / "nx2"))
 sys.path.insert(0, str(SOURCE))
 spec = importlib.util.spec_from_file_location("prompt_assets", SOURCE / "prompt_assets.py")
 P = importlib.util.module_from_spec(spec)
@@ -507,7 +507,7 @@ class PromptSkipTests(unittest.TestCase):
                 self.during = None
                 self.build(packaged=packaged)
                 self.assertTrue(self.out.exists())
-                os.environ["HOOKSHOT_FORCE_PROMPTS"] = "1"
+                os.environ["LONGSHOT_FORCE_PROMPTS"] = "1"
                 def failed(out):
                     (out / "External.bfotf").write_bytes(b"partial font")
                     raise OSError("authored drawing failure")
@@ -520,7 +520,7 @@ class PromptSkipTests(unittest.TestCase):
     def test_interrupted_generation_keeps_old_output_without_stamp(self):
         self.build()
         old = (self.out / "External.bfotf").read_bytes()
-        os.environ["HOOKSHOT_FORCE_PROMPTS"] = "1"
+        os.environ["LONGSHOT_FORCE_PROMPTS"] = "1"
         def interrupt(out):
             (out / "External.bfotf").write_bytes(b"partial new font")
             raise KeyboardInterrupt()
@@ -557,10 +557,10 @@ class PromptSkipTests(unittest.TestCase):
     def test_forced_switch_and_env_on_false_values(self):
         self.build()
         for value in ("", "0", " false ", "OFF", "No"):
-            os.environ["HOOKSHOT_FORCE_PROMPTS"] = value
+            os.environ["LONGSHOT_FORCE_PROMPTS"] = value
             self.build()
             self.assertEqual(self.calls, 1)
-        os.environ["HOOKSHOT_FORCE_PROMPTS"] = "yes"
+        os.environ["LONGSHOT_FORCE_PROMPTS"] = "yes"
         self.build()
         self.assertEqual(self.calls, 2)
         self.assertIn("regenerated (forced)", self.log.getvalue())
@@ -581,7 +581,7 @@ class PromptSkipTests(unittest.TestCase):
 
     def test_incomplete_generation_leaves_no_prompts(self):
         self.build()
-        os.environ["HOOKSHOT_FORCE_PROMPTS"] = "1"
+        os.environ["LONGSHOT_FORCE_PROMPTS"] = "1"
         self.during = lambda out: (out / "External.bfotf").unlink()
         self.build()
         self.assertFalse(self.out.exists())
@@ -589,7 +589,7 @@ class PromptSkipTests(unittest.TestCase):
 
     def test_failed_publication_leaves_no_prompts(self):
         self.build()
-        os.environ["HOOKSHOT_FORCE_PROMPTS"] = "1"
+        os.environ["LONGSHOT_FORCE_PROMPTS"] = "1"
         replace = os.replace
         def fail_new(src, dst):
             if Path(src).name == "new":
@@ -609,7 +609,7 @@ class PromptSkipTests(unittest.TestCase):
 
 
     def test_unreadable_reason_is_printed_even_if_forced_generation_fails(self):
-        os.environ["HOOKSHOT_FORCE_PROMPTS"] = "1"
+        os.environ["LONGSHOT_FORCE_PROMPTS"] = "1"
         def interrupted(out):
             raise OSError("authored generation failure")
         self.during = interrupted

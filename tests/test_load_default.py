@@ -51,10 +51,10 @@ def check_source():
         raise SystemExit("vk_programs.cpp does not use load_default.h's rule")
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     built = draw.index("remove(precompile_built_path().c_str());   // (notes are added here")
-    if '"hookshot_load_start.txt").c_str());' not in draw[built:built + 400]:
-        raise SystemExit("a preparation does not remove hookshot_load_start.txt")
-    if '"hookshot_load_start.txt.waited").c_str());' not in draw[built:built + 700]:
-        raise SystemExit("a preparation does not remove the strike beside hookshot_load_start.txt")
+    if '"longshot_load_start.txt").c_str());' not in draw[built:built + 400]:
+        raise SystemExit("a preparation does not remove longshot_load_start.txt")
+    if '"longshot_load_start.txt.waited").c_str());' not in draw[built:built + 700]:
+        raise SystemExit("a preparation does not remove the strike beside longshot_load_start.txt")
 
 
 def main():

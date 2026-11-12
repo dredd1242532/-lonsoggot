@@ -16,8 +16,8 @@ import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-WINDOW = (ROOT / "builder" / "py" / "hookshot_builder" / "window.py").read_text(encoding="utf-8")
-MAIN = (ROOT / "builder" / "HookshotBuilder" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+WINDOW = (ROOT / "builder" / "py" / "longshot_builder" / "window.py").read_text(encoding="utf-8")
+MAIN = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
 
 
 def method(name):
@@ -95,22 +95,22 @@ class Window:
 
 class PythonBuilder(unittest.TestCase):
     def test_a_build_that_stopped_goes_back_as_before(self):
-        w = Window("C:/Games/Hookshot", updating=False, files_ready=True)
+        w = Window("C:/Games/Longshot", updating=False, files_ready=True)
         w.back()
         self.assertEqual(w.calls, ["step 0", "page files"])
 
     def test_an_update_that_stopped_lets_the_button_go(self):
-        w = Window("C:/Games/Hookshot", updating=True, files_ready=True)
+        w = Window("C:/Games/Longshot", updating=True, files_ready=True)
         w.back()
         self.assertFalse(w.updating)
         self.assertEqual(w.calls, ["step 0", "page files", "refresh"])
 
     def test_after_a_start_with_update_the_first_page_is_set_up_for_that_folder(self):
-        w = Window("D:/Other/Hookshot", updating=True, files_ready=False)
+        w = Window("D:/Other/Longshot", updating=True, files_ready=False)
         w.back()
         self.assertFalse(w.updating)
         self.assertEqual(w.calls, ["step 0", "page files", "find_files"])   # (start's own way to the first page)
-        self.assertEqual(w.kept_folder, "D:/Other/Hookshot")
+        self.assertEqual(w.kept_folder, "D:/Other/Longshot")
         w.back()   # (pressed again before the game files are found: not looked for twice)
         self.assertEqual(w.calls.count("find_files"), 1)
         w.calls.clear()
@@ -118,7 +118,7 @@ class PythonBuilder(unittest.TestCase):
         for t in threading.enumerate():   # (found_go asks for the newest release on a thread of its own)
             if t is not threading.current_thread():
                 t.join(5)
-        self.assertEqual(w.out_path.text(), "D:/Other/Hookshot", "the saved folder replaced the update's")
+        self.assertEqual(w.out_path.text(), "D:/Other/Longshot", "the saved folder replaced the update's")
         self.assertTrue(w.files_ready)
         self.assertLess(w.calls.index("apply_settings"), w.calls.index("fill_dumps"))
         self.assertEqual((w.latest_tag, w.calls[-1]), ("v9.9.9", "refresh_mode"))

@@ -1,9 +1,9 @@
-// (hookshot) The programs' life: the game's create, set-shaders and free calls, each program's first draw or dispatch, and the
+// (longshot) The programs' life: the game's create, set-shaders and free calls, each program's first draw or dispatch, and the
 // census of what play had to make. See vk_programs.h.
 //
 // RX_VK_LOG_PROGRAM_LIFE=1 logs each of those ("vk: program life: ...") and, every 600 presents and when the window closes, one
 // census line ("vk: program census ..."). The log answers when the game makes its programs against when it first draws them:
-// whether the work a first draw does today (a program read from hookshot_programs.bin, a pipeline made from the caches) could be
+// whether the work a first draw does today (a program read from longshot_programs.bin, a pipeline made from the caches) could be
 // done at the create call instead.
 #include <algorithm>
 #include <chrono>
@@ -91,7 +91,7 @@ struct NoteAt {
 std::vector<Signature> index_signatures;
 std::unordered_map<uint64_t, std::vector<NoteAt>> index_notes;   // by program key
 std::unordered_set<uint64_t> index_computes;
-std::unordered_set<uint64_t> index_kept;   // (every program key hookshot_programs.bin held when the index was made)
+std::unordered_set<uint64_t> index_kept;   // (every program key longshot_programs.bin held when the index was made)
 std::unordered_map<uint64_t, std::vector<uint64_t>> index_compute_variants;   // by key: the variants play dispatched before
 std::atomic<bool> index_ready{false};
 
@@ -153,9 +153,9 @@ bool ids_ready() {
         p2.pNext = &ip;
         vkGetPhysicalDeviceProperties2(dev.physical, &p2);
         const std::string cache = program_cache_path();
-        ids.open(cache.substr(0, cache.find_last_of("\\/") + 1) + "hookshot_module_ids.bin", program_cache_stamp(),
+        ids.open(cache.substr(0, cache.find_last_of("\\/") + 1) + "longshot_module_ids.bin", program_cache_stamp(),
                  ip.shaderModuleIdentifierAlgorithmUUID);
-        logf("vk: module identifiers: %zu known (hookshot_module_ids.bin): a learned compute variant's pipeline is made at its "
+        logf("vk: module identifiers: %zu known (longshot_module_ids.bin): a learned compute variant's pipeline is made at its "
              "program's create call without its code (RX_VK_MODULE_IDS=0: off)", ids.size());
     });
     return ids_on.load(std::memory_order_acquire);
@@ -356,7 +356,7 @@ bool programs_load_at_create() { return load_mode.load(std::memory_order_acquire
 namespace {
 /// (a first use ran or waited for a load, ns) The safety net (load_default.h waits_verdict): the waits longer than kLongMs, in
 /// this session. Over kNowMs of them, or over kStrikeMs in this session and in the one before it, and the next start of this
-/// install loads before the title again (hookshot_load_start.txt; a preparation removes it). Over kStrikeMs for the first
+/// install loads before the title again (longshot_load_start.txt; a preparation removes it). Over kStrikeMs for the first
 /// time only leaves a strike for the next session to find. Loads at create are for PCs where a first use hardly ever meets one
 std::atomic<int64_t> wait_worst_ns{0}, wait_long_ns{0};
 std::atomic<bool> wait_marked{false}, wait_struck{false};
@@ -381,7 +381,7 @@ void load_wait_note(int64_t ns) {
     logf("vk: first uses waited for loads for %.0f ms in this session (the longest %.0f ms; waits over %.0f ms counted): over "
          "%.0f ms%s, so the next start loads every listed program before the title again%s", long_ms, worst_ms,
          load_default::kLongMs, long_ms > load_default::kNowMs ? load_default::kNowMs : load_default::kStrikeMs,
-         long_ms > load_default::kNowMs ? "" : ", as the session before this one was", wrote ? " (hookshot_load_start.txt)" : "; the marker did not write");
+         long_ms > load_default::kNowMs ? "" : ", as the session before this one was", wrote ? " (longshot_load_start.txt)" : "; the marker did not write");
 }
 }
 
@@ -426,7 +426,7 @@ void programs_slow_upload(double ms, uint32_t width, uint32_t height, uint32_t n
 void module_ids_flush() {
     if (ids_on.load(std::memory_order_acquire) && ids.pending() && !ids.flush()) {
         static std::atomic<int> told{0};
-        if (told++ < 3) logf("vk: module identifiers: hookshot_module_ids.bin did not write");
+        if (told++ < 3) logf("vk: module identifiers: longshot_module_ids.bin did not write");
     }
 }
 void module_id_learned(uint64_t key, uint64_t variant, VkShaderModule module) {
@@ -448,7 +448,7 @@ void programs_frames_note() {
     const bool wrote = load_default::marker_write_lacked(load_fallback_path(), lacked);
     logf("vk: %lld listed pipelines were in no cache when their programs were loaded in this session (over %lld): they are "
          "compiled in play, so the next start loads every listed program before the title again%s", lacked,
-         load_default::kNotInCacheMost, wrote ? " (hookshot_load_start.txt)" : "; the marker did not write");
+         load_default::kNotInCacheMost, wrote ? " (longshot_load_start.txt)" : "; the marker did not write");
 }
 
 void programs_load_wait(uint64_t key) {

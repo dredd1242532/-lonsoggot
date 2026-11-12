@@ -3,7 +3,7 @@
 NVIDIA's Linux driver keeps no shader cache at all when that folder does not exist: it neither makes it nor falls back to
 ~/.cache/nvidia, and every start compiles every pipeline again. This cuts driver_cache_folder out of hos_main.c, compiles
 it and runs it on missing, nested, existing and impossible paths, and checks that the Linux main calls it before the
-window. It also keeps the game's Linux file named hookshot: NVIDIA files its cache by the program's file name alone, so a
+window. It also keeps the game's Linux file named longshot: NVIDIA files its cache by the program's file name alone, so a
 new name would start every player's cache from nothing.
 python -I -B tests/test_driver_cache_folder.py [--cxx c++]
 """
@@ -52,13 +52,13 @@ def main():
     if main_fn.index("driver_cache_folder();") > main_fn.index("hos_display_init()"):
         raise SystemExit("FAIL: driver_cache_folder runs after the window (SDL) may have loaded Vulkan")
     exe_name = re.search(r'^EXE = "([^"]+)" if LINUX', (ROOT / "nx2" / "build.py").read_text(encoding="utf-8"), re.M)
-    if not exe_name or exe_name.group(1) != "hookshot":
-        raise SystemExit("FAIL: the Linux game is no longer named hookshot (nx2/build.py EXE): NVIDIA's cache is filed by that name")
+    if not exe_name or exe_name.group(1) != "longshot":
+        raise SystemExit("FAIL: the Linux game is no longer named longshot (nx2/build.py EXE): NVIDIA's cache is filed by that name")
 
     cxx = shutil.which(args.cxx)
     if not cxx:
         raise SystemExit("C++ compiler not found: " + args.cxx)
-    with tempfile.TemporaryDirectory(prefix="hookshot-cache-folder-") as folder:
+    with tempfile.TemporaryDirectory(prefix="longshot-cache-folder-") as folder:
         tmp = Path(folder)
         (tmp / "t.cpp").write_text(HARNESS % function(src, "static void driver_cache_folder(void) {"), encoding="utf-8")
         exe = tmp / "t"

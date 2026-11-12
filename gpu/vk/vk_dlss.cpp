@@ -1,4 +1,4 @@
-// (hookshot) NVIDIA DLSS Super Resolution, one of the temporal upscaler's engines (vk_dlss.h). The frame chain it draws
+// (longshot) NVIDIA DLSS Super Resolution, one of the temporal upscaler's engines (vk_dlss.h). The frame chain it draws
 // with (the scene's camera and depth, the inputs, the actor motion, the jitter, the picture into the network's output) is
 // vk_temporal.cpp's; here are NGX, DLSS's feature and its evaluation.
 //
@@ -6,15 +6,15 @@
 // off). DLSS's runtime (Windows: nvngx_dlss.dll; Linux: libnvidia-ngx-dlss.so.*), and DLSS Frame Generation's beside it
 // (nvngx_dlssg.dll; libnvidia-ngx-dlssg.so.*: without one there NGX takes the driver's own copy, which may be older), is
 // looked for in RX_VK_DLSS_DIR=<folder>
-// when set, the game folder's ngx folder, and %LOCALAPPDATA%\Hookshot\ngx (Linux: $XDG_DATA_HOME/hookshot/ngx): NGX takes
+// when set, the game folder's ngx folder, and %LOCALAPPDATA%\Longshot\ngx (Linux: $XDG_DATA_HOME/longshot/ngx): NGX takes
 // the newest one it finds in them. Windows' paths are wide all the way (GetModuleFileNameW, _wgetenv), so any folder name
 // works. On Linux NGX takes only ASCII paths: a folder named otherwise goes to it as /proc/self/fd/<n> (wide()), and the
 // runtime itself has to be in a folder whose real path is ASCII (the log and the menu say so when it is not). The Insert
 // menu's DLSS model row (opts.dlss_model, upscaler_rows.h) chooses DLSS's preset: K by default, M, L, or NVIDIA's default
 // (0). RX_VK_DLSS_PRESET=<letter> (or 0) over it. RX_VK_DLSS_LOG=1: NGX's own log in ours.
 //
-// NVIDIA's NGX SDK is not part of Hookshot (NVIDIA's license): a local build fetches it (scripts/ngx_sdk.py) and builds with
-// HOOKSHOT_NGX_SDK, which compiles this file with HOOKSHOT_NGX. Without it only the stubs at the end are here.
+// NVIDIA's NGX SDK is not part of Longshot (NVIDIA's license): a local build fetches it (scripts/ngx_sdk.py) and builds with
+// LONGSHOT_NGX_SDK, which compiles this file with LONGSHOT_NGX. Without it only the stubs at the end are here.
 // NGX's core is the driver's (Windows: _nvngx.dll, which NVIDIA's loader finds in the driver's own folder; Linux:
 // libnvidia-ngx.so). It is never put beside the game: a copy there would be loaded in place of the driver's.
 #include "vk_dlss.h"
@@ -40,7 +40,7 @@
 #include "vk_temporal.h"
 #include "vk_texture.h"
 
-#ifdef HOOKSHOT_NGX
+#ifdef LONGSHOT_NGX
 #include "nvsdk_ngx_vk.h"
 #include "nvsdk_ngx_helpers.h"
 #include "nvsdk_ngx_helpers_vk.h"
@@ -73,7 +73,7 @@ DlssWhy dlss_why() {
     return w < 0 ? DLSS_OK : (DlssWhy)w;
 }
 
-#ifdef HOOKSHOT_NGX
+#ifdef LONGSHOT_NGX
 
 namespace {
 
@@ -119,7 +119,7 @@ void NVSDK_CONV ngx_log(const char* message, NVSDK_NGX_Logging_Level, NVSDK_NGX_
 
 namespace fs = std::filesystem;
 #ifdef _WIN32
-/// The game folder (game_module_path's rule: bin\hookshot.exe beside image.bin is the folder above bin), from
+/// The game folder (game_module_path's rule: bin\longshot.exe beside image.bin is the folder above bin), from
 /// GetModuleFileNameW: a folder with characters outside the ANSI code page is still the right one
 fs::path game_dir() {
     std::wstring exe(32768, L'\0');
@@ -208,17 +208,17 @@ std::vector<fs::path> runtime_dirs(const fs::path& game) {
 #ifdef _WIN32
     if (fs::path e = env_path(L"RX_VK_DLSS_DIR"); !e.empty()) dirs.push_back(e);
     dirs.push_back(game / L"ngx");
-    if (fs::path l = env_path(L"LOCALAPPDATA"); !l.empty()) dirs.push_back(l / L"Hookshot" / L"ngx");
+    if (fs::path l = env_path(L"LOCALAPPDATA"); !l.empty()) dirs.push_back(l / L"Longshot" / L"ngx");
 #else
     if (fs::path e = env_path("RX_VK_DLSS_DIR"); !e.empty()) dirs.push_back(e);
     dirs.push_back(game / "ngx");
-    if (fs::path x = env_path("XDG_DATA_HOME"); !x.empty()) dirs.push_back(x / "hookshot" / "ngx");
-    else if (fs::path h = env_path("HOME"); !h.empty()) dirs.push_back(h / ".local" / "share" / "hookshot" / "ngx");
+    if (fs::path x = env_path("XDG_DATA_HOME"); !x.empty()) dirs.push_back(x / "longshot" / "ngx");
+    else if (fs::path h = env_path("HOME"); !h.empty()) dirs.push_back(h / ".local" / "share" / "longshot" / "ngx");
 #endif
     return dirs;
 }
 
-/// (a project id of Hookshot's own: NGX wants one with the custom engine type, any GUID)
+/// (a project id of Longshot's own: NGX wants one with the custom engine type, any GUID)
 constexpr const char* kProjectId = "7b2f5d0c-6a1e-4c39-9f84-3d5e2a1b0c96";
 
 /// NGX on this device, once: false when DLSS cannot run here (the reason logged)
@@ -298,7 +298,7 @@ bool ngx_init() {
         else if (!runtime) logf("vk: NVIDIA DLSS: not available: no %s in %s (scripts/ngx_sdk.py fetches it)", kRuntime, where.c_str());
         else if (!loadable)
             logf("vk: NVIDIA DLSS: not available: %s is only in folders whose path is not all ASCII (%s), and NVIDIA's NGX on "
-                 "Linux loads it only from one that is: put it in $XDG_DATA_HOME/hookshot/ngx, or RX_VK_DLSS_DIR=<an ASCII folder>",
+                 "Linux loads it only from one that is: put it in $XDG_DATA_HOME/longshot/ngx, or RX_VK_DLSS_DIR=<an ASCII folder>",
                  kRuntime, where.c_str());
         else logf("vk: NVIDIA DLSS: not available on this GPU (%#x): DLSS needs an NVIDIA RTX GPU", (unsigned)init);
         g_why = needs_driver ? DLSS_NEEDS_DRIVER : !runtime ? DLSS_NO_RUNTIME : !loadable ? DLSS_RUNTIME_NOT_ASCII : DLSS_NEEDS_RTX;
@@ -800,7 +800,7 @@ void fg_release(Fg& g) {
     g.fw = g.fh = 0;
 }
 
-// (hookshot) Why the last set DLSS-G was asked for went to the renderer's own (dlss_fg_skip); none when DLSS-G made it.
+// (longshot) Why the last set DLSS-G was asked for went to the renderer's own (dlss_fg_skip); none when DLSS-G made it.
 // A set with nothing to blend from (a loading hitch) leaves it as it was
 std::atomic<int> fg_skip{FG_SKIP_NONE};
 std::atomic<unsigned> fg_skip_most{0};

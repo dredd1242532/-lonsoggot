@@ -55,7 +55,7 @@ VARIANTS = [
 ]
 
 
-# (hookshot) Frame interpolation and the optical flow it runs on, the same arrangement: AMD ships
+# (longshot) Frame interpolation and the optical flow it runs on, the same arrangement: AMD ships
 # each pass as GLSL over the SDK's own GPU headers, and the renderer records them as SPIR-V headers
 # beside the upscaler's. The options are the same promises about the same inputs -- the depth is
 # reversed and the motion is at the render extent -- because the inputs are the ones the upscaler is

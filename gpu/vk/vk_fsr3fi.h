@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 3.1 frame interpolation, and the optical flow it runs on, recorded as our own Vulkan compute passes:
+// (longshot) AMD FSR 3.1 frame interpolation, and the optical flow it runs on, recorded as our own Vulkan compute passes:
 // the made frame between two of the game's when the Frame generation row is 2x.
 //
 // The renderer already makes frames: vk_framegen.cpp interpolates between the last two presented frames from colour alone.

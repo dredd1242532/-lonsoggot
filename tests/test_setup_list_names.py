@@ -10,12 +10,12 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "builder" / "py"))
-from hookshot_builder import setup_parts  # noqa: E402
+from longshot_builder import setup_parts  # noqa: E402
 
 SHA = "0123456789abcdef" * 4
 
 
-def read(tag="v2", sha=SHA, dest="HookshotBuilder/tools", size="100"):
+def read(tag="v2", sha=SHA, dest="LongshotBuilder/tools", size="100"):
     text = "tag %s\npart %s %s %s - llvm-mingw https://x/y.zip\nrun a.exe\n" % (tag, sha, size, dest)
     with mock.patch.object(setup_parts.Http, "get", lambda self, url, **kw: text.encode()):
         return setup_parts.read_manifest(lambda s: None)
@@ -30,7 +30,7 @@ class SetupListNamesTests(unittest.TestCase):
                 read(**bad)
 
     def test_a_part_is_reused_only_for_its_exact_checksum(self):
-        with tempfile.TemporaryDirectory() as base, mock.patch.dict(os.environ, {"HOOKSHOT_SETUP_BASE": base}):
+        with tempfile.TemporaryDirectory() as base, mock.patch.dict(os.environ, {"LONGSHOT_SETUP_BASE": base}):
             v = Path(base, "versions")
             (v / "v1" / "tools" / "llvm-mingw").mkdir(parents=True)
             (v / "current.txt").write_text("v1")

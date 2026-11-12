@@ -1,4 +1,4 @@
-// (hookshot) The program cache: hookshot_programs.bin (and its .idx) beside the game, what translation made, kept between runs; its
+// (longshot) The program cache: longshot_programs.bin (and its .idx) beside the game, what translation made, kept between runs; its
 // reads for play, the precompile, the prediction and the prepare; and the sizes of the prepare's worker pools.
 //
 // Not part of the translator stamp (nx2/build.py hashes vk_shader.cpp, vk_bank.cpp, vk_state.h, vk_api.h and the recompiler's
@@ -9,7 +9,7 @@
 // written as they lie in memory: Program::Answer, the questions, Stage::c1 and the head's words (vk_shader.h, which the translator
 // stamp does not cover); the static_asserts beside kProgramCacheFormat stop a build whose layout of those changed, so that it is
 // raised. (Shader::Info, also written as it lies, is the recompiler's: its folders are in the translator stamp.) The pipeline notes,
-// the state lists' notes and hookshot_prepared.bin are stamped with program_cache_stamp too, so they go with it
+// the state lists' notes and longshot_prepared.bin are stamped with program_cache_stamp too, so they go with it
 #ifndef _WIN32
 #include <fcntl.h>
 #include <sys/file.h>
@@ -34,7 +34,7 @@
 #include "zstd.h"
 
 #include "shader_recompiler/shader_info.h"
-#include "hookshot_env.h"
+#include "longshot_env.h"
 #include "fallback_loaded.h"
 #include "fallback_size_policy.h"
 #include "vk_paths.h"
@@ -44,7 +44,7 @@
 
 namespace mkwvk {
 
-/// (hookshot) The cache's own format: raise it with any change to what a record holds or how the file or its index is laid out
+/// (longshot) The cache's own format: raise it with any change to what a record holds or how the file or its index is laid out
 constexpr uint32_t kProgramCacheFormat = 1;
 // (what a record holds as it lies in memory, as format 1 has it: a build that changes one stops here. Raise kProgramCacheFormat, then
 // change these to the new layout)
@@ -72,26 +72,26 @@ uint64_t program_cache_stamp() {
     return stamp;
 }
 
-// ---- (hookshot) The program cache, hookshot_programs.bin beside the executable: what translation made, by the key of the
+// ---- (longshot) The program cache, longshot_programs.bin beside the executable: what translation made, by the key of the
 // stages' code and inputs. A program met for the first time stopped the frame for its translation, 9 s of it each run,
 // the long stutters when walking somewhere (replay workers in jobs_wait for up to 150 ms). The pipelines themselves were
-// already kept (mkw_vk_pipelines.bin). Written as made; good for this translator (HOOKSHOT_SHADER_STAMP) and these switches only
+// already kept (mkw_vk_pipelines.bin). Written as made; good for this translator (LONGSHOT_SHADER_STAMP) and these switches only
 // (a file made by another starts again). RX_VK_NO_PROGRAM_CACHE=1: off ----
 std::mutex disk_mu;
 // (read as wanted: with every program of the game in it the file is gigabytes, and it was read into memory whole)
 FILE* disk_in = nullptr;
-std::string disk_path;   // (hookshot_programs.bin: the precompile opens it once a thread)
+std::string disk_path;   // (longshot_programs.bin: the precompile opens it once a thread)
 std::unordered_map<uint64_t, std::vector<DiskRecord>> disk_records;
-// (hookshot) the records program_cache_load and program_cache_load_some took out of disk_records as they read them in: still in the
+// (longshot) the records program_cache_load and program_cache_load_some took out of disk_records as they read them in: still in the
 // file, and still kept programs to the prediction (program_cache_each). Without them a first start's prediction saw none of the
 // programs the state list's notes name, which its own preparation had just read in: "predicted 0 pipelines" on every new build
 std::unordered_map<uint64_t, std::vector<DiskRecord>> disk_taken;
 FILE* disk_out = nullptr;
-// (the records' heads, in the file's order, in hookshot_programs.idx beside it: see disk_init)
+// (the records' heads, in the file's order, in longshot_programs.idx beside it: see disk_init)
 FILE* disk_idx = nullptr;
 bool disk_listing = false;
 bool disk_on = false;
-bool disk_zstd = false;   // (hookshot) RX_VK_PROGRAM_CACHE_ZSTD=1: records compressed with zstd, hookshot_programs.zst.bin
+bool disk_zstd = false;   // (longshot) RX_VK_PROGRAM_CACHE_ZSTD=1: records compressed with zstd, longshot_programs.zst.bin
 std::atomic<int64_t> st_cache_hits{0};
 constexpr uint32_t kDiskMagic = 0x31505348;
 constexpr uint32_t kDiskMagicZstd = 0x32505348;   // ("HSP2": a 20-byte record head, key, stored size, kind)
@@ -129,21 +129,21 @@ void disk_init() {
     static std::once_flag once;
     std::call_once(once, [] {
         if (env_on("RX_VK_NO_PROGRAM_CACHE")) return;
-        // (hookshot) RX_VK_PROGRAM_CACHE_ZSTD=1: each record compressed with zstd, in a file of its own so that a build
+        // (longshot) RX_VK_PROGRAM_CACHE_ZSTD=1: each record compressed with zstd, in a file of its own so that a build
         // without this switch never reads it. SPIR-V compresses about 7.7x at zstd's level 3.
         disk_zstd = env_on("RX_VK_PROGRAM_CACHE_ZSTD");
         char exe[MAX_PATH];
         const DWORD n = game_module_path(exe, MAX_PATH);
         std::string path(exe, n);
-        path = path.substr(0, path.find_last_of("\\/") + 1) + (disk_zstd ? "hookshot_programs.zst.bin" : "hookshot_programs.bin");
-        // (one Hookshot at a time on a cache: a second one, started while the first wrote, took the record being written for one
+        path = path.substr(0, path.find_last_of("\\/") + 1) + (disk_zstd ? "longshot_programs.zst.bin" : "longshot_programs.bin");
+        // (one Longshot at a time on a cache: a second one, started while the first wrote, took the record being written for one
         // cut short and cut the file there, under the first, whose list of records then named bytes written over since. Held
         // until the process ends)
         {
             uint64_t h = 0xCBF29CE484222325ull;
             for (const char ch : path) h = (h ^ (uint8_t)tolower((unsigned char)ch)) * 1099511628211ull;
             char name[64];
-            snprintf(name, sizeof name, "Local\\HookshotProgramCache_%016llx", (unsigned long long)h);
+            snprintf(name, sizeof name, "Local\\LongshotProgramCache_%016llx", (unsigned long long)h);
 #ifdef _WIN32
             const HANDLE held = CreateMutexA(nullptr, FALSE, name);
             const bool taken = !held || GetLastError() == ERROR_ALREADY_EXISTS;
@@ -152,14 +152,14 @@ void disk_init() {
             const bool taken = fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0;
 #endif
             if (taken) {
-                logf("vk: program cache %s: another Hookshot is using it: this one runs without it", path.c_str());
+                logf("vk: program cache %s: another Longshot is using it: this one runs without it", path.c_str());
                 return;
             }
         }
         const uint64_t stamp = program_cache_stamp();
         const size_t head_size = disk_zstd ? kZstdHead : 16;   // (the zstd cache's head has the record's kind too)
         const uint32_t magic = disk_zstd ? kDiskMagicZstd : kDiskMagic;
-        // (hookshot_programs.idx: the records' heads, 20 bytes each, in the file's order. The records follow one another in the
+        // (longshot_programs.idx: the records' heads, 20 bytes each, in the file's order. The records follow one another in the
         // file, so finding them was a read of each one's head, 22000 of them over the 4 GB: seconds at every start, each a read
         // somewhere else on the disk (and on a compressed file system a block of 128 KB unpacked for those 20 bytes). The index
         // is taken when its stamp is the cache's, its sizes fit in the file and the last record's head in the file is the one
@@ -280,7 +280,7 @@ template <class V> void put_list(std::vector<uint8_t>& o, const V& v) {
     for (const auto& e : v) put(o, e);
 }
 
-/// (hookshot) A program record's head, what comes before its stages: written and read only here, so that program_cache_read and
+/// (longshot) A program record's head, what comes before its stages: written and read only here, so that program_cache_read and
 /// program_cache_each read the same fields. program_cache_each read only the first ones and took the mesh fallback's five words
 /// for the stage count: no kept program reached the prediction (vk_predict.cpp, "predicted 0 pipelines")
 void put_head(std::vector<uint8_t>& o, const Program& p) {
@@ -324,7 +324,7 @@ void put_info(std::vector<uint8_t>& o, const Shader::Info& i) {
     put(o, (uint64_t)i.handle_programs.size());
     for (const auto& h : i.handle_programs) put_list(o, h);
 }
-/// (hookshot) every descriptor array within kMaxDescriptorCount: the counts come from hookshot_programs.bin, and two of 2^31
+/// (longshot) every descriptor array within kMaxDescriptorCount: the counts come from longshot_programs.bin, and two of 2^31
 /// wrapped the layout's sum to 0 (a push layout with billions of descriptors), and one made the binds loop that often
 constexpr uint32_t kMaxDescriptorCount = 4096;
 template <class Info> bool descriptor_counts_fit(const Info& i) {
@@ -506,7 +506,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
             st.phis = fallback_size::spirv_phis(spirv.data(), spirv.size());
             ok = ok && st.module;
         }
-        ok = ok && answers_fit(*p, p->answers);   // (hookshot: an answer past the stages or their slots: not this record)
+        ok = ok && answers_fit(*p, p->answers);   // (longshot: an answer past the stages or their slots: not this record)
         if (!ok) {
             static std::atomic<int> logged{0};
             // Program owns the stage containers, but their Vulkan handles are not RAII-managed.
@@ -527,7 +527,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
     }
 }
 
-// ---- (hookshot) A compute program's kept variants, read at its first dispatch without their code. A key has up to 64 kept
+// ---- (longshot) A compute program's kept variants, read at its first dispatch without their code. A key has up to 64 kept
 // variants (the texture answers the prepare tried), and the dispatch runs one: which one is decided from each variant's answers
 // and its stage's descriptors (vk_shader.cpp still_valid), not from its SPIR-V. Reading every variant whole and making a module
 // of each was half of what a first dispatch cost on the thread replaying (RTX 3090, a tour with no compute program kept ready:
@@ -688,7 +688,7 @@ void program_cache_load(uint64_t key, std::vector<std::unique_ptr<Program>>& var
     }
 }
 
-// ---- (hookshot) The records by position, for the load when the game makes a program (vk_programs.cpp) ----
+// ---- (longshot) The records by position, for the load when the game makes a program (vk_programs.cpp) ----
 bool program_cache_has(uint64_t key) {
     disk_init();
     if (!disk_on) return false;
@@ -824,7 +824,7 @@ size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const
     return n;
 }
 
-/// (hookshot) Program key's kept variants made for fn, then let go (modules and layouts): the records stay for play
+/// (longshot) Program key's kept variants made for fn, then let go (modules and layouts): the records stay for play
 void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn) {
     std::vector<std::unique_ptr<Program>> variants;
     program_cache_load(key, variants, true);
@@ -837,7 +837,7 @@ void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn)
     }
 }
 
-/// (hookshot, the prepare's driver part: vk_draw.cpp warm_libraries) the key of every kept graphics and mesh program, whoever made
+/// (longshot, the prepare's driver part: vk_draw.cpp warm_libraries) the key of every kept graphics and mesh program, whoever made
 /// it (the seed, a state list, play), in the file's order, from the list of records alone: program_cache_each reads every record
 /// for its list, the whole file (6.7 GB with every program of the game). *loaded: the variants read in already, whose records
 /// that list no longer names (see loaded_variants)
@@ -860,7 +860,7 @@ std::vector<uint64_t> program_cache_keys(std::vector<Program*>* loaded) {
     return keys;
 }
 
-/// (hookshot, the prediction: vk_predict.cpp) every kept graphics program variant, read without making its modules. fn is called on
+/// (longshot, the prediction: vk_predict.cpp) every kept graphics program variant, read without making its modules. fn is called on
 /// several threads at once, in no order
 void program_cache_each(const std::function<void(const KeptProgram&)>& fn) {
     disk_init();

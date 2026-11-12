@@ -1,4 +1,4 @@
-using HookshotBuilder;
+using LongshotBuilder;
 
 sealed class Tools;
 static class Storage { public static string NgxSdk = ""; }
@@ -46,7 +46,7 @@ static class Program
     static void Main()
     {
         // Authored placeholders only: no NVIDIA SDK, runtime or game data is used.
-        var root = Path.Combine(Path.GetTempPath(), "hookshot-dlss-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "longshot-dlss-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
@@ -96,13 +96,13 @@ static class Program
             Update(game, false); // A tick saved before AMD's license was asked fetches nothing.
             File.WriteAllText(Window.SettingsPath, "{\"Fsr\":false}");
             Update(game, false);
-            File.WriteAllText(Path.Combine(game, ".hookshot_fsr"), "");
+            File.WriteAllText(Path.Combine(game, ".longshot_fsr"), "");
             Update(game, false); // A folder built with FSR 4, its DLLs the player's own: nothing to fetch.
             File.WriteAllText(Path.Combine(game, "amd_fidelityfx_upscaler_vk.dll"), "authored upscaler placeholder");
             Update(game, false); // A DLL alone does not accept AMD's license.
             File.WriteAllText(Path.Combine(game, "LICENSE-AMD-FSR-SDK.md"), "authored license placeholder");
             Update(game, false, fsr: true);
-            File.Delete(Path.Combine(game, ".hookshot_fsr"));
+            File.Delete(Path.Combine(game, ".longshot_fsr"));
             Update(game, false); // Built without FSR 4 since: not opted back in.
             Console.WriteLine($"Builder DLSS update checks passed ({checks} assertions).");
         }

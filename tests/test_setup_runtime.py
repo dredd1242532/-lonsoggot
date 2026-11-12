@@ -24,7 +24,7 @@ def main():
     assert required and len(set(required)) == len(required)
     prelude = '#define WIN32_LEAN_AND_MEAN\n#define _CRT_SECURE_NO_WARNINGS\n#include <windows.h>\n#include <shellapi.h>\n#include <wchar.h>\n#include <stdio.h>\n'
     driver = '\nint main(void) { int argc; wchar_t **argv=CommandLineToArgvW(GetCommandLineW(), &argc); if(!argv || argc != 2) return 2; printf("%d\\n",builder_ready(argv[1])); LocalFree(argv); return 0; }\n'
-    with tempfile.TemporaryDirectory(prefix="hookshot-setup-runtime-") as temp:
+    with tempfile.TemporaryDirectory(prefix="longshot-setup-runtime-") as temp:
         root = Path(temp)
         source = root / "fixture.cpp"
         source.write_text(prelude + helper + driver, encoding="utf-8")
@@ -32,7 +32,7 @@ def main():
         subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(source), "-lshell32", "-o", str(exe)], check=True)
         folder = root / "Builder space é"
         folder.mkdir()
-        names = ["HookshotBuilder.exe"] + required
+        names = ["LongshotBuilder.exe"] + required
         for name in names:
             (folder / name).write_bytes(b"authored fixture, not a program")
         app = folder / names[0]

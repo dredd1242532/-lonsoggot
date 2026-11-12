@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     CHECK(!choose(nullptr, true, true).create);
     CHECK(!choose(nullptr, false, true).create);
     CHECK(choose("", true, false).create && choose("1", true, false).create && !choose("yes", false, false).create);
-    CHECK(std::strstr(choose(nullptr, true, true).why, "hookshot_load_start.txt"));
+    CHECK(std::strstr(choose(nullptr, true, true).why, "longshot_load_start.txt"));
     // the safety net: the measured good sessions pass, the measured bad ones do not; at the limits it has not fired
     using load_default::Waits;
     using load_default::waits_verdict;
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     CHECK(waits_verdict(2000, false) == Waits::kStrike);
     // the strike: not there, written, taken once
     {
-        const std::string m = std::string(argv[1]) + "/hookshot_load_start.txt";
+        const std::string m = std::string(argv[1]) + "/longshot_load_start.txt";
         CHECK(!load_default::strike_take(m));
         CHECK(load_default::strike_write(m, 640.2) && load_default::marker_there(load_default::strike_path(m)));
         CHECK(!load_default::marker_there(m));   // (a strike is not the marker)
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     // however long the session
     CHECK(!caches_lacked(0));
     // the marker: not there, written, there; its text says how to take it away
-    const std::string path = std::string(argv[1]) + "/hookshot_load_start.txt";
+    const std::string path = std::string(argv[1]) + "/longshot_load_start.txt";
     CHECK(!load_default::marker_there(path));
     CHECK(load_default::marker_write(path, 884.4, 2556.6) && load_default::marker_there(path));
     char text[400]{};

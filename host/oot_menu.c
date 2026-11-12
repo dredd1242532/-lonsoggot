@@ -13,8 +13,8 @@
    and hands it to the focus manager (*(screen+32)+96, its vtable +48), when the manager takes the player's input.
    HOS_MENU_TRACE=1: the focus changes, the screens and what the mouse does logged. */
 #include "hos.h"
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 #if defined(_WIN32)
 #include <windows.h>

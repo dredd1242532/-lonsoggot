@@ -11,7 +11,7 @@ The real keyboard polling block is also compiled to exercise both shortcut keys 
 With it, menu_tick's Esc block, gpu/vk/vk_menu.h's real Options and the Menu shortcut row's names: out of the box (no
 options file, or one without menu_shortcut=) the shortcut is "Insert, F1 or Esc", and Esc opens a closed menu, as a PC
 game's pause menu, without that press also going back a page; open, the press is left to go back or close it. And
-menu_init's reading of hookshot_options.ini: a file from before options_version 5 wrote Insert or F1, the default then,
+menu_init's reading of longshot_options.ini: a file from before options_version 5 wrote Insert or F1, the default then,
 whether chosen or not, and loads as Insert, F1 or Esc; F1 only stays, and a file from version 5 on, up to the version
 save() writes now, keeps each choice.
 
@@ -188,7 +188,7 @@ static void test_esc() {
     std::puts("PASS: out of the box, Esc opens the closed menu (Insert, F1 or Esc); Insert or F1 and F1 only leave it closed");
 }
 
-// (menu_init's reading of hookshot_options.ini, stubbed around: the Menu shortcut row as the only row)
+// (menu_init's reading of longshot_options.ini, stubbed around: the Menu shortcut row as the only row)
 static std::string ini_file;
 static std::string ini_path() { return ini_file; }
 static int parse_output(const char*) { return 0; }
@@ -250,7 +250,7 @@ def main():
     a = p.parse_args()
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     tick = menu[menu.index("void menu_tick() {"):]
-    key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (hookshot) the gamepads")]
+    key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (longshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
     esc_block = tick[esc_at:tick.index("    if (open_now.load() && page == 5) {", esc_at)]
     tx_at = menu.index("const char* tx_menu_shortcut(int v) {")
@@ -285,7 +285,7 @@ def main():
         # (_CRT_SECURE_NO_WARNINGS: the MSVC CRT's fopen deprecation, as the game's own Windows build passes)
         subprocess.run([a.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-I" + str(ROOT), str(cpp),
                         "-o", str(exe)], check=True)
-        subprocess.run([str(exe), str(Path(tmp) / "hookshot_options.ini")], check=True)
+        subprocess.run([str(exe), str(Path(tmp) / "longshot_options.ini")], check=True)
 
     need(menu, r'\{TAB_CONTROLS, "Menu shortcut", &opts\.menu_shortcut, 0, 2, 1, tx_menu_shortcut,[^}]*nullptr, false, true\}',
          "the shortcut choice must be saved in Controls and exempt from presets")

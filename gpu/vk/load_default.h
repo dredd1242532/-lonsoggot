@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// (hookshot) When kept programs are loaded, where RX_VK_LOAD does not say: at their create calls (create) or all before the
+// (longshot) When kept programs are loaded, where RX_VK_LOAD does not say: at their create calls (create) or all before the
 // title (start), and the safety net that takes an install back to start. Nothing of Vulkan here: tests/test_load_default.py.
 #pragma once
 #include <cstdio>
@@ -22,7 +22,7 @@ inline Choice choose(const char* env, bool native_mesh, bool marker, bool compre
     if (env && !std::strcmp(env, "create")) return {true, "RX_VK_LOAD=create"};
     if (env && !std::strcmp(env, "start")) return {false, "RX_VK_LOAD=start"};
     if (!native_mesh) return {false, "this GPU draws mesh programs through the compute fallback"};
-    if (marker) return {false, "in an earlier session first uses waited too long for loads (hookshot_load_start.txt)"};
+    if (marker) return {false, "in an earlier session first uses waited too long for loads (longshot_load_start.txt)"};
     return {true, "the default where the GPU has mesh shaders"};
 }
 
