@@ -5,6 +5,7 @@ ones took, and the last build again, with the same arguments, tools and environm
     python -I nx2/dev.py times [-n N] [--work DIR]    the last builds' times, phase by phase (build_times.json, make_game.py)
     python -I nx2/dev.py build [--dev] [--work DIR]   the last make_game.py build again (its last_build.json); --dev: the dev
                                                       profile (LONGSHOT_PROFILE=dev: a console, no shader preparation at start)
+    python -I nx2/dev.py compdb [--work DIR]          the last build's compile_commands.json at the checkout's top (clangd)
 
 The work folder is --work, else OOT_WORK, else the checkout's work/. Nothing here reads the game's files beyond what the build's
 own key reads (the exefs files' hashes), and nothing it prints comes from them. Standard library only.
@@ -118,6 +119,17 @@ def times_table(work, n):
     return ["%-*s  %s" % (width, label, "  ".join("%16s" % c for c in cells)) for label, cells in rows]
 
 
+def compdb(work):
+    """The last build's compile_commands.json (nx2/build.py write_compdb) at the checkout's top, where clangd and clang-tidy look"""
+    import shutil
+    src = os.path.join(work, "sa", "build", "compile_commands.json")
+    if not os.path.isfile(src):
+        raise SystemExit("no %s: build once (nx2/make_game.py, or dev.py build) first" % src)
+    shutil.copyfile(src, os.path.join(ROOT, "compile_commands.json"))
+    print("compile_commands.json: %s" % os.path.join(ROOT, "compile_commands.json"))
+    return 0
+
+
 def replayed(argv):
     """The last build's arguments for this one: all of them but --log and its file (that build's log, not this one's)"""
     out, skip = [], False
@@ -147,7 +159,7 @@ def build(work, dev):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
-    for name in ("status", "times", "build"):
+    for name in ("status", "times", "build", "compdb"):
         q = sub.add_parser(name)
         q.add_argument("--work")
         if name == "times":
@@ -156,6 +168,8 @@ def main(argv=None):
             q.add_argument("--dev", action="store_true")
     a = p.parse_args(argv)
     work = work_folder(a.work)
+    if a.command == "compdb":
+        return compdb(work)
     if a.command == "build":
         return build(work, a.dev)
     if a.command == "times":

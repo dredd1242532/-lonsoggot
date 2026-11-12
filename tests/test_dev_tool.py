@@ -156,6 +156,16 @@ class TimesAndBuildTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 dev.build(str(Path(d) / "none"), dev=False)
 
+    def test_compdb_puts_the_last_builds_at_the_top(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as top:
+            (Path(d) / "sa" / "build").mkdir(parents=True)
+            (Path(d) / "sa" / "build" / "compile_commands.json").write_text("[]")
+            with mock.patch.object(dev, "ROOT", top), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(dev.compdb(d), 0)
+            self.assertEqual((Path(top) / "compile_commands.json").read_text(), "[]")
+            with self.assertRaises(SystemExit):
+                dev.compdb(str(Path(d) / "none"))
+
 
 if __name__ == "__main__":
     raise SystemExit(unittest.main(verbosity=1))
