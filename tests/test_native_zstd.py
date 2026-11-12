@@ -415,8 +415,10 @@ E_CHECKSUM, E_DICT, E_PREFIX, E_ROOM, E_SRCSIZE = 22, 32, 10, 70, 72   # (zstd's
 
 
 def whole(frame, room, dd=0, raw=(0, 0)):
-    """one call of the whole-buffer decode: the frames at SRC[0], the output at DST"""
-    return ([(SRC[0], frame)], [WORK, DST, room, SRC[0], len(frame), raw[0], raw[1], dd])
+    """one call of the whole-buffer decode: the frames at SRC[0], the output at DST, nonzero guard bytes on both sides of
+    the output room (a write past it shows even when it writes zero)"""
+    guard = bytes([0xA5]) * 64
+    return ([(SRC[0], frame), (DST - 64, guard), (DST + room, guard)], [WORK, DST, room, SRC[0], len(frame), raw[0], raw[1], dd])
 
 
 def zerr(x0):
