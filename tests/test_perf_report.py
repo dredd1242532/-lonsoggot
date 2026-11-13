@@ -7,6 +7,7 @@ frame added at each present, the events where they happen), and the launcher's s
     and a release only for the folder's build; each one the relay took or refused is deleted; one it couldn't take now
     (not reached, 429, 5xx) stops the sending and stays; with the tick off nothing is sent;
   - at most 48 wait: the oldest past that go unsent;
+  - each one the relay took is kept as sent in perf_sent/ (the newest 48), for a tester to read; off deletes those too;
   - the relay's address is perf_reports in nx2/addresses.ini (none in the code);
   - the summary's map before the first one: "Preparing shaders", then "Title and intro".
 
@@ -90,6 +91,10 @@ def launcher_side(tmp):
         check(all(b["version"] == "v3.1.0" and b["release"] is True for b in relay.bodies),
               "the version and the release flag filled in")
         check(not list((f / pr.PENDING).glob("*.json")), "each one sent is deleted")
+        kept = sorted((f / pr.SENT).glob("*.json"))
+        check([json.loads(p.read_text())["n"] for p in kept] == [0, 1, 2]
+              and json.loads(kept[0].read_text())["version"] == "v3.1.0",
+              "a copy of each one sent is kept in perf_sent/, as sent")
 
         f2 = game_folder(tmp, "edited", log_source="ffff0000")
         relay.bodies.clear()
@@ -121,14 +126,18 @@ def launcher_side(tmp):
 
         f5 = game_folder(tmp, "turned off")
         (f5 / pr.PENDING / "1700000099-9.tmp").write_text("{")
+        pr.send_waiting(str(f5), url=relay.url)
+        (f5 / pr.PENDING / "1700000098-8.json").write_text("{}")
         pr.set_sending(str(f5), False)
-        check(not (f5 / pr.CHOICE).exists() and not list((f5 / pr.PENDING).iterdir()),
-              "turning the tick off deletes the setting and what is waiting")
+        check(not (f5 / pr.CHOICE).exists() and not list((f5 / pr.PENDING).iterdir())
+              and not list((f5 / pr.SENT).iterdir()),
+              "turning the tick off deletes the setting, what is waiting and the copies of what was sent")
 
         f6 = game_folder(tmp, "many", summaries=pr.MAX_PENDING + 5)
         relay.bodies.clear()
         pr.send_waiting(str(f6), url=relay.url)
         check(len(relay.bodies) == pr.MAX_PENDING and relay.bodies[0]["n"] == 5, "at most 48: the oldest go unsent")
+        check(len(list((f6 / pr.SENT).glob("*.json"))) == pr.MAX_PENDING, "perf_sent/ keeps the newest 48")
     finally:
         relay.close()
 

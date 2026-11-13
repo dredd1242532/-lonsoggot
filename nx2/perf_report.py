@@ -8,7 +8,9 @@ the game left in the game folder's perf_pending/.
     oldest first, and deletes each one the relay took or refused; one it couldn't reach stays for next time.
   - The sender fills in version and release (the release flag as the crash report has it: a release's version, built
     from the release's own sources), which the game can't know.
-  - Turning the tick off deletes what is waiting: the player said no.
+  - Each summary the relay took is also kept, as it was sent, in perf_sent/ (the newest 48): what went to the team, for the
+    player or a tester to read.
+  - Turning the tick off deletes what is waiting, and what perf_sent/ kept: the player said no.
 
 python -I nx2/perf_report.py <game folder>            what would be sent, sends nothing
 python -I nx2/perf_report.py <game folder> --send     sends it (what the launchers start: start_sending)
@@ -27,6 +29,7 @@ from addresses import address  # noqa: E402
 ENDPOINT = address("perf_reports")
 CHOICE = "longshot_perf.ini"   # (send=1: the launcher's tick; the game reads it, gpu/vk/perf_report.cpp)
 PENDING = "perf_pending"
+SENT = "perf_sent"   # (a copy of each summary the relay took, as sent: the newest MAX_PENDING)
 VERSION_FILE = "longshot_version.txt"
 LOGS = ["longshot_log.txt"] + ["longshot_log.%d.txt" % k for k in range(1, 5)]
 MAX_PENDING = 48   # (the newest kept when the launcher hasn't been back for long: older ones go unsent)
@@ -57,28 +60,31 @@ def set_sending(folder, on):
         os.remove(path)
     except OSError:
         pass
-    try:
-        names = [n for n in os.listdir(os.path.join(folder, PENDING)) if n.endswith((".json", ".tmp"))]
-    except OSError:
-        names = []
-    for name in names:   # (and a summary the game was writing when it was cut short: its .tmp)
+    for sub in (PENDING, SENT):   # (and a summary the game was writing when it was cut short: its .tmp)
         try:
-            os.remove(os.path.join(folder, PENDING, name))
+            names = [n for n in os.listdir(os.path.join(folder, sub)) if n.endswith((".json", ".tmp"))]
         except OSError:
-            pass
+            names = []
+        for name in names:
+            try:
+                os.remove(os.path.join(folder, sub, name))
+            except OSError:
+                pass
+
+
+def order(name):
+    """A summary's place, oldest first: its name is <unix time>-<n>.json"""
+    m = re.match(r"(\d+)-(\d+)\.json$", name)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
 
 def waiting(folder):
-    """The summaries waiting, oldest first (their names are <unix time>-<n>.json)"""
+    """The summaries waiting, oldest first"""
     try:
         names = [n for n in os.listdir(os.path.join(folder, PENDING)) if n.endswith(".json")]
     except OSError:
         return []
-
-    def key(n):
-        m = re.match(r"(\d+)-(\d+)\.json$", n)
-        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-    return sorted(names, key=key)
+    return sorted(names, key=order)
 
 
 def build_facts(folder):
@@ -160,11 +166,27 @@ def send_waiting(folder, url=None, timeout=10):
             counts["left"] = len(names) - i
             break
         counts[result] += 1
+        if result == "sent":
+            keep_sent(folder, name, body)
         try:
             os.remove(path)
         except OSError:
             pass
     return counts
+
+
+def keep_sent(folder, name, body):
+    """A copy of what the relay took, as sent, in perf_sent/: the newest MAX_PENDING. Best effort: the summary is sent"""
+    sent = os.path.join(folder, SENT)
+    try:
+        os.makedirs(sent, exist_ok=True)
+        with open(os.path.join(sent, name), "wb") as f:
+            f.write(body)
+        names = sorted((n for n in os.listdir(sent) if n.endswith(".json")), key=order)
+        for old in names[:-MAX_PENDING]:
+            os.remove(os.path.join(sent, old))
+    except OSError:
+        pass
 
 
 def start_sending(folder, python=None, python_args=()):
@@ -192,8 +214,13 @@ def main():
         print(send_waiting(folder))
         return
     version, release = build_facts(folder)
-    print("tick: %s, waiting: %d, version %s, release %s, to %s" % (
-        "on" if sending(folder) else "off", len(waiting(folder)), version or "?", release, ENDPOINT or "nowhere"))
+    try:
+        kept = sum(n.endswith(".json") for n in os.listdir(os.path.join(folder, SENT)))
+    except OSError:
+        kept = 0
+    print("tick: %s, waiting: %d, version %s, release %s, to %s; %d sent ones kept in %s" % (
+        "on" if sending(folder) else "off", len(waiting(folder)), version or "?", release, ENDPOINT or "nowhere", kept,
+        os.path.join(folder, SENT)))
 
 
 if __name__ == "__main__":

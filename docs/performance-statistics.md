@@ -8,7 +8,9 @@ renderer and map, each on its own.
 ## What the player sees
 
 - The tick, on the launcher's page. Ticking it writes `send=1` to the game folder's `longshot_perf.ini`;
-  unticking deletes the file and every summary that hasn't been sent yet.
+  unticking deletes the file, every summary that hasn't been sent yet, and the copies in `perf_sent/`.
+- `perf_sent/` in the game folder: each summary the relay took, exactly as it was sent (the newest 48). A player or a
+  tester can open them to see what went to the team; `python -I nx2/perf_report.py <folder>` says how many are there.
 - Nothing in the game. The log says `vk: performance statistics on (...)` at the first frame when it's on.
 
 ## What is sent
@@ -54,7 +56,8 @@ summary carries no ID, so two summaries can't be tied to one player.
 - **The launcher** (LongshotLauncher, with `nx2/perf_report.py`): it shows the tick, and at its start runs
   `nx2/perf_report.py <folder> --send` in a process of its own, so Play, which closes the launcher at once, doesn't cut a
   send short. It sends what is waiting to `perf_reports` in `nx2/addresses.ini`, oldest first. A summary the relay took
-  or refused is deleted; one it couldn't reach (or a 429 or 5xx) stays for next time.
+  or refused is deleted (one it took is kept as sent in `perf_sent/`); one it couldn't reach (or a 429 or 5xx) stays for
+  next time.
 - **The relay** (Bean-Ops `deploy/perf-relay`): checks each summary, caps every label's values (the rest become
   `other`), and exposes them as Prometheus metrics. Grafana's **Longshot performance** dashboard reads them, with a
   toggle between official builds, unofficial ones and both.
