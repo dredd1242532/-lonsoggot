@@ -6,10 +6,10 @@
 # builder's own toolchains folder) and, for --cli, downloads what is missing.
 #   Longshot.AppImage --cli <args>     nx2/make_game.py itself, e.g. --cli --nup game.nup --out ~/Games/Longshot
 #                                      (RecompLauncher's prepare: --cli --prepare --game <copy>)
-#   Longshot.AppImage --play           start the game in ~/.config/longshot/builder.ini's out= folder
+#   Longshot.AppImage --play           start the game in ~/Games/Longshot
 #   Longshot.AppImage --play <folder>  start the game in that folder (RecompLauncher's start)
 #   Longshot.AppImage <folder>         the same
-#   Longshot.AppImage --launch <dir>  the same (a game folder's longshot, when a 2.x builder AppImage made it: builder/linux/longshot-folder)
+#   Longshot.AppImage --launch <dir>  the same (a game folder's longshot, builder/linux/longshot-folder, when --cli built it)
 #   Longshot.AppImage                  a message: get the Longshot Launcher
 HERE="$(dirname "$(readlink -f "$0")")"
 LIB="$HERE/usr/lib/longshot"
@@ -45,7 +45,7 @@ fi
 if [ -n "${1:-}" ] && [ -d "$1" ]; then
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$1"
 fi
-# Anything else (started from the applications menu or a file manager, or a 2.x builder's --update): no window, a message
+# Anything else (started from the applications menu or a file manager): no window, a message
 MESSAGE="The Longshot Builder has no window of its own: the Longshot Launcher builds the game and starts it. Get the launcher from https://longshot.magicbean.dev/download"
 echo "$MESSAGE" >&2
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ ! -t 2 ]; then

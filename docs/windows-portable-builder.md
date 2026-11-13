@@ -15,27 +15,18 @@ The setup creates a marked `LongshotBuilder` data folder beside itself. Keep thi
 Builder, its build tools, SDK downloads you opt into, and the default build files. The normal setup continues to use
 `%LOCALAPPDATA%\LongshotBuilder`; portable mode does not import that installation.
 
-The default game folder is `Longshot` beside the data folder. Keep the game and Builder on the same volume. You can
-move their containing folder or change that volume's drive letter: the game records a relative association to its
-Builder.
+With `--prepare`, the default game folder is `Longshot` beside the data folder. You can move their containing folder or
+change that volume's drive letter: the setup finds its marked data folder beside it again on later `--cli` runs without
+the flag, and the installed Builder finds its marked home when it is started directly. No user/system environment
+variables or registry configuration are installed. Windows, .NET and third-party tools can still create their own
+temporary files and operating-system caches; this is not a zero-write or sandbox mode.
 
-The original setup finds its marked data folder beside it again on later `--cli` runs without the flag, and the
-installed Builder finds its marked home when it is started directly. A run with `--cli --repair` checks every part
-again and unpacks the version anew, in that same home. No user/system environment variables or registry configuration
-are installed. Windows, .NET and third-party tools can still create their own temporary files and operating-system
-caches; this is not a zero-write or sandbox mode.
-
-Do not remove `.longshot-portable` from the data folder or `.longshot_builder_home` from a game built in portable
-mode. An invalid association stops the setup rather than silently using another Builder. The game can still be played
-without the Builder, using its game launcher (`longshot.exe` in the game folder). An interrupted installation keeps
-staged files separate from the published version. During portable updates, unchanged parts are copied instead of moved
-out of the installed Builder, so enough free space for both versions is needed. A repair publishes its complete staged
-directory before discarding the replaced one. If Windows blocks restoration after a failed rename, the preserved old
-directory remains beside it as `<version>.rollback-*`; close programs using these folders before recovering it.
-
-Portable mode requires the packaged setup launcher; a source checkout without that launcher cannot produce a
-relocatable portable game's association. Rebuilding or updating a portable game with the standard Builder removes
-that association after successful output finalization.
+Do not remove `.longshot-portable` from the data folder. An invalid marker stops the setup rather than silently using
+another Builder. The game is played with its own launcher (`longshot.exe` in the game folder), which needs no Builder.
+An interrupted installation keeps staged files separate from the published version. During portable updates, unchanged
+parts are copied instead of moved out of the installed Builder, so enough free space for both versions is needed. If
+Windows blocks restoration after a failed rename, the preserved old directory remains beside it as
+`<version>.rollback-*`; close programs using these folders before recovering it.
 
 For scripted child processes the setup supplies an absolute `LONGSHOT_SETUP_BASE` and
 `LONGSHOT_BUILDER_PORTABLE=1` to that process tree only. A portable root must have the valid marker, be a dedicated

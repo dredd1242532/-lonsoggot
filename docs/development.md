@@ -41,7 +41,8 @@ filesystem. Only its own relative `lib -> usr/lib` stays a link.
 On Linux, a game folder's `longshot` (`builder/linux/longshot-folder`) starts the program named by `builder=` in
 `longshot_version.txt`, the one that built the folder (the Longshot Launcher, or a builder AppImage), with
 `--launch <folder>`; when that one is gone, it starts `bin/longshot` (`tests/test_linux_downgrade.py`). The builders have
-no window: the AppImage's `--launch <folder>` plays that folder's game, and `--cli` runs `make_game.py`. They never look
+no window: the AppImage's `--launch <folder>` (a folder it built with `--cli`) plays that folder's game, and `--cli` runs
+`make_game.py`. On Windows the folder's `longshot.exe` (`builder/setup/setup.c`) starts `bin\longshot.exe` itself. They never look
 for or install another version (the Longshot Launcher does).
 
 Run everything with `python -I` from this folder.

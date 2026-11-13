@@ -228,7 +228,7 @@ class AppRun(unittest.TestCase):
         self.assertFalse((self.dir / "data").exists())
 
     def test_launch_plays_that_folder_with_no_build_tool(self):
-        # (a game folder's longshot, made by a 2.x builder AppImage, starts it with --launch <folder>: the 2.x window's page)
+        # (a game folder's longshot starts the AppImage that built it with --cli with --launch <folder>: builder/linux/longshot-folder)
         folder = self.dir / "no-game"
         folder.mkdir()
         r = self.run_app("--launch", str(folder))

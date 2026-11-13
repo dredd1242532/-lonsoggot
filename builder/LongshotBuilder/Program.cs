@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -8,8 +7,7 @@ namespace LongshotBuilder;
 /// The Windows builder has no window: players use the Longshot Launcher, which builds and starts the game. What is left:
 ///   LongshotBuilder.exe --cli <make_game.py's options>   (RecompLauncher, through the setup) no window; make_game.py's lines on
 ///                                                        stdout, and its result as the exit code
-///   LongshotBuilder.exe --launch <game folder>           (the game folder's longshot.exe made by a 2.x Builder) the game itself
-///   LongshotBuilder.exe                                  a message: get the Longshot Launcher
+///   LongshotBuilder.exe                                  anything else: a message, get the Longshot Launcher
 static class Program
 {
     /// Where players get the launcher (README, "Install and play")
@@ -38,7 +36,6 @@ static class Program
             }
             return Cli(args.Skip(1).ToList());
         }
-        if (args.Length == 2 && args[0] == "--launch") return Play(args[1]);
         Say(UseTheLauncher);
         return 1;
     }
@@ -70,29 +67,6 @@ static class Program
         if (said == null) lock (stdout) stdout.WriteLine("error " + reason);
         Console.Error.WriteLine("error " + reason);
         return 1;
-    }
-
-    /// --launch <game folder>: what a game folder's longshot.exe (builder/setup/setup.c, launch mode) asks of the installed builder.
-    /// The 2.x Builders opened a page with Play there; this starts the game, bin\longshot.exe, as that Play did (the launcher
-    /// already checked for updates: the game does not ask again). Never the folder's own longshot.exe, which is that launcher
-    static int Play(string folder)
-    {
-        folder = folder.TrimEnd('\\', '/');
-        var game = Path.Combine(folder, "bin", "longshot.exe");
-        if (!File.Exists(game))
-        {
-            Say("The game (bin\\longshot.exe) is missing from " + folder + ". Build it again with the Longshot Launcher: " + LauncherDownload);
-            return 1;
-        }
-        var si = new ProcessStartInfo(game) { UseShellExecute = false, WorkingDirectory = folder };
-        si.Environment["LONGSHOT_NO_UPDATE_CHECK"] = "1";
-        try { Process.Start(si)?.Dispose(); }
-        catch (Exception e)
-        {
-            Say("Longshot could not start: " + e.Message);
-            return 1;
-        }
-        return 0;
     }
 
     /// A message on stderr (for whoever started this from a command line or a script) and in a message box

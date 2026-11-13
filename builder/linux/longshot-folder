@@ -2,8 +2,8 @@
 # The game folder's launcher, what longshot.exe is on Windows. The game itself is bin/longshot. This file is copied to
 # longshot in the folder (nx2/make_game.py).
 #
-# It starts the builder= line in longshot_version.txt (what made this game: the Longshot Launcher, or a builder AppImage,
-# which plays it) with --launch <this folder>. When that one is gone, it starts the game.
+# It starts the builder= line in longshot_version.txt (what made this game: the Longshot Launcher, or the builder AppImage
+# for a build with --cli, which plays it) with --launch <this folder>. When that one is gone, it starts the game.
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
