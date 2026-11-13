@@ -278,11 +278,13 @@ void perf_frame(const fs::Frame& f, double wait_ms) {
 
     std::lock_guard lk(mu);
     if (!current || since_map >= kMapEvery) where_now(), since_map = 0;
-    // (the target: the cap's, else uncapped the recent average, so that a frame twice the usual is still a hitch)
-    avg_ms = avg_ms ? avg_ms * 0.98 + f.ms * 0.02 : f.ms;
+    // (the target: the cap's, else uncapped the recent average. A hitch is twice the longer of the target and the recent
+    // average, before this frame: a frame twice the usual, never every frame of a game the GPU holds under its cap)
+    const double usual = avg_ms ? avg_ms : f.ms;
+    avg_ms = usual * 0.98 + f.ms * 0.02;
     const double cap_ms = menu_target_ms();
-    const double target = cap_ms > 0 ? cap_ms : avg_ms;
-    pr::add_frame(*current, f, w, target, last_ms);
+    const double target = cap_ms > 0 ? cap_ms : usual;
+    pr::add_frame(*current, f, w, target, last_ms, usual);
     last_ms = f.ms;
     since_map += f.ms / 1000.0, since_summary += f.ms / 1000.0;
     if (since_summary >= kPeriod) summarize(false), since_summary = 0;

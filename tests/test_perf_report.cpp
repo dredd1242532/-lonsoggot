@@ -31,6 +31,16 @@ int main() {
     CHECK("60 fps, 30 ms", !pr::is_hitch(30, 16.7));
     CHECK("240 fps, 12 ms is no stutter", !pr::is_hitch(12, 4.17));
     CHECK("30 fps, 70 ms", pr::is_hitch(70, 33.3));
+    {   // (a 60 cap the GPU holds at 20 fps: its 50 ms frames are slow, not hitches; a 120 ms one among them is)
+        pr::MapTotals m;
+        for (int i = 0; i < 50; i++) pr::add_frame(m, frame(50, 10, 35, 3, 2), pr::Waits{}, 16.7, 50, 50);
+        int64_t hitches = 0;
+        for (int64_t h : m.hitch) hitches += h;
+        CHECK("held at 20 fps under a 60 cap: no hitch", hitches == 0);
+        pr::add_frame(m, frame(120, 10, 100, 3, 2), pr::Waits{}, 16.7, 50, 50);
+        for (int64_t h : m.hitch) hitches += h;
+        CHECK("a 120 ms frame among them: one", hitches == 1);
+    }
 
     // what it waited on: the biggest of the renderer's waits and the parts, "other" under a quarter of the frame
     {

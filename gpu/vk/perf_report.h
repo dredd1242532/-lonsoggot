@@ -103,13 +103,16 @@ struct MapTotals {
     }
 };
 
-inline void add_frame(MapTotals& m, const fps_stats::Frame& f, const Waits& w, double target_ms, double last_ms) {
+/// usual_ms: the recent average frame. A hitch is measured against the longer of it and the target: a game the GPU holds
+/// at 20 fps under a 60 cap has slow frames, not stutters (its fps says so), and each of its frames would be one otherwise
+inline void add_frame(MapTotals& m, const fps_stats::Frame& f, const Waits& w, double target_ms, double last_ms,
+                      double usual_ms = 0) {
     m.seconds += f.ms / 1000.0;
     m.frame[bucket_of(f.ms, kFrameBuckets)]++;
     m.frame_sum += f.ms;
     if (f.gpu_ms > 0) m.gpu[bucket_of(f.gpu_ms, kGpuBuckets)]++, m.gpu_sum += f.gpu_ms;
     for (int p = 0; p < fps_stats::kParts; p++) m.part[p] += f.part[p];
-    if (is_hitch(f.ms, target_ms)) m.hitch[cause_of(f, w)]++;
+    if (is_hitch(f.ms, std::max(target_ms, usual_ms))) m.hitch[cause_of(f, w)]++;
     else if (is_pacing_miss(f.ms, last_ms, target_ms)) m.pacing_misses++;
     m.left_out += f.left_out;
 }

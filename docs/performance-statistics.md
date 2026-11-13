@@ -27,7 +27,8 @@ under 60 KiB):
   start-up screen prepares them, then "Title and intro"):
   - frame times and the GPU's time as histograms (buckets around 240 to 20 fps, then stutters);
   - the FPS counter's parts (game, render, GPU wait, pacing);
-  - hitches (a frame over twice its target and over 25 ms) by what they waited on most: pipelines, shader translation,
+  - hitches (a frame over 25 ms and over twice the longer of its target and the recent average frame: a game held under
+    its cap has slow frames, which the fps show, not a hitch at every frame) by what they waited on most: pipelines, shader translation,
     texture uploads, memory sync, the GPU, read-backs, the game, pacing, other;
   - pacing misses (a frame more than a quarter of the target off the one before);
   - draws left out;
