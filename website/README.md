@@ -77,6 +77,11 @@ source text and heading anchors; linked sections open automatically. Expand/coll
 controls and print handling keep the full reference accessible. The getting-started
 guide uses cards while retaining its original source in `docs/`.
 
+The manual and compatibility page share the README's minimum/recommended specs
+table. `SystemRequirements.astro` renders that source at build time. Requirements
+without a published minimum or separate recommended tier are labelled explicitly;
+the table does not establish performance targets or replace GPU-status caveats.
+
 ## Validation and limits
 
 `npm run check` verifies generated routes, links, anchors, edit destinations, artwork

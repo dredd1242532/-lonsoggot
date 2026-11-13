@@ -19,6 +19,11 @@ export function sectionsAt(text, level) {
 }
 const wrap = (css, content) => `\n<div class="${css}">\n\n${content.trim()}\n\n</div>\n`;
 const fold = (label, body) => `\n<details class="manual-detail">\n<summary>${label}</summary>\n\n${body.trim()}\n\n</details>\n`;
+export function formatRequirements(body) {
+  // Keep the canonical Markdown table intact, with a keyboard-accessible scroll area on narrow screens.
+  return body.replace(/(^\|[^\n]+\n(?:\|[^\n]+(?:\n|$))+)/m, table =>
+    '\n<div class="specs-scroll" role="region" aria-label="Minimum and recommended system requirements" tabindex="0">\n\n' + table.trim() + '\n\n</div>\n');
+}
 const jumps = `<nav class="manual-jumps" aria-label="Installation shortcuts">
 <a href="#what-you-need"><span>01 / CHECK YOUR SETUP</span><strong>Requirements</strong><small>Game version, hardware and space</small></a>
 <a href="#on-windows"><span>02 / CHOOSE YOUR PLATFORM</span><strong>Windows ↘</strong><small>Install, build and launch</small></a>
@@ -30,7 +35,7 @@ function installation(body) {
   return sectionsAt(body, 3).map(section => {
     if (!section.title) return wrap('manual-intro', section.body) + jumps;
     const content = section.heading + '\n' + section.body;
-    if (section.title === 'What you need') return wrap('manual-requirements', content);
+    if (section.title === 'What you need') return wrap('manual-requirements', section.heading + '\n' + formatRequirements(section.body));
     if (section.title === 'On Windows') return wrap('manual-platform', content);
     if (section.title === 'On Linux') {
       const at = section.body.indexOf('When the desktop gives the launcher its own systemd service,');

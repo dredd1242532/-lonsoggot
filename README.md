@@ -90,20 +90,26 @@ it, and keeps it and itself up to date. Longshot's first version will be **v3.0.
 
 ### What you need
 
-- **Your copy of the game at the supported version:** program `0400486024DEC000`, update v131072, build `e0f3ccfa`.
-  Other versions do not work. A `.nup` file, or the `romfs` and `exefs` folders.
-- 64-bit Windows 10 or 11, or 64-bit Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora, Arch,
-  SteamOS ...) and a CPU with AVX2. The Linux AppImage needs AVX2; on Windows, and in a build from source, a CPU
-  without it gets a game built for what it has, a little slower.
-- A graphics card with Vulkan 1.3 and mesh shaders, with an up-to-date driver: NVIDIA GeForce RTX 20 series or newer,
-  AMD Radeon RX 6000 series or newer, or Intel Arc. On Linux, Mesa or NVIDIA's driver. Cards without mesh shaders are
-  not supported.
-- 8 GB of video memory (VRAM) or more is recommended. Cards with less can use the in-game menu's lower Quality presets.
-- 16 GB of RAM or more. A run uses about 10 GB.
-- About 60 GB free while building, on an SSD if you can: a hard drive makes the build much slower. You can build on one
-  anyway; the builder says so first.
-- An internet connection for the download. Nothing else to install: the builder the launcher installs brings its own
-  compiler and tools.
+**Your game copy:** program `0400486024DEC000` · update **v131072** · build `e0f3ccfa`.
+Use a `.nup` file, or the `romfs` and `exefs` folders. Other game versions are not supported.
+
+These are the documented requirements, not a promise of a particular frame rate or resolution.
+A separate recommended CPU or GPU tier has not been established.
+
+| Component | Minimum / required | Recommended |
+|---|---|---|
+| **Operating system** | **64-bit Windows 10 / 11**, or **64-bit Linux** with glibc 2.35 or newer. | Same supported operating systems. |
+| **Processor** | **AVX2 required for the Linux AppImage.** Windows and source builds can target a CPU without AVX2, with slower performance. | **AVX2-capable CPU.** No specific processor model is published. |
+| **Graphics card** | **Vulkan 1.3 + mesh shaders.** NVIDIA GeForce RTX 20 series or newer, AMD Radeon RX 6000 series or newer, or Intel Arc. | No separate higher GPU tier is published. Check the [project status](#project-status) for known issues. |
+| **Video memory (VRAM)** | No fixed minimum is published. Cards below 8 GB can use lower in-game Quality presets. | **8 GB or more.** |
+| **System memory (RAM)** | **16 GB or more.** A run uses about 10 GB. | **16 GB or more.** No separate higher target is published. |
+| **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **SSD with about 60 GB free** for the build. |
+
+**Drivers:** use an up-to-date graphics driver with Vulkan 1.3 and mesh shaders; cards without mesh shaders are not supported.
+On Linux, use Mesa or NVIDIA's driver. Linux examples include Ubuntu 22.04, Debian 12, Fedora, Arch and SteamOS.
+
+**Download:** an internet connection is required. The launcher installs the builder, which brings its own compiler and tools;
+there is nothing else to install.
 
 ### On Windows
 

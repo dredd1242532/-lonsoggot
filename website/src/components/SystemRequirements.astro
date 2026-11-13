@@ -1,0 +1,13 @@
+---
+import { readFile } from 'node:fs/promises';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
+import { sectionsAt, formatRequirements } from '../../scripts/format-manual.mjs';
+const readme = await readFile('../README.md', 'utf8');
+const requirements = sectionsAt(readme, 3).find(section => section.title === 'What you need');
+if (!requirements) throw new Error('Missing canonical requirements in README.md');
+const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+const markdown = formatRequirements(requirements.body).replace(/\]\(#([^)]*)\)/g, `](${base}reference/manual/#$1)`);
+const processor = await createMarkdownProcessor();
+const { code } = await processor.render(markdown);
+---
+<div class="manual-requirements" set:html={code} />

@@ -1,10 +1,16 @@
 ---
-title: Check build compatibility
+title: System requirements
 description: Compare your game version and PC with Longshot's documented requirements.
 ---
 import CompatibilityChecker from '../../components/CompatibilityChecker.astro';
+import SystemRequirements from '../../components/SystemRequirements.astro';
 
-Check your game version, operating system, graphics support, memory, and free space before building Longshot.
+Compare the minimum requirements and recommendations, then check your own setup below.
+
+<SystemRequirements />
+
+## Check your setup
+
 Your answers stay in this page. Nothing is uploaded or saved.
 
 <CompatibilityChecker />
@@ -13,9 +19,6 @@ Your answers stay in this page. Nothing is uploaded or saved.
 
 Checked against the [upstream requirements](https://git.magicbean.dev/MagicBeanDev/Longshot#what-you-need)
 and [project status](https://git.magicbean.dev/MagicBeanDev/Longshot#project-status) on **November 12, 2026**.
-
-The calculator is reviewed against the README's requirements and GPU status. A website build stops if either
-source section changes, until the calculator has been reviewed again. The source links above contain the full requirements.
 
 This checks the selected requirements, not performance or stability. Confirm the capabilities of your installed driver;
 the checker does not maintain a driver-version database.

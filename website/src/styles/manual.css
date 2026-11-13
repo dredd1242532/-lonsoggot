@@ -11,9 +11,16 @@
 .sl-markdown-content .manual-shortcuts { display: flex; gap: .3rem 1.2rem; flex-wrap: wrap; margin: 0 0 2.5rem; }
 .sl-markdown-content .manual-shortcuts a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; margin: 0; }
 .sl-markdown-content .manual-requirements { margin: 2.5rem 0; }
-.sl-markdown-content .manual-requirements > ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; list-style: none; padding: 0; }
-.sl-markdown-content .manual-requirements > ul > li { margin: 0; padding: 1rem 1.2rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: .95rem; line-height: 1.65; }
-.sl-markdown-content .manual-requirements > ul > li:first-child { grid-column: 1/-1; border-left: 3px solid var(--sl-color-text-accent); }
+.sl-markdown-content .manual-requirements > p:first-of-type { padding: 1.2rem 1.4rem; border: 1px solid var(--border); border-left: 3px solid var(--sl-color-text-accent); border-radius: 8px; background: var(--panel); }
+.sl-markdown-content .specs-scroll { overflow-x: auto; margin-block: 1.5rem; border: 1px solid var(--border); border-radius: 10px; }
+.sl-markdown-content .specs-scroll:focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 4px; }
+.sl-markdown-content .manual-requirements .specs-scroll table { display: table; table-layout: fixed; width: 100%; min-width: 36rem; margin: 0; font-size: .95rem; line-height: 1.6; border-collapse: collapse; }
+.sl-markdown-content .specs-scroll :is(th,td) { padding: 1rem; vertical-align: top; border: 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.sl-markdown-content .specs-scroll th { background: var(--panel-hover); color: var(--sl-color-white); text-align: left; font-size: 1rem; }
+.sl-markdown-content .specs-scroll :is(th,td):first-child { width: 22%; }
+.sl-markdown-content .specs-scroll :is(th,td):last-child { background: var(--panel); border-left: 1px solid var(--border); }
+.sl-markdown-content .specs-scroll th:last-child { color: var(--sl-color-text-accent); }
+.sl-markdown-content .specs-scroll tr:last-child td { border-bottom: 0; }
 .sl-markdown-content .manual-platform { margin: 3rem 0; padding-top: 1rem; border-top: 1px solid var(--border); }
 .sl-markdown-content .manual-platform h3 { font-family: var(--longshot-font-heading); font-size: 2rem; }
 .sl-markdown-content .manual-platform > ol { list-style: none; counter-reset: install-step; padding: 0; margin: 1.5rem 0; display: grid; gap: .75rem; }
@@ -40,7 +47,7 @@
 .sl-markdown-content .install-hub-card a { color: var(--sl-color-text-accent); }
 @media (max-width: 60rem) { .sl-markdown-content .manual-jumps { grid-template-columns: 1fr; } }
 @media (max-width: 38rem) {
-  .sl-markdown-content :is(.manual-requirements > ul,.install-hub) { grid-template-columns: 1fr; }
+  .sl-markdown-content .install-hub { grid-template-columns: 1fr; }
   .sl-markdown-content .manual-platform > ol > li { padding-right: 1rem; padding-left: 3.4rem; }
   .sl-markdown-content .manual-platform > ol > li::before { left: .8rem; }
 }
@@ -49,4 +56,6 @@
   .manual-guide details::details-content { display: block; content-visibility: visible; }
   .manual-guide details > :not(summary) { display: block; }
   .sl-markdown-content .manual-guide table { display: table; overflow: visible; font-size: .8rem; }
+  .sl-markdown-content .specs-scroll { overflow: visible; }
+  .sl-markdown-content .manual-requirements .specs-scroll table { min-width: 0; font-size: .8rem; }
 }
