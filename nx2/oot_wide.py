@@ -99,7 +99,7 @@ MOVIE = ("{ extern volatile float hos_wide_margin; const float _m = hos_wide_mar
 # ratio over 16:9, centred: the middle 16:9 fills the texture (the scissor keeps the texture's), as a 16:9 window would show.
 # Narrower than 16:9 (4:3, 16:10) it is made taller instead, by 16:9 over the picture's ratio: the picture's middle band fills
 # the texture at its own shape, neither squeezed nor with bars.
-THUMB = ("{ extern volatile float hos_wide_ratio; const float _r = hos_wide_ratio; if (_r > 0.0f && (uint32_t)c->x[1] == 0 "
+THUMB = ("{ extern float hos_wide_thumb_ratio(void); const float _r = hos_wide_thumb_ratio(); if (_r > 0.0f && (uint32_t)c->x[1] == 0 "
          "&& (uint32_t)c->x[2] == 0 && (uint32_t)c->x[3] == 543 && (uint32_t)c->x[4] == 306) { "
          "if (_r > 16.0f / 9.0f) { const int _w = (int)(543.0f * _r / (16.0f / 9.0f) + 0.5f); "
          "c->x[1] = (uint32_t)((543 - _w) / 2); c->x[3] = (uint32_t)_w; } "

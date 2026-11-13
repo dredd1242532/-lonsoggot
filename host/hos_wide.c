@@ -14,25 +14,30 @@ static _Atomic float window_aspect;
 int hos_wide_window = 0;
 extern float hos_aspect_ratio;
 
-float hos_wide_aspect(void) { return hos_wide_window ? atomic_load_explicit(&window_aspect, memory_order_relaxed) : hos_aspect_ratio; }
+float hos_wide_aspect(void) {
+    const float live = atomic_load_explicit(&window_aspect, memory_order_relaxed);
+    /* No window (HOS_HEADLESS): keep the picture/camera shape chosen at boot. */
+    return hos_wide_window && live > 0.0f ? live : hos_aspect_ratio;
+}
+
+float hos_wide_thumb_ratio(void) { return hos_wide_window ? hos_wide_aspect() : hos_wide_ratio; }
 
 void hos_wide_resize(unsigned width, unsigned height) {
     if (!hos_wide_window || !width || !height) return;
-    const float aspect = (float)width / height;
+    const float aspect = (float)hos_wide_clamp((double)width / height);
     atomic_store_explicit(&window_aspect, aspect, memory_order_relaxed);
-
+    const float shape = aspect / (16.0f / 9.0f);
+    hos_wide_squeeze = shape < 1.0f ? 1.0f : 1.0f / shape;
+    hos_wide_margin = (1.0f - hos_wide_squeeze) * 0.5f;
 }
 
 void hos_wide_start(unsigned width, unsigned height) {
-    if (!hos_wide_window) return;
+    if (!hos_wide_window || !width || !height) return;
     uint32_t hos_output_size(int height);
     const HosWideSize size = hos_wide_window_size(width, height, hos_output_size(1));
     hos_wide_out = size.picture;
     hos_wide_scene = size.scene;
-    const float shape = size.aspect / (16.0f / 9.0f);
     hos_wide_ratio = size.aspect;
-    hos_wide_squeeze = shape < 1.0f ? 1.0f : 1.0f / shape;
-    hos_wide_margin = (1.0f - hos_wide_squeeze) * 0.5f;
     hos_wide_resize(width, height);
     hos_log("display: fill window %ux%u, picture %ux%u, scene %ux%u, camera %.6f (%s)", width, height,
             (unsigned)size.picture, (unsigned)(size.picture >> 32), (unsigned)size.scene, (unsigned)(size.scene >> 32),
@@ -85,6 +90,12 @@ int hos_wide_projection(uint64_t projection, float *tangent, float *aspect) {
         ++count;
     }
     const int changed = hos_wide_perspective(&entries[i].view, want, tangent, aspect);
+    if (!changed) {
+        /* This address now belongs to another kind of view. Do not retain its
+           old patched aspect, or a later shadow view could look like a camera. */
+        memmove(entries + i, entries + i + 1, (count - i - 1) * sizeof *entries);
+        --count;
+    }
     ReleaseSRWLockExclusive(&lock);
     return changed;
 }

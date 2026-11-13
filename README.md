@@ -511,8 +511,12 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   again on returning to DLSS. Changing Render resolution or choosing a Quality preset replaces that saved scale.
 - **Window aspect ratio** (opt-in): fills the actual window. Wider than 16:9 shows more at the sides (Hor+);
   narrower or taller shows more above and below (Vert+), keeping the 16:9 horizontal view. Select Window in
-  Graphics, Aspect ratio, then restart. Later window resizes update the camera and presentation without a restart;
-  render targets keep their startup size. Tall windows render more pixels at startup and may run slower.
+  Graphics, Aspect ratio, then restart (`ultrawide=2` in `longshot_options.ini`; 1 keeps Monitor's shape, 0 keeps the chosen output shape). Later window resizes update the camera and presentation without a restart;
+  the picture size is set by the window's shape at start. Only the Output resolution's height is used.
+  A windowed start is normally 1280x720: widening it later stretches the fixed-size picture, so it can look softer
+  than Monitor's shape. Start full screen or set `HOS_WINDOW_SIZE` to choose another startup shape.
+  Startup and live shapes are clamped to 5:4 through 48:9 (2448x1848 is within this range).
+  Narrow windows render more pixels at startup and may run slower.
   The UI keeps its 16:9 proportions in the centre, including after resizing. HUD docking and size controls are not added.
   The existing monitor modes, including their narrow-screen HUD behavior (https://github.com/NotRexed/Hookshot/pull/2015), stay unchanged.
 - **Aspect ratio** and **Output resolution:** the menu lists the resolutions your screen offers (its display modes, as

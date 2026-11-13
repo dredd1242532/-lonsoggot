@@ -571,7 +571,7 @@ int step_output_choice(int id, int dir) {
 /// it has that shape; else the screen's own size when it has it; else the one whose height is nearest the screen's
 /// (display_modes.h pick)
 float window_start_aspect = 0;   // Allocated targets keep their startup shape across a live resize.
-int aspect_started = -1;   // (the Aspect ratio row's value at the start, from the size the run started with: outputs_sync)
+int aspect_started = -3;   // Neither Window (-1), monitor (-2), nor a shape index.   // (the Aspect ratio row's value at the start, from the size the run started with: outputs_sync)
 int output_started = 0;    // (the Output resolution the run started with)
 int output_for_aspect(int v) {
     if (v == aspect_window_value()) return opts.output_res;
@@ -720,7 +720,7 @@ const char* tx_ultrawide(int v) {
 }
 /// The Aspect ratio: the monitor's own shape, the game's 16:9, or another shape, wider or narrower than 16:9
 const char* hn_ultrawide(int v, int variant) {
-    if (v == aspect_window_value()) return variant <= 0 ? "Fill the actual window: wider shows more at the sides, taller shows more above and below. Follows window resizes. Requires a restart." : nullptr;
+    if (v == aspect_window_value()) return variant <= 0 ? "Fill the actual window: wider shows more at the sides, taller shows more above and below. Follows window resizes (5:4 to 48:9). The picture size is set by the window's shape at start. Requires a restart." : nullptr;
     static const char* const t[] = {
         "Your monitor's own shape: the picture fills it. The HUD keeps its 16:9 shape in the middle.",
         "The game's own shape.",
@@ -1084,6 +1084,8 @@ const char* hn_vsync(int v, int variant) {
 /// The Output resolution: the game's own, the player's own, or one of the screen's sizes as it compares with the screen (its
 /// own, larger, smaller; nothing where the screen's size is not known)
 const char* hn_output_res(int v, int variant) {
+    if (opts.ultrawide == aspect_window_value()) return variant <= 0 ?
+        "Window uses this size's height, not its shape. The picture size is set by the window's shape at start." : nullptr;
     static const char* const t[] = {
         "The game's own size.",
         "Your screen's own size: the HUD and text pixel for pixel, nothing to scale to the window.",
@@ -4013,7 +4015,10 @@ void draw_startup(ui::Ctx& c) {
 
 } // namespace
 
-bool window_fit_active() { return ultrawide_read == 2 && !getenv("HOS_ASPECT"); }
+bool window_fit_active() {
+    static const bool aspect_override = getenv("HOS_ASPECT") != nullptr;
+    return ultrawide_read == 2 && !aspect_override;
+}
 
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 

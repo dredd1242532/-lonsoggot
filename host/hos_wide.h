@@ -13,8 +13,9 @@ typedef struct HosWideSize {
 static inline HosWideSize hos_wide_picture_size(double aspect, unsigned output_height) {
     HosWideSize size = {0, 0, 0};
     if (!(aspect > 0) || !isfinite(aspect) || !output_height) return size;
+    aspect = hos_wide_clamp(aspect);
     /* Hor+ grows width; Vert+ grows height. Do not shrink either axis below
-       the game's 2560x1440 picture / 1920x1080 BaseResolution constants: the
+       the selected 16:9 output's dimensions (before the pixel cap): the
        fixed upscaler's network is still configured with those minimum sizes. */
     unsigned oh = output_height;
     unsigned ow = (unsigned)(output_height * (16.0 / 9.0) / 8 + 0.5) * 8;
@@ -64,6 +65,7 @@ static inline int hos_wide_perspective(HosWideProjection *view, float want, floa
 
 extern int hos_wide_window;
 float hos_wide_aspect(void);
+float hos_wide_thumb_ratio(void);
 void hos_wide_start(unsigned width, unsigned height);
 void hos_wide_resize(unsigned width, unsigned height);
 int hos_wide_projection(uint64_t projection, float *tangent, float *aspect);

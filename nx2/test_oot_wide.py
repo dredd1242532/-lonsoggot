@@ -46,6 +46,8 @@ static void eq(float a, float b) { if (fabsf(a-b) > 0.00001f) { fprintf(stderr, 
         source += (f"static void matrix_{reg}_{base}(Ctx *c) {{ "
                    + oot_wide._ratio(reg, base) + " }\n")
     source += "static void hud(Ctx *c) { " + oot_wide.HUD + " }\n"
+    source += "static void movie(Ctx *c) { " + oot_wide.MOVIE + " }\n"
+    source += "static void thumb(Ctx *c) { " + oot_wide.THUMB + " }\n"
     backend = (ROOT / "host/rx_backend.c").read_text()
     start = backend.index("void rx_resize(int width, int height) {")
     end = backend.index("\nconst char *rx_describe", start)
@@ -73,8 +75,8 @@ int main(void) {
         assert((uint32_t)size.picture >= 1920);
         assert((uint32_t)size.scene >= 1440);
         assert((uint32_t)size.picture % 8 == 0 && (uint32_t)size.scene % 8 == 0);
-        assert(fabs((double)(uint32_t)size.picture / (size.picture >> 32) - (double)w/h) <= 0.01);
-        eq(size.aspect, (float)w/h);
+        assert(fabs((double)(uint32_t)size.picture / (size.picture >> 32) - hos_wide_clamp((double)w/h)) <= 0.01);
+        eq(size.aspect, (float)hos_wide_clamp((double)w/h));
         hos_wide_resize(w, h);
         const float shape = size.aspect / (16.0f/9.0f);
         Ctx context = {0}, *c = &context;
@@ -112,7 +114,7 @@ int main(void) {
     // The instruction loads q1 and q4, NOT q4+4..q5+4 (#2015).
     // Scale every lane of q4; the neighbouring q5 register must remain untouched.
     for (unsigned i=0; i<sizeof windows/sizeof windows[0]; ++i) {
-        const float aspect=(float)windows[i][0]/windows[i][1], shape=aspect/(16.0f/9.0f);
+        const float aspect=(float)hos_wide_clamp((double)windows[i][0]/windows[i][1]), shape=aspect/(16.0f/9.0f);
         hos_wide_resize(windows[i][0],windows[i][1]);
         Ctx c={0}; c.x[0]=512;
         const float x[4]={2.0f/3840,0,0,0}, y[4]={3,2.0f/2160,5,7}, sentinel[4]={11,13,17,19};
@@ -191,7 +193,27 @@ int main(void) {
     vk = NULL; rx_resize(3440,1440); eq(hos_wide_aspect(),3440.0f/1440.0f);
     assert(resize_calls == 2 && last_width == 3440 && last_height == 1440);
     assert(hos_wide_out == initial);
-    puts("PASS: 11 shapes, 4 matrix sites, live host callbacks and 1024 cached views");
+    // Execute MOVIE and THUMB after a resize; the target/jitter ratio stays fixed.
+    hos_wide_start(1280,720);
+    extern volatile float hos_wide_ratio, hos_wide_margin;
+    const float jitter = hos_wide_ratio;
+    const unsigned live[][2] = {{2520,1080},{2448,1848},{1280,720}};
+    for (unsigned i=0;i<3;++i) {
+        hos_wide_resize(live[i][0],live[i][1]);
+        const float ratio=hos_wide_aspect();
+        Ctx c={0}; c.x[29]=128;
+        const float left=0,right=1;
+        memcpy(memory+96,&left,4);memcpy(memory+104,&right,4);
+        movie(&c);
+        float l,r;memcpy(&l,memory+96,4);memcpy(&r,memory+104,4);
+        const float margin=ratio>16.0f/9.0f?(1-(16.0f/9.0f)/ratio)/2:0;
+        eq(l,margin);eq(r,1-margin);eq(hos_wide_margin,margin);
+        c.x[3]=543;c.x[4]=306;thumb(&c);
+        assert(c.x[3] == (ratio>16.0f/9.0f?(unsigned)(543*ratio/(16.0f/9.0f)+0.5f):543));
+        assert(c.x[4] == (ratio<16.0f/9.0f?(unsigned)(306*(16.0f/9.0f)/ratio+0.5f):306));
+        eq(hos_wide_ratio,jitter);
+    }
+    puts("PASS: live movie/thumbnail, 11 shapes, 4 matrix sites, live host callbacks and 1024 cached views");
 }
 '''
     with tempfile.TemporaryDirectory(prefix="oot-wide-") as temp:

@@ -42,15 +42,36 @@ int main(int argc, char **argv) {
     const int window = atoi(argv[1]), fixed = atoi(argv[2]);
     start(); assert(hos_wide_window == window);
     const uint64_t before = hos_wide_out;
+    if (window) assert(hos_wide_aspect() == hos_aspect_ratio); /* headless fallback */
     hos_wide_start(1600, 1200);
     if (window) {
         assert((unsigned)hos_wide_out == 2560 && (hos_wide_out >> 32) == 1920);
         assert(fabsf(hos_wide_aspect() - 4.0f/3.0f) < 1e-5f);
         const uint64_t allocated = hos_wide_out;
+        const float jitter = hos_wide_ratio;
         hos_wide_resize(3440, 1440);
         assert(hos_wide_out == allocated && fabsf(hos_wide_aspect() - 3440.0f/1440) < 1e-5f);
+        assert(fabsf(hos_wide_squeeze - (16.0f/9.0f)/(3440.0f/1440)) < 1e-5f);
+        assert(fabsf(hos_wide_margin - (1-hos_wide_squeeze)/2) < 1e-5f);
+        assert(hos_wide_ratio == jitter); /* render-target/DLSS shape never changes */
         hos_wide_resize(0, 0);
         assert(hos_wide_out == allocated && fabsf(hos_wide_aspect() - 3440.0f/1440) < 1e-5f);
+        hos_wide_resize(1280, 720);
+        assert(hos_wide_margin == 0 && hos_wide_squeeze == 1);
+        hos_wide_resize(1600, 40);
+        assert(fabsf(hos_wide_aspect() - 48.0f/9.0f) < 1e-5f);
+        hos_wide_resize(40, 1600);
+        assert(hos_wide_aspect() == 1.25f);
+        float t = 0.5f, a = 16.0f/9.0f;
+        assert(hos_wide_projection(1, &t, &a));
+        a = 2.0f; assert(!hos_wide_projection(1, &t, &a)); /* retire recycled view */
+        a = 1.25f; assert(!hos_wide_projection(1, &t, &a)); /* not a tracked camera now */
+        assert(hos_wide_ratio == jitter && hos_wide_out == allocated);
+        HosWideSize narrow = hos_wide_picture_size(0.025, 1440);
+        HosWideSize wide = hos_wide_picture_size(40, 2160);
+        assert(narrow.aspect == 1.25f && (unsigned)narrow.scene >= 1920);
+        assert(fabsf(wide.aspect - 48.0f/9.0f) < 1e-5f);
+        assert((wide.scene >> 32) >= 1080 && (unsigned)wide.picture <= 16384);
     } else {
         assert(hos_wide_out == before);
         const float aspect = hos_wide_aspect();
