@@ -3,11 +3,9 @@
 The virtual-core block is compiled with a single-threaded harness; the wrapper and the TLS
 cache helpers are stubs. The checks are:
 - mask 0 is no affinity: it uses every host core and prefers the core the guest cached;
-- a mask change moves the thread's TLS cell to the new core + 1 (single-bit/0) or clears it
-  (multi-bit), so the guest's own cache agrees with the core it runs on;
-- a thread that holds a guest mutex is not moved until it lets the mutex go.
+- a mask change that excludes the held core is queued, and the next checkpoint moves it.
 
-python -I -B tests/test_vcore_mask_tls.py [--cxx clang++]
+python -I -B tests/test_vcore_mask0.py [--cxx clang++]
 """
 import argparse
 import os
