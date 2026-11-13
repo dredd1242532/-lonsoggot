@@ -2,6 +2,7 @@
 #ifndef COOP_DUEL_H
 #define COOP_DUEL_H
 #include "coop_arena.h"
+#include "coop_proto.h"
 #include "coop_state.h"
 
 enum { COOP_DUEL_VERSION = 1, COOP_DUEL_CONTROL_BYTES = 104, COOP_DUEL_COUNTDOWN_MS = 3000,
