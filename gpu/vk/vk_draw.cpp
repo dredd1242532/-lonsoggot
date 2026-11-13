@@ -4695,11 +4695,8 @@ bool dyn_same(const float* fp, int nf, const uint32_t* up, int nu, const uint8_t
     if (nf <= 0 || nu <= 0 || nb <= 0) return false;
     for (int i = 0; i < nf; i++)
         if (fp[i] != cfp[i]) return false;
-    for (int i = 0; i < nu; i++)
-        if (up[i] != cup[i]) return false;
-    for (int i = 0; i < nb; i++)
-        if (raw[i] != craw[i]) return false;
-    return true;
+    // (the words and the bytes each at once: a draw that keeps its state, the usual one, compared every one of them in turn)
+    return !std::memcmp(up, cup, (size_t)nu * sizeof *up) && !std::memcmp(raw, craw, (size_t)nb);
 }
 constexpr int kDynF = 13, kDynU = 35;
 struct DynFast {
