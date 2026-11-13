@@ -34,8 +34,8 @@ def compile_fixture(cc, source, folder, tsan=False, mutation=None):
             text = text.replace("if (!save_kind(kind)) return accepted_locked(s, member) || (presentation_kind(kind) && presence_locked(s, member));",
                                 "(void)kind; return accepted_locked(s, member);")
         elif mutation == "cancel":
-            text = text.replace("if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);",
-                                "if (0 && e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);")
+            text = text.replace("if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_out_discard(s, e);",
+                                "if (0 && e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_out_discard(s, e);")
         (folder / "coop.c").write_text(text)
     commands = [
         [cc, "-std=c99", "-O2", "-w", "-c", str(source / "third_party/monocypher/monocypher.c"), "-o", str(mono)] + flags,

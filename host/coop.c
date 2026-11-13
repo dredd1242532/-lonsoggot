@@ -189,7 +189,7 @@ struct CoopSess {
 static void event_drop_target(CoopSess *s, EventTarget *target) {
     if (target->session) s->n_event_given_up++, target->session = 0;
 }
-static void event_discard(CoopSess *s, EventOut *event) {
+static void event_out_discard(CoopSess *s, EventOut *event) {
     if (!event->id) return;
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++) event_drop_target(s, &event->target[id]);
     event->id = 0;
@@ -668,7 +668,7 @@ static void events_reset(CoopSess *s) {
     memset(s->download, 0, sizeof s->download);
     memset(s->download_epoch, 0, sizeof s->download_epoch);
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
-        event_discard(s, &s->event_out[i]);
+        event_out_discard(s, &s->event_out[i]);
         memset(s->event_out[i].target, 0, sizeof s->event_out[i].target);
     }
     coop_unlock(&s->lock);
@@ -753,7 +753,7 @@ void coop_sess_cancel_save_events(CoopSess *s, const uint8_t transfer[16]) {
     coop_lock(&s->lock);
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
         EventOut *e = &s->event_out[i];
-        if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);
+        if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_out_discard(s, e);
     }
     coop_unlock(&s->lock);
 }
@@ -882,7 +882,7 @@ static void events_tick(CoopSess *s, uint64_t now) {
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
         EventOut *e = &s->event_out[i];
         if (!e->id) continue;
-        if (e->deadline && now >= e->deadline) { event_discard(s, e); continue; }
+        if (e->deadline && now >= e->deadline) { event_out_discard(s, e); continue; }
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
             EventTarget *t = &e->target[id];
