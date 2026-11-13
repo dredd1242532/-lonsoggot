@@ -23,6 +23,7 @@ path = os.environ["HOS_CONTROL"]
 log = open(os.environ["FAKE_LOG"], "a", buffering=1)
 log.write(json.dumps({"cmd": "_start", "control": path, "xdg": os.environ.get("XDG_DATA_HOME")}) + "\n")
 frame = [100]
+started = time.monotonic()   # (status's uptime: a relaunch starts it again)
 if os.name == "nt":   # a named pipe, through ctypes: one synchronous handle a connection, read then write, never both at once
     import ctypes
     from ctypes import wintypes
@@ -51,6 +52,9 @@ if os.name == "nt":   # a named pipe, through ctypes: one synchronous handle a c
         def flush_and_exit(self):
             k.FlushFileBuffers(self.h)   # (the reply read before the process and its pipe go)
             os._exit(0)
+        def flush_and_relaunch(self):
+            k.FlushFileBuffers(self.h)
+            os.execv(sys.executable, [sys.executable, "-I"] + sys.argv)   # (a new process; this one goes, its pipe with it)
     def accept():
         h = k.CreateNamedPipeW(name, 3, 0, 255, 65536, 65536, 0, None)   # (duplex, byte mode, waiting)
         if not k.ConnectNamedPipe(h, None) and ctypes.get_last_error() != 535:   # ERROR_PIPE_CONNECTED
@@ -71,6 +75,10 @@ else:
         def flush_and_exit(self):
             os.unlink(path)
             os._exit(0)
+        def flush_and_relaunch(self):   # (as the game: the socket let go of, then this process again, the same pid)
+            srv.close()
+            os.unlink(path)
+            os.execv(sys.executable, [sys.executable, "-I"] + sys.argv)
     def accept():
         return Conn(srv.accept()[0])
 def ticker():
@@ -86,7 +94,7 @@ def serve(f):
         r = {"id": rid, "ok": True, "frame": frame[0]}
         if cmd == "status":
             r.update(protocol=1, fps=59.9, state="play", draws=2400.0, window={"width": 1280, "height": 720}, version="fake",
-                     map="KokiriForest_Child")
+                     map="KokiriForest_Child", uptime=round(time.monotonic() - started, 3))
         elif cmd == "teleport":
             if req.get("to") is None:
                 r.update(destinations=[{"index": 0, "child": "KokiriForest_Child", "adult": "KokiriForest_Adult"},
@@ -137,6 +145,10 @@ def serve(f):
         elif cmd == "quit":
             f.write((json.dumps(dict(r, quitting=True)) + "\n").encode())
             f.flush_and_exit()
+        elif cmd == "relaunch":
+            f.write((json.dumps(dict(r, relaunching=True)) + "\n").encode())
+            time.sleep(0.2)   # (the client has the reply before the stand-in goes, as the game's flush sees to)
+            f.flush_and_relaunch()
         elif cmd == "release":
             r.update(released=2)
         elif cmd == "saves":
@@ -457,6 +469,26 @@ class LongshotCtl(unittest.TestCase):
             self.assertIn("--slot goes with --save", r.stderr)
         else:
             r = ctl("launch", self.dir, "--save", src, check=2)
+
+    def test_relaunch(self):
+        """the stand-in started again as the game is (execv: on Linux the same pid, on Windows a new process): the client
+        is back once a status answers from the new one, and the socket serves on"""
+        with open(self.log) as f:
+            starts = sum('"_start"' in line for line in f)
+        # (twice, back to back: the second asks a stand-in barely a second old. It answers for 0.2 s after its reply, as
+        # the old game might before it lets go of the socket; the client waits for the one started again, not that answer)
+        for n in (1, 2):
+            r = ctl("--json", "relaunch", "--timeout", "30", env=self.env, check=0)
+            st = json.loads(r.stdout)
+            self.assertTrue(st["ok"])
+            self.assertLessEqual(st["uptime"], st["after_s"] + 0.1)
+            self.assertGreaterEqual(st["after_s"], 0.2, "relaunch %d was taken for done by the old stand-in" % n)
+            with open(self.log) as f:
+                self.assertEqual(sum('"_start"' in line for line in f), starts + n)
+        self.assertEqual(self.last("relaunch")["cmd"], "relaunch")
+        r = ctl("relaunch", env=self.env, check=0)
+        self.assertRegex(r.stdout, r"^relaunched: answering again after [\d.]+ s \(uptime [\d.]+ s\)")
+        self.assertEqual(ctl("status", env=self.env, check=0).returncode, 0)
 
     def test_zz_quit(self):   # (last: the stand-in ends)
         r = ctl("quit", env=self.env, check=0)

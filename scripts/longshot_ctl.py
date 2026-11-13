@@ -21,6 +21,8 @@ steer it and read its state from a shell, a test or a coding agent. Standard lib
     mem read ADDR SIZE [--format hex|u8|u16|u32|u64|f32]   read guest memory (HOS_CONTROL_MEM=ro or rw)
     mem write ADDR HEX                          write guest memory (HOS_CONTROL_MEM=rw); aliases: ro->r/read, rw->readwrite
     quit                                        the game exits
+    relaunch [--timeout 120]                    the game starts again (the Insert menu's Restart now), with the same
+                                                command and environment; back when its bridge answers again
     raw '{"cmd": "status"}'                     any request
 
 The socket defaults to $HOS_CONTROL. Plain lines by default, --json for the replies as they come. Exit status: 0 done,
@@ -219,6 +221,32 @@ def format_bytes(data, fmt):
     return " ".join(("%g" if fmt == "f32" else "%d") % v for v in out)
 
 
+def relaunch(b, timeout):
+    """The game started again (the relaunch command), then its status once its bridge answers on the same socket from the
+    process started again: one whose uptime is no longer than the wait (its bridge started after the ask), not the old one
+    answering before it lets go of the socket (status gives the uptime to 0.1 s: 0.05 s to spare). b is closed; the status
+    reply has after_s, the seconds it took"""
+    check(b.request("relaunch"))
+    path = b.path
+    b.close()
+    t0 = time.monotonic()
+    while True:
+        try:
+            nb = Bridge(path, 2)
+            try:
+                st = nb.request("status", timeout=5)
+            finally:
+                nb.close()
+            waited = time.monotonic() - t0
+            if st.get("ok") and st.get("uptime", float("inf")) <= waited + 0.05:
+                return dict(st, after_s=round(waited, 1))
+        except Failed:
+            pass
+        if time.monotonic() - t0 > timeout:
+            raise Failed("the game did not answer again in %.0f s" % timeout, 3)
+        time.sleep(0.2)
+
+
 def connect(a, timeout=10.0):
     path = a.sock or os.environ.get("HOS_CONTROL")
     if not path:
@@ -369,6 +397,9 @@ def run(a):
                 print(slots_text(r))
         elif a.command == "quit":
             show(a, check(b.request("quit")), lambda r: "quitting")
+        elif a.command == "relaunch":
+            st = relaunch(b, a.timeout)
+            show(a, st, lambda r: "relaunched: answering again after %.1f s (uptime %.1f s)" % (r["after_s"], r["uptime"]))
         elif a.command == "raw":
             req = json.loads(a.request)
             b.next_id += 1
@@ -602,6 +633,8 @@ def main(argv=None):
     q = sub.add_parser("slots", help="the save slots: last written, sizes, scene; * the newest (Continue's)")
     q.add_argument("--thumbs", metavar="DIR", help="each slot's file-select picture written there as slot_NN.jpg")
     sub.add_parser("quit")
+    q = sub.add_parser("relaunch", help="the game starts again (the Insert menu's Restart now); back when it answers")
+    q.add_argument("--timeout", type=float, default=120, help="seconds for the game started again to answer")
     q = sub.add_parser("raw")
     q.add_argument("request", help="a JSON request object")
     a = p.parse_args(argv)

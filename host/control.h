@@ -70,6 +70,9 @@ typedef struct HosControlGame {
     int (*age)(int adult);
     /* (OoT) with the map: an event playing (a cutscene, a map change's), a map loading, Link the child. 0 before any */
     int (*oot_state)(int *event, int *loading, int *child);
+    /* the game started again as the Insert menu's Restart now does it (host/hos_relaunch.c: the same command and the
+       environment it started with, so the bridge comes back on the same socket); does not return. NULL: no restart here */
+    void (*relaunch)(void);
 } HosControlGame;
 
 /* Listens on path and serves on a thread of its own. 0 when it could not (logged) */

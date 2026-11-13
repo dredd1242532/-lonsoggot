@@ -16,7 +16,7 @@
 
    Commands: status, press, stick, sequence, release, shot, wait, option_get, option_set, saves, teleport and age (OoT),
    subscribe,
-   unsubscribe, quit, and guest memory (mem_read, mem_read_many, mem_write) when HOS_CONTROL_MEM allows it.
+   unsubscribe, quit, relaunch, and guest memory (mem_read, mem_read_many, mem_write) when HOS_CONTROL_MEM allows it.
    Inputs are timed in frames, from the first controller read after the request. The state (intro, menu, loading,
    play) is a guess from the draws a frame, as test scripts made it from the log: ~2 draws at the intro, 15-70 in menus,
    ~5 while loading, hundreds in play.
@@ -1404,6 +1404,20 @@ static void cmd_quit(int ci, const char *id) {
     transport_cleanup();
     G.game->quit();
 }
+/* the game started again (the Insert menu's Restart now): the reply first, then the socket goes with this process, and
+   the new one serves it again under the same name (the client reconnects: scripts/longshot_ctl.py relaunch) */
+static void cmd_relaunch(int ci, const char *id) {
+    Conn *c = &G.conns[ci];
+    if (!G.game->relaunch) return reply_error(c, id, "unavailable", "this game cannot start again from the bridge");
+    Buf b = {0};
+    reply_start(&b, id, 1);
+    buf_puts(&b, ",\"relaunching\":true");
+    reply_end(c, &b);
+    conn_flush_now(c);
+    ctl_log("control: relaunch asked by a client");
+    transport_cleanup();
+    G.game->relaunch();
+}
 
 /* ---- guest memory (host/control.c's HOS_CONTROL_MEM, docs/control.md): mem_read, mem_read_many, mem_write ---- */
 static void buf_hex(Buf *b, const uint8_t *p, uint64_t n) {
@@ -1798,6 +1812,7 @@ static void request(int ci, const char *line, size_t len) {
         log_wanted_update();
         reply_ok(c, id);
     } else if (!strcmp(cmd, "quit")) cmd_quit(ci, id);
+    else if (!strcmp(cmd, "relaunch")) cmd_relaunch(ci, id);
     else if (!strncmp(cmd, "mem_", 4) || !strcmp(cmd, "symbols")) cmd_mem(ci, &d, req, id, cmd);
     else reply_error(c, id, "unknown_cmd", "no command %.60s", cmd);
 }
@@ -2313,6 +2328,13 @@ static void game_quit(void) {   /* (as the window's close: the pipelines made si
     hos_log_flush();
     ExitProcess(0);
 }
+void hos_relaunch_ask(void);         /* (hos_relaunch.c: the Insert menu's Restart now) */
+void hos_window_closed_exit(void);   /* (hos_relaunch.c: the exit, started again first when asked) */
+static void game_relaunch(void) {   /* (as quit, then started again with the command and environment it began with) */
+    rx_close_asked();
+    hos_relaunch_ask();
+    hos_window_closed_exit();
+}
 static const char *game_renderer(void) { return rx_describe(); }
 int hos_oot_current_map(char *out, size_t cap);                              /* (hos_main.c) */
 int hos_oot_destination(int index, const char **child, const char **adult);
@@ -2327,7 +2349,8 @@ static HosControlGame game = {
     .mem_write = game_mem_write, .save_root = game_save_root, .log = game_log, .quit = game_quit,
     .renderer = game_renderer, .map = hos_oot_current_map, .destination = hos_oot_destination,
     .teleport = hos_oot_teleport_ask, .teleport_result = hos_oot_teleport_result,
-    .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state};
+    .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
+    .relaunch = game_relaunch};
 
 void hos_control_start(const char *version) {
     const char *path = getenv("HOS_CONTROL");
