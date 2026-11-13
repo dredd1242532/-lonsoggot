@@ -110,6 +110,11 @@ class Screenshots(unittest.TestCase):
         self.entry['reviewed_source']['files'] = {'../secret': 'a' * 64}
         self.assertTrue(any('unsafe relative path' in e for e in self.check()[0]))
 
+    def test_menu_fixture_requires_both_capture_sources(self):
+        self.entry['kind'] = 'menu-fixture'
+        errors, _ = self.check(review=False)
+        self.assertTrue(any('must fingerprint menu.cpp and capture_menu.py' in e for e in errors))
+
     def test_review_never_rewrites_capture_or_review_records(self):
         self.entry['captured_source'] = {'revision': 'original-release'}
         self.ui.write_text('changed later\n')

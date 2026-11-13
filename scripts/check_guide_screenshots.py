@@ -107,6 +107,10 @@ def check(root, review_sources=False, launcher_source=None):
             # Validate paths/hashes even when an external checkout is not available.
             files = hashes(source.get('files'), source_root or root)
             fixture_files = hashes(entry['fixture_files'], root) if 'fixture_files' in entry else {}
+            if entry.get('kind') == 'menu-fixture':
+                required = {'scripts/screenshots/menu.cpp', 'scripts/screenshots/capture_menu.py'}
+                if not required.issubset(fixture_files):
+                    raise ValueError('menu-fixture must fingerprint menu.cpp and capture_menu.py in fixture_files')
             notices.append(f'ASSET OK: {name} ({actual_size[0]}x{actual_size[1]})')
             if review_sources:
                 if source_root is None:
