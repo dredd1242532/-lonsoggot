@@ -287,4 +287,4 @@ jobs:
           echo "$SHA256  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
       - name: Lint the workflows
-        run: '"$RUNNER_TEMP/actionlint" -color'
+        run: '"$RUNNER_TEMP/actionlint" -color -config-file .forgejo/actionlint.yaml .forgejo/workflows/*.yml'
