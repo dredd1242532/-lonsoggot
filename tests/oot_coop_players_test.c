@@ -14,6 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+static int setenv(const char *name, const char *value, int overwrite) {
+    return !overwrite && getenv(name) ? 0 : _putenv_s(name, value);
+}
+static int unsetenv(const char *name) { return _putenv_s(name, ""); }
+#endif
+
 #include "coop.h"
 #include "coop_players.h"
 #include "coop_gameplay.h"
