@@ -381,7 +381,7 @@ class Publish(unittest.TestCase):
         notes.write_text("## v3.0.0-rc.1\n")
         a, b = self.dir / "Longshot-v3.0.0-rc.1-x86_64.AppImage", self.dir / "SHA256SUMS"
         a.write_bytes(b"\x7fELF builder")
-        b.write_text("sums\n")
+        b.write_bytes(b"sums\n")   # (bytes: write_text writes \r\n on Windows, and the upload is the file as it is)
         run("--product", "longshot", "publish", "v3.0.0-rc.1", "--target", "abc", "--notes", notes, a, b)
         rel = FakeForgejo.releases[0]
         self.assertEqual((rel["tag_name"], rel["draft"], rel["prerelease"], rel["name"]), ("v3.0.0-rc.1", False, True, "Longshot v3.0.0-rc.1"))
