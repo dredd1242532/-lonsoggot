@@ -26,7 +26,7 @@ Project and issue links use https://git.magicbean.dev/MagicBeanDev/Longshot.
 
 ## Design and interaction
 
-The front page has Guides, Help, Development and Team navigation, site search, light/dark
+The front page has Guides, Help, Development, Team and About navigation, site search, light/dark
 controls, and team credits. The main Grappling Hook Bean becomes the Glowing Fairy
 Bean after three clicks, taps or keyboard button activations. Reload resets it.
 A failed image load keeps the original artwork and allows a retry.
