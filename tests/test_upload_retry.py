@@ -1,9 +1,9 @@
 """A texture whose upload failed is tried again, whatever its kind (gpu/vk/vk_texture.cpp texture_touch).
 
-With the VRAM or RAM full an upload can fail for want of staging memory. #1505 made a BC3 texture try again 30 frames on;
-every other kind was marked uploaded on a failure: a first upload that failed left an empty image, drawn as it was until the
-game wrote that memory again, and a re-upload that failed dropped what the CPU had written (upload_gen moved past it) and
-the GPU buffer write gpu_wrote_into had just marked seen.
+With the VRAM or RAM full an upload can fail for want of staging memory. https://github.com/NotRexed/Hookshot/pull/1505
+made a BC3 texture try again 30 frames on; every other kind was marked uploaded on a failure: a first upload that failed
+left an empty image, drawn as it was until the game wrote that memory again, and a re-upload that failed dropped what
+the CPU had written (upload_gen moved past it) and the GPU buffer write gpu_wrote_into had just marked seen.
 
 texture_touch is too tied to the renderer to run here, so its source is checked:
 - the failed branch marks nothing done (no uploaded, no upload_gen), sets retry_frame 30 frames on, puts gpu_wrote_seen back,
