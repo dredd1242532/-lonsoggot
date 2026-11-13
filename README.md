@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://longshot.magicbean.dev/"><b>Website</b></a> |
   <a href="https://longshot.magicbean.dev/download"><b>Download</b></a> |
-  <a href="https://discord.gg/KX99srmQTe"><b>Discord</b></a> |
+  <a href="https://discord.gg/magicbean"><b>Discord</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#build-from-source">Build from source</a> |
@@ -30,7 +30,7 @@ Longshot is a static recompilation of a supported console game. The game's code 
 
 Longshot is a continuation of [Hookshot](https://github.com/NotRexed/Hookshot). The top maintainers have moved to this project.
 
-**[Join us on Discord](https://discord.gg/KX99srmQTe)!**
+**[Join us on Discord](https://discord.gg/magicbean)!**
 <br>
 
 > [!IMPORTANT]
