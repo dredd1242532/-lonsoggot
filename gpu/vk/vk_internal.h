@@ -32,6 +32,9 @@ namespace mkwvk {
 extern std::vector<std::string> gpu_device_names;
 extern const MkwVkHost* host;
 void logf(const char* fmt, ...);
+// (longshot) A line at another level than info, as host/hos.h's hos_log_at: "[trace] " leads its text, after the host's thread tag
+enum LogLevel : int { log_error, log_warn, log_info, log_debug, log_trace };
+void logf_at(LogLevel level, const char* fmt, ...);
 void queue_flush_locked();   // (vk_replay.cpp, RX_VK_BATCH: held submits out; dev.present_mu held)
 void queue_flush();          // (the same, taking dev.present_mu)
 // (longshot) held submits out, then vkDeviceWaitIdle with the present queue's lock taken too (dev.present_mu held): the device's
@@ -362,6 +365,10 @@ void state_list_run();                        // (an update: the state list's pi
 /// (longshot) A prediction a start began and did not finish (closed, or ended in it): the next start runs it again
 bool predict_pending();   // vk_draw.cpp
 void predict_run(void (*progress)(size_t done, size_t total));   // (after a prepare_run that prepared: the notes' predictions)
+/// (longshot) Compile shaders: whether a preparation builds the predicted pipelines too (All), or leaves them out (Most, the
+/// default). RX_VK_COMPILE_SHADERS=all or most (the game's --compile-shaders), else compile_shaders= in longshot_options.ini
+/// (1 All, 0 Most)
+bool compile_all();   // vk_draw.cpp
 /// (longshot) The CPUs this process may run on: its affinity mask (sched_getaffinity on Linux, through host/posix), not every CPU
 /// the PC has. The prepare's pools are sized from it: a process limited to 12 of 24 CPUs ran 24 threads on them
 unsigned usable_cpus();   // vk_progcache.cpp

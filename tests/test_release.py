@@ -2,7 +2,9 @@
 SHA256SUMS and its signature; the channels as the launcher reads them from the release list; the version a tag must reach
 (the bump from the commits since the last stable), in a git repository made here; the nightly's name; and publish and
 prune against a fake Forgejo on 127.0.0.1 (a draft first, every file uploaded and checked, published last; only nightlies
-pruned). Needs git and the openssl command line.
+pruned); the release page (the launcher's download links, Longshot's "download the launcher" notice, per channel); and the
+release a tag's commit already has (released-as: found by its tag's commit, taken only signed and whole).
+Needs git and the openssl command line.
 
     python -I tests/test_release.py
 """
@@ -211,6 +213,75 @@ class Bump(unittest.TestCase):
         self.assertEqual(release.previous_tag("v3.1.0", 3, str(self.dir)), "v3.0.0")   # (a stable: since the stable before)
 
 
+    def test_the_first_notes_give_git_cliff_no_range(self):
+        # (git-cliff takes a lone ref for a range and stops: SetCommitRangeError("HEAD", unable to parse OID), the
+        # launcher's first nightlies. With no tag before and no first commit, it is given no range: the whole history)
+        self.commit("feat: a")
+        stub = self.dir / "git-cliff-stub"
+        stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
+        stub.chmod(0o755)
+        with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
+            args = release.notes("nightly-2-0123abcd", "launcher", root=str(self.dir)).split()
+        self.assertEqual(args[-2:], ["--strip", "all"])
+        self.git("tag", "v1.0.0")
+        self.commit("fix: b")
+        with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
+            args = release.notes("nightly-3-0123abcd", "launcher", root=str(self.dir)).split()
+        self.assertEqual(args[-1], "v1.0.0..HEAD")
+
+class ReleasePage(unittest.TestCase):
+    """The release page publish writes: the launcher's starts with big download links to its own files; Longshot's with "to
+    play, get the Longshot Launcher", linking longshot.magicbean.dev's newest launcher of the same channel, and "don't download the
+    files below" (above the builder files)"""
+
+    LAUNCHER = ("LongshotLauncher-%s-windows-x64-setup.exe", "LongshotLauncher-%s-windows-x64-portable.zip",
+                "LongshotLauncher-%s-x86_64.AppImage", "SHA256SUMS", "SHA256SUMS.sig")
+    LONGSHOT = ("LongshotBuilder-%s-windows-x64.zip", "Longshot-%s-x86_64.AppImage", "tools.lock", "SHA256SUMS", "SHA256SUMS.sig")
+
+    def page(self, tag, product, files):
+        names = [f % tag if "%s" in f else f for f in files]
+        return release.release_page(tag, product, "## %s\n\n### Fixes\n\n- a fix\n" % tag, names, "MagicBeanDev/LongshotLauncher")
+
+    def test_the_launcher_page_links_its_own_files(self):
+        for tag, channel in (("v1.0.0", "stable"), ("v1.1.0-rc.2", "rc"), ("nightly-10-968b7963", "nightly")):
+            with self.subTest(tag):
+                page = self.page(tag, "launcher", self.LAUNCHER)
+                head, notes = page.split("\n---\n", 1)
+                base = "https://git-cdn.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/download/%s/LongshotLauncher-%s" % (tag, tag)
+                self.assertEqual(head.strip().split("\n\n")[:4], [
+                    "# ⬇️ Download Longshot Launcher",
+                    "### [🪟 &nbsp;Download for Windows](%s-windows-x64-setup.exe)" % base,
+                    "### [🐧 &nbsp;Download for Linux (AppImage)](%s-x86_64.AppImage)" % base,
+                    "Windows without installing: [portable zip](%s-windows-x64-portable.zip)" % base])
+                self.assertIn(release.CHANNEL_SAYS[channel], head)
+                self.assertNotIn("|", head)                     # (no tables: big links)
+                self.assertNotIn("SHA256SUMS", head)
+                self.assertEqual(notes.strip(), "## %s\n\n### Fixes\n\n- a fix" % tag)   # (git-cliff's notes follow)
+        # (a file a release lacks is not linked)
+        page = self.page("v1.0.0", "launcher", self.LAUNCHER[2:])
+        self.assertIn("Download for Linux", page)
+        self.assertNotIn("Download for Windows", page)
+        self.assertNotIn("portable zip", page)
+
+    def test_the_longshot_page_sends_players_to_the_launcher_of_its_channel(self):
+        for tag, channel in (("v3.0.0", "stable"), ("v3.0.0-rc.1", "rc"), ("nightly-34-545618fc", "nightly")):
+            with self.subTest(tag):
+                page = self.page(tag, "longshot", self.LONGSHOT)
+                head, notes = page.split("\n---\n", 1)
+                link = "https://longshot.magicbean.dev/download/launcher/" + channel
+                self.assertEqual(head.strip().split("\n\n")[:5], [
+                    "# 🎮 To play, get the Longshot Launcher",
+                    "### [🪟 &nbsp;Download the launcher for Windows](%s/windows)" % link,
+                    "### [🐧 &nbsp;Download the launcher for Linux (AppImage)](%s/linux)" % link,
+                    "Windows without installing: [portable zip](%s/windows-portable) · [the launcher's newest %s release](%s)"
+                    % (link, channel, link),
+                    "**Don't download the files below:** they're the builder the launcher installs for you."])
+                for other in {"stable", "rc", "nightly"} - {channel}:
+                    self.assertNotIn("/download/launcher/" + other, page)
+                self.assertNotIn("releases/download", page)   # (no link to a builder file)
+                self.assertTrue(notes.strip().startswith("## " + tag))
+
+
 NIGHTLY_OF = lambda tag: release.NIGHTLY.match(tag)
 
 
@@ -232,8 +303,18 @@ class FakeForgejo(http.server.BaseHTTPRequestHandler):
         return self.rfile.read(int(self.headers.get("Content-Length") or 0))
 
     max_items = 50   # (the server's max_response_items: /api/v1/settings/api)
+    files, fetched = {}, []   # (the release files under /attachments/<name>, and the hosts they were asked of)
 
     def do_GET(self):
+        if self.path.startswith("/attachments/"):
+            self.fetched.append(self.headers.get("Host"))
+            data = self.files.get(self.path.rsplit("/", 1)[1])
+            if data is None:
+                return self.answer(404, {"message": "not found"})
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            return self.wfile.write(data)
         # (as Forgejo 17's GET /repos/{owner}/{repo}/releases: drafts only with a writer token; draft= and pre-release= keep
         # only the releases whose field equals the value; limit (default 30, at most max_response_items) and page; newest first)
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -312,6 +393,28 @@ class Publish(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run("--product", "longshot", "publish", "v3.0.1-rc.1", "--target", "abc", "--notes", notes, bad)
 
+    def test_the_page_on_the_release(self):
+        # (publish puts the notes under the page's header: Longshot's says to download the launcher of its channel)
+        notes = self.dir / "notes.md"
+        notes.write_text("### Fixes\n\n- a fix\n")
+        f = self.dir / "LongshotBuilder-nightly-34-545618fc-windows-x64.zip"
+        f.write_bytes(b"PK zip")
+        run("--product", "longshot", "publish", "nightly-34-545618fc", "--target", "abc", "--notes", notes, f)
+        body = FakeForgejo.releases[0]["body"]
+        self.assertTrue(body.startswith("# 🎮 To play, get the Longshot Launcher\n"))
+        self.assertIn("https://longshot.magicbean.dev/download/launcher/nightly/windows", body)
+        self.assertIn("### Fixes\n\n- a fix\n", body)
+        # (the launcher's: its own files, on its repository)
+        FakeForgejo.releases, FakeForgejo.uploads = [], []
+        f = self.dir / "LongshotLauncher-v1.0.0-rc.1-windows-x64-setup.exe"
+        f.write_bytes(b"MZ setup")
+        run("--product", "launcher", "publish", "v1.0.0-rc.1", "--target", "abc", "--notes", notes, f)
+        body = FakeForgejo.releases[0]["body"]
+        self.assertTrue(body.startswith("# ⬇️ Download Longshot Launcher\n"))
+        self.assertIn("### [🪟 &nbsp;Download for Windows](https://git-cdn.magicbean.dev/MagicBeanDev/Test/releases/download/"
+                      "v1.0.0-rc.1/LongshotLauncher-v1.0.0-rc.1-windows-x64-setup.exe)", body)
+        self.assertIn(release.CHANNEL_SAYS["rc"], body)
+
     def test_a_draft_left_by_a_failed_run_is_reused(self):
         FakeForgejo.releases = [{"id": 1, "tag_name": "v3.0.0", "draft": True, "prerelease": False,
                                  "assets": [{"id": 9, "name": "half", "size": 1}]}]
@@ -384,6 +487,178 @@ class Publish(unittest.TestCase):
             run("--product", "longshot", "publish", "v3.0.0", "--target", "abc", "--notes", notes, f)
         self.assertIn("already published", str(e.exception))
         self.assertEqual(FakeForgejo.uploads, [])
+
+
+class ReleasedAs(unittest.TestCase):
+    """released-as: a tag's commit that CI released already (its nightly; for a stable, its release candidate). Found by the
+    commit its tag is, and taken only when its SHA256SUMS is signed by a trusted key and names exactly its files; a
+    release of the commit that is not stops the run"""
+
+    def setUp(self):
+        FakeForgejo.releases, FakeForgejo.files, FakeForgejo.fetched = [], {}, []
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeForgejo)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.dir = Path(tempfile.mkdtemp(prefix="release-as-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.base = "http://127.0.0.1:%d" % self.server.server_port
+        patcher = mock.patch.dict(os.environ, {"FORGEJO_API": self.base + "/api/v1", "RELEASE_TOKEN": "t",
+                                               "GITHUB_REPOSITORY": "MagicBeanDev/Test"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("FORGEJO_UPLOAD_API", None)
+        run("keygen", self.dir / "keys")
+        run("keygen", self.dir / "other")
+        self.repo = self.dir / "repo"
+        (self.repo / "scripts").mkdir(parents=True)
+        spki = release.spki_der(str(self.dir / "keys" / "release.pub.pem"))
+        (self.repo / "scripts" / "release_keys.json").write_text(json.dumps({"keys": [base64.b64encode(spki).decode()]}))
+        self.git("init", "-q", "-b", "main")
+        self.git("commit", "-q", "--allow-empty", "-m", "feat: a")
+        self.a = self.git("rev-parse", "HEAD")
+        self.git("commit", "-q", "--allow-empty", "-m", "fix: b")
+        self.b = self.git("rev-parse", "HEAD")
+
+    def git(self, *args):
+        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "tag.gpgsign=false",
+                               *args], cwd=self.repo, check=True, capture_output=True, text=True).stdout.strip()
+
+    def release(self, tag, commit, files=("Longshot-%s-x86_64.AppImage", "LongshotBuilder-%s-windows-x64.zip", "tools.lock"),
+                key="keys", draft=False, sums_of=None, sig=None):
+        """A release of commit as CI publishes it: its files, SHA256SUMS over them (or over sums_of), signed with key"""
+        self.git("tag", tag, commit)
+        names = [f % tag if "%s" in f else f for f in files]
+        sums = "".join("%s  %s\n" % (hashlib.sha256(n.encode()).hexdigest(), n) for n in sorted(sums_of or names))
+        sums_file = self.dir / ("sums-" + tag)
+        sums_file.write_text(sums)
+        rid = len(FakeForgejo.releases) + 1
+        assets = []
+        for name, data in [(n, n.encode()) for n in names] + [("SHA256SUMS", sums.encode())] + \
+                          [("SHA256SUMS.sig", sig if sig is not None else
+                            release.sign(str(sums_file), str(self.dir / key / "release.pem")).encode())]:
+            FakeForgejo.files["%d-%s" % (rid, name)] = data
+            assets.append({"id": len(assets) + 1, "name": name, "size": len(data),
+                           "browser_download_url": "%s/attachments/%d-%s" % (self.base, rid, name)})
+        FakeForgejo.releases.append({"id": rid, "tag_name": tag, "draft": draft, "prerelease": True, "assets": assets})
+
+    def released_as(self, commit, but=None):
+        return release.released_as(commit, "longshot", root=str(self.repo), but=but)
+
+    def nightly(self, n, commit):
+        return "nightly-%d-%s" % (n, commit[:8])
+
+    def test_the_signed_nightly_of_the_commit(self):
+        self.assertIsNone(self.released_as(self.b))   # (none at all: the full build)
+        self.release(self.nightly(1, self.a), self.a)
+        self.release(self.nightly(2, self.b), self.b, draft=True)   # (a failed run's draft: no release)
+        self.assertIsNone(self.released_as(self.b))
+        self.release(self.nightly(3, self.b), self.b)
+        self.assertEqual(self.released_as(self.b), self.nightly(3, self.b))
+        self.assertEqual(self.released_as(self.a), self.nightly(1, self.a))
+        # (a nightly whose name has the commit's 8 hex but whose tag is another commit is not it)
+        self.git("tag", "-d", self.nightly(1, self.a))
+        self.git("tag", self.nightly(1, self.a), self.b)
+        self.assertIsNone(self.released_as(self.a))
+
+    def test_a_stable_finds_its_release_candidate(self):
+        self.release("v3.0.0-rc.1", self.b)
+        self.assertEqual(self.released_as(self.b, but="v3.0.0"), "v3.0.0-rc.1")
+        self.assertIsNone(self.released_as(self.b, but="v3.0.0-rc.1"))   # (never the tag itself)
+        self.release("v2.9.0", self.b)   # (no version of this product: never taken)
+        self.assertEqual(self.released_as(self.b, but="v3.0.0"), "v3.0.0-rc.1")
+
+    def test_a_release_not_signed_or_not_whole_stops_the_run(self):
+        cases = {
+            "untrusted": dict(key="other"),
+            "corrupt": dict(sig=b"MEUCIQ=="),
+            "not base64": dict(sig=b"\x00not base64"),
+            "a file more": dict(sums_of=["tools.lock"]),
+            "a file less": dict(sums_of=["tools.lock", "LongshotBuilder.exe", "Longshot-x-x86_64.AppImage",
+                                         "LongshotBuilder-x-windows-x64.zip"]),
+        }
+        for n, (what, kwargs) in enumerate(cases.items(), 1):
+            with self.subTest(what):
+                FakeForgejo.releases = []
+                tag = self.nightly(n, self.b)
+                self.release(tag, self.b, **kwargs)
+                with self.assertRaises(SystemExit) as e:
+                    self.released_as(self.b)
+                self.assertIn(tag, str(e.exception))
+        FakeForgejo.releases = []
+        self.release(self.nightly(9, self.b), self.b)
+        FakeForgejo.releases[0]["assets"] = [a for a in FakeForgejo.releases[0]["assets"] if a["name"] != "SHA256SUMS.sig"]
+        with self.assertRaises(SystemExit):
+            self.released_as(self.b)
+        # (a file that does not answer stops it too)
+        FakeForgejo.releases, FakeForgejo.files = [], {}
+        self.release(self.nightly(10, self.b), self.b)
+        FakeForgejo.files.clear()
+        with self.assertRaises(SystemExit):
+            self.released_as(self.b)
+
+    def test_the_files_come_from_the_address_without_cloudflare(self):
+        # (FORGEJO_UPLOAD_API: the same server by its own address; the release list's links name the public one)
+        self.release(self.nightly(1, self.b), self.b)
+        for a in FakeForgejo.releases[0]["assets"]:
+            a["browser_download_url"] = a["browser_download_url"].replace(self.base, "https://git.example.invalid")
+        with mock.patch.dict(os.environ, FORGEJO_UPLOAD_API="http://localhost:%d/api/v1" % self.server.server_port):
+            self.assertEqual(self.released_as(self.b), self.nightly(1, self.b))
+        self.assertEqual(FakeForgejo.fetched, ["localhost:%d" % self.server.server_port] * 2)
+
+    def test_the_command(self):
+        self.release(self.nightly(1, self.b), self.b)
+        with mock.patch.object(release, "ROOT", str(self.repo)), mock.patch.object(release, "git",
+                lambda *a, root=None, check=True, _g=release.git: _g(*a, root=str(self.repo), check=check)), \
+                mock.patch.object(release, "trusted_keys", lambda root=None, _t=release.trusted_keys: _t(str(self.repo))):
+            self.assertEqual(run("--product", "longshot", "released-as", self.b, "--not", "v3.0.0-rc.1"), (0, self.nightly(1, self.b) + "\n"))
+            self.assertEqual(run("--product", "longshot", "released-as", self.a), (0, "\n"))
+            with self.assertRaises(SystemExit):
+                run("--product", "longshot", "released-as", self.b[:8])
+
+
+class TokenStaysHome(unittest.TestCase):
+    """Forgejo sends a release file to a signed link of its file store (Cloudflare R2), which refuses a request that also
+    carries a token: download() gives the token to the forge, and not to where it redirects"""
+
+    def test_a_redirect_to_the_file_store_goes_without_the_token(self):
+        seen = {}
+
+        class Store(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["store"] = self.headers.get("Authorization")
+                body = b"bad request" if self.headers.get("Authorization") else b"the sums"
+                self.send_response(400 if self.headers.get("Authorization") else 200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        store = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Store)
+
+        class Forge(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["forge"] = self.headers.get("Authorization")
+                self.send_response(303)
+                self.send_header("Location", "http://127.0.0.1:%d/bucket/SHA256SUMS?X-Amz-Signature=x" % store.server_port)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        forge = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Forge)
+        for s in (store, forge):
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+            self.addCleanup(s.server_close)
+            self.addCleanup(s.shutdown)
+        url = "http://127.0.0.1:%d/o/r/releases/download/v1/SHA256SUMS" % forge.server_port
+        with mock.patch.dict(os.environ, RELEASE_TOKEN="secret"):
+            os.environ.pop("FORGEJO_UPLOAD_API", None)
+            self.assertEqual(release.download(url), b"the sums")
+        self.assertEqual(seen, {"forge": "token secret", "store": None})
 
 
 if __name__ == "__main__":

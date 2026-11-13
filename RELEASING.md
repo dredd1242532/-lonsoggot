@@ -87,12 +87,19 @@ Players on the nightly channel keep the last good nightly until then.
 3. **What CI does** (`release.yml`): it checks the tag (`check-tag`: its form, on `main`, above every release, as high as the
    commits call for). It builds both systems' files, writes and signs `SHA256SUMS`, checks the signature with the key the
    launcher trusts, writes the notes with git-cliff, uploads everything to a draft, and publishes it as a pre-release.
+   The page has a header above the notes: the launcher's links its own files; Longshot's sends players to the launcher
+   of the same channel ([docs/releases.md](docs/releases.md#release-notes)).
+   For Longshot, when the commit's nightly is still published (CI keeps the newest 5), `release.py released-as` finds it
+   and checks its signed `SHA256SUMS`: the build checks that ship no file (the Windows Vulkan back end, AMD FSR 4) passed
+   in its run and are not run again. The files are built again: each carries its version.
 4. **Check it.**
    - The run is green, and the release page shows every file, `SHA256SUMS` and `SHA256SUMS.sig`.
    - `python -I scripts/release.py channels` shows the tag on `rc`.
    - Download `SHA256SUMS`, `SHA256SUMS.sig` and the files, and run
      `python -I scripts/release.py verify SHA256SUMS --files <folder>`.
    - In a launcher set to the rc channel (Settings), Retry offers it.
+   - For the launcher: within a minute, `https://longshot.magicbean.dev/download/launcher/rc` goes to it (and, for a stable,
+     `/download/launcher/stable`).
 5. Ask testers on the rc channel to try it, and for Longshot one on Windows for what CI can't check
    ([Needs a Windows tester](#needs-a-windows-tester-longshot)). Fixes go in as pull requests; each round is a new rc tag
    (`-rc.2`).
@@ -111,7 +118,8 @@ git push forge v3.1.0
 
 Web UI: *New release*, tag `v3.1.0`, target: the rc's commit, **Create tag**.
 
-CI builds it again from that commit, signs and publishes it: it appears on **stable** and on **rc**. Its notes cover every
+CI builds it again from that commit (its files carry the version; for Longshot, the build checks the rc's run passed are
+not run again: `release.py released-as`), signs and publishes it: it appears on **stable** and on **rc**. Its notes cover every
 change since the previous stable, the release candidates included. A later commit of `main` can be tagged instead, but
 then it was not what testers tried.
 
@@ -155,14 +163,16 @@ To check before pushing: `python -I scripts/release.py check-tag <tag>` (it read
 ## Needs a Windows tester (Longshot)
 
 There is no Windows runner: every job runs on Linux, and Longshot's Windows files are cross-built there (the setup and the
-Vulkan back end with llvm-mingw's Linux build of `tools.lock`'s release, the WPF builder with `dotnet publish -r win-x64
+Vulkan back end with llvm-mingw's Linux build of `tools.lock`'s release, the builder (command-line only) with `dotnet publish -r win-x64
 -p:EnableWindowsTargeting=true`). CI checks them as Windows files (PE headers, imports, resources, the .NET runtime:
 `scripts/check_windows_files.py`) and starts the setup and the builder under Wine, which only shows that they load. For each
 release candidate, before its stable, a tester on Windows 10 or 11:
 
-- **Builds and plays.** Unzip `LongshotBuilder-<v>-windows-x64.zip` and run `LongshotBuilder.exe`: the setup installs the
-  builder and downloads the tools; build the game from your own copy and play to the title screen. The setup shows its
-  icon, the builder its fonts and image.
+- **Builds and plays.** With the Longshot Launcher, build this version from your own copy and play to the title screen.
+  Then unzip `LongshotBuilder-<v>-windows-x64.zip` and run `LongshotBuilder.exe --cli --prepare --game <your copy>` (as
+  RecompLauncher does): the setup installs the builder and downloads the tools, then builds. Started by a double-click,
+  the setup and `LongshotBuilder\LongshotBuilder.exe` each show only the message that sends players to the launcher; the
+  setup shows its icon.
 - **Notes what Windows says.** Nothing is signed: what SmartScreen and the antivirus do with the zip and the setup.
 - **Runs the checks only Windows can** (they were `ci.yml`'s `windows-2022` jobs, which nothing could run): the suite on
   Windows' Python, `python -I -B tests/run_all.py --strict` (the 15 checks Linux skips, their `RUN_ALL_SKIP` naming why: the setup's Win32
@@ -193,7 +203,7 @@ for Linux. A bump is a pull request that changes its line:
   the profile):
   ```sh
   python -I scripts/tools.py assemble python --requirements nx2/prompt_requirements.txt --out python.zip
-  python -I scripts/tools.py assemble cpm --add <dav1d-cpm folder from build-windows.yml's dav1d artifact> --out cpm.zip
+  python -I scripts/tools.py assemble cpm --add <cpm folder> --out cpm.zip   # (its dav1d/<version>: scripts/windows/dav1d.sh <cpm folder>)
   python -I scripts/tools.py assemble third-party --from <an archive with tools/third_party> --out third-party.zip
   python -I scripts/tools.py assemble profile --work work --out profile.zip
   RELEASE_TOKEN=<your token> python -I scripts/tools.py add python 3.14.2-1 python.zip --dest LongshotBuilder/tools/python --prefix python
@@ -216,7 +226,7 @@ for Linux. A bump is a pull request that changes its line:
      `build-linux/tools`, and `check_player_build.sh` starts a build from the image with them), then the pull request
      (`build(linux): LLVM 23.1.6`).
 
-  The AppImage itself carries Python with `requirements.txt`'s packages and Tk (`deps.sh` without `tools`); a change to
+  The AppImage itself carries Python with `requirements.txt`'s packages (`deps.sh` without `tools`); a change to
   those is an ordinary pull request.
 
 Uploads over 100 MB (llvm-mingw, both emsdk) go to the address without Cloudflare: `FORGEJO_UPLOAD_API=<it>/api/v1` (One-time

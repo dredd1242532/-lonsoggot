@@ -35,9 +35,15 @@ The release on Forgejo ($RELEASE_TOKEN: in CI the job's own token, forgejo.token
 this is; $FORGEJO_API, $FORGEJO_UPLOAD_API):
     python -I scripts/release.py publish <tag> --target <commit> --notes <file> <file>...
         a draft release (pre-release unless a stable), every file uploaded and checked, then published: until that last step
-        no launcher sees it. A draft left by a failed run of the same tag is reused
+        no launcher sees it. A draft left by a failed run of the same tag is reused. The page is the notes under a header
+        (release_page): the launcher's, big download links to its own files; Longshot's, "to play, get the Longshot
+        Launcher", with longshot.magicbean.dev's links to the newest launcher of the same channel
     python -I scripts/release.py prune [--keep 5]
         the nightly releases and their tags past the newest <keep>; nothing else is ever deleted
+    python -I scripts/release.py released-as <commit> [--not <tag>]
+        the published release CI made of that commit (a nightly, or a release candidate under its stable), its SHA256SUMS
+        signed by a key the launcher trusts and naming its every file; nothing when there is none. A release of the commit
+        that fails those checks stops it
     python -I scripts/release.py channels
         what each channel offers now, as the launcher reads it
 """
@@ -244,12 +250,62 @@ def notes(tag, product, root=ROOT):
     cliff = os.environ.get("GIT_CLIFF") or shutil.which("git-cliff")
     if not cliff:
         fail("git-cliff is needed for the notes: python -I scripts/release.py git-cliff <folder>, then GIT_CLIFF=<its path>")
-    args = [cliff, "--config", os.path.join(root, "cliff.toml"), "--tag", tag, "--strip", "all",
-            (since + ".." + ref) if since else ref]
+    # (no tag before and no first commit, the launcher's first release: every commit of the checkout, which is ref's. No
+    # range then: git-cliff takes a lone ref for a range and stops, SetCommitRangeError("HEAD", unable to parse OID))
+    args = [cliff, "--config", os.path.join(root, "cliff.toml"), "--tag", tag, "--strip", "all"] + \
+        ([since + ".." + ref] if since else [])
     p = subprocess.run(args, cwd=root, capture_output=True, text=True, encoding="utf-8")
     if p.returncode:
         fail("git-cliff: " + p.stderr.strip())
     return p.stdout.strip() + "\n"
+
+
+# ---- the release page ----
+
+# (longshot.magicbean.dev's permanent download links, the Longshot website, website/ in MagicBeanDev/Longshot: /download/launcher/<channel>[/<os>] goes to that channel's
+# newest launcher, by the rules of newest() above)
+SITE = "https://longshot.magicbean.dev"
+# (the same release files from Cloudflare's edge: git-cdn serves git.magicbean.dev's release paths from its R2 store, cached)
+CDN = "https://git-cdn.magicbean.dev"
+LAUNCHER_FILES = {"setup": "-windows-x64-setup.exe", "portable": "-windows-x64-portable.zip", "appimage": "-x86_64.AppImage"}
+CHANNEL_SAYS = {"stable": "This is a stable release: it builds Longshot's stable versions by default.",
+                "rc": "This is a release candidate: it builds Longshot's rc versions by default.",
+                "nightly": "This is a nightly, untested: it builds Longshot's nightlies by default."}
+
+
+def page_header(tag, product, names, repo=None):
+    """The top of a release's page, above git-cliff's notes: big heading links that look like buttons, no tables. The
+    launcher's: this release's own files. Longshot's: "to play, get the Longshot Launcher", with longshot.magicbean.dev's links to
+    the newest launcher of the same channel (rc to rc, nightly to nightly, stable to stable), and "don't download the files
+    below" (above the builder files)"""
+    channel = channel_of(tag, PRODUCTS[product]["first_major"]) or "nightly"
+    if product == "launcher":
+        base = "%s/%s/releases/download/%s/" % (CDN, repo or repo_of(product), urllib.parse.quote(tag))
+        url = {k: base + urllib.parse.quote(n) for k, suffix in LAUNCHER_FILES.items() for n in sorted(names)
+               if n.startswith("LongshotLauncher-") and n.endswith(suffix)}
+        lines = ["# ⬇️ Download Longshot Launcher", ""]
+        if "setup" in url:
+            lines += ["### [🪟 &nbsp;Download for Windows](%s)" % url["setup"], ""]
+        if "appimage" in url:
+            lines += ["### [🐧 &nbsp;Download for Linux (AppImage)](%s)" % url["appimage"], ""]
+        if "portable" in url:
+            lines += ["Windows without installing: [portable zip](%s)" % url["portable"], ""]
+        return "\n".join(lines + [
+            "Run it, point it at your own dump of the game (a `.nup`, or its romfs and exefs folders), and press **Build**. "
+            "It installs Longshot and keeps it and itself up to date. %s" % CHANNEL_SAYS[channel], "", "---", ""])
+    link = "%s/download/launcher/%s" % (SITE, channel)
+    return "\n".join([
+        "# 🎮 To play, get the Longshot Launcher", "",
+        "### [🪟 &nbsp;Download the launcher for Windows](%s/windows)" % link, "",
+        "### [🐧 &nbsp;Download the launcher for Linux (AppImage)](%s/linux)" % link, "",
+        "Windows without installing: [portable zip](%s/windows-portable) · [the launcher's newest %s release](%s)"
+        % (link, channel, link), "",
+        "**Don't download the files below:** they're the builder the launcher installs for you.", "", "---", ""])
+
+
+def release_page(tag, product, notes_text, names, repo=None):
+    """The release page's text: the header, then git-cliff's notes"""
+    return page_header(tag, product, names, repo) + "\n" + notes_text.strip() + "\n"
 
 
 # ---- keys and signatures ----
@@ -435,7 +491,7 @@ def publish(tag, target, notes_file, files, product):
             fail("%s looks like a game, dump or NVIDIA file: never released (CONTRIBUTING.md)" % path)
     stable = bool(STABLE.match(tag))
     with open(notes_file, encoding="utf-8") as f:
-        body = f.read()
+        body = release_page(tag, product, f.read(), [os.path.basename(p) for p in files], repo)
     title = "%s %s" % (PRODUCTS[product]["display"], tag)
     found = [r for r in releases(repo) if r["tag_name"] == tag]
     if found and not found[0]["draft"]:
@@ -474,6 +530,78 @@ def prune(keep, product):
         api("DELETE", "/repos/%s/releases/%d" % (repo, r["id"]))
         api("DELETE", "/repos/%s/tags/%s" % (repo, urllib.parse.quote(r["tag_name"])), missing_ok=True)   # (a draft has no tag yet)
         print("pruned %s" % r["tag_name"])
+
+
+def download(url, limit=1 << 20):
+    """A release file's bytes (SHA256SUMS, its signature: small), from the address without Cloudflare when FORGEJO_UPLOAD_API
+    names one (the same server: only the scheme and host change), else from url"""
+    up = os.environ.get("FORGEJO_UPLOAD_API")
+    if up:
+        u, base = urllib.parse.urlsplit(url), urllib.parse.urlsplit(up)
+        url = urllib.parse.urlunsplit((base.scheme, base.netloc, u.path, u.query, ""))
+    headers = {"User-Agent": "longshot-release"}
+    if os.environ.get("RELEASE_TOKEN"):
+        headers["Authorization"] = "token " + os.environ["RELEASE_TOKEN"]
+    try:
+        with _OPENER.open(urllib.request.Request(url, headers=headers), timeout=120) as r:
+            data = r.read(limit + 1)
+    except (urllib.error.URLError, OSError) as e:
+        fail("%s: %s" % (url, e))
+    if len(data) > limit:
+        fail("%s: larger than %d bytes" % (url, limit))
+    return data
+
+
+class _TokenStaysHome(urllib.request.HTTPRedirectHandler):
+    """The token goes to the forge only. Forgejo answers a release file with a redirect to a signed link of its file store
+    (Cloudflare R2), which refuses a request that also carries a token (HTTP 400); urllib would pass the header on."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(req.full_url).netloc:
+            new.remove_header("Authorization")
+        return new
+
+
+_OPENER = urllib.request.build_opener(_TokenStaysHome)
+
+
+def released_as(commit, product, root=ROOT, but=None):
+    """The tag of the published release CI made of commit (a nightly, or for a stable its release candidate), or None.
+    Forgejo's list says a release's tag, git (the tags fetched) which commit it is. CI publishes a release only when every
+    job of its run passed, and signs its SHA256SUMS: a release of commit is taken only with SHA256SUMS signed by a key the
+    launcher trusts and naming exactly its files. One that is not stops this (fail): a bad release of the commit is never
+    passed over"""
+    first = PRODUCTS[product]["first_major"]
+    keys = trusted_keys(root)
+    for rel in releases(repo_of(product)):
+        tag = rel["tag_name"]
+        if rel.get("draft") or tag == but or channel_of(tag, first) is None:
+            continue
+        m = NIGHTLY.match(tag)
+        if m and not commit.startswith(m.group(2)):
+            continue
+        if git("rev-list", "-n", "1", "refs/tags/" + tag, root=root, check=False) != commit:
+            continue
+        assets = {a["name"]: a for a in rel.get("assets") or []}
+        if SUMS not in assets or SIG not in assets:
+            fail("%s, a release of %s: no %s and %s" % (tag, commit[:8], SUMS, SIG))
+        sums = download(assets[SUMS]["browser_download_url"])
+        try:
+            der = base64.b64decode(download(assets[SIG]["browser_download_url"]).strip(), validate=True)
+        except ValueError:
+            fail("%s, a release of %s: %s is not base64" % (tag, commit[:8], SIG))
+        if not keys:
+            fail("no key to check %s with (Core/ReleaseTrust.cs, scripts/release_keys.json)" % tag)
+        if not verify_sig(sums, der, keys):
+            fail("%s, a release of %s: its %s is not signed by a trusted key" % (tag, commit[:8], SUMS))
+        named = set(read_sums(sums.decode("utf-8", "replace")))
+        files = set(assets) - {SUMS, SIG}
+        if named != files:
+            fail("%s, a release of %s: %s names %s, the release has %s"
+                 % (tag, commit[:8], SUMS, ", ".join(sorted(named)) or "nothing", ", ".join(sorted(files)) or "nothing"))
+        return tag
+    return None
 
 
 # ---- commands ----
@@ -516,6 +644,9 @@ def main(argv=None):
     s = sub.add_parser("prune")
     s.add_argument("--keep", type=int, default=5)
     sub.add_parser("channels")
+    s = sub.add_parser("released-as")
+    s.add_argument("commit")
+    s.add_argument("--not", dest="but")
     s = sub.add_parser("git-cliff")
     s.add_argument("folder")
     a = p.parse_args(argv)
@@ -606,6 +737,10 @@ def main(argv=None):
         prune(a.keep, product)
     elif a.cmd == "git-cliff":
         print(fetch_git_cliff(a.folder))
+    elif a.cmd == "released-as":
+        if not re.match(r"^[0-9a-f]{40}$", a.commit):
+            fail("%s: a full commit hash is needed" % a.commit)
+        print(released_as(a.commit, product, but=a.but) or "")
     elif a.cmd == "channels":
         rels = releases(repo_of(product))
         for c in CHANNELS:

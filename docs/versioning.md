@@ -32,7 +32,7 @@ switches, the files a build writes into a game folder (`longshot_options.ini`, `
 
 ## Choosing the next version
 
-There are no release pull requests and no release-please: a maintainer pushes a tag, and CI does the rest
+There are no release pull requests: a maintainer pushes a tag, and CI does the rest
 ([RELEASING.md](../RELEASING.md)). Pull requests are squash-merged and their titles are
 [Conventional Commits](https://www.conventionalcommits.org/) (`.forgejo/workflows/ci.yml`,
 [CONTRIBUTING.md](../CONTRIBUTING.md#pull-request-titles)), so the commits on `main` say what changed, and CI
@@ -63,11 +63,10 @@ builds of the same release apart, and it is the only identifier a build from a m
 
 ## The changelog
 
-`CHANGELOG.md` is Hookshot's, written by Hookshot's release tooling up to the fork (its entries up to 2.2.0-rc.1), and is
-kept for history. Hookshot's first release, `0.1.0`, is described in its hand-written
-[`changelog.txt`](https://github.com/NotRexed/Hookshot/blob/main/changelog.txt), which Longshot does not carry. Longshot's
-changes are on each release's page, written by git-cliff (`cliff.toml`, `scripts/release.py notes`) when it is released;
-nothing is committed back to `main`.
+Longshot keeps no changelog file. Its changes are on each release's page, written by git-cliff (`cliff.toml`,
+`scripts/release.py notes`) when it is released; nothing is committed back to `main`. Hookshot's history up to the fork
+(its entries up to 2.2.0-rc.1) stays in [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot)'s
+[`CHANGELOG.md`](https://github.com/NotRexed/Hookshot/blob/main/CHANGELOG.md).
 
 ## Rules
 
