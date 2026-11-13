@@ -303,14 +303,25 @@ class Assemble(unittest.TestCase):
         ran = []
 
         def pip(args, check):
-            ran.append(args)
+            ran.append(args + [Path(args[args.index("-r") + 1]).read_text(encoding="utf-8")])
             target = Path(args[args.index("--target") + 1])
             (target / "fontTools").mkdir(parents=True)
             (target / "fontTools" / "__init__.py").write_text("")
-        tools.assemble_python(t, str(self.dir / "py.zip"), str(req), str(self.dir / "new.zip"), pip=pip)
-        self.assertEqual(ran[0][-1], "fonttools==4.68.0")
+        lock = self.dir / "lock.txt"
+        lock.write_text("fonttools==4.68.0 \\\n    --hash=sha256:%s \\\n    --hash=sha256:%s\npillow==13.0.0 \\\n"
+                        "    --hash=sha256:%s\n" % ("1" * 64, "2" * 64, "3" * 64), encoding="utf-8")
+        tools.assemble_python(t, str(self.dir / "py.zip"), str(req), str(self.dir / "new.zip"), pip=pip, lock=str(lock))
+        # (only the missing pin, each wheel held to the lock's hashes, as the AppImage's Python is)
+        self.assertIn("--require-hashes", ran[0])
+        self.assertEqual(ran[0][-1], "fonttools==4.68.0 --hash=sha256:%s --hash=sha256:%s\n" % ("1" * 64, "2" * 64))
         self.assertIn("3.14", ran[0])
         self.assertIn("win_amd64", ran[0])
+        self.assertFalse(Path(ran[0][ran[0].index("-r") + 1]).exists())
+        # (a pin the lock does not hold at its version stops it before pip runs)
+        lock.write_text("fonttools==4.67.0 \\\n    --hash=sha256:%s\n" % ("1" * 64), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            tools.assemble_python(t, str(self.dir / "py.zip"), str(req), str(self.dir / "new2.zip"), pip=pip, lock=str(lock))
+        self.assertEqual(len(ran), 1)
         with zipfile.ZipFile(self.dir / "new.zip") as z:
             self.assertIn("python/Lib/site-packages/fontTools/__init__.py", z.namelist())
             self.assertIn("python/python314.dll", z.namelist())

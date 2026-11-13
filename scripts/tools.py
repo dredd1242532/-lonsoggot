@@ -364,8 +364,9 @@ def pack(folder, out):
 
 # ---- assembling Longshot's own archives ----
 
-def assemble_python(tool, archive, requirements, out, pip=None):
-    """The Python archive with requirements' pins (name==version) installed into Lib/site-packages, when it lacks one"""
+def assemble_python(tool, archive, requirements, out, pip=None, lock=None):
+    """The Python archive with requirements' pins (name==version) installed into Lib/site-packages, when it lacks one. Each
+    wheel is checked against requirements-lock.txt's SHA-256s (pip --require-hashes), as the AppImage's Python is"""
     with open(requirements, encoding="utf-8") as f:
         pins = [p for p in (l.split("#")[0].strip() for l in f.read().splitlines()) if p]
     files = members(archive, tool.prefix)
@@ -378,11 +379,26 @@ def assemble_python(tool, archive, requirements, out, pip=None):
     if len(dll) != 1:
         fail("%s: no pythonXY.dll to give the version" % archive)
     version = "3." + dll[0][7:-4]
-    stage = out + ".site"
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import python_lock
+    locked = python_lock.read_lock(lock or python_lock.LOCK)
+    hashed = []
+    for p in missing:
+        name, pinned_version = (x.strip() for x in p.split("=="))
+        got = locked.get(python_lock.norm(name))
+        if not got or got[1] != pinned_version or not got[2]:
+            fail("%s is not in requirements-lock.txt at that version: run python -I scripts/python_lock.py" % p)
+        hashed.append("%s==%s %s" % (got[0], got[1], " ".join("--hash=sha256:" + h for h in got[2])))
+    stage, pinned = out + ".site", out + ".requirements.txt"
     shutil.rmtree(stage, ignore_errors=True)
-    (pip or subprocess.run)([sys.executable, "-m", "pip", "install", "--no-deps", "--only-binary", ":all:", "--no-compile",
-                             "--no-cache-dir", "--disable-pip-version-check", "-q", "--platform", "win_amd64", "--python-version",
-                             version, "--implementation", "cp", "--target", stage] + missing, check=True)
+    with open(pinned, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(hashed) + "\n")
+    try:
+        (pip or subprocess.run)([sys.executable, "-m", "pip", "install", "--no-deps", "--only-binary", ":all:", "--no-compile",
+                                 "--no-cache-dir", "--disable-pip-version-check", "-q", "--platform", "win_amd64", "--python-version",
+                                 version, "--implementation", "cp", "--target", stage, "--require-hashes", "-r", pinned], check=True)
+    finally:
+        os.remove(pinned)
     for d, _, names in os.walk(stage):
         for n in names:
             full = os.path.join(d, n)

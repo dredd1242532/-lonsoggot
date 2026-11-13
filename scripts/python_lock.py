@@ -1,9 +1,10 @@
 """requirements-lock.txt: the SHA-256 of every wheel the shipped Python may install for requirements.txt's pins.
 
 The tools' Python that releases ship gets its packages from PyPI: scripts/linux/deps.sh installs requirements.txt into
-the AppImage's Python with pip's --require-hashes from requirements-lock.txt, so a wheel that is not one of the files
-PyPI had for that version when the lock was written is refused, as every other download the release makes is checked
-against its SHA-256. (The Windows builder's packages come through scripts/tools.py and tools.lock.)
+the AppImage's Python, and scripts/tools.py's assemble_python nx2/prompt_requirements.txt into the Windows builder's
+Python, both with pip's --require-hashes from requirements-lock.txt, so a wheel that is not one of the files PyPI had for
+that version when the lock was written is refused, as every other download the release makes is checked against its
+SHA-256.
 
 The lock lists, for each pin (name==version), the wheels for the systems a release ships: Linux x86_64 (manylinux) and
 Windows x64, every CPython version and the version-independent (py3, abi3) ones.
