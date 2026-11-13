@@ -419,6 +419,13 @@ The other rows are 0 Off and 1 On. Some are read at the start, before the menu e
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
 (`gpu/vk/vk_main.cpp`) and the controls (`host/nn_hid.c`).
 
+The Mods tab keeps a file of its own beside it, `longshot_mods.txt` (`host/mods.c`): one line a mod in the list's order,
+`on <name>` or `off <name>`, and `cheat <key> on` or `off` for the cheats. A mod the file doesn't name comes after the
+named ones, by name, and is on; with no file the order is the folders' names'. `nx2/exefs_patches.py` reads the same
+file when the game is built, for the mods whose ExeFS patches go in. Two more files are written, not edited:
+`exefs_patches.txt` (the build: the patch files it applied, which the Mods tab compares with the mods' folders) and
+`modcache/rsizetable.zs` (the game, at each start with mods: the merged resource size table).
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits for the game's state, the Insert menu's settings, quit), with
 `scripts/longshot_ctl.py` as its client. Off unless set; see [control.md](control.md).
