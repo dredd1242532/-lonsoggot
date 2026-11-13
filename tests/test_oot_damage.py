@@ -21,7 +21,8 @@ def main():
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     assert "HOS_OPT_DAMAGE_TAKEN = 55" in api
     assert "int damage_taken = 1;" in options
-    assert '"Damage taken", &opts.damage_taken, 0, 3, 1, tx_damage_taken' in menu
+    assert '{TAB_DEBUG, "Damage taken", &opts.damage_taken, 0, 3, 1, tx_damage_taken' in menu
+    assert '{TAB_GAMEPLAY, "Damage taken"' not in menu
     assert '"Half", "Normal", "Double", "Quadruple"' in menu
     assert "if (id == HOS_OPT_DAMAGE_TAKEN) return opts.damage_taken;" in replay
     source = '#include "a64.h"\n' + patches.LIFE_HEAD + patches.LIFE_CAS + '\n' + patches.LIFE_CAS + '\n}\n'

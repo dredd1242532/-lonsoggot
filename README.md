@@ -348,7 +348,6 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Menu size | Small, Medium, Large | Medium |
 | | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
-| | Damage taken | Half, Normal, Double, Quadruple (live; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Microphone | Off, Default, or each microphone by name | Default |
@@ -374,6 +373,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
 | Debug | Debug tools | Off, On (the tools below it while on) | Off |
+| | Player: Damage taken | Half, Normal, Double, Quadruple (live; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Descriptor reuse | Off, On (after a restart) | On |
 | | Developer: Sampler cache | Off, On (after a restart) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
@@ -900,7 +900,9 @@ switch that stands in for a menu row (`RX_VK_PACE`, `RX_VK_UPSCALE`, `RX_VK_FRAM
 `HOS_DYNRES`, `HOS_OUTPUT_RES`) applies to that run only: `longshot_options.ini` keeps the value chosen in the menu.
 
 To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or add `HOS_OOT_CHEATS=1` to
-`longshot_env.txt` in the game folder). The tools then show below it on the same tab. The tab's Developer section,
+`longshot_env.txt` in the game folder). The tools then show below it on the same tab. **Damage taken** is in the **Player** group beside
+**Heart protection**: Half, Normal (the default), Double or Quadruple. Its saved setting still applies when Debug tools
+is off; Heart protection takes priority while enabled. The tab's Developer section,
 always shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
