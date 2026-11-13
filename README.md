@@ -478,25 +478,35 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
-| VR (Windows) | VR headset | Off, On (after a restart; needs `openxr_loader.dll` beside the game: [quest/README.md](quest/README.md)) | Off |
+| VR | VR headset | Off, On (Windows; after a restart; needs `openxr_loader.dll` beside the game: [quest/README.md](quest/README.md)) | Off |
 | | View | Flat screen, Stereo 3D (after a restart) | Flat screen |
 | | Recentre view | Puts the view in front of you as you face now (also F8, or both sticks held in for a second) | |
-| | 3D view: First person | Off, On (a quick tap of the left stick, or F9, switches it in play) | Off |
-| | 3D view: First person eye height, eye forward | -0.20 m to 0.80 m, in steps of 0.05 | 0.25 m, 0.20 m |
-| | 3D view: World scale | 50% to 400%, in steps of 10 | 100% |
-| | 3D view: Eye separation | 0% to 200%, in steps of 10 | 100% |
-| | 3D view: Level horizon, Fill the view | Off, On | On |
-| | 3D view: Head movement | Turns only, Moves and turns | Moves and turns |
-| | 3D view: Upscaler in 3D | Game's own, As Graphics | As Graphics |
-| | 3D view: Desktop window | The game's frames, Both eyes, Left eye | Both eyes |
-| | HUD: HUD panel, Reticle at the aim | Off, On | On |
-| | HUD: HUD distance, width, height | 0.50 m to 5.00 m; 0.50 m to 4.00 m; -1.00 m to 1.00 m | 1.60 m, 1.90 m, -0.05 m |
-| | HUD: Reticle area, Reticle distance | 10% to 90%; 5 m to 100 m | 30%, 25 m |
-| | Flat screen: Screen distance, width, height | 0.50 m to 10.00 m; 0.30 m to 10.00 m; -2.00 m to 2.00 m | 2.60 m, 3.60 m, 0.00 m |
-| | Controllers: Touch controllers, Swap Touch sticks | Off, On | On, Off |
-| | Controllers: Touch motion aiming | Off, On (after a restart) | On |
-| | Advanced: Paired frames, Headset pacing | Off, On | On |
-| | Advanced: Camera smoothing | Off, On | Off |
+| | First person | Off, On (a quick tap of the left stick, or F9, switches it in play) | Off |
+| | First person eye height | -0.20 m to 0.80 m, in steps of 0.05 | 0.25 m |
+| | First person eye forward | -0.20 m to 0.80 m, in steps of 0.05 | 0.20 m |
+| | World scale | 50% to 400%, in steps of 10 | 100% |
+| | Eye separation | 0% to 200%, in steps of 10 | 100% |
+| | Level horizon | Off, On | On |
+| | Head movement | Turns only, Moves and turns | Moves and turns |
+| | Fill the view | Off, On | On |
+| | Upscaler in 3D | Game's own, As Graphics | As Graphics |
+| | Desktop window | The game's frames, Both eyes, Left eye | Both eyes |
+| | HUD panel | Off, On | On |
+| | HUD distance | 0.50 m to 5.00 m, in steps of 0.10 | 1.60 m |
+| | HUD width | 0.50 m to 4.00 m, in steps of 0.10 | 1.90 m |
+| | HUD height | -1.00 m to 1.00 m, in steps of 0.05 | -0.05 m |
+| | Reticle at the aim | Off, On | On |
+| | Reticle area | 10% to 90%, in steps of 5 | 30% |
+| | Reticle distance | 5 m to 100 m, in steps of 5 | 25 m |
+| | Screen distance | 0.50 m to 10.00 m, in steps of 0.10 | 2.60 m |
+| | Screen width | 0.30 m to 10.00 m, in steps of 0.10 | 3.60 m |
+| | Screen height | -2.00 m to 2.00 m, in steps of 0.05 | 0.00 m |
+| | Touch controllers | Off, On | On |
+| | Touch motion aiming | Off, On (after a restart) | On |
+| | Swap Touch sticks | Off, On | Off |
+| | Paired frames | Off, On | On |
+| | Headset pacing | Off, On | On |
+| | Camera smoothing | Off, On | Off |
 | Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed) | Off |
 | | Player: Damage taken | Half, Normal, Double, Quadruple (live, while Debug tools is on; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
