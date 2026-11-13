@@ -269,6 +269,44 @@ class LongshotCtl(unittest.TestCase):
         self.assertEqual(ctl("release", "--all", env=self.env, check=0).stdout.strip(), "released 2 (every client's)")
         self.assertIs(self.last("release")["all"], True)
 
+    def test_relaunch_through_a_dropped_connection(self):
+        # (seen on Windows with the PC busy: the client met the old game's pipe as it closed, its write failed with EINVAL, and
+        # relaunch ended in a traceback instead of trying again)
+        sys.path.insert(0, str(CTL.parent))
+        try:
+            import longshot_ctl
+        finally:
+            sys.path.pop(0)
+        tries = []
+
+        class Old:
+            path = "game"
+
+            def request(self, cmd, **kw):
+                return {"ok": True}
+
+            def close(self):
+                pass
+
+        class Again(Old):
+            def __init__(self, path, timeout):
+                pass
+
+            def request(self, cmd, **kw):
+                tries.append(cmd)
+                if len(tries) == 1:
+                    raise OSError(22, "Invalid argument")
+                return {"ok": True, "uptime": 0.0}
+
+        real = longshot_ctl.Bridge
+        longshot_ctl.Bridge = Again
+        try:
+            st = longshot_ctl.relaunch(Old(), 10)
+        finally:
+            longshot_ctl.Bridge = real
+        self.assertTrue(st["ok"])
+        self.assertEqual(tries, ["status", "status"])
+
     def test_input_waits_as_long_as_the_bridge(self):
         # (without --timeout the bridge's default holds: 30 s plus the input's frames at 10 fps. The client waited 70 s
         # for any reply and gave up on long inputs the game was still pressing)

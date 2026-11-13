@@ -224,8 +224,9 @@ def format_bytes(data, fmt):
 def relaunch(b, timeout):
     """The game started again (the relaunch command), then its status once its bridge answers on the same socket from the
     process started again: one whose uptime is no longer than the wait (its bridge started after the ask), not the old one
-    answering before it lets go of the socket (status gives the uptime to 0.1 s: 0.05 s to spare). b is closed; the status
-    reply has after_s, the seconds it took"""
+    answering before it lets go of the socket (status gives the uptime to 0.1 s: 0.05 s to spare). A connection the old
+    one drops mid-request (Windows: a write to its pipe as it closes, EINVAL) is tried again. b is closed; the status reply
+    has after_s, the seconds it took"""
     check(b.request("relaunch"))
     path = b.path
     b.close()
@@ -240,7 +241,7 @@ def relaunch(b, timeout):
             waited = time.monotonic() - t0
             if st.get("ok") and st.get("uptime", float("inf")) <= waited + 0.05:
                 return dict(st, after_s=round(waited, 1))
-        except Failed:
+        except (Failed, OSError):
             pass
         if time.monotonic() - t0 > timeout:
             raise Failed("the game did not answer again in %.0f s" % timeout, 3)
