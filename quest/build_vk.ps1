@@ -57,7 +57,8 @@ if ($Install) {
     if (-not (Test-Path $orig)) { Copy-Item $dst $orig }
     Copy-Item $dll $dst -Force
     # (Khronos' loader is not in the repository: its release's own package, checked by its SHA-256, kept in questin)
-    $loader = Join-Path $PSScriptRoot "bin\openxr_loader.dll"
+    $loader = Join-Path $tools "openxr-loader\openxr_loader.dll"   # (tools.lock's openxr-loader, when the Builder installed it)
+    if (-not (Test-Path $loader)) { $loader = Join-Path $PSScriptRoot "bin\openxr_loader.dll" }
     if (-not (Test-Path $loader)) {
         $zip = Join-Path $env:TEMP "openxr_loader_windows-1.1.65.zip"
         Invoke-WebRequest "https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/release-1.1.65/openxr_loader_windows-1.1.65.zip" -OutFile $zip

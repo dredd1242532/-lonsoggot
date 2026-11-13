@@ -1381,6 +1381,14 @@ def main():
             dll, dst = os.path.join(WGPU, "lib", "wgpu_native.dll"), os.path.join(out, "wgpu_native.dll")
             if not os.path.exists(dst) or os.path.getsize(dst) != os.path.getsize(dll):
                 shutil.copyfile(dll, dst)
+        # (longshot-vr) Khronos' OpenXR loader beside it, when the tools have it (tools.lock's openxr-loader, LONGSHOT_OPENXR_LOADER:
+        # its folder): gpu/vk/vk_xr.cpp loads it by name when VR is on. Without it the game is the same and VR stays off
+        xr_loader = os.path.join(os.environ.get("LONGSHOT_OPENXR_LOADER", ""), "openxr_loader.dll")
+        if os.path.isfile(xr_loader):
+            import shutil
+            xr_dst = os.path.join(out, "openxr_loader.dll")
+            if not os.path.exists(xr_dst) or os.path.getsize(xr_dst) != os.path.getsize(xr_loader):
+                shutil.copyfile(xr_loader, xr_dst)
         # (longshot) a shared FFmpeg's DLLs beside it (an LGPL shared build, as cross builds find: the static one needs none)
         for l in FFMPEG_LIBS if FFMPEG and os.path.isdir(os.path.join(FFMPEG, "bin")) else ():
             import shutil

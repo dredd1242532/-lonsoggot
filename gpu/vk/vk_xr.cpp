@@ -1413,6 +1413,12 @@ bool xr_wanted() {
         Xr& x = xr();
         xr_opts_load();
         if (!x.set.vr) return false;
+        // (no headset for a run with no game or no window: --prepare-shaders after a build, HOS_HEADLESS. The preparation run
+        // made a session with the runtime and died leaving it, 0xc0000409, and the shaders were left for the first start)
+        if (env_on("LONGSHOT_PREPARE_ONLY") || env_on("HOS_HEADLESS")) {
+            logf("xr: VR is on, but this run has no game window: no headset for it");
+            return false;
+        }
         HMODULE m = load_loader();
         if (!m) {
             logf("xr: VR is on (longshot_vr.ini), but there is no openxr_loader.dll: the desktop only");

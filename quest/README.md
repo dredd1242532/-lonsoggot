@@ -80,6 +80,7 @@ Limits:
 
 - Frame generation is optional in VR: the headset's compositor keeps the screen steady at its own refresh rate
   whatever the game's frame rate.
-- `openxr_loader.dll` is Khronos' loader, release 1.1.65 (Apache-2.0). It is not in the repository: `build_vk.ps1 -Install`
-  downloads Khronos' release package, checks its SHA-256 and copies the DLL into `bin`. Its headers are in
-  `third_party/openxr`.
+- `openxr_loader.dll` is Khronos' loader, release 1.1.65 (Apache-2.0). It is not in the repository: it is a line of
+  `tools.lock` (`openxr-loader`), so the Builder downloads Khronos' release package with its other tools, checks its
+  SHA-256, and the build copies the DLL beside the game. `build_vk.ps1 -Install` takes it from the Builder's tools, or
+  downloads and checks the same package itself. Its headers are in `third_party/openxr`.

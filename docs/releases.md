@@ -103,8 +103,9 @@ Rotating the key: RELEASING.md, "Rotate the key".
 
 The builders need build tools that are not Longshot's own code. Windows (`windows-x64` lines): llvm-mingw, Python with the
 prompt packages, emsdk, the CPM cache (FFmpeg, Vulkan and SPIR-V headers, VMA, dav1d), wgpu-native, the prebuilt files of
-`third_party` (a64emit.dll, lld-link.exe, SDL2/SDL3, zbic.dll), and the play profile when there is one (optional: without
-it the game is built all the same, a little slower in play). Linux (`linux-x64` lines): LLVM's clang
+`third_party` (a64emit.dll, lld-link.exe, SDL2/SDL3, zbic.dll), the play profile when there is one (optional: without
+it the game is built all the same, a little slower in play), and Khronos' OpenXR loader (`openxr-loader`, optional: the
+build copies its `openxr_loader.dll` beside the game for VR, and without it VR stays off). Linux (`linux-x64` lines): LLVM's clang
 and lld (`emsdk`), the glibc 2.35 `sysroot`, `ffmpeg` with dav1d, `sdl2` and the Vulkan, SPIR-V and VMA headers (`cpm`).
 They are not in the release: `tools.lock` names them.
 

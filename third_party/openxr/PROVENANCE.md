@@ -13,9 +13,10 @@ What is here and why:
 | `include/openxr/` | The API's headers. `vk_xr.cpp` is built with `XR_NO_PROTOTYPES` and asks the loader for every function by name, so nothing of OpenXR is linked |
 | `LICENSE` | The Apache-2.0 text |
 
-The loader, `openxr_loader.dll`, is not here and is never committed: it comes from the same release's package
-(`x64/bin/openxr_loader.dll`) and sits beside `longshot_vk.dll` in the game folder's `bin`. Without it VR stays off and
-the game plays on the desktop as before (`quest/README.md`).
+The loader, `openxr_loader.dll`, is not here and is never committed: it is `tools.lock`'s `openxr-loader`, the same
+release's package as Khronos publishes it (`x64/bin/openxr_loader.dll`), which the Builder downloads and checks and
+`nx2/build.py` copies beside `longshot_vk.dll`. Without it VR stays off and the game plays on the desktop as before
+(`quest/README.md`).
 
 Nothing in this folder is edited. A change belongs in a new folder with its own note, per `CONTRIBUTING.md`.
 

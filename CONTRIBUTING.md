@@ -118,6 +118,7 @@ Where a step below needs files from the Builder, use the Windows builder of the 
    |---|---|---|
    | `cpm` | anywhere | `RX_CPM` points at it (Vulkan headers and FFmpeg; without it the standalone build stops, unless system headers or `LONGSHOT_*_HEADERS` are set) |
    | `wgpu-native` | anywhere | `WGPU_NATIVE` points at it (the WebGPU fallback renderer; without it the game has none) |
+   | `openxr-loader` | anywhere | `LONGSHOT_OPENXR_LOADER` points at it (Khronos' `openxr_loader.dll`, copied beside the game for VR; without it the game has no headset) |
    | `third_party` | `third_party\` | its `.dll`, `.exe`, `.lib` and `.sha1` files, to the same places: `a64emit`, `lld-link`, `zbic` and SDL2 |
    | `work` | `work\` | hot-function list, link order, profile and icon (without them the game builds but runs slower) |
 
