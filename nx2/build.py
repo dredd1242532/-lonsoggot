@@ -83,20 +83,34 @@ def check_vk_symbols(so):
     globals written inside an anonymous namespace, which makes a different symbol that nothing
     defines.
     """
-    nm = shutil.which("nm") or shutil.which("llvm-nm")
-    if not nm:
-        return True   # (not a reason to fail a build; the check is a guard, not a dependency)
-    try:
-        out = subprocess.run([nm, "-D", "--undefined-only", so], capture_output=True, text=True,
-                             check=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return True
+    names = None
+    # (nm can omit symbol versions: an ordinary abort@GLIBC then looks like a missing host function.
+    # GNU and LLVM readelf keep the version and the binding in their dynamic-symbol rows.)
+    readelf = shutil.which("readelf") or shutil.which("llvm-readelf")
+    if readelf:
+        try:
+            out = subprocess.run([readelf, "--dyn-syms", "--wide", so], capture_output=True, text=True,
+                                 check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            pass
+        else:
+            rows = [line.split() for line in out.splitlines()]
+            rows = [p for p in rows if len(p) >= 7 and p[0].endswith(":") and p[0][:-1].isdigit()]
+            if rows:   # (an unrecognized format falls back to nm, not an empty list of imports)
+                names = [p[7] for p in rows if len(p) >= 8 and p[6] == "UND" and p[4] != "WEAK"]
+    if names is None:
+        nm = shutil.which("nm") or shutil.which("llvm-nm")
+        if not nm:
+            return True   # (not a reason to fail a build; the check is a guard, not a dependency)
+        try:
+            out = subprocess.run([nm, "-D", "--undefined-only", so], capture_output=True, text=True,
+                                 check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            return True
+        # ("w" is weak: the host supplies those, or does not)
+        names = [p[1] for line in out.splitlines() if len(p := line.split()) >= 2 and p[0] == "U"]
     bad = []
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 2 or parts[0] != "U":   # ("w" is weak: the host supplies those, or does not)
-            continue
-        name = parts[1]
+    for name in names:
         if "@GLIBC" in name or "@CXXABI" in name or "@GLIBCXX" in name or "@GCC" in name:
             continue
         bad.append(name)
