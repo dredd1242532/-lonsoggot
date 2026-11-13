@@ -1,7 +1,7 @@
 name: Install or build problem
 about: The launcher, the builder or the AppImage stops, fails to build, update or start the game
 title: "Install: "
-labels: [bug]
+labels: [kind/bug]
 body:
   - type: markdown
     attributes:

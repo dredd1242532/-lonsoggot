@@ -1,7 +1,7 @@
 name: Game problem
 about: A crash, freeze, wrong graphics, low fps or stutter, sound or controls while playing
 title: "Game: "
-labels: [bug]
+labels: [kind/bug]
 body:
   - type: markdown
     attributes:
