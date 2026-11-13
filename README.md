@@ -117,8 +117,10 @@ For a portable install on an external SSD, see [Portable Longshot Builder](docs/
 3. Double-click it, and build the game as on Windows above (the game goes to `~/Games/Longshot` by default).
 
 The launcher can add the game to your applications menu as "Longshot". Each Longshot version's builder is also released
-alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases): Longshot Builder with everything it needs
-inside, for building without the launcher.
+alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases), for building without the
+launcher: Longshot Builder alone (about 95 MB). At its first start it downloads its build tools (the compiler, the C
+library it links against, FFmpeg, SDL2: about 170 MB) into `~/.local/share/longshot/builder/toolchains`, and later
+versions take the ones that did not change from there. The launcher downloads the same tools itself.
 
 When the desktop gives the launcher its own systemd service, **Play** waits up to two seconds for the game's
 separate scope before closing the window. If that hand-off fails, it cancels that attempt before starting the
@@ -210,7 +212,7 @@ the network or with other programs:
 - **Downloads from git.magicbean.dev.** The Longshot Launcher reads the release lists of Longshot and of the launcher on
   git.magicbean.dev, downloads a version's files from its release, and checks every file against the SHA-256 the
   release's signed `SHA256SUMS` gives. The Windows builder's tools come from the links `tools.lock` gives (their makers'
-  releases, or Longshot's `tools` release), checked the same way. With **DLSS** on, NVIDIA's DLSS library comes from `github.com/NVIDIA/DLSS`; the
+  releases, or Longshot's packages on git.magicbean.dev), checked the same way; the Linux builder's too. With **DLSS** on, NVIDIA's DLSS library comes from `github.com/NVIDIA/DLSS`; the
   builder's own compiler and tools come from their makers' releases (llvm-mingw, Python), checked by SHA-256 too. The game
   itself checks for nothing at start.
 - **Your Discord status, through the Discord app on this PC.** While Discord runs, the game shows "Playing Longshot" with
@@ -722,8 +724,8 @@ You need `clang` and `lld` (LLVM 23 or newer reads the play profile; an older on
 Then run `python -I nx2/make_game.py ...` as on Windows. Vulkan / SPIR-V / VMA headers come from the distro, from
 `LONGSHOT_*_HEADERS`, or from a CPM cache via `RX_CPM`.
 
-`scripts/linux/deps.sh` fetches and builds all of these into `build-linux/deps`, and `scripts/linux/appimage.sh` makes
-the AppImage from them. A folder built from a source checkout has no launcher: `longshot` there is the game.
+`scripts/linux/deps.sh tools` fetches and builds all of these into `build-linux/deps` (the AppImage's own tools,
+`tools.lock`'s Linux lines), and `scripts/linux/appimage.sh` makes the AppImage. A folder built from a source checkout has no launcher: `longshot` there is the game.
 
 </details>
 

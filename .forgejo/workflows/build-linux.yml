@@ -1,8 +1,9 @@
-# The Linux Longshot Builder (docs/releases.md): Longshot-<version>-x86_64.AppImage, the builder with the compiler, Python,
-# libraries and the Vulkan back end it builds the game with on the player's PC (scripts/linux/deps.sh's pinned downloads,
-# scripts/linux/appimage.sh), and recomplauncher.json inside. No game data is involved. Built in Ubuntu 22.04, the oldest
-# system it is for (glibc 2.35). The AppImage is a workflow artifact; called by release.yml with the version's name, it is
-# the release's.
+# The Linux Longshot Builder (docs/releases.md): Longshot-<version>-x86_64.AppImage, the builder with its Python, Longshot's
+# sources and the Vulkan back end built (scripts/linux/deps.sh's pinned downloads, scripts/linux/appimage.sh), and
+# recomplauncher.json inside. Its build tools (the compiler, the sysroot, FFmpeg, SDL2, the Vulkan headers) are not in it:
+# they are tools.lock's linux-x64 lines, installed here to build the back end and check the image, and on the player's PC by
+# the launcher or the builder's first start. No game data is involved. Built in Ubuntu 22.04, the oldest system it is for
+# (glibc 2.35). The AppImage is a workflow artifact; called by release.yml with the version's name, it is the release's.
 name: Linux AppImage
 on:
   # (no pull_request trigger for now: the Release workflow builds main's pushes and tags by calling this one; build a
@@ -98,21 +99,31 @@ jobs:
           path: build-linux/deps/downloads
           key: linux-deps-downloads-${{ hashFiles('scripts/linux/deps.sh') }}
 
-      - name: Dependencies (LLVM, Python, FFmpeg with dav1d, SDL2, Vulkan headers)
+      - name: Dependencies (Python with Tk, the AppImage packer)
         run: scripts/linux/deps.sh
+
+      # (tools.lock's linux-x64 tools, from Longshot's packages, each checked by its SHA-256: what the player's builder
+      # downloads. Kept between runs by tools.lock's own hash; a release fetches them again)
+      - if: env.RELEASE_TAG == ''
+        uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build-linux/tools
+          key: linux-tools-${{ hashFiles('tools.lock') }}
+      - name: The build tools (tools.lock, linux-x64)
+        run: python3 -I scripts/tools.py install build-linux/tools --system linux-x64 --cache "$RUNNER_TEMP/tools-cache"
 
       # The Vulkan back end's compiled objects (nx2/build.py's object cache, build-linux/vk-work/objcache: each object
       # under the SHA-1 of its source, its flags and the headers it can see), for pull requests: a pull request compiles
       # only the files its change reaches, not all 209 (about 80-140 s here). Written after every build but a release's
       # (a pull request's own, for its next push; main's, for every pull request). Read only by pull requests: a push to
       # main compiles every object itself, as a release does, so the nightly and the releases never take one from a cache. The
-      # key also names the compiler (deps.sh pins LLVM) and this system's C and C++ library headers, which the objects'
+      # key also names the compiler (tools.lock pins it) and this system's C and C++ library headers, which the objects'
       # own keys leave out.
       - name: Object cache key
         if: env.RELEASE_TAG == ''
         id: objkey
         env:
-          COMPILER: ${{ hashFiles('scripts/linux/deps.sh') }}
+          COMPILER: ${{ hashFiles('tools.lock') }}
           SOURCES: ${{ hashFiles('gpu/**', 'third_party/imgui/**', 'third_party/zstd/**', 'host/posix/**', 'nx2/build.py') }}
         run: |
           system=$(dpkg-query -W -f '${Package}=${Version}\n' libc6-dev libstdc++-13-dev libstdc++-12-dev | sha256sum | cut -c1-16)
@@ -173,9 +184,9 @@ jobs:
         run: |
           cp -r build-linux/vk-work "$RUNNER_TEMP/vk-fsr"
           rm -f "$RUNNER_TEMP/vk-fsr/sa/build/longshot_vk.so"   # (the AppImage's own, without FSR: the test below is this build's)
-          D="$PWD/build-linux/deps"
-          OOT_WORK="$RUNNER_TEMP/vk-fsr" EMSDK="$D/emsdk" RX_CPM="$D/cpm" RX_MARCH=x86-64-v3 RX_VK_ONLY=1 RX_RELEASE=1 LONGSHOT_FSR=1 \
-            "$D/python/bin/python3" -I nx2/build.py --standalone --jobs "$(nproc)" |
+          D="$PWD/build-linux/deps" T="$PWD/build-linux/tools"
+          OOT_WORK="$RUNNER_TEMP/vk-fsr" EMSDK="$T/usr/lib/longshot/emsdk" RX_CPM="$T/usr/share/longshot/cpm" RX_MARCH=x86-64-v3 \
+            RX_VK_ONLY=1 RX_RELEASE=1 LONGSHOT_FSR=1 "$D/python/bin/python3" -I nx2/build.py --standalone --jobs "$(nproc)" |
             tee "$RUNNER_TEMP/vk-fsr.log"
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"

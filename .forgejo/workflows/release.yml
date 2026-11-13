@@ -5,8 +5,8 @@
 #   a tag vX.Y.Z-rc.N    a release candidate, a pre-release (the rc channel)
 #   a tag vX.Y.Z         a stable (the stable channel, and rc too). Longshot's first is v3.0.0
 #
-# 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool a Windows builder needs is in the
-#    tools release), then the version's name; a tag is checked too (scripts/release.py check-tag: its form, on main, above
+# 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool the Windows and the Linux builder
+#    need is in Longshot's packages), then the version's name; a tag is checked too (scripts/release.py check-tag: its form, on main, above
 #    every release, and as high as the commits since the last stable call for). Either refused builds nothing.
 # 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
 # 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
@@ -47,9 +47,10 @@ jobs:
           persist-credentials: false
       - name: The tools
         run: |
-          # (every tool the Windows builder needs is in tools.lock, so the tools release: before any build, not after both)
+          # (every tool the Windows and the Linux builder need is in tools.lock and its packages: before any build, not
+          # after both. Neither builder carries its tools: they download them by tools.lock)
           if ! python3 -I scripts/tools.py check --require; then
-            echo "::error::the tools release is missing a tool the Windows builder needs; RELEASING.md, One-time setup"
+            echo "::error::tools.lock or its packages lack a tool a builder needs; RELEASING.md, Bump a tool"
             exit 1
           fi
       - id: name
