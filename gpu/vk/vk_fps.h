@@ -14,7 +14,20 @@ namespace mkwvk {
 
 /// What the counter shows (fps_stats::Level): set by the menu, read at every present
 extern std::atomic<int> fps_level_now;
-inline bool fps_breakdown_on() { return fps_level_now.load(std::memory_order_relaxed) >= fps_stats::kBreakdown; }
+/// The performance summary is on (perf_report.cpp: the launcher's Send performance statistics): the Breakdown measures
+/// every frame for it, whatever the counter shows
+extern std::atomic<bool> perf_measure;
+inline bool fps_breakdown_on() {
+    return fps_level_now.load(std::memory_order_relaxed) >= fps_stats::kBreakdown || perf_measure.load(std::memory_order_relaxed);
+}
+/// (perf_report.cpp) read the launcher's tick once: true when the summary is on
+bool perf_report_init();
+/// (perf_report.cpp) a measured frame, on the thread that presents, into its map's totals
+void perf_frame(const fps_stats::Frame& f);
+/// (perf_report.cpp) a renderer's event (perf_report::Event), counted into the next summary
+void perf_event(int event);
+/// (perf_report.cpp) the last summary at once, with that event (-1 none: the window closed; a lost device: the process ends next)
+void perf_report_final(int event);
 
 int64_t fps_clock();   // (ns, the clock the frames are stamped with)
 /// At the game's present (vk_replay.cpp present), on the thread that presents: the frame since the last one, into the ring

@@ -33,7 +33,9 @@
 #endif
 
 #include "dlss_checks.h"
+#include "perf_report.h"
 #include "upscaler_rows.h"
+#include "vk_fps.h"
 #include "vk_menu.h"
 #include "vk_paths.h"
 #include "vk_reactive.h"
@@ -435,6 +437,7 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     s.refused = 0;
     s.feature_aa = mode == NVSDK_NGX_PerfQuality_Value_DLAA;
     s.features_made++;
+    if (s.features_made > 1) perf_event(perf_report::kDlssRecreated);   // (made again in play: a stall)
     logf("vk: NVIDIA DLSS: feature %llu made (%s; frame %llu, %.1f ms of CPU): %ux%u (%ux%u to %ux%u) -> %ux%u, mode %d, "
          "preset %c%s%s", (unsigned long long)s.features_made, why, (unsigned long long)texture_frame_no(), made_ms, rw, rh,
          min_w, min_h, max_w, max_h, ow, oh, (int)mode, upscaler_rows::preset_letter(preset),

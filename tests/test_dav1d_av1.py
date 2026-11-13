@@ -55,6 +55,7 @@ void dav1d_av1_decode(void *m, const uint8_t *data, size_t n, int64_t pts,
 void dav1d_av1_flush(void *m);
 void dav1d_av1_close(void *m);
 void hos_log(const char *fmt, ...) { va_list a; va_start(a, fmt); vfprintf(stderr, fmt, a); va_end(a); fputc('\n', stderr); }
+void hos_movie_fallback(void) {}   /* (nn_video.c's: the performance summary's count of decoders that did not start) */
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 enum { W = 64, H = 48, N = 12 };
 static uint8_t expect(int f, int plane, int x, int y) {

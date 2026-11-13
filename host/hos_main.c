@@ -24,6 +24,7 @@
 #define LONGSHOT_VERSION "unknown"
 #endif
 const char *hos_version(void) { return LONGSHOT_VERSION; }   /* (discord_rpc.c's status) */
+
 #if defined(_WIN32) || defined(__EMSCRIPTEN__)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -48,6 +49,19 @@ const char *hos_version(void) { return LONGSHOT_VERSION; }   /* (discord_rpc.c's
 #define SEP '/'
 #define SEP_S "/"
 #endif
+
+/* (longshot) the map Link is in and his age, as the last map: line, for the performance summary (gpu/vk/perf_report.cpp
+   through MkwVkHost perf_info): "" before a save is loaded */
+static SRWLOCK map_lock = SRWLOCK_INIT;
+static char map_now[100];
+void hos_movie_stats(int64_t out[5]);   /* nn_video.c */
+const char *hos_perf_info(char *map, int cap, int64_t movie[5]) {
+    AcquireSRWLockShared(&map_lock);
+    snprintf(map, (size_t)cap, "%s", map_now);
+    ReleaseSRWLockShared(&map_lock);
+    hos_movie_stats(movie);
+    return LONGSHOT_VERSION;
+}
 
 #ifdef A64_MEM_ZERO
 /* web: guest address = wasm address; the guest window is wasm memory below the host's data (-sGLOBAL_BASE) */
@@ -673,7 +687,12 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
         if (oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) && map[0]) {   /* Sequence_CurrentBanc */
             snprintf(line, sizeof line, "%s (%s)", map,
                      oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? "child" : "adult") : "age not known");
-            if (strcmp(line, logged)) hos_log("map: %s", line), snprintf(logged, sizeof logged, "%s", line);
+            if (strcmp(line, logged)) {
+                hos_log("map: %s", line), snprintf(logged, sizeof logged, "%s", line);
+                AcquireSRWLockExclusive(&map_lock);   /* (the performance summary's map: hos_perf_info) */
+                snprintf(map_now, sizeof map_now, "%s", line);
+                ReleaseSRWLockExclusive(&map_lock);
+            }
         }
     }
     if (!probed && oot_pouch_count(c, "Item_DekuSeed") >= 0) {

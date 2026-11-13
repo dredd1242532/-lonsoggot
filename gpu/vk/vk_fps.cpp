@@ -56,6 +56,7 @@ FpsRender::~FpsRender() {
 }
 
 void fps_presented() {
+    static const bool perf = perf_report_init();   // (the launcher's tick, read at the first present)
     const int level = fps_level_now.load(std::memory_order_relaxed);
     // (the last frame's state, for the next one: on the presenting thread only)
     static int64_t last_at = 0, last_render = 0, last_wait[fs::kParts] = {}, last_slept[2] = {}, last_gpu = 0, last_pipes = 0,
@@ -63,15 +64,15 @@ void fps_presented() {
     static int last_level = 0;
     {   // (the host times its sleeps only while the Breakdown shows: told when that changes)
         static int told = 0;
-        const int on = level >= fs::kBreakdown;
+        const int on = level >= fs::kBreakdown || perf;
         if (on != told && host->fps_timing) host->fps_timing(on), told = on;
     }
-    if (level < fs::kFrameTime) {
+    if (level < fs::kFrameTime && !perf) {
         last_at = 0, last_level = level;
         return;
     }
     const int64_t now = fps_clock();
-    const bool breakdown = level >= fs::kBreakdown;
+    const bool breakdown = level >= fs::kBreakdown || perf;
     int64_t slept[2] = {0, 0}, gpu = 0, pipes = 0, left = 0, slot = 0;
     if (breakdown) {
         if (host->slept_ns) host->slept_ns(slept);
@@ -86,7 +87,7 @@ void fps_presented() {
         f.at_ns = now;
         const double ms = (now - last_at) / 1e6;
         f.ms = (float)ms;   // (the Breakdown's first frame: its time, without parts)
-        if (breakdown && last_level >= fs::kBreakdown) {   // (the parts from the Breakdown's first whole frame on)
+        if (breakdown && (last_level >= fs::kBreakdown || perf)) {   // (the parts from the Breakdown's first whole frame on)
             const auto d = [](int64_t a, int64_t b) { return std::max<int64_t>(a - b, 0) / 1e6; };
             // (the recording slots' waits are inside the renderer's entries, timed by the replay itself: moved to the GPU's)
             const double slots = d(slot, last_slot);
@@ -98,6 +99,7 @@ void fps_presented() {
             f.left_out = (uint16_t)std::clamp<int64_t>(left - last_left, 0, 65535);
         }
         if (f.ms > 0) {   // (two presents in the same clock tick: not a frame)
+            if (perf) perf_frame(f);
             std::lock_guard lk(ring_mu);
             ring.push(f);
         }

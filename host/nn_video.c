@@ -117,6 +117,8 @@ static const Av1Decoder av1_decoders[] = {
     {"Media Foundation", mf_av1_open, mf_av1_decode, mf_av1_flush, mf_av1_close},
 };
 
+static int64_t movie_totals[5];   /* (longshot) the performance summary's: hos_movie_stats, below */
+
 typedef struct {
     AVCodecContext *ctx;
     void *mf;                        /* (longshot) an AV1 decoder of our own instead of ctx (av1: which one) */
@@ -438,6 +440,7 @@ static void queue_frame(Dec *d, const AVFrame *f) {
     p.nv12 = (uint8_t *)malloc(nv12_size);
     if (!p.nv12 || (!lazy_rgba && !p.rgba)) {   /* (out of memory: this frame is dropped, not written through NULL; issue 342) */
         static volatile LONG told;
+        __atomic_add_fetch(&movie_totals[1], 1, __ATOMIC_RELAXED);
         if (InterlockedIncrement(&told) <= 4) hos_log("video: no memory for a %dx%d frame: dropped", w, h);
         free(p.rgba), free(p.nv12);
         return;
@@ -553,7 +556,18 @@ static void decode_next(Dec *d) {
 /* (longshot, issue 2316) one line when a movie stops: its decoder, the time it took for each submission against the time
    between the movie's pictures, and the pictures the catch-up skipped. A decoder slower than the movie leaves the picture
    behind the sound, whatever the catch-up does: the line says which it was in a report's longshot_log.txt */
+/* (longshot) every movie's totals this session, for the performance summary (hos_perf_info, gpu/vk/perf_report.cpp): pictures
+   shown, skipped to keep up with the sound (and dropped for want of memory), shown late (over 50 ms after the one before),
+   decoding time in ns, decoders that did not start. Added as each movie stops (movie_totals: above) */
+void hos_movie_stats(int64_t out[5]) {
+    for (int i = 0; i < 5; i++) out[i] = __atomic_load_n(&movie_totals[i], __ATOMIC_RELAXED);
+}
+void hos_movie_fallback(void) { __atomic_add_fetch(&movie_totals[4], 1, __ATOMIC_RELAXED); }
 static void movie_report(Dec *d) {
+    __atomic_add_fetch(&movie_totals[0], d->decoded > d->skipped ? d->decoded - d->skipped : 0, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&movie_totals[1], d->skipped, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&movie_totals[2], d->gaps[0][2] + d->gaps[0][3] + d->gaps[1][2] + d->gaps[1][3], __ATOMIC_RELAXED);
+    __atomic_add_fetch(&movie_totals[3], d->decode_ns, __ATOMIC_RELAXED);
     if (d->decoded > 1) {
         const double each = (double)d->decode_ns / d->decoded / 1e6,
                      every = (double)(d->end_pts - d->first_pts) / (d->decoded - 1) / 1e6;   /* (pts in ns) */

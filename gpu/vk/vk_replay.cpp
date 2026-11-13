@@ -41,6 +41,7 @@
 #include "vk_framegen.h"
 #include "vk_dlss.h"   // (longshot: dlss_fg_idle)
 #include "vk_fps.h"
+#include "perf_report.h"
 #include "vk_menu.h"
 #include "vk_jobs.h"
 #include "vk_shader.h"
@@ -3275,6 +3276,7 @@ uint64_t vk_retirement_value() {
 /// closed (issue 1275: captures kept 25 -> 6527, staging 256 -> 1408 MB). Now the report once (a thread that sees the loss
 /// too waits for it, instead of ending the process before it is written), then the process ends as replay_fatal does
 [[noreturn]] void device_lost(const char* why) {
+    perf_report_final(perf_report::kDeviceLost);   // (the performance summary's last, before the process ends)
     static std::once_flag once;
     std::call_once(once, checkpoints_report);
     replay_fatal(why ? why
@@ -3563,9 +3565,11 @@ void log_frame_stats() {
             static const bool keep_all = getenv("RX_VK_NETWORK_KEEP") && !strcmp(getenv("RX_VK_NETWORK_KEEP"), "all");
             const double gpu_ms = (st_gpu_ns - l_gpu) / 120.0 / 1e6, draws = (d - l_d) / 120.0;
             menu_auto_tune(gpu_ms, draws, 120.0 / secs);   // (the Quality preset Auto (this PC): measured in play)
-            if (!keep_all && gpu_ms > 40.0 && draws < 40.0 && !movie_networks_slow.exchange(true))
+            if (!keep_all && gpu_ms > 40.0 && draws < 40.0 && !movie_networks_slow.exchange(true)) {
+                perf_event(perf_report::kMovieUpscalerDropped);
                 logf("vk: %.0f ms of GPU time a frame for %.0f draws (a movie): its upscaler networks are left out from now on "
                      "(a linear upscale; RX_VK_NETWORK_KEEP=all keeps them)", gpu_ms, draws);
+            }
         }
         l_made = texture_made();
         {
@@ -3648,6 +3652,7 @@ void status_tick() {
     const int mode = line ? temporal_status(dlss, sizeof dlss) : temporal_mode();   // (temporal_status: since the last line, so only for one)
     static bool over = false;
     if (known && sl::crossed(over, used, allowed)) {
+        if (over) perf_event(perf_report::kVramOverBudget);
         char w[200];
         sl::over_text(w, sizeof w, used, allowed, mode);
         logf("%s", w);
