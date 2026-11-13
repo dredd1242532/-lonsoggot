@@ -3694,6 +3694,7 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // (longshot) a storage buffer table's entries (count > 1, Info::global_tables): the ones past the table's
                 // end are whatever the constant buffer holds there, bound only when they look like a buffer
                 const bool plausible = d.count == 1 || (size && size <= (256ull << 20) && host->gpu_guest(base));
+                if (d.is_written) memory_writer_key(p.key);   // (RX_VK_LOG_RB_WRITERS: the program a written page is from)
                 BufferRef b = addr && plausible ? gpu_buffer_bind(base, n, d.is_written && !bare) : BufferRef{};
                 // (AyyBeeDee20738, PR 138) a table entry's region that does not fit its pool this moment bound nothing, and the next
                 // frame bound it again: its reads flipped between the data and 0, the picture between bright and dark. Smaller,

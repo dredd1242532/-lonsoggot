@@ -304,6 +304,21 @@ void memory_drop_shadow(uint64_t guest, uint64_t size);   // (a write the captur
 /// when any write-back ever did
 uint64_t memory_writeback_value(uint64_t guest, uint64_t size, bool* ever, uint64_t* part = nullptr, uint64_t* whole = nullptr);
 void memory_note_readback(uint64_t guest, uint64_t size);   // (PR 430) a CPU read of GPU results: see memory_rb_refresh
+// (longshot, diagnostics) RX_VK_LOG_RB_WRITERS=1: what wrote the pages a readback waits for. The replay says what it is recording
+// (memory_writer_note: the op, kRbWriterUb for the uniform updates written at a recording's end, a program's key for a storage
+// buffer it writes) and counts its draws and dispatches (memory_count_work); every page a write-back is noted for keeps the
+// first and the last such writer of its newest submission. memory_rb_writers: those of a range (false: none known)
+constexpr uint32_t kRbWriterUb = 0x10000, kRbWriterWb = 0x10001;
+struct RbWriter {
+    uint64_t value = 0, part = 0, work = 0, key = 0;
+    uint32_t what = 0;
+};
+bool rb_writers_on();
+void memory_writer_note(uint32_t what, uint64_t key);
+void memory_writer_key(uint64_t key);   // (the program of the draw or dispatch noted: its key)
+void memory_count_work();
+uint64_t memory_work_count();
+bool memory_rb_writers(uint64_t guest, uint64_t size, RbWriter& first, RbWriter& last, int* pages);
 void memory_note_cpu_read(uint64_t guest, uint64_t size);   // (invalidate) a CPU read: a large binding over it keeps its write-back
 void memory_note_cpu_access(uint64_t guest, uint64_t size, bool write);   // (and a CPU write a mirror sync copies: wb_learn.h)
 bool memory_wb_followed(uint64_t lo, uint64_t hi);   // (whether a large binding wb_learn.h follows overlaps [lo, hi))

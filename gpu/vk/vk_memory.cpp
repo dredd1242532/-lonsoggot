@@ -1476,6 +1476,8 @@ WbPages wb_parts;
 // (longshot) the pages' last write in place (part 0: note_direct_write), for the late pages' fix: no record of which words,
 // so a capture with such a page late waits, as before, whatever else writes it back
 WbPages wb_direct;
+// (RX_VK_LOG_RB_WRITERS, diagnostics: set once it is on) each range noted, to rb_page_note (below, with the writers it keeps)
+void (*wb_writers_hook)(uint64_t lo, uint64_t hi, uint64_t value, uint64_t part) = nullptr;
 void wb_pages_note(uint64_t guest_lo, uint64_t guest_hi, uint64_t value, uint64_t part) {
     static const bool off = env_on("RX_VK_NO_READBACK_WAIT");
     if (off || !value || guest_hi <= guest_lo) return;
@@ -1485,6 +1487,7 @@ void wb_pages_note(uint64_t guest_lo, uint64_t guest_hi, uint64_t value, uint64_
         if (part || !wb_parts.empty()) wb_parts.set(p, part);
         if (!part) wb_direct.set(p, value);
     }
+    if (wb_writers_hook) wb_writers_hook(guest_lo, guest_hi, value, part);
 }
 } // namespace
 /// The newest write-back value of the range's pages (0: none; *ever: whether any page was ever written back). With part
@@ -1941,6 +1944,74 @@ void note_in_place_read(bool outside = false) {
 } // namespace
 void memory_recording_part(uint64_t part) { mem_rec_part.store(part); }
 uint64_t memory_in_place_part() { return mem_in_place_part.load(); }
+
+// ---- (longshot, diagnostics) RX_VK_LOG_RB_WRITERS=1: what wrote the pages a readback waits for (vk_internal.h) ----
+// The writer the replay is recording now (its thread's: memory_writer_note), its draws and dispatches counted, and each noted
+// page's first and last writer in its newest submission (under wb_pages_mu, through wb_pages_note's hook)
+namespace {
+thread_local uint32_t wr_what = 0;
+thread_local uint64_t wr_key = 0;
+std::atomic<uint64_t> wr_work{0};
+struct PageWriters { RbWriter first, last; };
+std::unordered_map<uint64_t, PageWriters> page_writers;
+void rb_page_note(uint64_t lo, uint64_t hi, uint64_t value, uint64_t part) {   // (wb_pages_mu held)
+    RbWriter w;
+    w.value = value, w.part = part ? part : mem_rec_part.load(std::memory_order_relaxed);
+    w.work = wr_work.load(std::memory_order_relaxed), w.key = wr_key, w.what = wr_what;
+    if (part) w.what = kRbWriterWb, w.key = 0;   // (a mirror's write-back at its part's end: when the CPU can have it)
+    if (page_writers.size() > (1u << 20)) page_writers.clear();   // (a diagnostic's memory, bounded)
+    for (uint64_t p = lo >> kPageShift; p <= (hi - 1) >> kPageShift; p++) {
+        PageWriters& pw = page_writers[p];
+        if (pw.last.value != value) pw.first = w;
+        pw.last = w;
+    }
+}
+} // namespace
+bool rb_writers_on() {
+    static const bool on = env_on("RX_VK_LOG_RB_WRITERS");
+    return on;
+}
+void memory_writer_note(uint32_t what, uint64_t key) {
+    if (!rb_writers_on()) return;
+    wr_what = what, wr_key = key;
+    static const bool hooked = [] {
+        std::lock_guard lk(wb_pages_mu);
+        wb_writers_hook = rb_page_note;
+        return true;
+    }();
+    (void)hooked;
+}
+void memory_writer_key(uint64_t key) {
+    if (rb_writers_on()) wr_key = key;
+}
+void memory_count_work() {
+    if (rb_writers_on()) wr_work.fetch_add(1, std::memory_order_relaxed);
+}
+uint64_t memory_work_count() { return wr_work.load(std::memory_order_relaxed); }
+/// (RX_VK_LOG_RB_WRITERS) the writers of a range's pages in the newest submission any of them was written in: the earliest first
+/// writer and the latest last one (by part, then by draw count), and how many of its pages that submission wrote
+bool memory_rb_writers(uint64_t guest, uint64_t size, RbWriter& first, RbWriter& last, int* pages) {
+    first = last = RbWriter{};
+    if (pages) *pages = 0;
+    if (!size || !rb_writers_on()) return false;
+    std::lock_guard lk(wb_pages_mu);
+    const uint64_t lo = guest >> kPageShift, hi = (guest + size - 1) >> kPageShift;
+    uint64_t newest = 0;
+    for (uint64_t p = lo; p <= hi; p++)
+        if (auto it = page_writers.find(p); it != page_writers.end()) newest = std::max(newest, it->second.last.value);
+    if (!newest) return false;
+    const auto later = [](const RbWriter& a, const RbWriter& b) { return a.part != b.part ? a.part > b.part : a.work > b.work; };
+    bool any = false;
+    for (uint64_t p = lo; p <= hi; p++) {
+        auto it = page_writers.find(p);
+        if (it == page_writers.end() || it->second.last.value != newest) continue;
+        if (pages) (*pages)++;
+        if (!any || later(first, it->second.first)) first = it->second.first;
+        if (!any || later(it->second.last, last)) last = it->second.last;
+        any = true;
+    }
+    return any;
+}
 void memory_recording_value(uint64_t value, uint64_t completed) {
     mem_rec_value = value;
     if (completed > mem_completed) mem_completed = completed;

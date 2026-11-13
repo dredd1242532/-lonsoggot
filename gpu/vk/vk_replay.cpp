@@ -1151,6 +1151,7 @@ namespace {
 /// their overlay copies)
 void flush_ub_updates(VkCommandBuffer cmd) {
     if (ub_first_of_recording >= ub_updates.size()) return;
+    memory_writer_note(kRbWriterUb, 0);   // (RX_VK_LOG_RB_WRITERS: what these write is the uniform updates')
     GprofSpan gp(cmd, "ubupd (the stream's uniform updates -> guest memory, with its barriers)");
     gp.items = (int)(ub_updates.size() - ub_first_of_recording);
     full_barrier(cmd);
@@ -1190,10 +1191,12 @@ bool op_is_work(uint32_t op) {
 void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* end = nullptr) {
     const Mode mode = rmode;
     const bool dry = mode == Mode::Dry, worker = mode == Mode::Worker;
+    static const bool rb_writers = rb_writers_on();   // (RX_VK_LOG_RB_WRITERS: each op said, as the writer of what it writes)
     for (;;) {
         if (p == end) return;
         nvn_op_hdr h;
         std::memcpy(&h, p, sizeof h);
+        if (rb_writers && !dry) memory_writer_note(h.op, 0);
         const uint8_t* a = p + 8;
         const uint32_t avail = h.size - 8;
         switch (h.op) {
@@ -1736,6 +1739,7 @@ void replay(VkCommandBuffer& cmd, NvnState& s, const uint8_t* p, const uint8_t* 
                 if (s.render_enabled && (compute || !s.raster_discard)) dry_mark_written(s, compute, dry_work == 0);
                 if (++dry_work % 64 == 0) par_points.push_back({p + h.size, s, ub_updates.size(), par_conds.size(), dry_work});
             } else if (!worker) {
+                if (rb_writers) memory_count_work();
                 maybe_split(cmd);
             }
         }
@@ -2438,11 +2442,14 @@ void burst_end() {
     if (ev_looked_any) ev_cpu_settled.store(ev_looked, std::memory_order_release), ev_looked_any = false;
 }
 
+void rb_span_begin(uint64_t value, uint64_t part);   // (RX_VK_LOG_RB_WRITERS: below, with the readback's)
+void rb_span_end(uint64_t value, uint64_t part);
 /// The recording being made: ended and submitted, the timeline signalled as far as no older submission is unfinished
 void finish_recording(uint64_t value) {
     (void)value;
     Recording& r = *rec_cur;
     rec_cur = nullptr;
+    if (rb_writers_on()) rb_span_end(r.value, r.part);
     end_pass(r.cmd);
     flush_ub_updates(r.cmd);
     memory_end_submission(r.cmd, r.part);
@@ -2525,6 +2532,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         memory_begin_submission();
         full_barrier(first.cmd, "barrier (recording start)");
         rec_cur = &first, rec_cur_value = tag, rec_parts = 0, part_work = 0;
+        if (rb_writers_on()) rb_span_begin(tag, first.part);
     }
     VkCommandBuffer cmd = rec_cur->cmd;
     const uint8_t* stop = nullptr;
@@ -2908,6 +2916,141 @@ bool tex_pages_any(uint64_t gpu, uint64_t size) {
 }
 void texture_created_of(const nvn_tex* t) { tex_pages_add(t, +1); }
 uint64_t fence();
+// ---- (longshot, diagnostics) RX_VK_LOG_RB_WRITERS=1 (with RX_VK_LOG_READBACK_WAITS=1 for a line a wait) ----
+// What wrote the pages a readback waits for (memory_rb_writers: the op, the program, the part, the draw), where that is in its
+// submission, and how long the read would have waited for the part its last writer was recorded in rather than for its whole
+// submission: the readback waits for that part first, timed, then as before (the same wait in two steps). Every 3000
+// readbacks, by the size read: the waits, the part's share of them, and the writers
+struct SubSpan { uint64_t first_part = 0, last_part = 0, w0 = 0, w1 = 0; };
+std::mutex rb_span_mu;
+std::map<uint64_t, SubSpan> rb_spans;   // (submission value -> its first and last parts, its draws' and dispatches' count then)
+void rb_span_begin(uint64_t value, uint64_t part) {
+    std::lock_guard lk(rb_span_mu);
+    SubSpan& s = rb_spans[value];
+    if (!s.first_part) s.first_part = part, s.w0 = memory_work_count();
+    while (rb_spans.size() > 4096) rb_spans.erase(rb_spans.begin());
+}
+void rb_span_end(uint64_t value, uint64_t part) {
+    std::lock_guard lk(rb_span_mu);
+    SubSpan& s = rb_spans[value];
+    if (!s.first_part) s.first_part = part, s.w0 = memory_work_count();
+    s.last_part = std::max(s.last_part, part), s.w1 = memory_work_count();
+}
+const char* rb_what_name(uint32_t what) {
+    switch (what) {
+    case kRbWriterUb: return "uniform-updates";
+    case kRbWriterWb: return "write-back";
+    case NOP_SIGNAL_EVENT: return "event";
+    case NOP_COPY_B2B: return "copy";
+    case NOP_CLEAR_BUF: return "clear";
+    case NOP_COPY_T2B: return "texture->buffer";
+    case NOP_DRAW: case NOP_DRAW_IDX: case NOP_DRAW_INDIRECT: case NOP_DRAW_MESH: return "draw";
+    case NOP_DISPATCH: case NOP_DISPATCH_INDIRECT: return "dispatch";
+    default: return "other";
+    }
+}
+struct RbDiag {
+    bool on = false;
+    RbWriter first, last;
+    int pages = 0;
+    SubSpan span;
+    double part_ms = -1;   // (when the last writer's part was done, into the wait; -1: not waited for apart)
+    // (the bytes read, up to 1 MB: before the wait, once the last writer's part was done, after the whole wait. What changed
+    // after the part says whether waiting for the part alone would have given the CPU the same bytes)
+    bool snap = false;
+    int64_t changed_before_part = 0, changed_after_part = 0;
+};
+thread_local std::vector<uint8_t> rb_snap[3];
+void rb_diag_wait(uint64_t gpu, uint64_t size, RbDiag& d) {
+    d.on = memory_rb_writers(host->gpu_guest(gpu), size, d.first, d.last, &d.pages);
+    if (!d.on) return;
+    if (size <= (1u << 20)) {
+        rb_snap[0].resize(size);
+        d.snap = host->gpu_read(gpu, rb_snap[0].data(), size);
+    }
+    {
+        std::lock_guard lk(rb_span_mu);
+        if (auto it = rb_spans.find(d.last.value); it != rb_spans.end()) d.span = it->second;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    int ok = 0;
+    if (d.last.part && wait_recorded_part(d.last.part, UINT64_MAX, &ok))
+        d.part_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (d.snap && d.part_ms >= 0) {
+        rb_snap[1].resize(size);
+        d.snap = host->gpu_read(gpu, rb_snap[1].data(), size);
+    } else {
+        d.snap = false;   // (no part waited for apart: nothing to tell)
+    }
+}
+int64_t rb_bytes_differ(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    int64_t n = 0;
+    for (size_t i = 0; i < a.size() && i < b.size(); i++) n += a[i] != b[i];
+    return n;
+}
+struct RbAgg {
+    int64_t n = 0, parted = 0;
+    double ms = 0, part_ms = 0, whole_ms = 0;   // (part_ms, whole_ms: the waits whose part was waited for apart)
+    int64_t snaps = 0, changed = 0, changed_after = 0, after_waits = 0;   // (bytes changed in the wait, after the part; waits with any after)
+    std::map<std::pair<uint32_t, uint64_t>, int> writers;
+};
+std::mutex rb_agg_mu;
+std::map<uint64_t, RbAgg> rb_agg;   // (by the size read)
+void rb_diag_done(uint64_t gpu, uint64_t size, RbDiag& d, double ms, bool log_line) {
+    if (!d.on) return;
+    if (d.snap) {
+        rb_snap[2].resize(size);
+        if ((d.snap = host->gpu_read(gpu, rb_snap[2].data(), size))) {
+            d.changed_before_part = rb_bytes_differ(rb_snap[0], rb_snap[1]);
+            d.changed_after_part = rb_bytes_differ(rb_snap[1], rb_snap[2]);
+        }
+    }
+    {
+        std::lock_guard lk(rb_agg_mu);
+        RbAgg& a = rb_agg[size];
+        a.n++, a.ms += ms;
+        if (d.part_ms >= 0) a.parted++, a.part_ms += d.part_ms, a.whole_ms += ms;
+        a.writers[{d.last.what, d.last.key}]++;
+        if (d.snap) {
+            a.snaps++, a.changed += d.changed_before_part + d.changed_after_part, a.changed_after += d.changed_after_part;
+            a.after_waits += d.changed_after_part != 0;
+        }
+    }
+    if (!log_line) return;
+    const uint64_t w0 = d.span.w0, w1 = std::max(d.span.w1, d.last.work);
+    logf("vk: readback writers %#llx +%#llx: last %s %016llx (part %llu, draw %llu of %llu in submission %llu), first %s %016llx "
+         "(part %llu, draw %llu), %d pages; the submission's parts %llu..%llu; its last writer's part done %.2f ms into the wait "
+         "of %.2f; bytes changed %lld by then, %lld after%s", (unsigned long long)gpu, (unsigned long long)size, rb_what_name(d.last.what), (unsigned long long)d.last.key,
+         (unsigned long long)d.last.part, (unsigned long long)(d.last.work >= w0 ? d.last.work - w0 : 0),
+         (unsigned long long)(w1 - w0), (unsigned long long)d.last.value, rb_what_name(d.first.what),
+         (unsigned long long)d.first.key, (unsigned long long)d.first.part,
+         (unsigned long long)(d.first.work >= w0 ? d.first.work - w0 : 0), d.pages, (unsigned long long)d.span.first_part,
+         (unsigned long long)d.span.last_part, d.part_ms, ms, (long long)d.changed_before_part, (long long)d.changed_after_part,
+         d.snap ? "" : " (not read)");
+}
+void rb_diag_report() {
+    std::lock_guard lk(rb_agg_mu);
+    for (auto& [size, a] : rb_agg) {
+        if (a.n < 3) continue;
+        std::vector<std::pair<int, std::pair<uint32_t, uint64_t>>> top;
+        for (const auto& [k, c] : a.writers) top.push_back({c, k});
+        std::sort(top.rbegin(), top.rend());
+        std::string who;
+        for (size_t i = 0; i < top.size() && i < 4; i++) {
+            char one[96];
+            snprintf(one, sizeof one, "%s%s %016llx x%d", i ? ", " : "", rb_what_name(top[i].second.first),
+                     (unsigned long long)top[i].second.second, top[i].first);
+            who += one;
+        }
+        logf("vk: readback writers, size %#llx: %lld waits, %.2f ms each; %lld with the last writer's part known: done %.2f ms into "
+             "their %.2f ms (%.2f ms of each wait after it); bytes the wait changed: %.1f each, %.1f of them after the part (%lld of "
+             "%lld waits); last writers: %s", (unsigned long long)size, (long long)a.n, a.ms / a.n,
+             (long long)a.parted, a.parted ? a.part_ms / a.parted : 0.0, a.parted ? a.whole_ms / a.parted : 0.0,
+             a.parted ? (a.whole_ms - a.part_ms) / a.parted : 0.0, a.snaps ? (double)a.changed / a.snaps : 0.0,
+             a.snaps ? (double)a.changed_after / a.snaps : 0.0, (long long)a.after_waits, (long long)a.snaps, who.c_str());
+    }
+    rb_agg.clear();
+}
 /// (longshot) invalidate's wait for a write-back's value, at most RX_VK_READBACK_WAIT_MS (default 250; 0: no limit, as before).
 /// On the Steam Deck (RADV, no buffer mirrors, queues replayed in submit order) the game's main thread and one of its jobs
 /// waited here, right after Kokiri Forest's save loaded, for a value the timeline never reached while they waited (it had been
@@ -3065,6 +3208,8 @@ void invalidate(uint64_t gpu, uint64_t size) {
             uint64_t part = 0, whole = 0;
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr, &part, &whole);
             static const bool log_each = env_on("RX_VK_LOG_READBACK_WAITS");
+            RbDiag rbd;   // (RX_VK_LOG_RB_WRITERS: its writers, and its last writer's part waited for first, timed)
+            if (rb_writers_on() && v > completed()) rb_diag_wait(gpu, size, rbd);
             uint64_t l_part = 0, l_last = 0, l_sent = 0, l_done = 0;   // (the log's: recordings, on their timeline)
             if (log_each && v > completed() && rec_timeline) {
                 std::lock_guard mk(rec_map_mu);
@@ -3095,13 +3240,15 @@ void invalidate(uint64_t gpu, uint64_t size) {
                 const int64_t d = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - w0).count();
                 ns += d;
                 static std::atomic<int> logged{0};
-                if (log_each && presents_now > 4000 && logged++ < 300)
+                const bool line = log_each && presents_now > 4000 && logged++ < 300;
+                if (line)
                     logf("vk: readback wait %lld %#llx +%#llx: %.2f ms (catch-up %.2f) value %llu, fence %llu, done %llu, behind %d; "
                          "recordings: its part's %llu, its submission's last %llu (in place: value %llu), %llu submitted, %llu done",
                          (long long)presents_now, (unsigned long long)gpu, (unsigned long long)size, d / 1e6,
                          std::chrono::duration_cast<std::chrono::nanoseconds>(w1 - w0).count() / 1e6, (unsigned long long)v,
                          (unsigned long long)f0, (unsigned long long)c0, (int)behind0, (unsigned long long)l_part,
                          (unsigned long long)l_last, (unsigned long long)whole, (unsigned long long)l_sent, (unsigned long long)l_done);
+                if (presents_now > 4000) rb_diag_done(gpu, size, rbd, d / 1e6, line);
             }
             static const bool log_ranges = env_on("RX_VK_LOG_READBACK_RANGES");
             if (log_ranges)
@@ -3115,6 +3262,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
                      "stopped queues first, %lld waited for their submission's last part (guest memory read in place after theirs)",
                      (long long)n, n ? ns.exchange(0) / (double)n / 1e6 : 0.0, (long long)settled.exchange(0),
                      (long long)held_back.exchange(0));
+                if (rb_writers_on()) rb_diag_report();
             }
         }
     }
