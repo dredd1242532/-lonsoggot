@@ -96,8 +96,8 @@
 .studio-release-status { margin: 0; color: var(--sl-color-white); font-size: 1rem; }
 .studio-release-status span { color: var(--soft-text); white-space: nowrap; }
 .studio-release-description { margin: .6rem 0; color: var(--soft-text); max-width: 38rem; font-size: .95rem; }
-.studio-release-disclaimer { margin: 1rem 0; padding: .85rem 1rem; border-left: 2px solid var(--sl-color-text-accent); background: var(--sl-color-bg); color: var(--sl-color-gray-1); max-width: 38rem; font-size: .9rem; line-height: 1.6; }
-.studio-release-disclaimer strong { display: block; color: var(--sl-color-white); }
+.studio-release-disclaimer { margin: .9rem 0 0; color: #ff9e9e; font-size: .9rem; line-height: 1.6; }
+:root[data-theme='light'] .studio-release-disclaimer { color: #a51d28; }
 .studio-release-date { margin: .5rem 0 0; color: var(--soft-text); font-size: .8rem; }
 .studio-release-actions { display: flex; flex-direction: column; gap: .6rem; align-items: stretch; }
 .studio-release-guide { display: inline-flex; align-items: center; justify-content: center; gap: .75rem; min-height: 44px; color: var(--sl-color-text-accent); font-size: .9rem; }
