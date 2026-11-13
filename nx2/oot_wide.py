@@ -123,6 +123,8 @@ SITES = (
     (0x33b82c, 0x2d558440, _ratio(1, 2)),
     # the 2D canvas setup: the layout's projection rows (ldp q1, q4, [x2]); the canvas is x0, its screen 0x1b8 before it
     (0x774368, 0xad401041, HUD),
+    # #95's pane size site: fill only the loading fade, leaving its centred icon alone.
+    (0x152ac40, 0x2d4b0400, "{ extern void hos_wide_fade_size(Ctx *, uint64_t); hos_wide_fade_size(c, c->x[0]); }"),
     # the movie layer's draw: its viewport (min x at x29 - 32, max x at x29 - 24) after ldp x9, x8, [x19, #0x18]
     (0x3b5c758, 0xa941a269, MOVIE),
     # the viewport helper's SetViewport, after the call's address is loaded (ldr x8, [x8]), before blr x8
