@@ -20,8 +20,12 @@ SteamOS, the AppImage has to be made runnable first). Every channel, and the fil
 
 ## 3. Build and play
 
-Point the launcher at your game and press **Build**: it takes about 15 minutes on a 12-core desktop, and longer on a
-slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
+Press **Build** on the launcher’s welcome screen, then point it at your game. Building takes about 15 minutes
+on a 12-core desktop, and longer on a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
+
+![Longshot Launcher welcome screen with the Build button and selected build version.](images/guide/launcher-home.png)
+
+*Longshot Launcher v1.0.0-rc.3 on Linux. The build version shown may change as new releases arrive.*
 
 See [the in-game menu](../README.md#in-game-menu) for settings and controls. If something goes wrong, start with
 [Common problems](common-issues.md) and [the README's troubleshooting](../README.md#if-something-goes-wrong).

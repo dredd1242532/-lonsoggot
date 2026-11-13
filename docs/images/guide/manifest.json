@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "screenshots": [
+    {
+      "file": "launcher-home.png",
+      "sha256": "3ba00dba781162dc51143c3022ef3ffd230cb916295586a33f9762624e680f7c",
+      "width": 960,
+      "height": 600,
+      "captured_at": "2026-11-13",
+      "kind": "launcher",
+      "launcher_version": "v1.0.0-rc.3",
+      "release_url": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/tag/v1.0.0-rc.3",
+      "release_target_commit": "028ad66d343db0502acdcc005609a31ea890ef79",
+      "binary_sha256": "c1bafe1b625caac43f223ec3de13fb5af2ea1f052312f7a93ba95c2a6a6c994b",
+      "reviewed_source": {
+        "repository": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher",
+        "revision": "028ad66d343db0502acdcc005609a31ea890ef79",
+        "files": {
+          "App/MainWindow.axaml": "cba0b3c2f52e4d3644fe72d72037f4e6aaaed24f02ff254943322e54c22e87d0",
+          "App/MainWindow.axaml.cs": "67ac2bb4199c46b21444526f7279ee39a657fa91b630fdf777a3f0e3ca90cb05",
+          "App/Views/HomeView.axaml": "44275c0cf1543ca02cecd36e2906c2ce101688278b123fce759d3a611cad1010",
+          "App/ViewModels/HomeViewModel.cs": "fc5da43439a9afe3ca089e9398da26835130ae02a46bb9e65fd47613215de094",
+          "Core/ReleaseManifest.cs": "09d76c0c285c97571aaa801f0ebcc0dd470c42622d924fd90a8b0faaad2cc7a0",
+          "App/App.axaml": "2a5d0a1956c9351158f60f4465787b44389ed6977e03e83c83f410b682b4ffc0"
+        }
+      },
+      "capture": {
+        "platform": "Linux x86_64 AppImage, X11 virtual display",
+        "display": "1280x800, native scale; 960x600 application window",
+        "theme": "default dark",
+        "state": "Fresh temporary launcher, config and data directories; official release list refreshed; no game, build or save loaded.",
+        "method": "Unmodified application-window PNG capture; no compositing or text replacement."
+      },
+      "review": {
+        "contains_game_assets": false,
+        "contains_game_fonts": false,
+        "contains_save_data": false,
+        "contains_private_paths": false,
+        "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
+        "notes": "Application-owned branding and UI only. The selected build version is a release-list value, not a running game version."
+      }
+    }
+  ]
+}
