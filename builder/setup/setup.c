@@ -302,7 +302,7 @@ static int init_home(int portable) {
             HbHome existing;
             if (!hb_home_discover(&existing, NULL, self, parent)) return 0;
             if (existing.portable) wcscpy(g_home.root, existing.root);
-            else if (!hb_home_join(g_home.root, MAX_PATH, parent, L"LongshotBuilder")) return 0;
+            else if (!hb_home_join(g_home.root, MAX_PATH, parent, HB_HOME_FOLDER)) return 0;
         }
         if (hb_home_volume(g_home.root)) return 0;
         mkdirs(g_home.root);
@@ -675,6 +675,12 @@ static DWORD WINAPI work(LPVOID unused) {
             wchar_t app[MAX_PATH];
             status(L"Copying the Longshot Builder...");
             home_path(app, L"%ls\\LongshotBuilder", install);
+            /* (a LongshotBuilder\ that is a portable home: an earlier setup's --portable made its home there, where the zip's
+               builder is. It is never copied: its versions\ would go into each version, and its marker would make the installed
+               builder its own home) */
+            if (hb_home_marked(g_app))
+                fail(L"%ls is a portable Builder home as well as the builder this zip carries. Unpack the whole zip into a new "
+                     L"folder and start the setup with --portable there.", g_app);
             if (!copy_part_tree(g_app, app)) fail(L"Could not copy the Longshot Builder from %ls (unpack the whole zip again).", g_app);
         }
         for (int i = 0; i < nparts; i++) {
