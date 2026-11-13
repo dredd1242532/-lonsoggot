@@ -7282,7 +7282,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             ParLock lk;
             ensure_layout(p);
         }
-        const int64_t pipes_new = use_counters.pipes_new;
+        const int64_t pipes_new = use.on ? use_counters.pipes_new : 0;   // (another file's thread-local: read for the life log only)
         pe = graphics_pipeline(p, s, at, topo, types);
         if (use.on) use.pipeline(pe->ready.load(std::memory_order_acquire), use_counters.pipes_new != pipes_new);
     }
@@ -9733,7 +9733,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         static const char* want = getenv("RX_VK_LOG_PUSH");
         static bool done;
         char hex[24];
-        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)cp->key);
+        if (want && !done) snprintf(hex, sizeof hex, "%016llx", (unsigned long long)cp->key);   // (only with the switch: once per dispatch)
         if (want && !done && !strncmp(hex, want, strlen(want))) {
             done = true;
             char line[1600];
