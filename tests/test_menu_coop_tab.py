@@ -410,6 +410,7 @@ int main(int argc, char** argv) {
     // (the maker's remedies: only to the game holding the maker's key; Remove a player among the others with a key)
     room = MkwVkCoopView{};
     room.state = HOS_COOP_STATE_JOINED, room.remedies = 1, room.n = 3, room.version = 99, room.member[0].self = 1;
+    for (int i = 0; i < room.n; i++) room.member[i].id = i + 1;   // host views always carry distinct member IDs
     std::snprintf(room.code, sizeof room.code, "K7XG2M-RTB9DH-W4PZ5N");
     std::snprintf(room.member[1].name, sizeof room.member[1].name, "Saria"), std::snprintf(room.member[1].key, sizeof room.member[1].key, "7c1d-e842-3b90-a5f6");
     std::snprintf(room.member[2].name, sizeof room.member[2].name, "Darunia"), std::snprintf(room.member[2].key, sizeof room.member[2].key, "d03a-5f17-c2e9-8b44");
