@@ -81,7 +81,7 @@ The fields are the ones the relay takes (`Bean-Ops/deploy/crash-relay/crash_rela
 | `renderer` | Vulkan or WebGPU, and why when it fell back |
 | `gpu` | the `vk: device` line of the device in use: name, driver |
 | `cpu` | the CPU's name, threads and RAM |
-| `map` | the last `map:` line before the crash |
+| `map` | the last `map:` line before the crash; before any, "Preparing shaders" (from the shaders' first progress line to "the shaders took") or "Title and intro" |
 | `options` | **every setting** in `longshot_options.ini`, defaults included, as `key=value` lines (below) |
 | `crash` | the `CRASH:` lines: the exception, the host backtrace, the thread, the guest backtrace (80 at most) |
 | `log_tail` | the 150 log lines before the first `CRASH:` line (the relay keeps 150, each up to 300 characters) |

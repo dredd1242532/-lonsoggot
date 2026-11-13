@@ -236,6 +236,20 @@ class CrashReportTest(unittest.TestCase):
         r = f.report()
         self.assertEqual(r["map"], "Kokiri Forest (child)")
 
+    def test_before_the_first_map_the_shaders_preparation_then_the_title(self):
+        # (the same names as the performance summary's, #206)
+        header = "".join(re.findall(r".*\n", LOG % SOURCE)[:5])
+        crash = (LOG % SOURCE)[(LOG % SOURCE).index("[hos Main] CRASH:"):]
+        steps = (("", "Title and intro"),
+                 ("[hos host] vk: start-up: shaders 120 of 38809, 0% of all\n", "Preparing shaders"),
+                 ("[hos host] vk: preparation: 8 workers for the shader programs (16 CPUs usable; half the CPUs)\n",
+                  "Preparing shaders"),
+                 ("[hos host] vk: start-up: shaders 120 of 38809, 0% of all\n"
+                  "[hos host] vk: start-up: the shaders took 40.2 s\n", "Title and intro"),
+                 ("[hos host] vk: start-up: the shaders took 40.2 s\n[hos Main] map: Hyrule Field\n", "Hyrule Field"))
+        for lines, place in steps:
+            self.assertEqual(self.make(log=header + lines + crash).report()["map"], place, lines)
+
     def test_no_crash_in_the_log_no_report_and_the_marker_goes(self):
         f = self.make(log="[hos host] longshot 3.4.1 (source %s)\n[hos Main] map: Lost Woods\n" % SOURCE)
         self.assertIsNone(f.report())

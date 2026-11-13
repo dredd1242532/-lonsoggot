@@ -5,7 +5,8 @@ The report is built from what is on disk, never from the crashed process:
 
 - the log of the run that crashed (longshot_log.txt, or longshot_log.1.txt once the game started again: crash_pending.txt
   says when the crash was), its first line (the version and its source fingerprint), its report: lines (the system, the
-  CPU, the GPU, the renderer: the game logs them at startup), its last map: line and its CRASH: lines;
+  CPU, the GPU, the renderer: the game logs them at startup), its last map: line (before any, "Preparing shaders" or
+  "Title and intro") and its CRASH: lines;
 - longshot_options.ini: every setting, defaults included; longshot_defaults.ini, when the game wrote it, says which
   differ;
 - longshot_version.txt's source= line (a release's fingerprint, from its signed VERSION file) for the release flag.
@@ -59,6 +60,11 @@ VERSION_OK = re.compile(r"[^0-9A-Za-z.+_-]")
 FIRST_LINE = re.compile(r"\blongshot (\S+)(?: \(source ([0-9a-f]+)\))?")
 REPORT_LINE = re.compile(r"\breport: (os|cpu|gpu|renderer) (.+)")
 MAP_LINE = re.compile(r"\bmap: (.+)")
+# (before the first map: the shaders' preparation, from its first progress line to "the shaders took", then the title and
+# intro; the same names as the performance summary's, #206)
+PREPARING_SHADERS, TITLE_AND_INTRO = "Preparing shaders", "Title and intro"
+PREP_LINE = re.compile(r"\bvk: (?:start-up: |preparation: |preparing program |shader preparation )")
+PREP_END = re.compile(r"\bvk: (?:start-up: the shaders took |preparation: done|shader preparation stopped )")
 CRASH_START = re.compile(r"CRASH: exception 0x[0-9a-fA-F]+ ")
 CRASH_LINE = re.compile(r"(?:^|\] )(CRASH: .*)")
 # (a place in a library is logged with its path on Linux, "at /usr/lib/libc.so.6+0xb5a22": the relay takes the module's name)
@@ -336,7 +342,7 @@ def build(folder, lines, home=None, user=None):
             break
     start = next(i for i, line in enumerate(lines) if CRASH_START.search(line))
     found = {}
-    place = ""
+    place = TITLE_AND_INTRO
     for line in lines[:start]:
         m = REPORT_LINE.search(line)
         if m:
@@ -344,6 +350,10 @@ def build(folder, lines, home=None, user=None):
         m = MAP_LINE.search(line)
         if m:
             place = m.group(1)
+        elif PREP_END.search(line):
+            place = TITLE_AND_INTRO
+        elif PREP_LINE.search(line) and place == TITLE_AND_INTRO:
+            place = PREPARING_SHADERS
     crash = []
     for line in lines[start:]:
         m = CRASH_LINE.search(line)
