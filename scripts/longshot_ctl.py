@@ -15,7 +15,11 @@ steer it and read its state from a shell, a test or a coding agent. Standard lib
                                                 loading_start, loading_end, change, map [--map NAME]
     teleport [INDEX|MAP] [--arrive SECS]        (OoT) the debug teleport: sent or refused; none: the destinations
     age [child|adult] [--arrive SECS]           (OoT) the Debug tab's Switch age (none: the other age), reloading the map
-    option get [NAME]  /  option set NAME VALUE the Insert menu's settings
+    option get [NAME]  /  option set NAME VALUE the Insert menu's settings, and the live switches (gpu/vk/vk_live.h)
+    ab NAME [--every 10] [--rounds 4]           a live switch flipped while the game runs; each value's fps, 1% low,
+                                                GPU time and draws, and how much halves of the same value differ
+    ab NAME --restart GAME_DIR [--values A,B]   a switch that needs a restart: one launch a value, A B then B A, each
+           [--teleport 3] [--settle 15]         taken into play and to the scene, then measured the same way
     saves  /  slots [--thumbs DIR]              the save folder the game uses; its slots, newest first
     watch [--events present,state,log,map] [--every 60] [--log TEXT] [--count N]
     mem read ADDR SIZE [--format hex|u8|u16|u32|u64|f32]   read guest memory (HOS_CONTROL_MEM=ro or rw)
@@ -51,6 +55,7 @@ class Bridge:
 
     def __init__(self, path, timeout=10.0):
         self.path, self.next_id, self.pending = path, 0, b""
+        self.kept = None   # (a list: the events that come during a request are kept there, not dropped)
         try:
             if WINDOWS:
                 name = path if path.startswith("\\\\.\\pipe\\") else "\\\\.\\pipe\\" + path
@@ -144,6 +149,8 @@ class Bridge:
                 raise Failed("the game closed the connection", 2)
             if msg.get("id") == rid and "ok" in msg:
                 return msg
+            if self.kept is not None and "event" in msg:
+                self.kept.append(msg)
 
 
 def plain_text(text):
@@ -241,9 +248,223 @@ def show(a, reply, plain):
         print(plain(reply))
 
 
+# (the game's line for the time since a live switch's last change, gpu/vk/vk_replay.cpp live_tick)
+LIVE_LINE = re.compile(r"vk: live: (\d+) frames in ([\d.]+) s with (.*?): ([\d.]+) fps \(1% low ([\d.]+)\), GPU ([\d.]+) ms a "
+                       r"frame, ([\d.]+) draws a frame")
+LIVE_SHORT = "vk: live: under half a second with "
+
+
+def live_halves(lines, name):
+    """The game's lines for each time between two asks, in order: its numbers and the value name had, or None for one too
+    short to count"""
+    out = []
+    for line in lines:
+        m = LIVE_LINE.search(line)
+        if m:
+            values = dict(v.split("=", 1) for v in m.group(3).split() if "=" in v)
+            out.append({"value": int(values.get(name, -1)), "frames": int(m.group(1)), "secs": float(m.group(2)),
+                        "fps": float(m.group(4)), "low": float(m.group(5)), "gpu_ms": float(m.group(6)),
+                        "draws": float(m.group(7))})
+        elif LIVE_SHORT in line:
+            out.append(None)
+    return out
+
+
+def median(xs):
+    s = sorted(xs)
+    return (s[len(s) // 2] + s[(len(s) - 1) // 2]) / 2
+
+
+def ab_summary(halves):
+    """Each value's medians, and its fps spread from half to half (what the same value varies by: the noise)"""
+    out = {}
+    for v in sorted({h["value"] for h in halves}):
+        hs = [h for h in halves if h["value"] == v]
+        out[v] = {k: median([h[k] for h in hs]) for k in ("fps", "low", "gpu_ms", "draws")}
+        out[v].update(halves=len(hs), spread=max(h["fps"] for h in hs) - min(h["fps"] for h in hs))
+    return out
+
+
+def ab_text(name, every, halves, summary, flagged, what="half", pair=None):
+    """The table: each half (what: a half of one session, or a launch), each value's medians over the halves not flagged,
+    B against A (pair: the values in that order; by default as summary has them)"""
+    whats = what + ("es" if what.endswith("ch") else "s")
+    lines = ["%-6s %-8s %7s %7s %8s %8s %8s" % (what, "value", "frames", "fps", "1% low", "GPU ms", "draws")]
+    for i, h in enumerate(halves):
+        lines.append("%-6d %-8s %7d %7.1f %8.1f %8.2f %8.0f%s" % (i + 1, h["value"], h["frames"], h["fps"], h["low"], h["gpu_ms"],
+                                                              h["draws"], "  (left out: %s)" % flagged[i] if flagged[i] else ""))
+    lines.append("")
+    lines.append("%-8s %6s %7s %7s %8s %8s %8s" % ("value", whats, "fps", "spread", "1% low", "GPU ms", "draws"))
+    for v, s in summary.items():
+        lines.append("%-8s %6d %7.1f %7.1f %8.1f %8.2f %8.0f" % (v, s["halves"], s["fps"], s["spread"], s["low"], s["gpu_ms"],
+                                                             s["draws"]))
+    va, vb = pair if pair and all(v in summary for v in pair) else list(summary)[:2] if len(summary) == 2 else (None, None)
+    if va is not None:
+        a, b = summary[va], summary[vb]
+        pct = lambda x, y: 100.0 * (y - x) / x if x else 0.0   # noqa: E731
+        noise = max(a["spread"], b["spread"])
+        lines.append("%s=%s against %s: fps %+.1f%%, 1%% low %+.1f%%, GPU ms %+.1f%%, draws %+.1f%%; the fps moved %.1f between "
+                     "%s of the same value%s" % (name, vb, va, pct(a["fps"], b["fps"]), pct(a["low"], b["low"]),
+                                                 pct(a["gpu_ms"], b["gpu_ms"]), pct(a["draws"], b["draws"]), noise, whats,
+                                                 " (the difference is within it)" if abs(b["fps"] - a["fps"]) <= noise else ""))
+    lines.append("(medians of %d s %s; the first 0.5 s after each change left out)" % (every, whats))
+    return "\n".join(lines)
+
+
+def live_lines(b, want, name, timeout=15):
+    """The game's vk: live: lines kept on b (subscribed to them), read until want halves are in or timeout seconds pass; its
+    state events (a load, a menu) go to b.states, by frame"""
+    deadline = time.monotonic() + timeout   # (each ask's line comes with the next frame)
+    lines = []
+    while True:
+        lines += [m.get("line", "") for m in b.kept if m.get("event") == "log"]
+        b.states = getattr(b, "states", []) + [m.get("frame") for m in b.kept if m.get("event") == "state"]
+        b.kept = []
+        if len(live_halves(lines, name)) >= want or time.monotonic() > deadline:
+            return live_halves(lines, name)
+        msg = b.line(max(0.1, deadline - time.monotonic()))
+        if msg is None:
+            raise Failed("the game closed the connection", 2)
+        b.kept.append(msg)
+
+
+def scene(b):
+    st = check(b.request("status"))
+    return st.get("state"), st.get("map"), st.get("frame")
+
+
+def scene_flag(before, after, half, states=()):
+    """Why a half is not counted: the game out of play at either end, another map, a change of state between (a load,
+    a menu: the state events' frames, after the first status's and up to the second's), or too short; "" for none"""
+    (s0, m0, f0), (s1, m1, f1) = before, after
+    moved = f0 is not None and f1 is not None and any(f is not None and f0 < f <= f1 for f in states)
+    return ("not in play" if s0 != "play" or s1 != "play" else "the map changed" if m0 != m1 else
+            "a load or a menu in it" if moved else "too short" if half is None else "")
+
+
+def ab_counted(halves, flagged):
+    """The halves the medians are taken over: measured and not flagged"""
+    counted = [h for h, f in zip(halves, flagged) if h is not None and not f]
+    if not counted:
+        raise Failed("every half was flagged or too short: %s" % "; ".join(f or "too short" for f in flagged), 1)
+    return counted
+
+
+def teleport_to(b, to, timeout):
+    """(OoT) the debug teleport, asked again while the game refuses it (an event playing: the one Continue starts, a map
+    change's) for up to timeout seconds, then until the game is in that map"""
+    deadline = time.monotonic() + timeout
+    while True:
+        r = b.request("teleport", to=to, timeout=30)
+        if r.get("ok"):
+            break
+        if time.monotonic() > deadline:
+            check(r)
+        b.request("wait", timeout=60, event="present", frames=120)
+    w = b.request("wait", timeout=max(10, deadline - time.monotonic()), event="map", map=r.get("map"))
+    if not w.get("ok"):
+        raise Failed("the teleport to %s was sent, and the game is not there after %.0f s" % (r.get("map") or to, timeout), 3)
+
+
+def to_play(b, timeout):
+    """Through the title and the file select (A, as Continue) until the game is in play. A press the game does not take
+    (the boot logos and the intro read no controller: the bridge's timeout) is tried again after a second"""
+    deadline = time.monotonic() + timeout
+    while scene(b)[0] != "play":
+        if time.monotonic() > deadline:
+            raise Failed("not in play after %.0f s" % timeout, 3)
+        b.request("press", buttons="A", frames=8, timeout=10)
+        b.request("wait", timeout=60, event="present", frames=60)
+
+
+def ab_restart(a):
+    """A switch that needs a restart: the game in a.restart started once a value (A B, then B A, a.rounds launches each
+    way, so neither value always comes second to warm caches), each time taken into play (Continue), to a.teleport, left
+    a.settle seconds, then a.every seconds measured between two marks (live.mark: the game's own numbers), and quit"""
+    values = a.values.split(",")
+    if len(values) != 2:
+        raise Failed("--values: two values, A,B", 2)
+    order = [v for r in range(a.rounds) for v in (values if r % 2 == 0 else values[::-1])]
+    base = os.path.abspath(a.run) if a.run else tempfile.mkdtemp(prefix="longshot-ab-")
+    halves, flagged = [], []
+    for i, v in enumerate(order):
+        ns = argparse.Namespace(game_dir=a.restart, data=None, save=a.save, slot=a.slot, headless=a.headless,
+                                run=os.path.join(base, "%02d-%s" % (i + 1, re.sub(r"[^\w.-]", "_", v))), sock=None,
+                                env=list(a.env) + ["%s=%s" % (a.name, v)], timeout=a.start_timeout, json=False)
+        info, p = start_game(ns)
+        b = Bridge(info["socket"], 10)
+        try:
+            to_play(b, a.start_timeout)
+            if a.teleport is not None:
+                teleport_to(b, int(a.teleport) if a.teleport.isdigit() else a.teleport, 120)
+            time.sleep(a.settle)
+            check(b.request("subscribe", events=["log", "state"], log="vk: live:"))
+            b.kept, b.states = [], []
+            before = scene(b)
+            check(b.request("option_set", name="live_mark", value=0))   # (the start: the time before is not counted)
+            time.sleep(a.every)
+            after = scene(b)
+            check(b.request("option_set", name="live_mark", value=0))
+            got = live_lines(b, 2, a.name)
+            if len(got) < 2:
+                raise Failed("launch %d logged %d of its 2 marks (is the renderer one with live.mark?)" % (i + 1, len(got)), 1)
+            half = dict(got[1], value=v) if got[1] else None
+            halves.append(half)
+            flagged.append(scene_flag(before, after, half, b.states))
+            b.request("quit")
+        finally:
+            b.close()
+            try:
+                p.wait(60)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        if not a.json:
+            h = halves[-1]
+            print("launch %d, %s=%s: %s" % (i + 1, a.name, v, "%.1f fps, GPU %.2f ms, %.0f draws" % (h["fps"], h["gpu_ms"], h["draws"])
+                                            if h else "too short"), flush=True)
+    summary = ab_summary(ab_counted(halves, flagged))
+    shown = [(h, f) for h, f in zip(halves, flagged) if h is not None]
+    show(a, {"ok": True, "switch": a.name, "restart": True, "every": a.every, "halves": halves, "flagged": flagged,
+             "summary": {str(k): v for k, v in summary.items()}},
+         lambda r: ab_text(a.name, a.every, [h for h, _ in shown], summary, [f for _, f in shown], what="launch", pair=values))
+    return 0
+
+
+def ab(a, b):
+    """A live switch flipped every a.every seconds while the game runs, a.rounds times each way, starting from the value it
+    has and ending on it; each half's numbers are the game's (vk: live: lines), and a half the scene changed in is marked"""
+    o = check(b.request("option_get", name=a.name))["option"]
+    if not o["key"].startswith("env."):
+        raise Failed("%s is not a live switch (option get lists them, tab live)" % a.name, 2)
+    name, start = o["name"], o["value"]
+    order = [start, 1 - (start != 0)] * a.rounds + [start]   # (the first ask ends the time before the run: not counted)
+    check(b.request("subscribe", events=["log", "state"], log="vk: live:"))
+    b.kept, b.states, scenes = [], [], []
+    for i, v in enumerate(order):
+        scenes.append(scene(b))
+        check(b.request("option_set", name=name, value=v))
+        if i + 1 < len(order):
+            time.sleep(a.every)
+    scenes.append(scene(b))
+    got = live_lines(b, len(order), name)
+    if len(got) < len(order):
+        raise Failed("the game logged %d of the %d halves (is the renderer one with live switches?)" % (len(got), len(order)), 1)
+    got = got[1:len(order)]
+    # (half i: from ask i + 1 to ask i + 2)
+    flagged = [scene_flag(scenes[i + 1], scenes[i + 2], got[i], b.states) for i in range(len(got))]
+    summary = ab_summary(ab_counted(got, flagged))
+    shown = [(h, f) for h, f in zip(got, flagged) if h is not None]
+    show(a, {"ok": True, "switch": name, "every": a.every, "halves": got, "flagged": flagged,
+             "summary": {str(k): v for k, v in summary.items()}},
+         lambda r: ab_text(name, a.every, [h for h, _ in shown], summary, [f for _, f in shown]))
+    return 0
+
+
 def run(a):
     if a.command == "launch":
         return launch(a)
+    if a.command == "ab" and a.restart:
+        return ab_restart(a)
     if a.command == "mem":
         a.addr = addr_of(a.addr)
         if a.action == "read":
@@ -381,6 +602,8 @@ def run(a):
                 if msg.get("id") == req["id"] and "ok" in msg:
                     print(json.dumps(msg))
                     return 0 if msg["ok"] else 1
+        elif a.command == "ab":
+            return ab(a, b)
         elif a.command == "watch":
             # (--log alone: the log lines only; with --events, those and the log lines)
             events = [e for e in (a.events or ("" if a.log else "present,state")).split(",") if e]
@@ -469,6 +692,13 @@ def copy_save(src, data, slot=None):
 
 def launch(a):
     """The game in GAME_DIR with HOS_CONTROL set, its socket in a run folder of its own; waits until it answers"""
+    info, _ = start_game(a)
+    print(json.dumps(info) if a.json else info["socket"])
+    return 0
+
+
+def start_game(a):
+    """launch's work: the game started and answering; its socket, pid, run folder and log, and the process"""
     game = os.path.abspath(a.game_dir)
     exe = os.path.join(game, "longshot.exe" if WINDOWS else "longshot")
     if not os.path.isfile(exe):
@@ -515,9 +745,7 @@ def launch(a):
         if time.monotonic() > deadline:
             raise Failed("the game's bridge did not answer in %.0f s: %s" % (a.timeout, log), 3)
         time.sleep(0.2)
-    info = {"socket": sock, "pid": p.pid, "run": run_dir, "log": log}
-    print(json.dumps(info) if a.json else sock)
-    return 0
+    return {"socket": sock, "pid": p.pid, "run": run_dir, "log": log}, p
 
 
 def main(argv=None):
@@ -575,6 +803,21 @@ def main(argv=None):
     q.add_argument("action", choices=["get", "set"])
     q.add_argument("name", nargs="?")
     q.add_argument("value", nargs="?")
+    q = sub.add_parser("ab", help="a live switch flipped while the game runs, and each value's numbers")
+    q.add_argument("name", help="a live switch (option get lists them, tab live), such as RX_VK_OCC_QUERIES")
+    q.add_argument("--every", type=int, default=10, help="seconds each way (measured, in each launch with --restart)")
+    q.add_argument("--rounds", type=int, default=4, help="halves each way (launches each way with --restart)")
+    q.add_argument("--restart", metavar="GAME_DIR", help="a switch that needs a restart: this game folder started once a "
+                                                         "value, A B then B A, each launch measured between two marks")
+    q.add_argument("--values", default="0,1", help="--restart: the switch's two values, A,B")
+    q.add_argument("--teleport", help="--restart: (OoT) a destination's index or map, once in play")
+    q.add_argument("--settle", type=float, default=15, help="--restart: seconds in the scene before measuring")
+    q.add_argument("--start-timeout", type=float, default=600, help="--restart: seconds for a launch to answer, and to reach play")
+    q.add_argument("--headless", action="store_true")
+    q.add_argument("--env", action="append", default=[], metavar="NAME=VALUE", help="--restart: more for each launch")
+    q.add_argument("--save", help="--restart: as launch's --save (Linux)")
+    q.add_argument("--slot", help="--restart: as launch's --slot")
+    q.add_argument("--run", help="--restart: the folder for the launches' run folders (default a new one)")
     q = sub.add_parser("watch")
     q.add_argument("--events", help="present,state,log,map (default present,state; with --log alone, log)")
     q.add_argument("--every", type=int, default=60)

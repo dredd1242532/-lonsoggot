@@ -51,6 +51,7 @@
 #include "upscaler_rows.h"
 #include "auto_settings.h"
 #include "menu_restart.h"
+#include "vk_live.h"   // (the switches the bridge changes while the game runs: listed after the rows)
 #include "vk_menu_i18n.h"
 #include "display_modes.h"   // (the Aspect ratio and Output resolution rows: the screen's sizes and their shapes)
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
@@ -4379,12 +4380,34 @@ void bridge_fill(int i, MkwVkSetting* out) {
 // waits for the start-up probe (NGX's start, ~3 s) while it runs. Under menu_mu that held menu_tick, and the present with
 // it; this way only the bridge's thread waits, and once answered the questions return at once)
 static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why(); }
-/// The index-th settings row (an enumeration, for listing them; the index is not a name: rows come and go). 0: past the last
+// (a live switch, vk_live.h, as the bridge lists it: what was asked for, taken at the next frame)
+static void live_fill(const LiveSwitch& s, MkwVkSetting* out) {
+    *out = MkwVkSetting{};
+    snprintf(out->key, sizeof out->key, "env.%s", s.env);
+    snprintf(out->name, sizeof out->name, "%s", s.env);
+    snprintf(out->tab, sizeof out->tab, "live");
+    out->value = s.want.load(std::memory_order_relaxed), out->lo = 0, out->hi = 1, out->step = 1;
+    snprintf(out->text, sizeof out->text, "%s: %s", out->value ? "on" : "off", s.what);
+}
+// (the mark, vk_live.h live_marks: any value asked ends the time measured)
+static void live_mark_fill(MkwVkSetting* out) {
+    *out = MkwVkSetting{};
+    snprintf(out->key, sizeof out->key, "live.mark");
+    snprintf(out->name, sizeof out->name, "live_mark");
+    snprintf(out->tab, sizeof out->tab, "live");
+    out->value = (int)(live_marks.load(std::memory_order_relaxed) & 0x7fffffff), out->hi = 0x7fffffff, out->step = 1;
+    snprintf(out->text, sizeof out->text, "marks so far: an ask ends the time measured");
+}
+/// The index-th settings row (an enumeration, for listing them; the index is not a name: rows come and go), and after the
+/// rows the live switches and the mark (vk_live.h). 0: past the last
 int menu_setting(int index, MkwVkSetting* out) {
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
-    for (int i = 0, n = 0; i < kRows; i++)
+    int n = 0;
+    for (int i = 0; i < kRows; i++)
         if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
+    if (index - n < LIVE_COUNT) return live_fill(live_switches()[index - n], out), 1;
+    if (index - n == LIVE_COUNT) return live_mark_fill(out), 1;
     return 0;
 }
 /// A row whose choices are not in the order of their numbers (the output sizes go by width, the Render resolution's slider by
@@ -4478,8 +4501,20 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
 /// Quality preset made Custom unless the row is exempt, a restart noted, kept in the options file). The rows the arrows step
 /// through a list of their own (the Upscaler, Render resolution, the output resolution) are walked to value: walk_to. out: the
 /// row as it is now. 1 set, 0 no such row, -1 nothing to choose on this PC (row_fixed), -2 none of a list row's steps reach
-/// value here (the row and the rest as they were)
+/// value here (the row and the rest as they were). A key env.<NAME> is a live switch (vk_live.h): asked for, on (any value but
+/// 0) or off, and taken at the next frame; not kept in the options file. live.mark, any value: a mark
 int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
+    if (!strncmp(key, "env.", 4)) {
+        LiveSwitch* const s = live_find(key + 4);
+        if (!s) return 0;
+        s->want.store(value != 0, std::memory_order_relaxed);
+        s->asks.fetch_add(1, std::memory_order_release);
+        return live_fill(*s, out), 1;
+    }
+    if (!strcmp(key, "live.mark")) {
+        live_marks.fetch_add(1, std::memory_order_release);
+        return live_mark_fill(out), 1;
+    }
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
     int i = 0;

@@ -23,6 +23,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 REPLAY = ROOT / "gpu" / "vk" / "vk_replay.cpp"
 DRAW = ROOT / "gpu" / "vk" / "vk_draw.cpp"
+LIVE = ROOT / "gpu" / "vk" / "vk_live.h"
 
 
 def block(text, marker):
@@ -242,8 +243,12 @@ def check_wiring(replay, draw):
     assert fn.index("} each_guard;") < fn.index("begin_pass(cmd, at);") < fn.index("} occ_guard;")
     assert fn.index("} occ_guard;") < fn.index("vkCmdBeginQuery(cmd, d.occ_pool, d.occ_query")
     assert re.search(r"~OccGuard\(\) \{ if \(pool\) vkCmdEndQuery\(cmd, pool, q\); \}", fn)
-    # off unless asked for
-    assert 'env_on("RX_VK_OCC_QUERIES")' in replay
+    # off unless asked for: a live switch (gpu/vk/vk_live.h, tests/test_live_switches.py), which starts as the variable says,
+    # asked once a command buffer (replay_handle's occ_room), before the pool is made
+    assert 'env_on("RX_VK_OCC_QUERIES")' in LIVE.read_text(encoding="utf-8")
+    on = block(replay, "bool occ_queries_on()")
+    assert on.index("if (!live_on(LIVE_OCC_QUERIES)) return false;") < on.index("vkCreateQueryPool")
+    assert "occ_queries_on()" not in replay.replace(on, "").replace("return occ_queries_on() &&", "", 1)
 
 
 def main():

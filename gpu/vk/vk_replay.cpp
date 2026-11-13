@@ -51,6 +51,7 @@
 #include "vk_present_trace.h"
 
 #include "vk_internal.h"
+#include "vk_live.h"   // (longshot: the switches the bridge changes while the game runs)
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
@@ -383,8 +384,11 @@ struct {
 } occ_st;
 
 bool occ_queries_on() {
-    static const bool on = [] {
-        if (!env_on("RX_VK_OCC_QUERIES")) return false;
+    // (a live switch, vk_live.h: asked once a command buffer, before its dry pass (replay_handle). Turned off, the run open
+    // goes past its limit and its report stays "visible", as without; turned on, the next reset opens one. The pool is made
+    // the first time it is on)
+    if (!live_on(LIVE_OCC_QUERIES)) return false;
+    static const bool made = [] {
         if (!dev.host_query_reset) {
             logf("vk: RX_VK_OCC_QUERIES: this device cannot reset queries from the CPU (hostQueryReset): off");
             return false;
@@ -402,7 +406,7 @@ bool occ_queries_on() {
              dev.occlusion_precise ? "" : " (not precise: a count says only none or some)");
         return true;
     }();
-    return on;
+    return made;
 }
 /// The ring's queries [first, first + n) back to unused (each one done on the GPU, or never begun)
 void occ_reset(uint64_t first, uint64_t n) {
@@ -3360,6 +3364,53 @@ void log_frame_stats() {
     }
 }
 
+/// (longshot) The live switches (vk_live.h): what the bridge asked for is taken here, at a frame's start, after the time
+/// since the last ask is logged ("vk: live: ..."), for an A/B in one session (scripts/longshot_ctl.py ab). Its first half
+/// second is left out: the frames already on their way, and the GPU's times read when their slots come round again
+void live_tick(int64_t now_ns, int64_t frame_ns) {
+    constexpr int64_t kSettleNs = 500'000'000;
+    static int64_t since_ns, counted_ns, gpu0, draws0;
+    static std::vector<float> ms;   // (the frames counted, present to present)
+    static unsigned seen;           // (the asks taken)
+    static bool counting;
+    const auto draws_now = [] {
+        int64_t d = 0, sk = 0, di = 0, pl = 0;
+        draw_stats(&d, &sk, &di, &pl);
+        return d;
+    };
+    if (!since_ns) since_ns = now_ns;
+    if (!counting && now_ns - since_ns >= kSettleNs) {
+        counting = true, counted_ns = now_ns, gpu0 = st_gpu_ns, draws0 = draws_now();
+        ms.clear();
+    } else if (counting && frame_ns > 0 && ms.size() < (1u << 20)) {
+        ms.push_back((float)(frame_ns / 1e6));
+    }
+    LiveSwitch* const sw = live_switches();
+    unsigned asks = live_marks.load(std::memory_order_acquire);
+    for (int i = 0; i < LIVE_COUNT; i++) asks += sw[i].asks.load(std::memory_order_acquire);
+    if (asks == seen) return;
+    seen = asks;
+    std::string values;
+    for (int i = 0; i < LIVE_COUNT; i++)
+        values += (i ? " " : "") + std::string(sw[i].env) + "=" + std::to_string(sw[i].value.load(std::memory_order_relaxed));
+    if (counting && !ms.empty()) {
+        std::vector<float> sorted = ms;
+        std::sort(sorted.begin(), sorted.end());
+        const double secs = (now_ns - counted_ns) / 1e9, n = (double)ms.size();
+        const float p99 = sorted[std::min(sorted.size() - 1, (size_t)(sorted.size() * 0.99))];
+        logf("vk: live: %zu frames in %.1f s with %s: %.1f fps (1%% low %.1f), GPU %.2f ms a frame, %.0f draws a frame", ms.size(),
+             secs, values.c_str(), n / secs, 1000.0 / p99, (st_gpu_ns - gpu0) / 1e6 / n, (draws_now() - draws0) / n);
+    } else {
+        logf("vk: live: under half a second with %s since the last change: not counted", values.c_str());
+    }
+    for (int i = 0; i < LIVE_COUNT; i++) {
+        const int want = sw[i].want.load(std::memory_order_relaxed), was = sw[i].value.exchange(want, std::memory_order_relaxed);
+        if (want != was) logf("vk: live: %s %d -> %d", sw[i].env, was, want);
+    }
+    since_ns = now_ns, counting = false;
+    ms.clear();
+}
+
 /// (longshot) Once a game frame: every 600 a status line (the video memory, DLSS's details while it draws), and every 60
 /// a look at the driver's allowance, warned of once when the use passes it (again only after it was back under)
 void status_tick() {
@@ -3370,6 +3421,7 @@ void status_tick() {
     static int64_t last_ns = 0, slowest_ns = 0;
     const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     if (last_ns) slowest_ns = std::max(slowest_ns, now_ns - last_ns);
+    live_tick(now_ns, last_ns ? now_ns - last_ns : 0);
     // (RX_VK_FRAME_TRACE=1: every frame a line of longshot_frames.csv beside the game, present to present and what the frame did,
     // so that each stutter can be matched to its cause: waits for shaders or pipelines, translation, uploads, the memory sync,
     // pipeline compiles, the GPU behind. RX_VK_FRAME_LOG has the frame times alone)
