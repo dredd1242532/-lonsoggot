@@ -893,6 +893,7 @@ uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
 uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in play finished for: auto_tuned=)
 ::auto_settings::Tuning auto_tuning;   // (the measured tuning in play, menu_auto_tune; its steps kept as auto_steps=)
 void apply_auto(bool keep_own);   // (below: the Auto preset's rows)
+static bool auto_deck_turned = false;   // (the Steam Deck profile turned on or off since Auto chose last: menu_auto_for_gpu)
 void apply_preset(int p) {
     if (p == kAutoPreset) {
         apply_auto(false);   // (chosen on the row: all of its rows, as any preset)
@@ -938,7 +939,10 @@ void apply_preset(int p) {
 void apply_auto(bool keep_own) {
     const ::auto_settings::Choice& c = auto_choice;
     if (c.tier < 1) return;
-    const bool own_budget = keep_own && opts.preset == kAutoPreset && opts.budget == 0;
+    const ::auto_settings::DeckSettings deck = ::auto_settings::deck_settings(c.vram_auto, keep_own, auto_deck_turned);
+    // (a VRAM budget at Auto the Steam Deck profile set, now turned off, is not the player's: the tier's cap comes back)
+    const bool own_budget = keep_own && opts.preset == kAutoPreset && opts.budget == 0 &&
+                            !(deck.restore_cap && opts.vram_budget == 0);
     const int vram_budget = opts.vram_budget;
     env_release(&opts.dlss);
     opts.dlss = c.upscaler;   // (before the tier's rows: apply_preset snaps its Render resolution to this upscaler)
@@ -946,15 +950,16 @@ void apply_auto(bool keep_own) {
     if (c.tier == 1) opts.upscale = 0, opts.sharpness = 0;   // (the plain scale, as RX_VK_LOW_SPEC: the lightest)
     opts.handheld = 0;   // (docked: the handheld profile gave a GTX 1050 a black picture; the Render resolution lightens the card)
     if (c.resolution) opts.resolution = ur::snap_render(c.upscaler, c.resolution);
-    // (the Steam Deck profile: the VRAM budget row at Auto, the integrated GPU's own rule, not Minimum's cap; a budget the player
-    // set stays theirs)
-    if (own_budget || c.vram_auto) {
+    // (the Steam Deck profile, when it is chosen (auto_settings.h deck_settings): the VRAM budget row at Auto, the integrated GPU's
+    // own rule, not Minimum's cap; a budget the player set stays theirs)
+    if (own_budget || deck.apply) {
         opts.budget = 0;
         opts.vram_budget = own_budget ? vram_budget : 0;
         vram_budget_sync();
     }
-    // (Frame generation is the player's, as with every preset, but for the Steam Deck profile's 2x; RX_VK_FRAMEGEN_MULT still wins)
-    if (c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;
+    // (Frame generation is the player's, as with every preset, but for the Steam Deck profile's 2x when the profile is chosen: not
+    // again when Auto chooses again for another screen or build. RX_VK_FRAMEGEN_MULT still wins)
+    if (deck.apply && c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;
     auto_tuned = 0;   // (chosen again: measured again in play)
     auto_tuning = {};
     opts.preset = kAutoPreset;   // (apply_preset set the tier's number)
@@ -4291,6 +4296,7 @@ void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings:
         logf("vk: Auto (this PC): the settings chosen for this PC before (%s)", hw_line);
         return;
     }
+    auto_deck_turned = ::auto_settings::deck_turned(auto_for, hw, props.vendorID, props.deviceID);
     apply_auto(!first);   // (the hardware changed: the VRAM budget the player set stays theirs)
     // (a row that takes a restart Auto sets, the Profile (docked), applies at the next start, a first start's too: host/hos_main.c
     // read it at boot, before the device, and this run keeps what menu_init recorded. It is Auto's, not the player's: closing the

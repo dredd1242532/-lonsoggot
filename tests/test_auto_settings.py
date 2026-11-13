@@ -97,8 +97,14 @@ def check_deck_profile(menu, main, auto):
     keeps no graphics pipeline ready with it, and says none were built"""
     need("vk_menu.cpp", menu, ['if (!strcmp(line, "steam_deck")) steam_deck_saved = env_value_off(eq + 1) ? 0 : 1;',
                                "int menu_steam_deck() { return steam_deck_saved; }"])
-    need("apply_auto", auto, ['if (c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;',
-                              "if (own_budget || c.vram_auto) {", "opts.vram_budget = own_budget ? vram_budget : 0;"])
+    need("apply_auto", auto, ["::auto_settings::deck_settings(c.vram_auto, keep_own, auto_deck_turned);",
+                              "!(deck.restore_cap && opts.vram_budget == 0);",
+                              'if (deck.apply && c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;',
+                              "if (own_budget || deck.apply) {", "opts.vram_budget = own_budget ? vram_budget : 0;"])
+    chooses = body(menu, "void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings::Hardware hw) {")
+    if not chooses.index("auto_deck_turned = ::auto_settings::deck_turned(auto_for, hw, props.vendorID, props.deviceID);") < \
+            chooses.index("apply_auto(!first);"):
+        raise SystemExit("menu_auto_for_gpu: whether the profile turned must be known before apply_auto")
     pick = main[main.index("bool pick_device() {"):]
     pick = pick[:pick.index("\n}\n")]
     if not pick.index("menu_init();") < pick.index("vkGetPhysicalDeviceProperties(dev.physical, &dev.props);") < \
@@ -110,7 +116,13 @@ def check_deck_profile(menu, main, auto):
     need("deck_profile_decide", decide, ['const char* env = getenv("RX_VK_STEAM_DECK");',
                                          "::auto_settings::deck_mode(env, menu_steam_deck())",
                                          'if (!getenv("RX_VK_RECORDER"))', "recorder_profile_thread()"])
-    need("auto_profile", body(main, "void auto_profile() {"), ["hw.handheld = deck_found(p);", "hw.deck = deck_profile_now;"])
+    need("auto_profile", body(main, "void auto_profile() {"), ["hw.handheld = handheld_found(p);", "hw.deck = deck_profile_now;"])
+    # (the profile by the Deck's APU alone: SteamDeck=1 is Steam's Deck-style session, on other handhelds too)
+    found = body(main, "bool deck_found(const VkPhysicalDeviceProperties& p) {")
+    if "SteamDeck" in found or "0x163F" not in found or "0x1435" not in found:
+        raise SystemExit("deck_found: the Steam Deck by its APU (0x163F, 0x1435), not SteamDeck=1")
+    replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
+    need("recorder_profile_thread", body(replay, "bool recorder_profile_thread() {"), ["!::mkwvk::rec::parallel_configured() &&"])
     recorder = (ROOT / "gpu/vk/vk_recorder.h").read_text(encoding="utf-8")
     need("vk_recorder.h", recorder, ['if (const char* e = getenv("RX_VK_RECORDER")) return e;', "const char* e = requested();",
                                      "requested(), getenv(\"RX_VK_PARALLEL\"));"])

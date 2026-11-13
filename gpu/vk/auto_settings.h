@@ -56,7 +56,7 @@ struct Choice {
 // - no graphics pipelines kept ready before the title (RX_VK_PRECOMPILE_GRAPHICS=none, vk_draw.cpp precompile_run; the compute
 //   programs still are): the ~25,000 the precompile keeps pushed the Deck's 16 GB into earlyoom's kills
 // RX_VK_STEAM_DECK=1 or 0 over the options file's steam_deck=1 or 0 (a line the menu keeps, no row); neither: on where a Deck is
-// found (Hardware::handheld)
+// found (vk_main.cpp deck_found: the Deck's APU, LCD or OLED)
 enum DeckMode : int { DECK_AUTO = -1, DECK_OFF = 0, DECK_ON = 1 };
 // (longshot_env.h's rule, kept here so the rules compile on their own: "", "0", "false", "off" or "no", any case, is off)
 inline bool value_off(const char* v) {
@@ -77,7 +77,7 @@ inline int deck_mode(const char* env, int saved) {
     if (env) return value_off(env) ? DECK_OFF : DECK_ON;
     return saved == DECK_OFF || saved == DECK_ON ? saved : DECK_AUTO;
 }
-inline bool deck_on(int mode, bool handheld) { return mode == DECK_ON || (mode == DECK_AUTO && handheld); }
+inline bool deck_on(int mode, bool found) { return mode == DECK_ON || (mode == DECK_AUTO && found); }
 
 // (upscaler_rows.h's, kept here so the rules compile on their own; the test checks they agree)
 enum { GAME = 0, DLSS = 1, FSR4 = 4 };
@@ -165,6 +165,27 @@ inline uint64_t fingerprint(const Hardware& h, uint32_t vendor_id, uint32_t devi
     // makes Auto choose again)
     if (h.deck) f = (f ^ 0x5DEC) * 1099511628211ull;
     return f;
+}
+
+// The Steam Deck profile's settings as Auto chooses (vk_menu.cpp apply_auto). Its Frame generation 2x and VRAM budget Auto are set
+// when the profile is chosen: a first start, Auto picked on its row (keep_own false), or the profile turned on for this PC since
+// Auto chose last (turned). When Auto chooses again for other hardware (another screen, a build with DLSS or FSR 4) they are the
+// player's, as every preset leaves Frame generation. turned: the fingerprint Auto chose for (auto_for) is this hardware's with the
+// profile the other way; when it turned off (restore_cap), the VRAM budget Auto it set is not taken for the player's: the tier's
+// cap comes back. Frame generation stays as it is, a row no preset sets
+struct DeckSettings {
+    bool apply = false;        // (set Frame generation 2x and the VRAM budget Auto)
+    bool restore_cap = false;  // (the profile turned off: a VRAM budget at Auto is the profile's, not the player's)
+};
+inline bool deck_turned(uint64_t auto_for, Hardware h, uint32_t vendor_id, uint32_t device_id) {
+    h.deck = !h.deck;
+    return auto_for != 0 && auto_for == fingerprint(h, vendor_id, device_id);
+}
+inline DeckSettings deck_settings(bool profile_on, bool keep_own, bool turned) {
+    DeckSettings d;
+    d.apply = profile_on && (!keep_own || turned);
+    d.restore_cap = !profile_on && keep_own && turned;
+    return d;
 }
 
 // The measured tuning in play: the render resolution moved toward what this PC holds at its frame rate cap. Each window is the

@@ -348,11 +348,13 @@ report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
 
 #### Steam Deck
 
-On a Steam Deck the game turns on its Steam Deck profile by itself: the settings that ran fastest there. With the
-Quality preset on **Auto (this PC)** it sets Minimum's scaling, **Frame generation** 2x and the **VRAM budget** Auto
-(2.5 GB with the Deck's 16 GB, not Minimum's 2.2 GB cap); whatever the preset, the renderer runs its commands on a thread
-of its own and keeps no graphics pipelines ready before the title, which ran the Deck out of memory. `RX_VK_STEAM_DECK=0`
-in `longshot_env.txt` (or a line `steam_deck=0` in `longshot_options.ini`) turns it off, and `=1` turns it on elsewhere.
+On a Steam Deck (LCD or OLED, found by its processor) the game turns on its Steam Deck profile by itself: the settings
+that ran fastest there. With the Quality preset on **Auto (this PC)** it sets Minimum's scaling, and when the profile is
+first chosen **Frame generation** 2x and the **VRAM budget** Auto (2.5 GB with the Deck's 16 GB, not Minimum's 2.2 GB
+cap); if you change those two afterwards they stay as you set them. Whatever the preset, the renderer runs its commands on
+a thread of its own and keeps no graphics pipelines ready before the title, which ran the Deck out of memory.
+`RX_VK_STEAM_DECK=0` in `longshot_env.txt` (or a line `steam_deck=0` in `longshot_options.ini`) turns it off (Auto then
+gives back Minimum's VRAM budget; Frame generation stays as it is), and `=1` turns it on elsewhere.
 The log's `vk: Steam Deck profile:` and `Auto (this PC)` lines say what it did.
 
 The largest gain on the Deck is its GPU clock, which the game cannot set itself. In Gaming Mode, open the Quick Access

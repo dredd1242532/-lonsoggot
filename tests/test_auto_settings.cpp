@@ -244,6 +244,24 @@ int main() {
         expect(o.tier == 1 && o.framegen == 2 && o.vram_auto, "the profile turned on elsewhere: its settings");
     }
     {
+        // (when the profile's Frame generation 2x and VRAM budget Auto are set: when it is chosen, not at each choice again)
+        Hardware sd = deck;
+        sd.deck = true;
+        Hardware plain = deck;
+        const uint64_t with = fingerprint(sd, 0x1002, 0x1435), without = fingerprint(plain, 0x1002, 0x1435);
+        expect(deck_turned(without, sd, 0x1002, 0x1435) && deck_turned(with, plain, 0x1002, 0x1435), "turned on or off: seen");
+        expect(!deck_turned(with, sd, 0x1002, 0x1435) && !deck_turned(0, sd, 0x1002, 0x1435), "the same, or a first start: not turned");
+        Hardware docked = sd;   // (docked to another screen: the hardware changed, the profile did not)
+        docked.screen_w = 1920, docked.screen_h = 1080;
+        expect(!deck_turned(with, docked, 0x1002, 0x1435), "another screen with the profile on all along: not turned");
+        expect(deck_settings(true, false, false).apply, "a first start or Auto picked on the row: the profile's settings");
+        expect(deck_settings(true, true, true).apply, "the profile just turned on (this update on a Deck): its settings once");
+        expect(!deck_settings(true, true, false).apply, "Auto choosing again for another screen: Frame generation stays the player's");
+        expect(!deck_settings(false, false, false).apply && !deck_settings(false, true, true).apply, "the profile off: none of it");
+        expect(deck_settings(false, true, true).restore_cap && !deck_settings(false, true, false).restore_cap &&
+               !deck_settings(true, true, true).restore_cap, "turned off: Minimum's VRAM cap comes back");
+    }
+    {
         // (the profile off: the fingerprint is the one from before the profile, so no other PC's Auto chooses again)
         const auto before = [](const Hardware& x, uint32_t vendor_id, uint32_t device_id) {
             uint64_t f = 1469598103934665603ull;

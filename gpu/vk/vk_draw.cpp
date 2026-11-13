@@ -8380,7 +8380,9 @@ bool precompile_wanted() {
 }
 /// (longshot) RX_VK_PRECOMPILE_GRAPHICS=none: the precompile keeps no graphics pipeline ready before the title (precompile_run);
 /// =all, as before. Unset: none with the Steam Deck profile (vk_main.cpp deck_profile_on), else all. Never in a preparation's own
-/// process (LONGSHOT_PREPARE_ONLY), whose work is filling the driver's cache with them
+/// process (LONGSHOT_PREPARE_ONLY), whose work is filling the driver's cache with them. Only where programs load at the start
+/// (RX_VK_LOAD=start: the default where mesh programs go through the compute fallback, as on the Steam Deck): loading at their
+/// create calls keeps none ready anyway (precompile_warm builds each into the driver's cache and lets it go), and is left as it is
 bool precompile_graphics_none() {
     if (env_on("LONGSHOT_PREPARE_ONLY")) return false;
     if (const char* e = getenv("RX_VK_PRECOMPILE_GRAPHICS")) return !strcmp(e, "none");
@@ -9051,6 +9053,9 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     // caches alone never meets a pipeline the prepare should have compiled. The first start after a preparation builds them
     // there and lets each go, precompile_warm: before the game, and never more of them alive than workers)
     if (programs_load_at_create()) {
+        if (precompile_graphics_none())
+            logf("vk: precompile: RX_VK_PRECOMPILE_GRAPHICS=none%s left as it is: programs load at their create calls, which keep no "
+                 "graphics pipeline ready before the title anyway", getenv("RX_VK_PRECOMPILE_GRAPHICS") ? "" : " (the Steam Deck profile's)");
         // (the pipeline cache's files dropped at this start, pcache_drop_stale: what the marker says is in them is gone)
         if (pcache_drop_stale()) remove(precompile_built_path().c_str());
         if (!precompile_covers_notes()) precompile_warm(progress);

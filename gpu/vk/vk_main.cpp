@@ -194,10 +194,16 @@ bool create_instance() {
     return true;
 }
 
-/// (longshot) A Steam Deck, LCD or OLED: its APU as RADV names it, or SteamOS's own flag
+/// (longshot) A Steam Deck, LCD or OLED, by its APU: AMD's 0x163F (LCD) or 0x1435 (OLED), or as RADV names them. Not SteamOS's
+/// SteamDeck=1, which Steam's Deck-style session sets on other handhelds too (a ROG Ally or Legion Go on Bazzite or ChimeraOS)
 bool deck_found(const VkPhysicalDeviceProperties& p) {
+    return (p.vendorID == 0x1002 && (p.deviceID == 0x163F || p.deviceID == 0x1435)) || strstr(p.deviceName, "Custom GPU 0405") ||
+           strstr(p.deviceName, "Custom GPU 0932");
+}
+/// (longshot) A handheld for Auto's tier (Hardware::handheld): a Steam Deck, or a PC in Steam's Deck-style session (SteamDeck=1)
+bool handheld_found(const VkPhysicalDeviceProperties& p) {
     const char* deck = getenv("SteamDeck");
-    return (deck && atoi(deck) == 1) || strstr(p.deviceName, "Custom GPU 0405") || strstr(p.deviceName, "Custom GPU 0932");
+    return (deck && atoi(deck) == 1) || deck_found(p);
 }
 /// (longshot) The Steam Deck profile (auto_settings.h): decided as the card is picked, before the device and its first command
 /// buffer, so the recorder's mode holds from the first vkCmd*. Its settings are Auto (this PC)'s (auto_profile,
@@ -215,9 +221,12 @@ void deck_profile_decide() {
         return;
     }
     const char* recorder = "the recorder as RX_VK_RECORDER says";
-    if (!getenv("RX_VK_RECORDER"))
-        recorder = recorder_profile_thread() ? "the command recorder on a thread of its own (RX_VK_RECORDER=thread)"
-                                             : "the recorder's mode was read already, so as before";
+    if (!getenv("RX_VK_RECORDER")) {
+        const char* par = getenv("RX_VK_PARALLEL");
+        recorder = par && atoi(par) >= 2 ? "the recorder off, as RX_VK_PARALLEL records on several threads"
+                   : recorder_profile_thread() ? "the command recorder on a thread of its own (RX_VK_RECORDER=thread)"
+                                               : "the recorder's mode was read already, so as before";
+    }
     logf("vk: Steam Deck profile: on (%s): %s; %s; with the Quality preset Auto (this PC), Frame generation 2x and the VRAM "
          "budget Auto (RX_VK_STEAM_DECK=0 turns the profile off)", why, recorder,
          getenv("RX_VK_PRECOMPILE_GRAPHICS") ? "graphics pipelines precompiled as RX_VK_PRECOMPILE_GRAPHICS says"
@@ -1494,7 +1503,7 @@ void auto_profile() {
     // (RDNA 4: "AMD Radeon RX 9070 XT", RADV's "(RADV GFX1201)")
     hw.rdna4 = hw.vendor == ::auto_settings::AMD && (strstr(p.deviceName, "RX 9") || strstr(p.deviceName, "GFX12"));
     // (the Steam Deck's APU, LCD and OLED, or SteamOS's own flag; and whether its profile is on, as pick_device decided)
-    hw.handheld = deck_found(p);
+    hw.handheld = handheld_found(p);
     hw.deck = deck_profile_now;
     hw.dlss_built = dlss_built();
     hw.fsr4_built = fsr4_built();
