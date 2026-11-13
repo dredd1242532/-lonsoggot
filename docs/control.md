@@ -515,7 +515,7 @@ sets `XDG_DATA_HOME` for the run, so it plays from saves of its own. `--env NAME
 exists but its game is missing it refuses: the root executable is the Builder launcher, not a fallback game.
 `--exe FILE` selects a development executable. `--image FILE`, `--romfs DIR` and `--user DIR` pass the game's own
 arguments (the image is positional), on both platforms; see [the runtime parser](../host/hos_main.c) and
-[the game's command line](../readme.md#running-the-game-from-the-command-line).
+[the game's command line](../README.md#running-the-game-from-the-command-line).
 
 ### Sessions
 
