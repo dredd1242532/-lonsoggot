@@ -381,6 +381,7 @@ public partial class MainWindow : Window
         s.Romfs = BuilderHome.LoadPath(s.Romfs);
         s.Exefs = BuilderHome.LoadPath(s.Exefs);
         PrepareTick.IsChecked = !s.PrepareLater;
+        CompileBox.SelectedIndex = Array.IndexOf(ShaderStep.Levels, ShaderStep.Level(s.CompileShaders));
         if (!string.IsNullOrEmpty(s.Out)) OutPath.Text = s.Out;
         DlssTick.IsChecked = s.Dlss;
         dlssLicense = s.DlssLicense;
@@ -415,6 +416,7 @@ public partial class MainWindow : Window
                                           Fsr = FsrTick.IsChecked == true,
                                           FsrLicense = fsrLicense,
                                           PrepareLater = PrepareTick.IsChecked != true,
+                                          CompileShaders = ChosenLevel(),
                                           MemoryGb = MemoryBox.SelectedItem is int gb ? gb : null };
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsPath)!);
             File.WriteAllText(SettingsPath, System.Text.Json.JsonSerializer.Serialize(s));
@@ -821,7 +823,7 @@ public partial class MainWindow : Window
         args.AddRange(new[] { "--out", OutPath.Text, "--language", lang.Code });
         if (FsrTick.IsChecked == true) args.Add("--fsr");   // (an --update of the folder keeps it: make_game.py's mark)
         prepareNow = PrepareTick.IsChecked == true;
-        Run(tools, ShaderStep.Args(args, prepareNow), dlss: DlssTick.IsChecked == true,
+        Run(tools, ShaderStep.Args(args, prepareNow, ChosenLevel()), dlss: DlssTick.IsChecked == true,
             fsr: FsrTick.IsChecked == true && fsrLicense);
     }
 
@@ -897,6 +899,7 @@ public partial class MainWindow : Window
     // (this build prepares the shaders: the tick for a build, the saved choice for an update. The game's @@stage shaders came, and
     // make_game's line when it left them to the first start: the row's end says which)
     bool prepareNow, shadersBegan;
+    string ChosenLevel() => ShaderStep.Levels[Math.Clamp(CompileBox.SelectedIndex, 0, ShaderStep.Levels.Length - 1)];
     string? shadersLater;
     TimeSpan? builtIn;   // (at @@times: the build without the shaders' minutes, as build_times.json keeps it)
 
@@ -1143,7 +1146,6 @@ public partial class MainWindow : Window
 
     void CancelBuild(object sender, RoutedEventArgs e)
     {
-        download?.Cancel();
         runner?.Cancel();
     }
 
@@ -1299,12 +1301,10 @@ public partial class MainWindow : Window
     void Back(object sender, RoutedEventArgs e) => ToFiles();
 
     /// The builder's own files are the Longshot Launcher's to check and install again (it checks every part against its
-    /// checksum): its releases page, where the launcher is
-    void Repair(object sender, RoutedEventArgs e) => Updater.OpenLauncherReleases();
+    /// checksum): the website's download page, where the launcher is
+    void Repair(object sender, RoutedEventArgs e) => Updater.OpenLauncherDownload();
 
     // ================= the update (Updater.cs): --update <folder>, the folder built again with these tools =================
-
-    CancellationTokenSource? download;
 
     public void BeginUpdate(string folder, string? tag)
     {
@@ -1330,23 +1330,8 @@ public partial class MainWindow : Window
         ShowPage(BuildPage);
     }
 
-    public CancellationToken DownloadToken => (download = new CancellationTokenSource()).Token;
-
-    public void DownloadProgress(double f)
-    {
-        rows.GetValueOrDefault("download")?.Small($"{(int)(f * 100)}%");
-        SetProgress(Weight["download"].Size * f);
-    }
-
-    public void Note(string line)
-    {
-        AddLog(line);
-        rows.GetValueOrDefault("download")?.Small(line);
-    }
-
     public void DownloadFailed(string why)
     {
-        download = null;
         rows.GetValueOrDefault("download")?.Stopped();
         ShowProblem(why, tools: false);
         ProblemTitle.Text = "The update could not be downloaded";
@@ -1355,9 +1340,8 @@ public partial class MainWindow : Window
     /// The new tools are here: the folder built again with them (only what changed is compiled)
     internal void UpdateBuild(Tools tools, string folder)
     {
-        download = null;
         if (rows.TryGetValue("download", out var d)) { d.Done(); d.Small("Build tools checked"); }
-        // (the saved tick also opts an existing game into DLSS. After a self-update ApplySettings has not run yet;
+        // (the saved tick also opts an existing game into DLSS. After an --update start ApplySettings has not run yet;
         // a folder already built with DLSS keeps it, its license accepted then: the settings' record, or for a license accepted
         // before the record, the SDK's LICENSE.txt)
         var saved = BuilderSettings.Load(SettingsPath);
@@ -1370,7 +1354,7 @@ public partial class MainWindow : Window
                   (File.Exists(System.IO.Path.Combine(folder, ".longshot_fsr")) &&
                    File.Exists(System.IO.Path.Combine(folder, "amd_fidelityfx_upscaler_vk.dll")) &&
                    File.Exists(System.IO.Path.Combine(folder, "LICENSE-AMD-FSR-SDK.md")));
-        // (prepareNow: the saved choice, read in BeginUpdate. The launcher's Update and the --update start after a self-update never
+        // (prepareNow: the saved choice, read in BeginUpdate. The launcher's Update and the --update start never
         // ran ApplySettings, so the tick there is only its default)
         Run(tools, ShaderStep.Args(new List<string> { "--update", folder }, prepareNow), keepRows: true, dlss: dlss, fsr: fsr);
     }

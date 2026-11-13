@@ -82,7 +82,7 @@ static class Finder
 
     public static void Shortcuts(string gameFolder, bool desktop, bool start)
     {
-        // (longshot.exe: the game's launcher in a folder built since it came (Play, and Update when a newer release is out), else the
+        // (longshot.exe: the game's launcher in a folder built since it came (Play, and Update when its builder is newer than the game), else the
         // game. The icon is the game's own: bin\longshot.exe when it is there)
         var exe = Path.Combine(gameFolder, "longshot.exe");
         var icon = File.Exists(Path.Combine(gameFolder, "bin", "longshot.exe")) ? Path.Combine(gameFolder, "bin", "longshot.exe") : exe;

@@ -20,8 +20,8 @@ body:
   - type: dropdown
     id: track
     attributes:
-      label: Update track
-      description: The channel you installed from (the launcher's or the builder's Update track).
+      label: Channel
+      description: The Longshot Launcher's channel you installed from.
       options:
         - Release
         - Release candidate

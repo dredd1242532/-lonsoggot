@@ -117,7 +117,10 @@ def state_list(tools):
 
 def make_zip(package_dir, version, setup, out):
     entries = {"LongshotBuilder.exe": setup, "tools.lock": os.path.join(ROOT, "tools.lock"),
-               "recomplauncher.json": os.path.join(ROOT, "recomplauncher.json"), "VERSION": (version + "\n").encode()}
+               "recomplauncher.json": os.path.join(ROOT, "recomplauncher.json"), "VERSION": (version + "\n").encode(),
+               # (the release again where the builder and the game read it: Runner.cs's Version, nx2/version.py's release(),
+               # and through them the game folder's longshot_version.txt and the first line of longshot_log.txt)
+               "LongshotBuilder/tools/version.txt": (version + "\n").encode()}
     for d, dirs, names in os.walk(package_dir):
         dirs.sort()
         for n in names:
