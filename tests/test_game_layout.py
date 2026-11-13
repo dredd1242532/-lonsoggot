@@ -4,6 +4,7 @@ its caches and logs in, loose beside the game, started once. No game: authored p
 - cache/, cache/prompts and logs/ are made;
 - the logs go into logs/, the shader and pipeline caches into cache/, the Vulkan pipeline cache renamed from mkw_vk_pipelines* to
   longshot_vk_pipelines* (its stamp and its play files too), and what a write of it cut short left (.tmp, .tmp-<n>) is deleted;
+- the program cache's old lock files beside the game are deleted (the game locks cache/'s);
 - the button prompts an older build made in prompts/ are deleted (made again in cache/prompts); the build's own prompts stay;
 - the build's files, the settings and the saves stay where they are;
 - a file already in cache/ or logs/ is never written over: the loose one stays, and the log says so;
@@ -42,6 +43,7 @@ CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_pipelines.
 RENAMED = {"mkw_vk_pipelines.bin": "longshot_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin": "longshot_vk_pipelines_play_3.bin",
            "mkw_vk_pipelines.stamp": "longshot_vk_pipelines.stamp"}
 CUT_SHORT = ("mkw_vk_pipelines.bin.tmp", "mkw_vk_pipelines_play_4.bin.tmp", "mkw_vk_pipelines.bin.tmp-a1B2c3")
+OLD_LOCKS = ("longshot_programs.bin.lock", "longshot_programs.zst.bin.lock")
 MADE_AGAIN = ("prompts/Common.bntx.zs", "prompts/Common.key", "prompts/External.bfotf.zs", "prompts/rsizetable.mod.zs")
 STAY = ("image.bin", "language.txt", "longshot_options.ini", "longshot_env.txt", "longshot_shaders.bin",
         "longshot_pipeline_states_shipped.bin", "prompts/Common.bntx", "prompts/External.bfotf", "prompts/rsizetable.zs",
@@ -50,7 +52,7 @@ STAY = ("image.bin", "language.txt", "longshot_options.ini", "longshot_env.txt",
 
 def game_folder(root, built, in_bin=False):
     """A game folder from before: the build's files, the settings, the saves, and its caches and logs loose beside the game"""
-    for name in STAY + LOGS + CACHES + tuple(RENAMED) + CUT_SHORT + MADE_AGAIN:
+    for name in STAY + LOGS + CACHES + tuple(RENAMED) + CUT_SHORT + MADE_AGAIN + OLD_LOCKS:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(name)
     where = root / "bin" if in_bin else root
@@ -70,7 +72,7 @@ def check(game, out):
     for old, new in RENAMED.items():
         assert (game / "cache" / new).read_text() == old and not (game / old).exists(), old
     assert not list(game.glob("mkw_vk_pipelines*")), list(game.glob("mkw_vk_pipelines*"))
-    for name in MADE_AGAIN:
+    for name in MADE_AGAIN + OLD_LOCKS:
         assert not (game / name).exists(), name
     for name in STAY:
         assert (game / name).read_text() == name, name

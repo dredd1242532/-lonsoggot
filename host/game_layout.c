@@ -41,6 +41,8 @@ static const char *const to_cache[] = {
 /* The Vulkan pipeline cache, mkw_vk_pipelines.bin, its stamp and its play files mkw_vk_pipelines_play_<n>.bin (mkw-recomp's
    names), renamed longshot_vk_pipelines* as they move into cache/ (gpu/vk/vk_draw.cpp, pcache_stamp.h) */
 static const char old_pcache[] = "mkw_vk_pipelines", new_pcache[] = "longshot_vk_pipelines";
+/* The program cache's lock files beside it (gpu/vk/vk_progcache.cpp): the game locks cache/'s now, and nothing holds these: deleted */
+static const char *const old_locks[] = {"longshot_programs.bin.lock", "longshot_programs.zst.bin.lock"};
 /* Made from the player's choices and made again when missing (host/prompts.c): deleted from the game folder */
 static const char *const made_again[] = {
     "prompts" SEP_S "Common.bntx.zs", "prompts" SEP_S "Common.blarc.zs", "prompts" SEP_S "Common.key",
@@ -112,6 +114,11 @@ void hos_game_layout(void) {
     move_as(game, "mkw_vk_pipelines.stamp", cache, "longshot_vk_pipelines.stamp");   /* (which translator made them) */
     each_old_pcache(game, cache, ".tmp", 0);     /* (a write cut short: never read) */
     each_old_pcache(game, cache, ".tmp-*", 0);   /* (one with its writer's own name, gpu/vk/pipeline_cache_file.h) */
+    for (size_t i = 0; i < sizeof old_locks / sizeof *old_locks; i++) {
+        char path[MAX_PATH];
+        snprintf(path, sizeof path, "%s%s", game, old_locks[i]);
+        DeleteFileA(path);
+    }
     for (size_t i = 0; i < sizeof made_again / sizeof *made_again; i++) {
         char path[MAX_PATH];
         snprintf(path, sizeof path, "%s%s", game, made_again[i]);
