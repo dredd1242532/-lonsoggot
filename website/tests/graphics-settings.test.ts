@@ -5,7 +5,7 @@ import { createMarkdownProcessor } from '@astrojs/markdown-remark';
 import { readGraphicsSettings, formatGraphicsSettings, readMenuRows, SHORT_CHOICES } from '../src/repo-docs/graphics-settings.ts';
 import { matchesSetting, installGraphicsSettings } from '../src/lib/graphics-settings.ts';
 
-const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
+const readme = await readFile(new URL('../../docs/menu.md', import.meta.url), 'utf8');
 const menu = await readFile(new URL('../../gpu/vk/vk_menu.cpp', import.meta.url), 'utf8');
 const guide = await readFile(new URL('../../docs/graphics-and-controls.md', import.meta.url), 'utf8');
 const processor = await createMarkdownProcessor();
@@ -21,14 +21,14 @@ test('HDR Native condition accepts current prose but remains required', () => {
     /no condition for HDR tone mapper/);
 });
 
-test('the Audio, Gameplay and Controls tabs follow the README, and Debug stays out', () => {
+test('the Audio, Gameplay and Controls tabs follow docs/menu.md, and Debug stays out', () => {
   const groups = readGraphicsSettings(readme, menu);
   assert.deepEqual(groups.filter(group => group.tab !== 'Graphics').map(group => group.name), ['Audio', 'Gameplay', 'Controls']);
   assert(groups.find(group => group.name === 'Controls').settings.some(setting => setting.name === 'Rumble strength'));
   assert.equal(new Set(groups.flatMap(group => group.settings).map(setting => setting.id)).size, groups.flatMap(group => group.settings).length);
 });
 
-test('all Graphics rows follow the source sections and preserve README choices/defaults', () => {
+test('all Graphics rows follow the source sections and preserve docs/menu.md choices/defaults', () => {
   const groups = readGraphicsSettings(readme, menu).filter(group => group.tab === 'Graphics');
   const settings = groups.flatMap(group => group.settings);
   const lines = readme.slice(readme.indexOf('| Graphics |'), readme.indexOf('| Audio |')).trim().split('\n');
@@ -49,7 +49,7 @@ test('upstream value and section-name edits flow through without another setting
 });
 
 test('missing tables, incomplete cells, added/removed/reordered rows stop publication', () => {
-  assert.throws(() => readGraphicsSettings('', menu), /Missing README/);
+  assert.throws(() => readGraphicsSettings('', menu), /Missing docs\/menu\.md/);
   assert.throws(() => readGraphicsSettings(readme, ''), /Missing menu/);
   assert.throws(() => readGraphicsSettings(readme.replace('| | Sharpness |', '| | Gone |'), menu), /mismatch/);
   assert.throws(() => readGraphicsSettings(readme.replace(/^\| \| Sharpness .*\n/m, ''), menu), /mismatch/);
@@ -73,7 +73,7 @@ bool row_shown(int i) {
   assert.throws(() => readMenuRows(menu.replace(/bool row_shown\(int i\) \{/, 'bool shown(int i) {')), /row_shown/);
 });
 
-test('cards take the menu\'s help, the source restart flag and README conditions', () => {
+test('cards take the menu\'s help, the source restart flag and docs/menu.md conditions', () => {
   const settings = readGraphicsSettings(readme, menu).flatMap(group => group.settings);
   const find = name => settings.find(setting => setting.name === name);
   assert.equal(find('Profile').summary, 'Runs the game as the console docked or handheld.');
@@ -88,15 +88,15 @@ test('cards take the menu\'s help, the source restart flag and README conditions
   assert(!settings.some(setting => setting.name === 'Restart' || setting.name === 'Descriptor reuse'));
 });
 
-test('restart, coverage and condition drift between README and the menu stop publication', () => {
-  // (README says after a restart where the menu applies at once, or not where it takes one)
+test('restart, coverage and condition drift between docs/menu.md and the menu stop publication', () => {
+  // (docs/menu.md says after a restart where the menu applies at once, or not where it takes one)
   assert.throws(() => readGraphicsSettings(readme.replace('| | Fullscreen | Off, On', '| | Fullscreen | Off, On (after a restart)'), menu), /restart mismatch at Fullscreen/);
   assert.throws(() => readGraphicsSettings(readme.replace('Auto, Stereo, 5.1 (after a restart)', 'Auto, Stereo, 5.1'), menu), /restart mismatch at Audio output/);
-  // (a row of another tab added to the menu, or one README lists that the menu lacks)
+  // (a row of another tab added to the menu, or one docs/menu.md lists that the menu lacks)
   assert.throws(() => readGraphicsSettings(readme, menu.replace('{TAB_AUDIO, "Volume"', '{TAB_AUDIO, "Balance", &opts.volume, 0, 1, 1, tx_onoff, "x"},\n    {TAB_AUDIO, "Volume"')), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(readme.replace(/^\| \| Mute in background .*\n/m, ''), menu), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(readme.replace('| | Text size |', '| | Text sizes |'), menu), /Gameplay coverage mismatch/);
-  // (a row the menu hides on some PCs, with no condition in README)
+  // (a row the menu hides on some PCs, with no condition in docs/menu.md)
   assert.throws(() => readGraphicsSettings(readme.replace(' (shown only on AMD GPUs with `VK_AMD_anti_lag`)', ''), menu), /no condition for AMD Anti-Lag 2/);
   assert.throws(() => readGraphicsSettings(readme, menu.replace('(v != &opts.antilag || antilag_available())', '(v != &opts.fov || antilag_available())')), /no condition for Field of view/);
 });

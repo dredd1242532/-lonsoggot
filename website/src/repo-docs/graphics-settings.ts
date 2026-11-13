@@ -4,14 +4,14 @@ import { publicGameText } from '../lib/public-copy.ts';
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-// The tabs a player sees, as README names them; the Controls page's rows (TAB_PAGE) are listed with the Controls tab's,
-// and the Motion page's (TAB_MOTION) on README's Motion line. The Debug tab is for testing, not here.
+// The tabs a player sees, as docs/menu.md names them; the Controls page's rows (TAB_PAGE) are listed with the Controls tab's,
+// and the Motion page's (TAB_MOTION) on docs/menu.md's Motion line. The Debug tab is for testing, not here.
 const TAB_NAMES = { GRAPHICS: 'Graphics', AUDIO: 'Audio', GAMEPLAY: 'Gameplay', CONTROLS: 'Controls', PAGE: 'Controls' };
 const ACTIONS = new Set(['Restart', 'Quit']);   // (rows that do a thing, with no choice to list)
 export const RESTART_BADGE = 'After a restart';
 
-// What a row's README cells say about when it shows or what sets it, as small badges on its card. A row the menu hides on
-// some PCs (row_shown) must match a `shown` rule, so a new condition in the menu fails the build until README names it.
+// What docs/menu.md cells say about when it shows or what sets it, as small badges on its card. A row the menu hides on
+// some PCs (row_shown) must match a `shown` rule, so a new condition in the menu fails the build until docs/menu.md names it.
 export const BADGES = [
   { test: /shown only on NVIDIA GPUs/i, label: 'NVIDIA GPUs only', shown: true },
   { test: /shown only on AMD GPUs/i, label: 'AMD GPUs only', shown: true },
@@ -84,18 +84,18 @@ export function readMenuRows(menu) {
 /// The menu's own help for a card: what the row is. Its restart sentence is the card's badge instead.
 const summaryOf = help => help.replace(/\s*Applies after (?:a )?restart\.?/g, '').trim();
 
-// Choices and defaults have one maintained source, README's table; names, order, sections, help and restarts come from the
+// Choices and defaults have one maintained source, docs/menu.md's table; names, order, sections, help and restarts come from the
 // menu's. Fail on drift between them instead of publishing a wrong or partial list. Escaped table pipes remain cell content.
 export function readGraphicsSettings(readme, menu) {
   const section = sectionsAt(readme, 2).find(section => section.title === 'In-game menu');
   const table = section?.body.match(/^\| Tab \| Option \| Choices \| Default \|\r?\n\|[-| :]+\|\r?\n((?:\|[^\n]+\r?\n?)+)/m);
-  if (!table) throw new Error('Missing README in-game menu table');
+  if (!table) throw new Error('Missing docs/menu.md in-game menu table');
   let tab = '';
   const settings = [];
   const otherTabs = new Map();
   for (const line of table[1].trim().split('\n')) {
     const cells = line.trim().slice(1, -1).split(/(?<!\\)\|/).map(cell => cell.trim().replaceAll('\\|', '|'));
-    if (cells.length !== 4) throw new Error('Changed README menu table structure');
+    if (cells.length !== 4) throw new Error('Changed docs/menu.md menu table structure');
     tab = cells[0] || tab;
     const [, name, choices, defaultValue] = cells;
     if (tab !== 'Graphics') {
@@ -104,46 +104,46 @@ export function readGraphicsSettings(readme, menu) {
       otherTabs.get(tab).push({ name, choices, defaultValue: defaultValue || '—', id: `setting-${slug(tab)}-${slug(name)}` });
       continue;
     }
-    if (!name || !choices || !defaultValue) throw new Error('Incomplete README graphics setting');
+    if (!name || !choices || !defaultValue) throw new Error('Incomplete docs/menu.md graphics setting');
     settings.push({ name, choices, defaultValue });
   }
-  if (!settings.length) throw new Error('No Graphics settings in README');
-  if ([...otherTabs.keys()].some(name => !Object.values(TAB_NAMES).includes(name))) throw new Error('README menu table has an unknown tab');
+  if (!settings.length) throw new Error('No Graphics settings in docs/menu.md');
+  if ([...otherTabs.keys()].some(name => !Object.values(TAB_NAMES).includes(name))) throw new Error('docs/menu.md menu table has an unknown tab');
 
   const rows = readMenuRows(menu);
   const withSource = (setting, tabName) => {
     const row = rows.find(row => !row.heading && TAB_NAMES[row.tab] === tabName && row.name === setting.name);
-    if (!row) throw new Error(`README/menu ${tabName} coverage mismatch at ${setting.name}`);
-    // (README says "after a restart" exactly where the menu's row takes one)
-    if (/after a restart/i.test(setting.choices) !== row.restart) throw new Error(`README/menu restart mismatch at ${setting.name}`);
+    if (!row) throw new Error(`docs/menu.md/menu ${tabName} coverage mismatch at ${setting.name}`);
+    // (docs/menu.md says "after a restart" exactly where the menu's row takes one)
+    if (/after a restart/i.test(setting.choices) !== row.restart) throw new Error(`docs/menu.md/menu restart mismatch at ${setting.name}`);
     const badges = BADGES.filter(badge => badge.test.test(badge.both ? `${setting.choices} ${setting.defaultValue}` : setting.choices));
     if (!row.shown && !badges.some(badge => badge.shown)) {
-      throw new Error(`README names no condition for ${setting.name}, which the menu shows only on some PCs`);
+      throw new Error(`docs/menu.md names no condition for ${setting.name}, which the menu shows only on some PCs`);
     }
     return { ...setting, summary: summaryOf(row.help), restart: row.restart, badges: badges.map(badge => badge.label) };
   };
 
-  // The Graphics tab: README's lines in the menu's order, under the menu's section titles
+  // The Graphics tab: docs/menu.md's lines in the menu's order, under the menu's section titles
   const groups = [{ name: 'Quality preset', settings: [] }];
   let at = 0;
   for (const row of rows.filter(row => row.tab === 'GRAPHICS')) {
     if (row.heading) {
-      if (row.value !== 'nullptr') throw new Error(`README/menu graphics coverage mismatch: unrecognized heading ${row.name}`);
+      if (row.value !== 'nullptr') throw new Error(`docs/menu.md/menu graphics coverage mismatch: unrecognized heading ${row.name}`);
       groups.push({ name: row.name, settings: [] });
       continue;
     }
-    if (!row.value.startsWith('&opts.')) throw new Error(`README/menu graphics coverage mismatch at ${row.name}`);
+    if (!row.value.startsWith('&opts.')) throw new Error(`docs/menu.md/menu graphics coverage mismatch at ${row.name}`);
     const setting = settings[at++];
-    if (setting?.name !== row.name) throw new Error(`README/menu graphics order mismatch at ${row.name}`);
+    if (setting?.name !== row.name) throw new Error(`docs/menu.md/menu graphics order mismatch at ${row.name}`);
     groups.at(-1).settings.push({ ...withSource(setting, 'Graphics'), id: `setting-${slug(row.name)}` });
   }
-  if (at !== settings.length || groups.some(group => !group.settings.length)) throw new Error('README/menu graphics coverage mismatch');
+  if (at !== settings.length || groups.some(group => !group.settings.length)) throw new Error('docs/menu.md/menu graphics coverage mismatch');
 
   // The other tabs: every row the menu has there, and nothing it has not
   for (const tabName of ['Audio', 'Gameplay', 'Controls']) {
     const listed = (otherTabs.get(tabName) || []).map(setting => setting.name).sort();
     const source = rows.filter(row => !row.heading && TAB_NAMES[row.tab] === tabName && !ACTIONS.has(row.name)).map(row => row.name).sort();
-    if (listed.join('\n') !== source.join('\n')) throw new Error(`README/menu ${tabName} coverage mismatch`);
+    if (listed.join('\n') !== source.join('\n')) throw new Error(`docs/menu.md/menu ${tabName} coverage mismatch`);
   }
   return [
     ...groups.map(group => ({ ...group, tab: 'Graphics', id: `settings-${slug(group.name)}` })),

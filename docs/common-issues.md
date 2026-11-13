@@ -1,6 +1,6 @@
 # Help
 
-Find what you see below and follow its steps: each fix comes from the [manual](../README.md#if-something-goes-wrong),
+Find what you see below and follow its steps: each fix comes from the [manual](troubleshooting.md#if-something-goes-wrong),
 with the exact message, file or setting to look for. Nothing fits, or the fix didn't work? [Still stuck?](#still-stuck)
 says where the log is and how to ask.
 
@@ -120,7 +120,7 @@ Without mesh shaders, Longshot draws through its compute fallback, which leaves 
    row off and restart.
 
 If the row can't be changed, `longshot_env.txt` sets it: remove its `RX_VK_ASTC_RGBA8=1` line. The
-[AMD texture workaround](../README.md#amd-texture-workaround) has the details.
+[AMD texture workaround](troubleshooting.md#amd-texture-workaround) has the details.
 
 [Search AMD reports](https://longshot.magicbean.dev/progress/#problem-search?q=amd)
 
@@ -129,7 +129,7 @@ If the row can't be changed, `longshot_env.txt` sets it: remove its `RX_VK_ASTC_
 ### It stutters the first time you see something
 
 Normal for now: the game prepares each new shader the first time it needs it, and it is smooth the next time you pass.
-You can help remove it for everyone: [send your pipeline list](../README.md#send-your-pipeline-list) (**Debug → Save my
+You can help remove it for everyone: [send your pipeline list](pipeline-list.md#send-your-pipeline-list) (**Debug → Save my
 pipeline list** in the menu).
 
 [Search stutter reports](https://longshot.magicbean.dev/progress/#problem-search?q=stutter)
@@ -152,7 +152,7 @@ the driver's limit itself.
 3. **Compare fairly.** Turn off **Frame generation**, so the FPS counts the game's own frames, and keep the resolution,
    upscaler and frame rate cap the same between runs.
 4. **Keep the log from the slow run** (and from the earlier version, after an update), and say where the FPS dropped.
-   The [low FPS checklist](../README.md#low-fps-or-stutter) lists the log lines that matter, and a switch that times
+   The [low FPS checklist](troubleshooting.md#low-fps-or-stutter) lists the log lines that matter, and a switch that times
    each GPU pass.
 
 [Search performance reports](https://longshot.magicbean.dev/progress/#problem-search?q=performance)
@@ -184,7 +184,7 @@ touchpad.
 3. **Wrong icons?** **Button prompts** on the same page picks the icons the game shows. It doesn't change what a button
    does.
 
-The [controls reference](../README.md#controls) covers the keyboard, the mouse and rumble.
+The [controls reference](menu.md#controls) covers the keyboard, the mouse and rumble.
 
 [Search controller reports](https://longshot.magicbean.dev/progress/#problem-search?q=controller)
 

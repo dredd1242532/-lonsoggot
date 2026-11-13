@@ -18,7 +18,7 @@ const repoFile = (file: string) => path.join(repoRoot, file);
 const publicAssets = new Set(['assets/longshot.png']);
 
 /** Every file a page is made from, for rebuilding the pages when one changes in dev. */
-export const sourceFiles = [...new Set([...Object.values(contentPages), 'gpu/vk/vk_menu.cpp'])].map(repoFile);
+export const sourceFiles = [...new Set([...Object.values(contentPages), 'docs/menu.md', 'gpu/vk/vk_menu.cpp'])].map(repoFile);
 export const testedFragmentsPath = repoFile(fragmentDirectory);
 export function isSourceFile(file: string): boolean {
   file = path.resolve(file);
@@ -63,7 +63,7 @@ export async function renderPage(slug: string): Promise<RepoPage> {
   if (source === 'docs/getting-started.md') text = formatInstallHub(text);
   if (source === 'docs/common-issues.md') text = formatCommonIssues(text);
   if (source === 'docs/graphics-and-controls.md') {
-    text = await formatGraphicsSettings(text, await readFile(repoFile('README.md'), 'utf8'),
+    text = await formatGraphicsSettings(text, await readFile(repoFile('docs/menu.md'), 'utf8'),
       await readFile(repoFile('gpu/vk/vk_menu.cpp'), 'utf8'), await createMarkdownProcessor());
   }
   if (source === 'docs/tested-configurations.md') text = publicTestedRunsMarker + '\n\n' + text;

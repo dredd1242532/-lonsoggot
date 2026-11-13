@@ -46,7 +46,7 @@ Output resolution starts at the game's own 2560x1440, or at your screen's size w
 
 ## Every setting
 
-The menu's own descriptions, with the choices and defaults from the [menu reference](../README.md#in-game-menu). Labels on
+The menu's own descriptions, with the choices and defaults from the [menu reference](menu.md#in-game-menu). Labels on
 a setting say when it applies: **After a restart**, only on some GPUs or builds, only while HDR is on, or set for you by a
 quality preset.
 
@@ -55,5 +55,5 @@ quality preset.
 ## Change one thing at a time
 
 When something looks or runs wrong, change a single setting and compare the same place in the game. To report a
-performance problem, follow the [performance steps](../README.md#low-fps-or-stutter); for bindings and controller
-layouts, see the [controls reference](../README.md#controls).
+performance problem, follow the [performance steps](troubleshooting.md#low-fps-or-stutter); for bindings and controller
+layouts, see the [controls reference](menu.md#controls).

@@ -144,8 +144,8 @@ scripts/linux/docker.sh shell       # a shell in that environment, with the chec
 The container keeps its own `build-linux/docker-deps` and `build-linux/docker-vk-work` (parts built on the host link
 against its newer glibc). Where SELinux is enforcing, the script runs the container with
 `--security-opt label=disable` rather than relabelling your checkout. The AppImage needs glibc 2.35 or newer and a
-Vulkan 1.3 driver with mesh shaders. `LONGSHOT_JOBS` sets how many files compile at once. The README's
-[Linux section](README.md#on-linux) has the runtime paths.
+Vulkan 1.3 driver with mesh shaders. `LONGSHOT_JOBS` sets how many files compile at once. The install guide's
+[Linux section](docs/install.md#on-linux) has the runtime paths.
 
 ### NVIDIA DLSS (optional)
 

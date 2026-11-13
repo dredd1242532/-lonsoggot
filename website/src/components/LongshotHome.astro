@@ -9,7 +9,7 @@ const date = (value: string) => new Date(value).toLocaleDateString('en-US', { mo
 const activity = (feed?.items || []).filter(i => i.kind === 'pull' && i.status === 'merged' && i.mergedAt)
   .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt)).slice(0, 4);
 
-// What Longshot does, from the README (Project status, In-game menu, Mods).
+// What Longshot does, from the README (Project status), docs/menu.md and docs/mods.md.
 const features = [
   { title: 'Native, no emulator', text: 'The game’s code is recompiled to C and built into a Windows or Linux program. The console’s system software is reimplemented, and the graphics are rebuilt on Vulkan.' },
   { title: 'Any screen', text: 'Resolutions up to 4K and 5K, ultrawide 21:9 and 32:9 or 4:3 with the HUD and movies kept in the middle, and HDR.' },

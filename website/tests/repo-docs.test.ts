@@ -14,7 +14,7 @@ test('sections do not split headings inside backtick or tilde code fences', () =
 });
 
 test('installation hub retains source sections and links', () => {
-  const source = 'Welcome\n\n## Windows\n[Instructions](../README.md#on-windows)\n\n## Linux\nChoose your platform.\n';
+  const source = 'Welcome\n\n## Windows\n[Instructions](../../docs/install.md#on-windows)\n\n## Linux\nChoose your platform.\n';
   const formatted = formatInstallHub(source);
   for (const line of source.split('\n').filter(Boolean)) assert(formatted.includes(line));
   assert.equal((formatted.match(/class="install-hub-card"/g) || []).length, 2);

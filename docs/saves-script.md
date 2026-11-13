@@ -29,7 +29,7 @@ Only the folder they are in differs.
 | Windows | `<game folder>\user\save\<user id>\`. The builder's game folder is `%USERPROFILE%\Games\Longshot` unless you chose another; each game folder has its own saves |
 
 `<user id>` is `5a3c9e1f0b7d24680000000000000001`, the same in every Longshot and Hookshot build. Started with
-`--user <folder>` ([command line arguments](../README.md#running-the-game-from-the-command-line)), Longshot keeps its
+`--user <folder>` ([command line arguments](command-line.md#running-the-game-from-the-command-line)), Longshot keeps its
 saves in `<folder>/save/<user id>/` instead.
 
 ## The script

@@ -14,7 +14,7 @@ memory (8 GB and mesh shaders recommended), 16 GB of memory and about 60 GB free
 - [Download for Linux](https://longshot.magicbean.dev/download/launcher/linux)
 - [Windows, portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable)
 
-Then follow [the Windows steps](../README.md#on-windows) or [the Linux steps](../README.md#on-linux) (on Linux and
+Then follow [the Windows steps](install.md#on-windows) or [the Linux steps](install.md#on-linux) (on Linux and
 SteamOS, the AppImage has to be made runnable first). Every channel, and the file for your system, is on the
 [download page](https://longshot.magicbean.dev/download).
 
@@ -23,5 +23,5 @@ SteamOS, the AppImage has to be made runnable first). Every channel, and the fil
 Point the launcher at your game and press **Build**: it takes about 15 minutes on a 12-core desktop, and longer on a
 slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
 
-See [the in-game menu](../README.md#in-game-menu) for settings and controls. If something goes wrong, start with
-[Common problems](common-issues.md) and [the README's troubleshooting](../README.md#if-something-goes-wrong).
+See [the in-game menu](menu.md#in-game-menu) for settings and controls. If something goes wrong, start with
+[Common problems](common-issues.md) and [troubleshooting](troubleshooting.md#if-something-goes-wrong).
