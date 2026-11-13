@@ -9,35 +9,23 @@
   <br>
 </h1>
 
-<h4 align="center">The Legend of Zelda: Ocarina of Time (Nintendo Switch 2) running natively on Windows & Linux, with no emulator.
+<h4 align="center">The Legend of Zelda: Ocarina of Time (Nintendo Switch 2) running natively on Windows & Linux, without emulation.
 </h4>
-
 
 <p align="center">
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
-  <a href="#in-game-menu">In-game menu</a> |
-  <a href="#if-something-goes-wrong">Problems</a> |
   <a href="#build-from-source">Build from source</a> |
   <a href="#how-it-works">How it works</a> |
   <a href="#want-to-help">Want to help?</a> |
-  <a href="#credits">Credits</a> |
-  <a href="#license">License</a>
+  <a href="#license">License + Credits</a>
 </p>
 
-Longshot is a static recompilation. The game's code is translated to C and compiled into a Windows or Linux program,
-the console's system software is reimplemented, and the Switch 2 graphics are rebuilt on Vulkan. All of this happens
-**on your PC, from your own copy of the game**.
+Longshot is a static recompilation of Ocarina of Time for the Switch 2. The game's code is translated to C and compiled into a Windows or Linux program, rebuilding the graphics on Vulkan, with the console's system software reimplemented. All of this happens **on your PC, from your own copy of the game**.
 
-Longshot is a fork of [Hookshot](https://github.com/NotRexed/Hookshot), the recompilation NotRexed made. The
-history up to the fork (its releases, issues and pull requests) is Hookshot's, and the links to it point there.
-<br>
+Longshot is a continuation of [Hookshot](https://github.com/NotRexed/Hookshot). The top maintainers have moved to this project.
 
-> [!WARNING]
-> Some users report the file in releases to be a Trojan - it is not. Feel free to run it through any antivirus software
-
-
-Discord: https://discord.gg/KX99srmQTe
+**[Join us on Discord](https://discord.gg/KX99srmQTe)!**
 <br>
 
 > [!IMPORTANT]
@@ -74,6 +62,9 @@ The game does not come ready-made: it is built on your PC from your copy. The **
 for you: it installs this version's Longshot Builder (checked against the release's signed checksums), builds the game, starts
 it, and keeps it and itself up to date. Longshot's first version will be **v3.0.0**; the launcher's first will be
 **v1.0.0** (its numbers are its own).
+
+> [!WARNING]
+> Windows may detect this as a Trojan, it is not. We are working on resolving this. Feel free to run it through any antivirus software.
 
 ### What you need
 
@@ -1012,6 +1003,22 @@ Bigger ways to help:
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the test commands, the code conventions and what a good pull request
 looks like.
 
+## License
+
+Longshot is free software under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later).
+It is a modified version of Hookshot, which NotRexed released under the same license; the changes made since the fork
+are Longshot's.
+
+    Hookshot: Copyright (C) 2026 NotRexed and the Hookshot contributors
+    Longshot: Copyright (C) 2026 the Longshot contributors
+
+It includes code from Eden and suyu, which are under the GPL too. Third-party parts under other licenses that
+work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus fonts, zbic and the
+a64-kit tools) keep their own notices in their folders.
+
+Longshot is an unofficial fan project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and Ocarina of
+Time are trademarks of Nintendo.
+
 ## Credits
 
 Longshot is a fork of NotRexed's [Hookshot](https://github.com/NotRexed/Hookshot), and exists thanks to the work of many
@@ -1043,19 +1050,3 @@ people:
   DLSS, DLAA and Reflex, the exposure flicker and fog fixes, build speed, CI), madebyjordan (AMD FSR 4.1), N3oTraX (FSR 4 on
   Linux), shayderrr, gab9281, Wpaif, nicholasgower, ZurielAtr, Joey-Magnus, Zorkats,
   d3zessete, chrispository, vzeol, leonidasmark, Segmentree, ShyVortex, hiKareeem and i900gaming, among others.
-
-## License
-
-Longshot is free software under the [GNU General Public License, version 3 or later](LICENSE) (GPL-3.0-or-later).
-It is a modified version of Hookshot, which NotRexed released under the same license; the changes made since the fork
-are Longshot's.
-
-    Hookshot: Copyright (C) 2026 NotRexed and the Hookshot contributors
-    Longshot: Copyright (C) 2026 the Longshot contributors
-
-It includes code from Eden and suyu, which are under the GPL too. Third-party parts under other licenses that
-work with the GPL (Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus fonts, zbic and the
-a64-kit tools) keep their own notices in their folders.
-
-Longshot is an unofficial fan project, not affiliated with or endorsed by Nintendo. The Legend of Zelda and Ocarina of
-Time are trademarks of Nintendo.
