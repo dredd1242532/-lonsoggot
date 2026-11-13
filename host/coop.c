@@ -60,7 +60,12 @@ enum {
     TICK_HOOKS = 4,
 };
 
-typedef struct { uint8_t dst, kind; uint16_t len; uint8_t data[COOP_MAX_MESSAGE]; } OutMsg;
+typedef struct {
+    uint8_t dst, kind;
+    uint16_t len;
+    uint64_t pos_self, pos_session, pos_epoch; // POS recipients fixed at enqueue, rechecked at send
+    uint8_t data[COOP_MAX_MESSAGE];
+} OutMsg;
 typedef struct { CoopMsgFn fn; void *user; } MsgHandler;
 typedef struct { CoopViewFn fn; void *user; } ViewHook;
 typedef struct { CoopTickFn fn; void *user; } TickHook;
@@ -1232,6 +1237,17 @@ static void flush_outbox(CoopSess *s) {
             return;
         }
         OutMsg *slot = &s->out[s->out_tail];
+        if (slot->kind == COOP_K_POS) {
+            const int exhausted = s->out_counter == UINT32_MAX;
+            // Serialize the final check and UDP send with revocation. Reacceptance cannot revive an old pose.
+            if (!exhausted && accepted_locked(s, slot->dst) && slot->pos_self == s->accepted_self &&
+                slot->pos_session == s->accepted[slot->dst] && slot->pos_epoch == s->accepted_epoch[slot->dst])
+                send_sealed(s, slot->dst, slot->kind, slot->data, slot->len);
+            s->out_tail = (s->out_tail + 1) % OUT_SLOTS;
+            coop_unlock(&s->lock);
+            if (exhausted) go_left(s, "encrypted message counter exhausted; join the room again", 1);
+            continue;
+        }
         m.dst = slot->dst, m.kind = slot->kind, m.len = slot->len;
         memcpy(m.data, slot->data, slot->len);
         s->out_tail = (s->out_tail + 1) % OUT_SLOTS;
@@ -1246,6 +1262,28 @@ int coop_sess_send(CoopSess *s, int member, uint8_t kind, const void *bytes, siz
         (member > COOP_MAX_MEMBERS && member != COOP_DST_ALL))
         return 0;
     coop_lock(&s->lock);
+    if (kind == COOP_K_POS) {
+        unsigned recipients = 0, count = 0;
+        for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
+            if ((!member || member == COOP_DST_ALL || member == id) && accepted_locked(s, id))
+                recipients |= 1u << id, count++;
+        const unsigned free_slots = (s->out_tail + OUT_SLOTS - s->out_head - 1) % OUT_SLOTS;
+        if (!count || count > free_slots) {
+            coop_unlock(&s->lock);
+            if (count) __atomic_add_fetch(&s->n_outbox_full, 1, __ATOMIC_RELAXED);
+            return 0;
+        }
+        for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
+            if (!(recipients & (1u << id))) continue;
+            OutMsg *slot = &s->out[s->out_head];
+            slot->dst = (uint8_t)id, slot->kind = kind, slot->len = (uint16_t)n;
+            slot->pos_self = s->accepted_self, slot->pos_session = s->accepted[id], slot->pos_epoch = s->accepted_epoch[id];
+            if (n) memcpy(slot->data, bytes, n);
+            s->out_head = (s->out_head + 1) % OUT_SLOTS;
+        }
+        coop_unlock(&s->lock);
+        return 1;
+    }
     unsigned next = (s->out_head + 1) % OUT_SLOTS;
     if (next == s->out_tail) {
         coop_unlock(&s->lock);
