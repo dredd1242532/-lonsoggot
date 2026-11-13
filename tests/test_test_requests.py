@@ -3,7 +3,7 @@ PR link, notes; people's chat does not); replaying the room gives each request's
 claim at once, a claim clears when it runs out (capped at 8 hours) and renew/release are the claimer's, done counts
 from anyone with a link to a comment on the same PR and replaces that person's earlier result, cancel is the
 requester's and nothing counts after it; list puts untested and unclaimed requests first and the ones waiting for a
-maintainer last; a claim needs an approved PR (its author a collaborator, or the "testing wanted" label) that is still
+Big Bean last; a claim needs an approved PR (its author a Big Bean, or the "testing wanted" label) that is still
 open, and no claim goes out when git.magicbean.dev can't be asked; and the commands refuse with exit code 3 what the replay would
 ignore, and post the documented lines otherwise.
 
@@ -143,7 +143,7 @@ FORGE = {}  # PR number -> what pr_info returns, or an exception to raise
 
 
 def fake_pr_info(number):
-    got = FORGE.get(number, {"state": "open", "labels": [], "author": "x", "writer": True})
+    got = FORGE.get(number, {"state": "open", "labels": [], "author": "x", "trusted": True})
     if isinstance(got, Exception):
         raise got
     return got
@@ -203,10 +203,10 @@ def test_commands():
 
 def test_approval():
     now_min = int(tr.time.time() // 60)
-    stranger = {"state": "open", "labels": ["bug"], "author": "x", "writer": False}
+    stranger = {"state": "open", "labels": ["bug"], "author": "x", "trusted": False}
     events = [ev("ann", now_min - 9, "%s T-AAAB request: a\n%s/pulls/1" % (T, tr.REPO)),
               ev("ann", now_min - 8, "%s T-AAAC request: b\n%s/pulls/2" % (T, tr.REPO))]
-    FORGE.update({1: stranger, 2: dict(stranger, writer=True)})
+    FORGE.update({1: stranger, 2: dict(stranger, trusted=True)})
     try:
         code, sent, _ = run(events, "bob", "claim", "T-AAAB")
         check(code == 3 and not sent, "a stranger's PR without the label can't be claimed")
@@ -214,11 +214,11 @@ def test_approval():
         got = [(t["id"], t["approved"]) for t in json.loads(out)]
         check(got == [("T-AAAC", True), ("T-AAAB", False)], "waiting requests list last: %s" % got)
         code, _, out = run(events, "bob", "list")
-        check("waiting for a maintainer" in out, "list says it waits for a maintainer")
+        check("waiting for a Big Bean" in out, "list says it waits for a Big Bean")
         FORGE[1] = dict(stranger, labels=["bug", "testing wanted"])
         code, sent, _ = run(events, "bob", "claim", "T-AAAB")
         check(code == 0 and sent, "the label approves it")
-        FORGE[2] = dict(stranger, writer=True, state="merged")
+        FORGE[2] = dict(stranger, trusted=True, state="merged")
         code, sent, _ = run(events, "bob", "claim", "T-AAAC")
         check(code == 3 and not sent, "a merged PR can't be claimed")
         FORGE[2] = tr.team_chat.ChatError("cannot reach git.magicbean.dev")

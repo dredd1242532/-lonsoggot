@@ -130,7 +130,8 @@ request. The guide for people is [docs/test-requests.md](docs/test-requests.md).
 - **Asking** ([.claude/skills/request-testing/SKILL.md](.claude/skills/request-testing/SKILL.md), `/request-testing`):
   `request --pr <n> --summary "..." --needs "..." --notes "..."` posts a request with an ID (`T-7KQ2`); `list --mine
   --all` shows who is testing it and each result with a link to the tester's comment; `cancel` closes it. A request
-  can be picked up when the PR's author may push to Longshot, or a maintainer added the `testing wanted` label; the
+  can be picked up when the PR's author is a Big Bean (an owner, or in the BigBeans team), or a Big Bean added the
+  `testing wanted` label; the
   label alone also posts a request for the PR.
 - **Testing** ([.claude/skills/testing/SKILL.md](.claude/skills/testing/SKILL.md), `/testing`, or `/loop 30m
   /testing` to keep picking them up): take the first request in `list` that fits your hardware, `claim` it, `renew`

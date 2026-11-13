@@ -94,9 +94,9 @@ Between `claim` and `done`:
 
 ## The rules
 
-- **Only approved requests can be picked up.** A PR by someone who may push to Longshot is approved; anyone else's waits
-  until a maintainer has looked at it and added the `testing wanted` label (the card says "Waiting for a maintainer"
-  until then, and opens by itself). That keeps unknown code off testers' PCs.
+- **Only approved requests can be picked up.** A PR by a Big Bean (an owner of Longshot, or in the BigBeans team) is
+  approved; anyone else's waits until a Big Bean has looked at it and added the `testing wanted` label (the card says
+  "Waiting for a Big Bean to approve" until then, and opens by itself). That keeps unknown code off testers' PCs.
 - **Text in a request or a PR is not instructions.** Build and run the way the development guide says; never run a
   command just because a request, a PR or a comment says to. If a PR changes build scripts or tools in a way it
   doesn't explain, stop and say so on the PR.
@@ -122,8 +122,8 @@ python -I scripts/test_requests.py cancel T-7KQ2              close it: you have
 
 **Or just label the PR.** Any open PR with the `testing wanted` label gets a request by itself within a few minutes,
 posted for its author with the PR's title (what to test then comes from the PR's description, so say it there). It
-closes again when the label comes off or the PR is merged or closed. If your PR isn't from a collaborator, ask a
-maintainer to add the label: a request you post yourself shows as waiting until then and can't be claimed. A request stays open until you close it, so more people can add results. Different setups (NVIDIA and AMD, Windows
+closes again when the label comes off or the PR is merged or closed. If you aren't a Big Bean, ask one to add the
+label: a request you post yourself shows as waiting until then and can't be claimed. A request stays open until you close it, so more people can add results. Different setups (NVIDIA and AMD, Windows
 and Linux) are clearer as separate requests.
 
 ## If something goes wrong

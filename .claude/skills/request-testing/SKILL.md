@@ -36,10 +36,11 @@ python -I scripts/test_requests.py request --pr 2711 --summary "Keep 8 GB cards 
   few minutes (the PR's title as the summary, no needs or notes: put what to test in the PR's description). Don't
   post a second one for the same PR; `list` shows it as asked by the relay. It closes when the label comes off or
   the PR is merged or closed.
-- **Approval:** a request can be claimed only when the PR's author may push to Longshot, or a maintainer has put
-  the `testing wanted` label on the PR. Otherwise the script says so, and the Discord card shows "Waiting for a
-  maintainer" until the label is added (the card opens by itself within a few minutes). Tell the user to ask a
-  maintainer for the label; don't add it yourself unless the user is a maintainer and asks you to.
+- **Approval:** a request can be claimed only when the PR's author is a Big Bean (an owner of Longshot, or in the
+  BigBeans team), or a Big Bean has put the `testing wanted` label on the PR. Otherwise the script says so, and the
+  Discord card shows "Waiting for a Big Bean to approve" until the label is added (the card opens by itself within a
+  few minutes). Tell the user to ask a Big Bean for the label; don't add it yourself unless the user is a Big Bean
+  and asks you to.
 
 Tell the user the request ID (`T-XXXX`). If they want it followed up, check back later (Claude Code:
 `/loop 2h /request-testing check T-XXXX`); don't wait in a loop on your own.

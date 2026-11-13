@@ -31,8 +31,8 @@ A message that breaks these rules changes nothing. (The approval below is git.ma
 before claiming; a claim typed by hand on a request that isn't approved shows nowhere on Discord.)
 
 Requests are for Longshot's pull requests on git.magicbean.dev. Only approved requests can be claimed: the PR's author
-may push to Longshot, or a maintainer put the "testing wanted" label on it. Anything else waits for a maintainer to add
-the label (the card on Discord says so, and list shows it last); this keeps strangers' code off testers' PCs until
+is a Big Bean (an owner of Longshot, or in the BigBeans team), or a Big Bean put the "testing wanted" label on it.
+Anything else waits for a Big Bean to add the label (the card on Discord says so, and list shows it last); this keeps strangers' code off testers' PCs until
 someone has looked at it. The script asks git.magicbean.dev, with the team sign-in.
 
 list puts first what most needs a tester: requests nobody has tested or is testing, then the ones being tested with no
@@ -65,7 +65,9 @@ DEFAULT_TTL = 90
 MAX_TTL = 480
 API = "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot"
 LABEL = "testing wanted"
-WRITERS = ("owner", "admin", "write")  # may push to Longshot: their PRs need no label
+OWNERS = ("owner", "admin")  # Longshot's owners: their PRs need no label
+TEAM = "BigBeans"  # nor do the PRs of this team's members
+ORG_API = "https://git.magicbean.dev/api/v1"
 HISTORY_LIMIT = 50000  # messages read back; renews add one per tester every half hour
 EXIT_REFUSED = team_chat.EXIT_REFUSED
 
@@ -159,12 +161,12 @@ def replay(events, now=None):
 
 
 def need(t):
-    """Sort key: what most needs a tester first; requests waiting for a maintainer last."""
+    """Sort key: what most needs a tester first; requests waiting for a Big Bean last."""
     return (t.get("approved") is False, bool(t["results"]), bool(t["claims"]), t["requested"])
 
 
-def forge_get(path, token=None):
-    req = urllib.request.Request(API + path, headers={"Accept": "application/json", "User-Agent": team_chat.USER_AGENT})
+def forge_get(path, token=None, base=API):
+    req = urllib.request.Request(base + path, headers={"Accept": "application/json", "User-Agent": team_chat.USER_AGENT})
     if token:
         req.add_header("Authorization", "Bearer " + token)
     with urllib.request.urlopen(req, timeout=20) as r:
@@ -172,7 +174,7 @@ def forge_get(path, token=None):
 
 
 def pr_info(number):
-    """The PR's state (open, draft, merged, closed), its labels and whether its author may push to Longshot, from
+    """The PR's state (open, draft, merged, closed), its labels and whether its author is a Big Bean, from
     git.magicbean.dev (the author check needs the team sign-in; without it only the label counts)."""
     try:
         pr = forge_get("/pulls/%d" % number)
@@ -183,20 +185,33 @@ def pr_info(number):
     state = "merged" if pr.get("merged") else "closed" if pr.get("state") == "closed" \
         else "draft" if pr.get("draft") else "open"
     author = (pr.get("user") or {}).get("login")
-    writer = False
     signed_in = magicbean_login.forge_session()
-    if author and signed_in:
-        try:
-            perm = forge_get("/collaborators/%s/permission" % urllib.parse.quote(author), signed_in["access_token"])
-            writer = perm.get("permission") in WRITERS
-        except (urllib.error.URLError, OSError, ValueError):
-            pass
+    trusted = bool(author and signed_in and big_bean(author, signed_in["access_token"]))
     return {"state": state, "labels": [label.get("name") for label in pr.get("labels") or []], "author": author,
-            "writer": writer}
+            "trusted": trusted}
+
+
+def big_bean(login, token):
+    """An owner of Longshot, or a member of TEAM. BigBeans is a read team with write on pull requests only, so its
+    members read as "read" on the permission endpoint: the team itself is asked. Seeing a team's members takes being in
+    the organization; anyone else's sign-in can't tell, and only the label counts for them (as for the relay that
+    keeps the Discord cards, which asks with its own token)."""
+    quoted = urllib.parse.quote(login)
+    try:
+        if forge_get("/collaborators/%s/permission" % quoted, token).get("permission") in OWNERS:
+            return True
+        teams = forge_get("/orgs/MagicBeanDev/teams/search?q=%s" % urllib.parse.quote(TEAM), token, ORG_API)
+        for team in teams.get("data") or []:
+            if team.get("name") == TEAM:
+                forge_get("/teams/%d/members/%s" % (team["id"], quoted), token, ORG_API)  # 404 when not a member
+                return True
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+    return False
 
 
 def approved(info):
-    return info["writer"] or LABEL in info["labels"]
+    return info["trusted"] or LABEL in info["labels"]
 
 
 def annotate(tests):
@@ -281,7 +296,7 @@ def describe(t, me=None):
     for user, r in sorted(t["results"].items(), key=lambda kv: kv[1]["time"]):
         lines.append("    %s by %s: %s" % (r["result"], who(user), r["comment"]))
     if t.get("approved") is False:
-        lines.append('    waiting for a maintainer to add the "%s" label on git.magicbean.dev: not claimable yet' % LABEL)
+        lines.append('    waiting for a Big Bean to add the "%s" label on git.magicbean.dev: not claimable yet' % LABEL)
     elif not t["claims"] and not t["results"] and t["status"] == "open":
         lines.append("    nobody has tested it yet")
     if t.get("pr_state") in ("merged", "closed"):
@@ -331,7 +346,7 @@ def cmd_request(args, config):
     except team_chat.ChatError:
         return 0
     if not approved(info):
-        print('note: #%d is not from a collaborator and has no "%s" label, so nobody can claim it until a maintainer '
+        print('note: #%d is not from a Big Bean and has no "%s" label, so nobody can claim it until a Big Bean '
               "adds the label on git.magicbean.dev" % (pr, LABEL))
     return 0
 
@@ -372,7 +387,7 @@ def cmd_claim(args, config):
     if t["pr"]:
         info = pr_info(t["pr"])  # no answer from git.magicbean.dev: no claim
         if not approved(info):
-            return refuse('%s waits for a maintainer: #%d is not from a collaborator and has no "%s" label'
+            return refuse('%s waits for a Big Bean: #%d is not from a Big Bean and has no "%s" label'
                           % (t["id"], t["pr"], LABEL))
         if info["state"] in ("merged", "closed"):
             return refuse("#%d is %s" % (t["pr"], info["state"]))
