@@ -54,8 +54,8 @@ static void vkResetQueryPool(VkDevice, VkQueryPool, uint32_t first, uint32_t cou
     if (first + count > 2 * kRecordings) throw std::runtime_error("reset past the pool");
     for (uint32_t q = first; q < first + count; q++) available[q] = false;
 }
-static bool each_switch;
-static bool env_on(const char*) { return each_switch; }
+static bool run_switch = true;   // (RX_VK_TS_RUN=1, all cases but "each")
+static bool env_on(const char*) { return run_switch; }
 
 static VkQueryPool ts_pool = (VkQueryPool)1;
 static bool ts_pending[kRecordings];
@@ -125,8 +125,8 @@ static void run(const std::string& c) {
         reuse(0);
         require(st_gpu_ns == 60, "slot 1's old times not counted again");
         require(ts_pending[1], "slot 1's new use still pending");
-    } else if (c == "each") {   // RX_VK_TS_EACH=1: one call a slot, as before
-        each_switch = true;
+    } else if (c == "each") {   // the default (RX_VK_TS_RUN unset): one call a slot, as before
+        run_switch = false;
         for (int i = 0; i < 6; i++) timed(i, 5, true);
         for (int i = 0; i < 6; i++) reuse(i);
         require(st_gpu_ns == 30 && calls == 6, "one slot a call");

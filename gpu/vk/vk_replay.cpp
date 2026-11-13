@@ -332,8 +332,12 @@ int64_t st_gpu_ns, st_gpu_max_ns;
 // A query's availability can still show a slot's previous use until the reset recorded in its next command buffer runs, so each
 // slot's queries are also reset on the host when its slot comes round (its last submit done, before it is recorded again; the pool
 // once when made): an available result is then the current use's. One not available yet stays pending for its own turn.
-// RX_VK_TS_EACH=1: one slot a call, as before
+// Opt-in, RX_VK_TS_RUN=1; the default still reads one slot a call
 constexpr int kTsRun = 16;
+bool ts_run() {
+    static const bool v = env_on("RX_VK_TS_RUN");
+    return v;
+}
 void gpu_time_add(uint64_t t0, uint64_t t1) {
     if (t1 <= t0) return;
     const int64_t ns = (int64_t)((t1 - t0) * (double)dev.props.limits.timestampPeriod);
@@ -357,8 +361,7 @@ void gpu_time_read_run(int slot) {
 }
 void gpu_time_collect(Recording& r) {
     if (!ts_pool) return;
-    static const bool each = env_on("RX_VK_TS_EACH");
-    if (!each) {
+    if (ts_run()) {
         if (ts_pending[r.slot]) gpu_time_read_run(r.slot);
         vkResetQueryPool(dev.device, ts_pool, 2 * r.slot, 2);   // (done: unavailable until its next use writes them)
         return;
@@ -385,7 +388,8 @@ void gpu_time_begin(Recording& r) {
         qi.queryCount = 2 * kRecordings;
         if (vkCreateQueryPool(dev.device, &qi, nullptr, &ts_pool) != VK_SUCCESS) ts_pool = VK_NULL_HANDLE;
         if (!ts_pool) return;
-        vkResetQueryPool(dev.device, ts_pool, 0, 2 * kRecordings);   // (gpu_time_collect: every slot's queries start unavailable)
+        if (ts_run())   // (gpu_time_collect: every slot's queries start unavailable)
+            vkResetQueryPool(dev.device, ts_pool, 0, 2 * kRecordings);
     }
     vkCmdResetQueryPool(r.cmd, ts_pool, 2 * r.slot, 2);
     vkCmdWriteTimestamp2(r.cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, ts_pool, 2 * r.slot);

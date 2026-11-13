@@ -1,5 +1,6 @@
-"""The replay's GPU-time collection, compiled from the real vk_replay.cpp against a fake query pool: a run of finished recording
-slots read in one vkGetQueryPoolResults, each recording counted once, none read before its queries are available. No Vulkan or game.
+"""The replay's GPU-time collection, compiled from the real vk_replay.cpp against a fake query pool. With RX_VK_TS_RUN=1, a run
+of finished recording slots is read in one vkGetQueryPoolResults, each recording counted once, none read before its queries are
+available; unset, one slot a call. No Vulkan or game.
 
     python -I -B tests/test_gpu_time_run.py [--cxx clang++] [--source gpu/vk/vk_replay.cpp] [--broken] [--case NAME ...]
 
