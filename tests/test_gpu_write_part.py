@@ -2,7 +2,7 @@
 
 A buffer bound for writing marks its whole bound range written, though the shader may touch less of it, and the game's
 transient scratch lands on the storage of a target the GPU drew and finalized: Castle Town after an area change took a
-15 MB re-upload of a 2560x1440 target every frame of a burst, for a 1.75 MB bind (#2780: the fps of an area entered is
+15 MB re-upload of a 2560x1440 target every frame of a burst, for a 1.75 MB bind (the fps of an area entered is
 below that of the same area booted into, until the game is relaunched). The whole upload also copies, over what the GPU
 drew, the memory of ranges nobody wrote. The statements of the marking and of the range it reports are cut from the
 source and run against stand-ins for the map, the submissions and a texture:

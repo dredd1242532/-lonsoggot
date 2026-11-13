@@ -159,6 +159,7 @@ See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-a
 
 | Switch | What it does |
 |---|---|
+| `RX_VK_GPU_WRITE_WHOLE` (set) | A/B for the gpu-write re-upload: copy the whole image again where the game's GPU write only covered part of it (`gpu_wrote_into` in `gpu/vk/vk_texture.cpp`); `RX_VK_NO_PARTIAL` turns all partial uploads off, this one only that path |
 | `HOS_HEADLESS` (set) | No window: the renderer draws offscreen, for screenshots and frame dumps. The menu's Save my pipeline list then opens nothing (no browser, folder or clipboard) |
 | `HOS_WINDOW_SIZE=<w>x<h>` | The window's size in pixels (1280x720 by default, wider for an ultrawide picture) |
 | `HOS_WINDOW_NOACTIVATE` (set) | The window opens behind the others and does not take the focus (Windows) |
