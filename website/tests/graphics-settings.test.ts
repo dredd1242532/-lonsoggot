@@ -10,6 +10,17 @@ const menu = await readFile(new URL('../../gpu/vk/vk_menu.cpp', import.meta.url)
 const guide = await readFile(new URL('../../docs/graphics-and-controls.md', import.meta.url), 'utf8');
 const processor = await createMarkdownProcessor();
 
+test('HDR Native condition accepts current prose but remains required', () => {
+  for (const wording of ['with HDR set to Native', 'shown only with HDR set to Native']) {
+    const text = readme.replaceAll('with HDR set to Native.', `${wording}.`);
+    const setting = readGraphicsSettings(text, menu).flatMap(group => group.settings)
+      .find(setting => setting.name === 'HDR tone mapper');
+    assert(setting.badges.includes('With HDR on Native'));
+  }
+  assert.throws(() => readGraphicsSettings(readme.replaceAll('with HDR set to Native.', 'alternative curve.'), menu),
+    /no condition for HDR tone mapper/);
+});
+
 test('the Audio, Gameplay and Controls tabs follow the README, and Debug stays out', () => {
   const groups = readGraphicsSettings(readme, menu);
   assert.deepEqual(groups.filter(group => group.tab !== 'Graphics').map(group => group.name), ['Audio', 'Gameplay', 'Controls']);
