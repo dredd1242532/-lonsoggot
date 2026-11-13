@@ -4557,32 +4557,41 @@ void texture_frame(uint64_t completed) {
     // evicted as before), the least recently used beyond that going as before. (Not written back into the memory instead: the game
     // may have put other things there since, and a write-back over scene data once crashed it)
     // (longshot) the textures the GPU drew that the game samples again after finalizing them, used in the last 1,800 presents: kept
-    // over the budget up to RX_VK_KEEP_RESAMPLED_MB (512 by default, the most recently used first; 0: evicted as before). Their
-    // total first, as finalized_kept's: keep_resampled.h
+    // over the budget, the most recently used first, within keep_finalized's cap (shared: what they may hold comes off its room), at
+    // most RX_VK_KEEP_RESAMPLED_MB (512 by default; 0: evicted as before) and an eighth of the budget, and none near what the driver
+    // allows. Their total first, as finalized_kept's: keep_resampled.h
     static const uint64_t keep_resampled_max =
         (uint64_t)(getenv("RX_VK_KEEP_RESAMPLED_MB") ? std::max(0, atoi(getenv("RX_VK_KEEP_RESAMPLED_MB"))) : 512) << 20;
     static const uint64_t keep_finalized_max =
         (uint64_t)(getenv("RX_VK_KEEP_FINALIZED_MB") ? std::max(0, atoi(getenv("RX_VK_KEEP_FINALIZED_MB"))) : 512) << 20;
+    // (an eighth of the budget as a size, before the rules take an excess off it: steady from pass to pass. Near the driver's limit
+    // the 97% line gives it 0)
+    const uint64_t resampled_cap = keep_resampled::cap(keep_resampled_max, keep_finalized_max, size_budget, known, used, allowed);
+    const auto gpu_owns = [&](const Texture* tex) {   // (its storage's range still the one the GPU drew it in)
+        const auto g = gpu_owned.find(tex->gpu);
+        return g != gpu_owned.end() && g->second.first == tex->gpu + std::max<uint64_t>(tex->guest_size, 1);
+    };
     const auto finalized_once = [&](const Texture* tex) {   // (keep_finalized's textures, the resampled ones among them)
         if (!keep_finalized_max || !tex->gpu_written || !tex->released || !tex->first_written ||
             tex->first_written != tex->last_written || tex->bytes > (4ull << 20))
             return false;
-        const auto g = gpu_owned.find(tex->gpu);   // (its storage's range still the one the GPU drew it in)
-        if (g == gpu_owned.end() || g->second.first != tex->gpu + std::max<uint64_t>(tex->guest_size, 1)) return false;
+        if (!gpu_owns(tex)) return false;
         return !drawn_over(tex) && !drawn_over_shifted(tex);
     };
     const auto keep_finalized = [&](const Texture* tex) {
         // (a resampled one keep_resampled may keep is its, below, not counted here; with that rule off, kept here as before)
-        if (keep_resampled_max && tex->resampled && keep_resampled::recent(frame_no - tex->last_frame)) return false;
+        if (resampled_cap && tex->resampled && keep_resampled::recent(frame_no - tex->last_frame)) return false;
         return finalized_once(tex);
     };
     uint64_t finalized_kept = 0;
     uint64_t resampled_total = 0;
-    if (keep_resampled_max)
+    if (resampled_cap)
         for (auto& [last, tex] : order)
-            if (tex->resampled && tex->gpu_written && keep_resampled::recent(frame_no - last) &&
-                keep_resampled::candidate(drawn_over_shifted(tex) || drawn_over(tex), tex->gpu_written, tex->resampled, frame_no - last))
+            if (tex->resampled &&   // (first: the overlap search only for the few marked)
+                keep_resampled::candidate(drawn_over_shifted(tex) || drawn_over(tex), gpu_owns(tex), tex->gpu_written, true,
+                                          frame_no - last))
                 resampled_total += tex->bytes;
+    const uint64_t finalized_room = keep_resampled::finalized_room(keep_finalized_max, resampled_total, resampled_cap);
     size_t finalized_kept_n = 0;
     if (keep_finalized_max)
         for (auto& [last, tex] : order)
@@ -4647,14 +4656,15 @@ void texture_frame(uint64_t completed) {
         const bool overwritten = shifted || drawn_over(tex);   // (above)
         // (above. Oldest first, as keep_finalized. Past its cap, a small finalized one is keep_finalized's again, below)
         const bool resampled_candidate =
-            keep_resampled::candidate(overwritten, tex->gpu_written, tex->resampled, frame_no - last);
-        if (resampled_candidate && keep_resampled::keep(tex->bytes, resampled_total, keep_resampled_max)) {
+            resampled_cap && tex->resampled &&
+            keep_resampled::candidate(overwritten, gpu_owns(tex), tex->gpu_written, true, frame_no - last);
+        if (resampled_candidate && keep_resampled::keep(tex->bytes, resampled_total, resampled_cap)) {
             static int logged;
             if (logged++ < 20)
                 logf("vk: texture #%u %#llx %ux%u NVN %#x (%llu MB) the GPU drew and the game samples again after finalizing it: kept, "
-                     "not evicted (%llu MB of such textures; RX_VK_KEEP_RESAMPLED_MB=0: evicted)", tex->id, (unsigned long long)tex->gpu,
-                     tex->width, tex->height, tex->nvn_format, (unsigned long long)(tex->bytes >> 20),
-                     (unsigned long long)(resampled_total >> 20));
+                     "not evicted (%llu MB of such textures, cap %llu MB; RX_VK_KEEP_RESAMPLED_MB=0: evicted)", tex->id,
+                     (unsigned long long)tex->gpu, tex->width, tex->height, tex->nvn_format, (unsigned long long)(tex->bytes >> 20),
+                     (unsigned long long)(resampled_total >> 20), (unsigned long long)(resampled_cap >> 20));
             continue;
         }
         // (longshot, RX_VK_COMPACT: the hold's pass, above. A live texture stays once the excess over its line is covered: the
@@ -4666,16 +4676,17 @@ void texture_frame(uint64_t completed) {
         }
         // (one keep_resampled let go past its cap: keep_finalized's as before that rule, if it is one of its textures. It joins
         // keep_finalized's total here, so the older ones walked before it were judged without it: they keep a little more)
-        const bool finalized_after_resampled = keep_resampled_max && resampled_candidate && finalized_once(tex);
+        const bool finalized_after_resampled = resampled_candidate && finalized_once(tex);
         if (finalized_after_resampled) finalized_kept += tex->bytes;
-        // (above. Oldest first: beyond the cap the least recently used go)
+        // (above. Oldest first: beyond the cap the least recently used go. The cap is keep_finalized's room: what keep_resampled may
+        // hold this pass is off it)
         if (finalized_kept && (finalized_after_resampled || keep_finalized(tex))) {
-            if (finalized_kept <= keep_finalized_max) continue;
+            if (finalized_kept <= finalized_room) continue;
             finalized_kept -= tex->bytes;
             static int logged;
             if (logged++ < 100)
                 logf("vk: kept finalized textures over %llu MB: #%u %#llx %ux%u NVN %#x goes (unused for %llu frames)",
-                     (unsigned long long)(keep_finalized_max >> 20), tex->id, (unsigned long long)tex->gpu, tex->width,
+                     (unsigned long long)(finalized_room >> 20), tex->id, (unsigned long long)tex->gpu, tex->width,
                      tex->height, tex->nvn_format, (unsigned long long)(frame_no - last));
         }
         if (!overwritten && tex->gpu_written && !tex->released && !evict_rendered && frame_no - last < keep_rendered) continue;
