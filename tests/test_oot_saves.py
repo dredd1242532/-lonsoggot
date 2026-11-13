@@ -403,6 +403,90 @@ class Copy(Case):
         self.assertEqual(code, 1)
         self.assertEqual(tree(self.li), before)
 
+    def fresh_saves(self):
+        for folder in (self.hs, self.li):
+            shutil.rmtree(folder)
+        make_save(self.hs, b"HS")
+        make_save(self.li, b"LI", slots=("slot_00",))
+
+    def failed_copy_leaves_the_target(self, command, target, source, **patch):
+        self.fresh_saves()
+        before = tree(target)
+        with mock.patch.object(oot.shutil, **patch), self.assertRaises(OSError):
+            self.run_main(command, "lichii")
+        self.assertEqual(tree(target), before)
+        self.assertEqual(sorted(p.name for p in target.parent.iterdir()), [target.name])   # (nothing left beside it)
+        self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({n.split("/")[0] for n in before}))   # (or in it)
+        code, out, err = self.run_main(command, "lichii")   # (and the same copy works once the disk has room)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree(target), tree(source))
+
+    def test_failed_copy_leaves_the_target(self):
+        # (a disk that fills up while the new save is written: before, the old slots were already gone and half a save was left)
+        real_copytree, real_replace = shutil.copytree, os.replace
+
+        def full_disk(src, dst, *args, **kw):
+            if Path(src).parent in (self.hs, self.li) and "-incoming-" in Path(dst).parent.name:
+                real_copytree(src, dst, *args, **kw)
+                raise OSError(28, "No space left on device")
+            return real_copytree(src, dst, *args, **kw)
+
+        def account_fails(src, dst, **kw):
+            raise OSError(28, "No space left on device")
+
+        def last_rename_fails(src, dst):   # (the last move into the target, after its old entries were moved aside)
+            if Path(src).name == "account.sav" and "-incoming-" in Path(src).parent.name:
+                raise OSError(13, "Permission denied")
+            return real_replace(src, dst)
+
+        for command, target, source in (("import", self.hs, self.li), ("export", self.li, self.hs)):
+            for name, patch in (("slot", dict(attribute="copytree", side_effect=full_disk)),
+                                ("account.sav", dict(attribute="copy2", side_effect=account_fails))):
+                with self.subTest(command=command, failing=name):
+                    self.failed_copy_leaves_the_target(command, target, source, **patch)
+            with self.subTest(command=command, failing="rename"):
+                self.fresh_saves()
+                before = tree(target)
+                with mock.patch.object(oot.os, "replace", side_effect=last_rename_fails), self.assertRaises(OSError):
+                    self.run_main(command, "lichii")
+                self.assertEqual(tree(target), before)
+                self.assertEqual(sorted(p.name for p in target.parent.iterdir()), [target.name])
+                self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({n.split("/")[0] for n in before}))
+
+    def test_target_behind_a_link_or_in_a_read_only_folder(self):
+        # (a save folder that links to another disk, as when moved to an SD card, and one in a folder that can't be written:
+        # the new save is staged inside the target, where the swap's renames work)
+        shm = Path("/dev/shm")
+        cases = []
+        other = Path(tempfile.mkdtemp(dir=shm)) if shm.is_dir() and os.access(shm, os.W_OK) else None
+        if other is not None:
+            self.addCleanup(shutil.rmtree, other, True)
+            if other.stat().st_dev != self.tmp.stat().st_dev:
+                cases.append(("link to another disk", other / "save"))
+        cases.append(("link on the same disk", self.tmp / "elsewhere" / "save"))
+        for name, real in cases:
+            with self.subTest(name):
+                self.fresh_saves()
+                shutil.rmtree(real, ignore_errors=True)
+                real.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(self.hs), real)
+                self.hs.symlink_to(real, target_is_directory=True)
+                code, out, err = self.run_main("import", "--from", str(self.li), "--longshot", str(self.hs))
+                self.assertEqual(code, 0, err)
+                self.assertTrue(self.hs.is_symlink())
+                self.assertEqual(tree(real), tree(self.li))
+                self.assertEqual(sorted(p.name for p in real.parent.iterdir()), ["save"])
+                self.hs.unlink()
+                shutil.move(str(real), self.hs)
+        if os.name == "posix" and os.geteuid() != 0:
+            with self.subTest("a folder that can't be written"):
+                self.fresh_saves()
+                self.hs.parent.chmod(0o555)
+                self.addCleanup(self.hs.parent.chmod, 0o755)
+                code, out, err = self.run_main("import", "lichii")
+                self.assertEqual(code, 0, err)
+                self.assertEqual(tree(self.hs), tree(self.li))
+                self.hs.parent.chmod(0o755)
 
 class NX2navi(Case):
     def setUp(self):

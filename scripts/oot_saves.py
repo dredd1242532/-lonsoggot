@@ -28,6 +28,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 
 TITLE = "0400486024DEC000"
 NO_ACCOUNT = "0000000000000000"
@@ -402,15 +403,45 @@ def copy_saves(src, dst, backup, keep_settings, dry_run):
     if had:
         os.makedirs(os.path.dirname(backup), exist_ok=True)
         shutil.copytree(dst, backup)
-        for s in slots(dst):
-            shutil.rmtree(os.path.join(dst, s))
-    else:
-        os.makedirs(dst)
-    for s in names:   # (links were refused above; copied as links, never followed, all the same)
-        shutil.copytree(os.path.join(src, s), os.path.join(dst, s), symlinks=True)
-    for f in files:
-        shutil.copy2(os.path.join(src, f), os.path.join(dst, f), follow_symlinks=False)
+    # The new save is copied whole into a folder on the target's disk first, and the target's slots are swapped for it
+    # by renames only after that worked: a copy that fails (a full disk) leaves the target as it was. (Inside the target,
+    # so also when it links to another disk, is a disk of its own or sits in a folder that can't be written.)
+    staging = dst if had else os.path.dirname(os.path.abspath(dst))
+    os.makedirs(staging, exist_ok=True)
+    incoming = tempfile.mkdtemp(prefix=".%s-incoming-" % os.path.basename(dst), dir=staging)
+    try:
+        for s in names:   # (links were refused above; copied as links, never followed, all the same)
+            shutil.copytree(os.path.join(src, s), os.path.join(incoming, s), symlinks=True)
+        for f in files:
+            shutil.copy2(os.path.join(src, f), os.path.join(incoming, f), follow_symlinks=False)
+        if not had:
+            os.makedirs(dst)
+        swap_in(dst, incoming, names + files, slots(dst) + [f for f in files if os.path.lexists(os.path.join(dst, f))])
+    finally:
+        shutil.rmtree(incoming, ignore_errors=True)
     print("Done." + (" Backup of the old %s in %s" % (dst, backup) if had else ""))
+
+
+def swap_in(dst, incoming, new, old):
+    """Moves the old entries of dst aside and the new ones from incoming into dst, all renames on one disk. If one fails
+    the moves are undone, so dst has either all of its old entries or all of the new ones."""
+    aside = tempfile.mkdtemp(prefix=".%s-old-" % os.path.basename(dst), dir=os.path.dirname(incoming))
+    moved, placed = [], []
+    try:
+        for n in old:
+            os.replace(os.path.join(dst, n), os.path.join(aside, n))
+            moved.append(n)
+        for n in new:
+            os.replace(os.path.join(incoming, n), os.path.join(dst, n))
+            placed.append(n)
+    except BaseException:
+        for n in reversed(placed):
+            os.replace(os.path.join(dst, n), os.path.join(incoming, n))
+        for n in reversed(moved):
+            os.replace(os.path.join(aside, n), os.path.join(dst, n))
+        os.rmdir(aside)
+        raise
+    shutil.rmtree(aside, ignore_errors=True)
 
 
 def program_named(name):
