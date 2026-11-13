@@ -525,6 +525,10 @@ int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
         }
 #ifdef _WIN32
         CreateThread(NULL, 0, pad_main, NULL, 0, NULL);
+        {   /* (longshot) the Switch 2 Pro Controller over USB, which Windows and this SDL have no driver for: host/pad_switch2.c */
+            void hos_switch2_start(void);
+            hos_switch2_start();
+        }
 #else
         if (hos_display_owns_sdl())
             InterlockedExchange(&pads_loaded, 1);   /* (the window's thread polls: hos_sdl_pads_pump) */
