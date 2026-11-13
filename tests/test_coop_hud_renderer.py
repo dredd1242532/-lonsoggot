@@ -12,6 +12,8 @@ FIXTURE=r'''
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#define _Static_assert static_assert
+#define _CRT_SECURE_NO_WARNINGS
 #include <cmath>
 #include <cstdint>
 #include <cstring>

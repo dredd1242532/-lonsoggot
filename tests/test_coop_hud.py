@@ -20,8 +20,8 @@ C=r'''
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "coop_state.h"
 #include "coop_proto.h"
+#include "coop_state.h"
 #include "vk_api.h"
 static CoopPos sample;
 static uint64_t age;
@@ -136,7 +136,7 @@ def main():
     if a.mutation=='bounds': math=math.replace('text_w+2*margin>viewport[2]','false')
     with tempfile.TemporaryDirectory(prefix='longshot-hud-') as tmp:
         d=Path(tmp); (d/'check.c').write_text(C.replace('@@HELPERS@@',helpers)); (d/'check.cpp').write_text(CPP); (d/'coop_overlay_math.h').write_text(math)
-        common=['-Wall','-Wextra','-Werror']
+        common=['-Wall','-Wextra','-Werror','-D_CRT_SECURE_NO_WARNINGS']
         subprocess.run([a.cc,'-std=gnu11',*common,'-I'+str(ROOT/'host'),'-I'+str(ROOT/'gpu/vk'),str(d/'check.c'),str(ROOT/'host/coop_state.c'),str(ROOT/'host/coop_proto.c'),str(ROOT/'third_party/monocypher/monocypher.c'),'-lm','-o',str(d/'c')],check=True)
         subprocess.run([str(d/'c')],check=True)
         cxx='clang++' if 'clang' in a.cc else 'g++'

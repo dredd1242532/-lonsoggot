@@ -173,7 +173,7 @@ static void tick_closed() {
 static void shown(int* out) {
     int n = 0;
     for (int i = 0; i < kRows; i++)
-        if (rows[i].tab == TAB_COOP && row_shown(i)) out[n++] = coop_kind(rows[i]);
+        if (rows[i].tab == TAB_COOP && !rows[i].value && row_shown(i)) out[n++] = coop_kind(rows[i]);
     out[n] = -1;
 }
 static bool shows(std::initializer_list<int> want) {
@@ -371,8 +371,11 @@ int main(int argc, char** argv) {
     digits.pad_chars = [](const TextField&) { return "0123456789"; };
     CHECK(edit_prompts(digits, true) == (text_prompts | (1u << ui::kRemoveChar) | (1u << ui::kUpDown) | (1u << ui::kAddChar)));
     // ---- the rows by the room's state ----
-    CHECK(kRows == 1 + kCoopRows);   // (every row of the tab is one coop_kind knows)
-    for (const Row& r : rows) CHECK(r.tab != TAB_COOP || (coop_kind(r) >= 0 && !r.value && r.help && std::strlen(r.help) > 20));
+    CHECK(kRows == 2 + kCoopRows);   // existing actions plus the independent local display row
+    for (const Row& r : rows) {
+        if (r.value) CHECK(r.value == &opts.coop_labels && r.lo == 0 && r.hi == 2 && *r.value == 1 && !r.restart);
+        else CHECK(r.tab != TAB_COOP || (coop_kind(r) >= 0 && r.help && std::strlen(r.help) > 20));
+    }
     CHECK(coop_kind(rows[0]) == -1);
     CHECK(shows({kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopRules, kCoopTemp}));   // (off)
     set_room(HOS_COOP_STATE_LEFT, "", 0, 0);
