@@ -32,6 +32,7 @@ FIXTURE_HEAD = r'''#include "control.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -44,19 +45,38 @@ typedef pthread_mutex_t SRWLOCK;
 #define ReleaseSRWLockExclusive(p) ((void)pthread_mutex_unlock(p))
 #define AcquireSRWLockShared(p) AcquireSRWLockExclusive(p)
 #define ReleaseSRWLockShared(p) ReleaseSRWLockExclusive(p)
-static LONG64 InterlockedCompareExchange64(volatile LONG64 *p, LONG64 x, LONG64 c) {
-    __atomic_compare_exchange_n(p, &c, x, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-    return c;
-}
 #endif
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 volatile LONG64 hos_present_count;
-static int64_t hos_now_ns(void) { return 5000000000LL + __atomic_load_n(&hos_present_count, __ATOMIC_ACQUIRE) * 16666667LL; }
+static _Thread_local int measuring_tap;
+static unsigned tap_reads, tap_formats, tap_clocks, tap_locks, tap_captures;
+static void counted_exclusive(SRWLOCK *p) {
+    if (measuring_tap) tap_locks++;
+    AcquireSRWLockExclusive(p);
+}
+static void counted_shared(SRWLOCK *p) {
+    if (measuring_tap) tap_locks++;
+    AcquireSRWLockShared(p);
+}
+#undef AcquireSRWLockExclusive
+#undef AcquireSRWLockShared
+#define AcquireSRWLockExclusive(p) counted_exclusive(p)
+#define AcquireSRWLockShared(p) counted_shared(p)
+static int counted_vsnprintf(char *out, size_t cap, const char *fmt, va_list args) {
+    if (measuring_tap) tap_formats++;
+    return vsnprintf(out, cap, fmt, args);
+}
+#define vsnprintf counted_vsnprintf
+static int64_t hos_now_ns(void) {
+    if (measuring_tap) tap_clocks++;
+    return 5000000000LL + __atomic_load_n(&hos_present_count, __ATOMIC_ACQUIRE) * 16666667LL;
+}
 /* main's singleton slots and a separate, bounded fake heap; every out-of-range read fails */
 #define SLOTS 0x84c00000ull
 #define HEAP 0x10000000ull
 static unsigned char slots[0x100000], heap[0x100000];
 static void *hos_guest_range(uint64_t a, uint64_t n) {
+    if (measuring_tap) tap_reads++;
     if (a >= SLOTS && n <= sizeof slots && a - SLOTS <= sizeof slots - n) return slots + (a - SLOTS);
     if (a >= HEAP && n <= sizeof heap && a - HEAP <= sizeof heap - n) return heap + (a - HEAP);
     return NULL;
@@ -64,6 +84,22 @@ static void *hos_guest_range(uint64_t a, uint64_t n) {
 '''
 
 FIXTURE_MAIN = r'''
+#undef vsnprintf
+static void expect_status_pending(unsigned expected) {
+    for (int i = 0; i < 2000; i++) {
+        AcquireSRWLockShared(&state_lock);
+        const unsigned pending = state_waiters;
+        ReleaseSRWLockShared(&state_lock);
+        if (pending == expected) return;
+#ifdef _WIN32
+        Sleep(1);
+#else
+        struct timespec delay = {0, 1000000};
+        nanosleep(&delay, NULL);
+#endif
+    }
+    CHECK(!"status demand did not reach the expected count");
+}
 static void w64(uint64_t a, uint64_t v) { CHECK(hos_guest_range(a, 8)); memcpy(hos_guest_range(a, 8), &v, 8); }
 static void w32(uint64_t a, uint32_t v) { CHECK(hos_guest_range(a, 4)); memcpy(hos_guest_range(a, 4), &v, 4); }
 static void w8(uint64_t a, uint8_t v) { CHECK(hos_guest_range(a, 1)); memcpy(hos_guest_range(a, 1), &v, 1); }
@@ -157,7 +193,8 @@ static void fake_watch(int slot, const HosControlOotWatch *watch) {
 }
 static void fake_log(const char *line) { fprintf(stderr, "%s\n", line); }
 static HosControlGame game = {
-    .frame = fake_frame, .map = fake_map, .oot_sample = hos_oot_sample,
+    .frame = fake_frame, .map = fake_map, .oot_sample_ask = hos_oot_sample_ask,
+    .oot_sample_cancel = hos_oot_sample_cancel, .oot_sample = hos_oot_sample,
     .oot_watch = fake_watch, .oot_poll = fake_poll, .log = fake_log, .version = "state-fixture"
 };
 static void setup(void) {
@@ -229,7 +266,7 @@ int main(int argc, char **argv) {
     table_caps();
     setup();
     char scratch[HOS_CONTROL_OOT_JSON];
-    CHECK(!hos_oot_sample(scratch, sizeof scratch));
+    CHECK(!hos_oot_sample(0, scratch, sizeof scratch));
     hos_oot_watch(-1, NULL), hos_oot_watch(HOS_CONTROL_OOT_CLIENTS, NULL);
     CHECK(!hos_oot_poll(-1, scratch, sizeof scratch));
     CHECK(!hos_oot_poll(HOS_CONTROL_OOT_CLIENTS, scratch, sizeof scratch));
@@ -246,7 +283,11 @@ int main(int argc, char **argv) {
         int v, r;
         if (sscanf(command, "sample %lld", &f) == 1) {
             __atomic_store_n(&hos_present_count, f, __ATOMIC_RELEASE);
+            const unsigned formats = tap_formats;
+            measuring_tap = 1;
             hos_oot_state_tap(actor);
+            measuring_tap = 0;
+            if (tap_formats != formats) tap_captures++;
             char map[64];
             if (state_text(state_u64(state_u64(STATE_GAMEDATA_SLOT)), STATE_MAP, map)) {
                 AcquireSRWLockExclusive(&map_lock);
@@ -285,6 +326,13 @@ int main(int argc, char **argv) {
             w64(map_value, escaped_text), w64(prompt, escaped_text), w64(music, escaped_text);
         } else if (sscanf(command, "expect_watches %d", &v) == 1) {
             CHECK(__builtin_popcount(__atomic_load_n(&watch_mask, __ATOMIC_ACQUIRE)) == v);
+        } else if (sscanf(command, "expect_status_pending %d", &v) == 1) {
+            expect_status_pending((unsigned)v);
+        } else if (!strcmp(command, "counts\n")) {
+            printf("{\"reads\":%u,\"formats\":%u,\"clocks\":%u,\"locks\":%u,\"captures\":%u}\n",
+                   tap_reads, tap_formats, tap_clocks, tap_locks, tap_captures);
+            fflush(stdout);
+            continue;
         } else CHECK(!"unknown fixture command");
         puts("{\"stepped\":true}");
         fflush(stdout);
@@ -346,7 +394,7 @@ def wiring(root, tap, mutation):
     check("void hos_oot_state_tap(uint64_t actor) {" in tap, "the tap's hook has another signature")
     for name in ("HOS_OOT_STATE_FILE", "HOS_OOT_STATE_EVERY", "HOS_OOT_STATE_FLAGS", "HOS_OOT_STATE_CHANGES"):
         check(name not in tap and name not in docs, "obsolete file tap switch remains: " + name)
-    for name in ("oot_sample", "oot_watch", "oot_poll"):
+    for name in ("oot_sample_ask", "oot_sample_cancel", "oot_sample", "oot_watch", "oot_poll"):
         check(".%s = hos_%s" % (name, name) in control, "production control callback missing: " + name)
     check("control.md" in docs, "development guide no longer points to the control protocol")
     for name in ("oot", "flags", "changes", "every", "game", "frame"):
@@ -378,7 +426,7 @@ MUTATIONS = tuple("drop-" + field for field in CORE_FIELDS) + (
     "cadence", "default-cadence", "independent", "null-range", "nonfinite", "lookup-cap", "changes-cap", "hash",
     "watch-hash", "collision", "changes", "changes-limit", "changes-more", "overflow-baseline", "moved-table",
     "resized-table", "replace", "unsubscribe", "disconnect", "pending", "retained", "json-cap", "flag-validation",
-    "changes-validation", "hook")
+    "changes-validation", "hook", "demand-guard", "due-guard", "status-demand", "status-fresh", "status-cancel")
 
 
 def mutate_sources(tap, control, mode):
@@ -397,6 +445,7 @@ def mutate_sources(tap, control, mode):
         check(escaped in tap or literal in tap, "MUTATION TARGET MISMATCH: " + mode)
         tap = tap.replace(escaped, r'\"missing_%s\"' % field).replace(literal, '"missing_%s"' % field)
     elif mode == "cadence":
+        tap = once(tap, "state_sub[i].last + state_sub[i].watch.every", "state_sub[i].last + 1")
         tap = once(tap, "frame - state_sub[slot].last < w->every", "frame - state_sub[slot].last < 1")
     elif mode == "default-cadence":
         control = within(control, "static void cmd_subscribe(", 'num_arg(d, req, "every", 60, &bad)',
@@ -457,6 +506,18 @@ def mutate_sources(tap, control, mode):
         control = within(control, "static int oot_watch_args(",
                          "if (changes && changes->type != J_TRUE && changes->type != J_FALSE) return 0;",
                          "/* mutation: accept non-boolean changes */")
+    elif mode in ("demand-guard", "due-guard"):
+        if mode == "demand-guard":
+            tap = once(tap, "if (due == INT64_MAX) return;", "(void)due; /* eager capture without consumers */")
+        tap = once(tap, "if (frame < due) return;", "(void)due; /* capture before the deadline */")
+        tap = once(tap, "if (frame < __atomic_load_n(&state_due, __ATOMIC_RELAXED)) {", "if (0) {")
+    elif mode == "status-demand":
+        control = once(control, "p->sample_ticket = G.game->oot_sample_ask();", "p->sample_ticket = 0;")
+    elif mode == "status-fresh":
+        tap = once(tap, "if (ticket && __atomic_load_n(&state_published, __ATOMIC_ACQUIRE) < ticket) return 0;",
+                   "(void)ticket; /* answer with an old snapshot before demand is fulfilled */")
+    elif mode == "status-cancel":
+        tap = once(tap, "state_waiters--;", "(void)ticket; /* unanswered demand leaked */")
     return tap, control
 
 
@@ -492,6 +553,11 @@ class Fixture:
         self.proc.stdin.write(command + "\n")
         self.proc.stdin.flush()
         check(self.receive() == {"stepped": True}, "fixture did not finish " + command)
+
+    def counts(self):
+        self.proc.stdin.write("counts\n")
+        self.proc.stdin.flush()
+        return self.receive()
 
     def close(self):
         self.proc.stdin.close()
@@ -559,6 +625,17 @@ def socket_cases(fixture, module, address):
                 check(time.monotonic() < deadline, "bridge never reached present %d: %r" % (frame, result))
                 time.sleep(0.005)
 
+        def fresh_at(frame):
+            admin.bridge.send({"id": "fresh", "cmd": "status"})
+            fixture.step("expect_status_pending 1")
+            fixture.step("sample %d" % frame)
+            result = admin.bridge.line(5)
+            check(result is not None and result.get("id") == "fresh" and result.get("ok") is True,
+                  "fresh status was not served: %r" % result)
+            check(result["frame"] >= frame and result["game"]["frame"] == frame,
+                  "status did not wait for the requested Link update: %r" % result)
+            return result
+
         def clients_at(count):
             deadline = time.monotonic() + 5
             while True:
@@ -601,10 +678,9 @@ def socket_cases(fixture, module, address):
         check(one["changed"] == {} and "more" not in one, "first sample reported changes")
         core = {key: value for key, value in one.items() if key not in ("flags", "changed")}
         check(status_at(100)["game"] == core, "status did not copy the complete core snapshot")
-        fixture.step("sample 103")
+        check(fresh_at(103)["game"]["frame"] == 103, "status was incorrectly throttled by watch cadence")
         for client in (fast, slow, default):
             client.quiet()
-        check(status_at(103)["game"]["frame"] == 103, "status was incorrectly throttled by watch cadence")
         fixture.step("values 0 7")
         fixture.step("sample 106")
         two = fast.event("fast", 106)
@@ -759,8 +835,7 @@ def socket_cases(fixture, module, address):
         fixture.step("holdpoll 1")
         fixture.step("sample 300")
         fixture.step("values 1 13")
-        fixture.step("sample 306")
-        check(status_at(306)["game"]["frame"] == 306, "pending subscriber stalled the shared status snapshot")
+        check(fresh_at(306)["game"]["frame"] == 306, "pending subscriber stalled the shared status snapshot")
         fixture.step("holdpoll 0")
         pending = fast.event("pending", 300, reply_frame=306)
         check(pending["rupees"] == 12 and pending["changed"] == {}, "pending sample was overwritten before consumption")
@@ -800,6 +875,94 @@ def socket_cases(fixture, module, address):
         fixture.step("expect_watches 0")
         fast.quiet()
         print("PASS: 64 longest names, maximally escaped strings, changes and a 199-byte id form complete socket JSON")
+
+
+def demand_cases(fixture, module, address):
+    with ExitStack() as stack:
+        admin, other = Client(module, address), Client(module, address)
+        stack.callback(admin.close)
+        stack.callback(other.close)
+        fixture.step("restore")
+        fixture.step("expect_watches 0")
+        fixture.step("expect_status_pending 0")
+        before = fixture.counts()
+        for frame in range(500, 505):
+            fixture.step("sample %d" % frame)
+        check(fixture.counts() == before,
+              "bridge on without demand performed guest reads, formatting, clock queries or locking")
+
+        admin.bridge.send({"id": "one", "cmd": "status"})
+        fixture.step("expect_status_pending 1")
+        fixture.step("sample 505")
+        one = admin.bridge.line(5)
+        check(one and one.get("id") == "one" and one.get("ok") and one["game"]["frame"] == 505,
+              "one status request did not produce one fresh snapshot: %r" % one)
+        after = fixture.counts()
+        check(after["captures"] == before["captures"] + 1 and after["reads"] > before["reads"] and
+              after["formats"] > before["formats"] and after["clocks"] == before["clocks"] + 1,
+              "one status request did not perform exactly one capture")
+        for frame in range(506, 510):
+            fixture.step("sample %d" % frame)
+        check(fixture.counts() == after, "fulfilled status demand kept capturing")
+
+        admin.bridge.send({"id": "coalesce-a", "cmd": "status"})
+        other.bridge.send({"id": "coalesce-b", "cmd": "status"})
+        fixture.step("expect_status_pending 2")
+        fixture.step("sample 510")
+        first, second = admin.bridge.line(5), other.bridge.line(5)
+        check(first and second and first.get("id") == "coalesce-a" and second.get("id") == "coalesce-b" and
+              first["game"] == second["game"] and first["game"]["frame"] == 510,
+              "pending statuses did not share a fresh snapshot")
+        check(fixture.counts()["captures"] == after["captures"] + 1, "coalesced requests captured twice")
+        before = fixture.counts()
+
+        other.bridge.send({"id": "cancel", "cmd": "status"})
+        fixture.step("expect_status_pending 1")
+        other.close()
+        fixture.step("expect_status_pending 0")
+        fixture.step("sample 511")
+        check(fixture.counts() == before, "disconnect left capture demand")
+        stale = admin.ask("status")
+        check(stale["game"]["frame"] == 510 and stale["game"]["t"] == first["game"]["t"],
+              "no Link update changed the retained snapshot's date")
+        fixture.step("expect_status_pending 0")
+        fixture.step("sample 512")
+        check(fixture.counts() == before, "timed-out status demand kept capturing")
+        fixture.step("present 700")
+        check(admin.ask("status")["game"] == stale["game"], "pause/loading manufactured a fresh snapshot")
+        fixture.step("sample 700")
+        check(fixture.counts() == before, "expired paused request captured after the reply")
+
+        stream = Client(module, address)
+        stack.callback(stream.close)
+        stream.ask("subscribe", rid="due", events=["oot"], every=6)
+        fixture.step("sample 701")
+        stream.event("due", 701)
+        after = fixture.counts()
+        check(after["captures"] == before["captures"] + 1, "first subscriber demand was not captured")
+        for frame in range(702, 707):
+            fixture.step("sample %d" % frame)
+        check(fixture.counts() == after, "subscriber caused work before its due present")
+        stream.quiet()
+        fixture.step("sample 707")
+        stream.event("due", 707)
+        check(fixture.counts()["captures"] == after["captures"] + 1, "due subscriber did not capture once")
+        stream.ask("unsubscribe")
+        before = fixture.counts()
+        fixture.step("sample 707")
+        check(fixture.counts() == before, "unsubscribe left capture demand")
+
+        admin.bridge.send({"id": "same-frame", "cmd": "status"})
+        fixture.step("expect_status_pending 1")
+        fixture.step("sample 707")
+        check(fixture.counts() == before, "same present was sampled twice")
+        fixture.step("sample 708")
+        fresh = admin.bridge.line(5)
+        check(fresh and fresh.get("id") == "same-frame" and fresh["game"]["frame"] == 708,
+              "deduplicated present lost the pending status")
+        check(fixture.counts()["captures"] == before["captures"] + 1, "one fresh request captured more than once")
+        print("PASS: no-demand and not-due paths do zero guest reads, formatting, clock queries and snapshot locks")
+        print("PASS: one status one fresh capture; coalesced requests; cancellation and retained timestamps")
 
 
 def main():
@@ -848,6 +1011,7 @@ def main():
             try:
                 fixture = Fixture(exe, address, env, errors)
                 socket_cases(fixture, client_module, address)
+                demand_cases(fixture, client_module, address)
             except BaseException:
                 errors.seek(0)
                 print(errors.read(), end="")

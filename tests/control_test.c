@@ -189,7 +189,10 @@ static int fake_state(int *event, int *loading, int *child) {
     *event = 0, *loading = 1, *child = __atomic_load_n(&fake_child, __ATOMIC_RELAXED) ^ (stale_age != 0);
     return 1;
 }
-static int fake_sample(char *out, size_t cap) {
+static uint64_t fake_sample_ask(void) { return 1; }
+static void fake_sample_cancel(uint64_t ticket) { (void)ticket; }
+static int fake_sample(uint64_t ticket, char *out, size_t cap) {
+    (void)ticket;   /* this fixture's snapshot is immediately available; the stepped sampler tests demand/cadence */
     char map[80];
     if (!fake_map(map, sizeof map)) return 0;
     const int child = __atomic_load_n(&fake_child, __ATOMIC_RELAXED) ^ (stale_age != 0);
@@ -236,7 +239,8 @@ static HosControlGame game = {
     .mem_write = fake_mem_write, .save_root = fake_save_root, .log = fake_log, .quit = fake_quit,
     .renderer = fake_renderer, .version = "test", .map = fake_map, .destination = fake_destination,
     .teleport = fake_teleport, .teleport_result = fake_teleport_result, .teleport_cancel = fake_teleport_cancel,
-    .age = fake_age, .oot_state = fake_state, .oot_sample = fake_sample};
+    .age = fake_age, .oot_state = fake_state, .oot_sample_ask = fake_sample_ask,
+    .oot_sample_cancel = fake_sample_cancel, .oot_sample = fake_sample};
 
 static void *game_thread(void *unused) {
     (void)unused;

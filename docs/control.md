@@ -146,7 +146,10 @@ version.
 
 `map` is the game's own name for the map (`Sequence_CurrentBanc`), read on the game's thread with the player's update
 every 250 ms: the last one known, so it stays through loads and menus, and it is `null` until Link was first seen.
-`game` is OoT's latest read-only snapshot, taken at Link's update; `null` until the first one:
+`game` is OoT's read-only snapshot from Link's update. A `status` request asks for one fresh snapshot; requests
+waiting together share that capture. The socket thread never reads the guest or blocks waiting for the game.
+If no Link update arrives within 250 ms (title, pause or loading), the reply keeps the last snapshot and its
+original `frame`/`t`, or `null` if none has ever been captured. A reply does not make a retained sample fresh.
 
 | `game` field | meaning |
 |---|---|
@@ -166,10 +169,13 @@ Samples stop on the title, while paused and wherever Link is not updated. Compar
 fresh samples with `event` and `loading` false before their next step.
 
 `status` does not scan all flags. Watched values and changed flags belong to each `oot` subscription below.
+With no pending `status` request and no due `oot` subscriber, the snapshot path returns after a cheap atomic
+deadline check: it does not read the guest, query the clock, format JSON or take its snapshot lock. Merely
+opening the bridge does not capture every present. A disconnected/timed-out status request drops its demand.
 
-The host's JSON-copy callback is `oot_sample` (`hos_oot_sample`), separate from the typed `oot_state` callback used
-by `age`. Both are sampled within the same player-update hook, but the typed map/age sample keeps its existing
-250 ms cadence; it need not have the JSON snapshot's timestamp. The `age` action rechecks the live age when taken.
+The snapshot request/copy/cancel callbacks are separate from the typed `oot_state` callback used by `age`.
+Both read in the same player-update hook, but the typed map/age sample keeps its existing 250 ms cadence;
+it need not have the JSON snapshot's timestamp. The `age` action rechecks the live age when taken.
 
 `state` is a guess from the draws a frame, the way test scripts read the log:
 

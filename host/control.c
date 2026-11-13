@@ -309,7 +309,7 @@ typedef struct Conn {
     unsigned log_seen;   /* (the log ring's count it has seen) */
 } Conn;
 
-enum { P_INPUT = 1, P_WAIT, P_SHOT, P_MEM, P_TELEPORT };
+enum { P_INPUT = 1, P_WAIT, P_SHOT, P_MEM, P_TELEPORT, P_STATUS };
 enum { W_FRAME = 1, W_STATE, W_LOADING_START, W_LOADING_END, W_CHANGE, W_MAP };
 typedef struct {
     int used, conn, gen, kind;
@@ -321,6 +321,7 @@ typedef struct {
     int mem_slot;   /* P_MEM */
     int dest;       /* P_TELEPORT: the destination (token: the game's ticket); -1 the age switch's */
     int adult_to;   /* P_TELEPORT for the age switch: 1 to the adult, 0 to the child */
+    uint64_t sample_ticket;   /* P_STATUS: coalesced next-Link-update snapshot */
 } Pending;
 
 typedef struct {
@@ -880,8 +881,8 @@ static int exclusive_now(int *active) {
     *active = n;
     return ex;
 }
-static void cmd_status(int ci, const char *id) {
-    const int64_t now = ctl_now_ns();
+static void status_reply(int ci, const char *id, const char *sample, int64_t now) {
+    stats_tick(now);   /* the reply's frame must not precede the snapshot just copied */
     int active = 0, clients = 0;
     const int ex = exclusive_now(&active);
     for (int i = 0; i < CTL_CONNS; i++) clients += G.conns[i].used;
@@ -898,9 +899,8 @@ static void cmd_status(int ci, const char *id) {
     buf_puts(&b, ",\"map\":");
     if (G.map[0]) buf_str(&b, G.map);
     else buf_puts(&b, "null");
-    char sample[HOS_CONTROL_OOT_JSON];
     buf_puts(&b, ",\"game\":");
-    if (G.game->oot_sample && G.game->oot_sample(sample, sizeof sample)) buf_puts(&b, sample);
+    if (sample) buf_puts(&b, sample);
     else buf_puts(&b, "null");
     buf_puts(&b, ",\"version\":");
     buf_str(&b, G.game->version ? G.game->version : "unknown");
@@ -909,6 +909,23 @@ static void cmd_status(int ci, const char *id) {
     if (r) buf_str(&b, r);
     else buf_puts(&b, "null");
     reply_end(&G.conns[ci], &b);
+}
+static void cmd_status(int ci, const char *id) {
+    if (!G.game->oot_sample_ask || !G.game->oot_sample || !G.game->oot_sample_cancel)
+        return status_reply(ci, id, NULL, ctl_now_ns());
+    Pending *p = pending_new(ci, id, P_STATUS);
+    if (!p) return reply_error(&G.conns[ci], id, "busy", "too many requests waiting");
+    p->sample_ticket = G.game->oot_sample_ask();
+    p->deadline = ctl_now_ns() + 250000000;   /* no Link update (title/pause/load): keep the old sample's date */
+}
+static int status_done(Pending *p, int64_t now) {
+    static char sample[HOS_CONTROL_OOT_JSON];   /* this thread only; no large scratch stack on every pending tick */
+    int have = G.game->oot_sample(p->sample_ticket, sample, sizeof sample);
+    if (!have && now < p->deadline) return 0;
+    G.game->oot_sample_cancel(p->sample_ticket);
+    if (!have) have = G.game->oot_sample(0, sample, sizeof sample);
+    status_reply(p->conn, p->id, have ? sample : NULL, now);
+    return 1;
 }
 
 /* ---- wait ---- */
@@ -1888,6 +1905,7 @@ static void pending_drop(Pending *p) {
         if (m->used && m->token == p->token) free(m->buf), m->used = 0;
         ctl_unlock(&G.mu);
     } else if (p->kind == P_TELEPORT && G.game->teleport_cancel) G.game->teleport_cancel(p->token);
+    else if (p->kind == P_STATUS) G.game->oot_sample_cancel(p->sample_ticket);
     p->used = 0;
 }
 /* a client gone: what it waited for is dropped, its inputs let go */
@@ -1913,7 +1931,7 @@ static void pending_tick(int64_t now) {
         }
         const int done = p->kind == P_INPUT ? input_done(p, c, now) : p->kind == P_WAIT ? wait_done(p, c, now)
                        : p->kind == P_MEM ? mem_finished(p, c, now) : p->kind == P_TELEPORT ? teleport_done(p, c, now)
-                       : shot_finished(p, c, now);
+                       : p->kind == P_STATUS ? status_done(p, now) : shot_finished(p, c, now);
         if (done) p->used = 0;
     }
 }
@@ -2363,7 +2381,9 @@ int hos_oot_teleport_result(int ticket, char *why, size_t why_cap, char *map, si
 void hos_oot_teleport_cancel(int ticket);
 int hos_oot_age_ask(int adult);
 int hos_oot_state(int *event, int *loading, int *child);
-int hos_oot_sample(char *out, size_t cap);
+uint64_t hos_oot_sample_ask(void);
+void hos_oot_sample_cancel(uint64_t ticket);
+int hos_oot_sample(uint64_t ticket, char *out, size_t cap);
 void hos_oot_watch(int slot, const HosControlOotWatch *watch);
 int hos_oot_poll(int slot, char *out, size_t cap);
 static HosControlGame game = {
@@ -2373,6 +2393,7 @@ static HosControlGame game = {
     .renderer = game_renderer, .map = hos_oot_current_map, .destination = hos_oot_destination,
     .teleport = hos_oot_teleport_ask, .teleport_result = hos_oot_teleport_result,
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
+    .oot_sample_ask = hos_oot_sample_ask, .oot_sample_cancel = hos_oot_sample_cancel,
     .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll};
 
 void hos_control_start(const char *version) {

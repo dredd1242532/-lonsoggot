@@ -1,6 +1,7 @@
 /* (longshot) OoT's read-only samples for the control bridge (docs/control.md).
    status.game holds the last snapshot; subscribe events:["oot"] samples every n presents, with an optional watch list
-   and changed flags. There is no file channel. HOS_CONTROL unset costs one early return.
+   and changed flags. There is no file channel. HOS_CONTROL unset costs one early return. With the bridge on, a cheap
+   atomic deadline skips capture unless a status request is pending or a subscriber without a pending sample is due.
 
    The guest reads stay in hos_oot_lift_player, under cheats_lock: Link's update is the point at which the actor,
    managers and camera are used by the game, not pointers kept for a later socket-thread read. The lock serializes
@@ -268,7 +269,44 @@ static struct {
     int64_t last;
 } state_sub[HOS_CONTROL_OOT_CLIENTS];
 
-int hos_oot_sample(char *out, size_t cap) {
+/* state_lock protects requests and watches. The game thread reads only this deadline when no work is due. */
+static int64_t state_due = INT64_MAX, state_last = -1;
+static uint64_t state_serial, state_requested, state_published;
+static unsigned state_waiters;
+
+static void state_schedule(void) {   /* state_lock held */
+    int64_t due = state_waiters ? state_last + 1 : INT64_MAX;
+    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) {
+        if (!state_sub[i].active || state_sub[i].ready) continue;
+        int64_t next = state_sub[i].last < 0 ? 0 : state_sub[i].last + state_sub[i].watch.every;
+        if (next <= state_last) next = state_last + 1;
+        if (next < due) due = next;
+    }
+    __atomic_store_n(&state_due, due, __ATOMIC_RELEASE);
+}
+
+uint64_t hos_oot_sample_ask(void) {
+    AcquireSRWLockExclusive(&state_lock);
+    if (!state_waiters) state_requested = ++state_serial;
+    state_waiters++;
+    const uint64_t ticket = state_requested;
+    state_schedule();
+    ReleaseSRWLockExclusive(&state_lock);
+    return ticket;
+}
+
+void hos_oot_sample_cancel(uint64_t ticket) {
+    if (!ticket || __atomic_load_n(&state_published, __ATOMIC_ACQUIRE) >= ticket) return;
+    AcquireSRWLockExclusive(&state_lock);
+    if (state_waiters && ticket == state_requested) {
+        state_waiters--;
+        state_schedule();
+    }
+    ReleaseSRWLockExclusive(&state_lock);
+}
+
+int hos_oot_sample(uint64_t ticket, char *out, size_t cap) {
+    if (ticket && __atomic_load_n(&state_published, __ATOMIC_ACQUIRE) < ticket) return 0;
     AcquireSRWLockShared(&state_lock);
     const int have = state_latest.n != 0 && state_latest.n < cap;
     if (have) memcpy(out, state_latest.text, state_latest.n + 1);
@@ -294,6 +332,7 @@ void hos_oot_watch(int slot, const HosControlOotWatch *watch) {
                 (uint32_t)strtoul(name + 2, NULL, 16) : state_murmur(name, strlen(name));
         }
     }
+    state_schedule();
     ReleaseSRWLockExclusive(&state_lock);
 }
 
@@ -304,6 +343,7 @@ int hos_oot_poll(int slot, char *out, size_t cap) {
     if (have) {
         memcpy(out, state_sub[slot].line.text, state_sub[slot].line.n + 1);
         state_sub[slot].ready = 0;
+        state_schedule();
     }
     ReleaseSRWLockExclusive(&state_lock);
     return have;
@@ -312,10 +352,17 @@ int hos_oot_poll(int slot, char *out, size_t cap) {
 /* Each update of Link (actor: the one whose +0x31c is his position). Only this function reads guest memory. */
 void hos_oot_state_tap(uint64_t actor) {
     if (!hos_control_on) return;
-    static int64_t last = -1;
-    const int64_t frame = (int64_t)InterlockedCompareExchange64(&hos_present_count, 0, 0);
-    if (frame == last) return;
-    last = frame;
+    const int64_t due = __atomic_load_n(&state_due, __ATOMIC_ACQUIRE);
+    if (due == INT64_MAX) return;
+    const int64_t frame = __atomic_load_n(&hos_present_count, __ATOMIC_RELAXED);
+    if (frame < due) return;
+    AcquireSRWLockExclusive(&state_lock);
+    /* A cancellation/replacement can move the deadline while this worker waits for the lock. */
+    if (frame < __atomic_load_n(&state_due, __ATOMIC_RELAXED)) {
+        ReleaseSRWLockExclusive(&state_lock);
+        return;
+    }
+    state_last = frame;
 
     static StateLine line;
     StateLine *l = &line;
@@ -348,7 +395,6 @@ void hos_oot_state_tap(uint64_t actor) {
     state_put_flag_text(l, mgr, "music", STATE_MUSIC);
     state_put(l, "}");
 
-    AcquireSRWLockExclusive(&state_lock);
     state_latest.n = l->n;
     memcpy(state_latest.text, l->text, l->n + 1);
     for (int slot = 0; slot < HOS_CONTROL_OOT_CLIENTS; slot++) {
@@ -373,5 +419,10 @@ void hos_oot_state_tap(uint64_t actor) {
         state_sub[slot].last = frame;
         state_sub[slot].ready = 1;
     }
+    if (state_waiters) {
+        __atomic_store_n(&state_published, state_requested, __ATOMIC_RELEASE);
+        state_waiters = 0;
+    }
+    state_schedule();
     ReleaseSRWLockExclusive(&state_lock);
 }

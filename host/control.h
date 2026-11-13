@@ -81,9 +81,12 @@ typedef struct HosControlGame {
     int (*age)(int adult);
     /* (OoT) with the map: an event playing (a cutscene, a map change's), a map loading, Link the child. 0 before any */
     int (*oot_state)(int *event, int *loading, int *child);
-    /* (OoT) copy the last sampled JSON object into out, 0 before Link's first update.
-       event/loading/age keep their protocol-1 types; frame and t date the sample, not this reply. */
-    int (*oot_sample)(char *out, size_t cap);
+    /* (OoT) coalesced request for the next safe Link-update snapshot; cancel drops an unanswered request. */
+    uint64_t (*oot_sample_ask)(void);
+    void (*oot_sample_cancel)(uint64_t ticket);
+    /* Copy a snapshot that satisfies ticket, or 0 while pending. Ticket 0 reads the last retained snapshot.
+       No guest reads here; frame/t still date the sample, including a retained one during pause/loading. */
+    int (*oot_sample)(uint64_t ticket, char *out, size_t cap);
     /* Replace a connection's watch (NULL cancels and forgets its baseline); no guest reads here. */
     void (*oot_watch)(int slot, const HosControlOotWatch *watch);
     /* Consume the latest pending sample for that connection, 0 when none. No guest reads or socket I/O. */
