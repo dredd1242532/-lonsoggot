@@ -5,7 +5,8 @@ the mods in their order, then each mod's cheats under a heading (a file's own he
 step over headings and stop at the ends; Left and Right switch a mod off and on; Enter picks a mod up, Up and Down move it a
 place (not past the ends), Enter puts it down; a data cheat switches with Left, Right and Enter, a master code or an
 unsupported cheat does not; an older host (version 17) shows no Mods tab. And by text: the API's version and functions, the
-host's table, the tab strip's title, the restart question's slot for the mods.
+host's table, the tab strip's title, the restart question's slot for the mods, that its texts name the mods switched
+(by behaviour: tests/test_menu_restart.cpp) and that a mod's change is told to the restart state.
 
 python -I -B tests/test_mods_menu.py [--cxx g++]
 """
@@ -142,6 +143,24 @@ def main():
          "the Mods tab is not drawn or not given its keys")
     need('restart_names[mods_slot] = "the mods"' in menu and "host->mods_changed()" in menu,
          "the restart question does not count the mods' order and switches")
+    # (the restart line and question name the mods switched, from the mods as the game started: kept before the tab's first
+    # change, and a change told to the restart state as set_row tells a row's, so Later is asked again after another one)
+    need("mr::mod_changes(mods_start, mods_now()," in menu,
+         "the restart line and question do not name the mods a restart would switch (menu_restart.h mod_changes)")
+    need("mr::line_forms(t.rows," in menu and "counted_mods(mods)" in menu,
+         "the Restart needed line does not group the mods after the rows (one by name, more as a count: menu_restart.h line_forms)")
+    need("restart_pending() && !only_this ? restart_line(" in menu,
+         "the Mods tab shows the Restart needed line when only the selected mod's own switch waits for a restart")
+    ask = menu[menu.index("void draw_ask(ui::Ctx& c) {"):]
+    ask = ask[:ask.index("\n}\n")]
+    need("counted_settings(" in ask and "counted_mods(" in ask and "t.mods.switched" in ask and "ui::diamond(" in ask,
+         "the restart question does not count the settings and the mods and list them under it")
+    at = menu.find("if (cur_tab == TAB_MODS) {   // (the Mods tab: its own lines, draw_mods)")
+    keys = menu[at:menu.find("} else {", at)] if at >= 0 else ""
+    order = [keys.find(s) for s in ("mods_keep_start();", "mods_tick(press, changed);", "restart_state.note(now);")]
+    need(min(order) >= 0 and order == sorted(order),
+         "menu_tick does not keep the mods' start before the Mods tab's keys, or does not tell the restart state of a mod's change")
+    need("mod_switched(n, e != 0)" in menu, "a mod switched otherwise than at the start is not marked on its line")
     body = menu[menu.index("bool can_mods() {"):menu.index("/// The Mods tab's rows and help")]
     with tempfile.TemporaryDirectory(prefix="mods-menu-") as tmp:
         tmp = Path(tmp)

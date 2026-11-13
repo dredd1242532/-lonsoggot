@@ -333,9 +333,10 @@ drawn. It is never copied anywhere, and Longshot does not include it. Without it
 Libertinus, which Longshot includes.
 
 The rows marked "after a restart" below are read when the game starts. While one is changed, it is tagged "After
-restart" and the help on the Graphics tab lists it; closing the menu then asks whether to restart now. **Later** keeps
-the change for the next start (and is not asked again until you change one of those rows); **Restart now** saves your
-choices and starts the game again, so progress since your last save is lost.
+restart" and the help on the Graphics tab lists it; closing the menu then asks whether to restart now, with a list of
+what the restart applies (the rows changed, and the mods switched on the Mods tab). **Later** keeps the change for the
+next start (and is not asked again until you change one of those rows, or a mod on the Mods tab); **Restart now** saves
+your choices and starts the game again, so progress since your last save is lost.
 
 A row for something this PC cannot use is not shown: NVIDIA Reflex and AMD Anti-Lag 2 without a GPU and driver that
 have them, the DLSS model where DLSS does not run. HDR paper white and
@@ -665,8 +666,10 @@ Deeper layouts such as `mods/contents/<title id>/<name>/romfs` work too. A folde
 The Insert menu's **Mods** tab (shown when there are mods) lists them in their order, each On or Off: Left and Right
 switch the selected one, Enter picks it up and Up and Down move it. When two mods have the same file, the one lower in
 the list wins; out of the box the list is in the folders' names' order, so `01-...`, `02-...` still set it. The order and
-the switches are kept in `longshot_mods.txt` in the game folder and apply at the next start (closing the menu offers the
-restart). The log (`longshot_log.txt`) names each mod and the files read from it.
+the switches are kept in `longshot_mods.txt` in the game folder and apply at the next start: closing the menu offers the
+restart, and its question lists each mod switched, with On or Off, and the order when it changed. The menu's "Restart
+needed" line names one switched mod and counts more ("2 mods"). A mod switched since the start has the gold mark a
+changed row has. The log (`longshot_log.txt`) names each mod and the files read from it.
 
 A mod file larger than the game's own needs a larger entry in the resource size table
 (`System/Resource/ResourceSizeTable.Product.111.Nin_Ounce_NVN2.rsizetable.zs`, which gives each file the memory the game
