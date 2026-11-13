@@ -896,8 +896,8 @@ license. Never share a game folder built with them, and do not post builds made 
   NVIDIA's license (or pass `--accept-nvidia-license`) and fetches the headers, `nvsdk_ngx_s.lib`, `nvngx_dlss.dll` and
   `nvngx_dlssg.dll`, each checked against its SHA-256. Then build with `LONGSHOT_NGX_SDK=<sdk folder>`: `make_game.py`
   copies both runtimes into `<game folder>\ngx`. NGX is also pointed at `%LOCALAPPDATA%\Longshot\ngx`, and at
-  `RX_VK_DLSS_DIR` when it is set, and uses the newest of each it finds across them (to try a given one, make sure no
-  other folder has a newer one). Without `nvngx_dlssg.dll` there, frame generation takes the driver's own copy, which
+  `RX_VK_DLSS_DIR` when it is set (in the environment or a file `HOS_ENV_FILE` names, not `longshot_env.txt`), and uses
+  the newest of each it finds across them (to try a given one, make sure no other folder has a newer one). Without `nvngx_dlssg.dll` there, frame generation takes the driver's own copy, which
   may be older: one that makes 1 frame at most, or refuses every set. Never copy NGX's core, `_nvngx.dll`, beside
   the game: it comes with NVIDIA's driver.
 - **Linux, a build from source:** `scripts/linux/ngx-sdk.sh <sdk folder>` (it runs `scripts/ngx_sdk.py --platform
@@ -911,7 +911,7 @@ license. Never share a game folder built with them, and do not post builds made 
   log and the Insert menu say so: copy `libnvidia-ngx-dlss.so.*` and `libnvidia-ngx-dlssg.so.*` from there into
   `$XDG_DATA_HOME/longshot/ngx`
   (`~/.local/share/longshot/ngx`), which the game also looks in, or into any other folder with an ASCII path and name
-  that folder in `RX_VK_DLSS_DIR`.
+  that folder in `RX_VK_DLSS_DIR` (set in the environment, such as Steam's launch options, not in `longshot_env.txt`).
 
 The **DLSS model** row chooses DLSS's network, by NVIDIA's preset letter, for every mode: **Transformer (K)**, the
 transformer model and the one tested most here (the default); **Transformer 2 (M)**, NVIDIA's second-generation
@@ -987,9 +987,9 @@ line, on Windows and Linux. The running game reads it, not the builder. A test r
 `longshot_env.txt` sets only the game's own switches: names that start with `RX_`, `HOS_`, `EDEN_`, `NVN_`
 or `SDL_`, and of the `LONGSHOT_` names only the game's (`LONGSHOT_NO_AV1_NOTICE`,
 `LONGSHOT_OCCLUSION_OFF`), not the builder's. It does not set SDL's library names such as `SDL_VULKAN_LIBRARY`, nor SDL's
-switches that write files (`*_SAVE_FRAMES` and the `disk` audio driver). It takes no value that is a path except
-`RX_VK_DLSS_DIR`'s (a folder on this PC named by its full path, such as `C:\ngx` or `/opt/ngx`, not a network share),
-and no value at all for the switches that name a file or folder (`HOS_AUDIO_DUMP`, `RX_VK_SHOTS` and the like, and every
+switches that write files (`*_SAVE_FRAMES` and the `disk` audio driver). It takes no value that is a path, not even
+`RX_VK_DLSS_DIR`'s (it picks where DLSS's runtime is loaded from; the game's `ngx` folder and
+`%LOCALAPPDATA%\Longshot\ngx` or `$XDG_DATA_HOME/longshot/ngx` need no switch), and no value at all for the switches that name a file or folder (`HOS_AUDIO_DUMP`, `RX_VK_SHOTS` and the like, and every
 dump switch: any name with `_DUMP` in it) or press buttons on a timer (`HOS_INPUT_SCRIPT`, `RX_VK_MENU_SCRIPT`). Other
 lines are left out, and the log says so. Switches that need a path, or other variables, go in a file named by
 `HOS_ENV_FILE`.

@@ -426,8 +426,9 @@ static const char *saves_dir(const char *beside) {
    player's longshot_env.txt as it is.
    (longshot) longshot_env.txt is a file players pass around, so it sets only the game's own switches (RX_, HOS_,
    LONGSHOT_, EDEN_, NVN_ and SDL_ names), never HOS_ENV_FILE or SDL's library override, and no value that is a
-   path but RX_VK_DLSS_DIR's: the system's variables (the Vulkan loader's layers, PATH and the like) can load code, and
-   the dump switches write files where they name. The file HOS_ENV_FILE names sets anything. */
+   path: the system's variables (the Vulkan loader's layers, PATH and the like) can load code, the dump switches write
+   files where they name, and RX_VK_DLSS_DIR picks the folder NGX loads DLSS from (the newest it finds wins: a copy put in
+   /tmp or C:\Users\Public would). The file HOS_ENV_FILE names sets anything, and so does the environment. */
 static int env_line_allowed(const char *name, const char *value) {
     static const char *const prefixes[] = {"RX_", "HOS_", "LONGSHOT_", "EDEN_", "NVN_", "SDL_"};
     int ok = 0;
@@ -462,30 +463,14 @@ static int env_line_allowed(const char *name, const char *value) {
         "RX_VK_DUMP_FAILED", "RX_VK_IR", "RX_VK_MENU_SCRIPT", "RX_DUMP_WGSL", "RX_DUMP_SLOW_WGSL", "RX_DUMP_TICS",
         "RX_WGSL_OVERRIDE", "RX_SCREENSHOT", "RX_FLASH_LOG", "HOS_SCAN_DT",
         "RX_VK_FRAME_TRACE",   /* (longshot: longshot_frames.csv, a line each frame without end) */
-        "HOS_CONTROL", "HOS_CONTROL_MEM"};   /* (longshot: the control bridge's socket, a bare name in the current folder,
-                                                and its guest memory reads and writes) */
+        "HOS_CONTROL", "HOS_CONTROL_MEM",   /* (longshot: the control bridge's socket, a bare name in the current folder,
+                                               and its guest memory reads and writes) */
+        "HOS_PGO"};   /* (longshot: a profiling build's counts, to the file it names) */
     for (size_t i = 0; i < sizeof by_name / sizeof *by_name; i++) names_file |= !strcmp(name, by_name[i]);
     /* (longshot) and every dump switch by its family, not one by one (RX_VK_DUMP_NATIVE and RX_DUMP_IR had been left
        out of the list above): RX_VK_DUMP*, RX_DUMP*, HOS_*_DUMP, RX_*_DUMPS. tests/test_env_file.py also looks through
        the sources for switches whose value is a path and checks that this file cannot set them */
     names_file |= strstr(name, "_DUMP") != NULL;
-    /* RX_VK_DLSS_DIR: a folder on this PC named in full (C:\x on Windows, /x on Linux), not a share (\\server\x or
-       //server/x) or a device path; (longshot) not a relative one either, which NGX resolved against whatever folder
-       the game was started from, and no .. step out of the folder the value names */
-    if (!strcmp(name, "RX_VK_DLSS_DIR")) {
-#ifdef _WIN32
-        const int full = ((value[0] | 0x20) >= 'a' && (value[0] | 0x20) <= 'z' && value[1] == ':' &&
-                          (value[2] == '\\' || value[2] == '/'));
-#else
-        const int full = value[0] == '/' && value[1] != '/';
-#endif
-        if (!full) return 0;
-        for (const char *p = value; *p; p++)
-            if (p[0] == '.' && p[1] == '.' && (p == value || p[-1] == '/' || p[-1] == '\\') &&
-                (!p[2] || p[2] == '/' || p[2] == '\\'))
-                return 0;
-        return 1;
-    }
     if (names_file) return 0;
     const int drive = ((value[0] | 0x20) >= 'a' && (value[0] | 0x20) <= 'z' && value[1] == ':');
     return !strpbrk(value, "/\\") && !drive && value[0] != '~' && strcmp(value, ".") && strcmp(value, "..");

@@ -33,7 +33,7 @@ def block(text, marker):
 GETENV = r'(?:std::)?getenv\("((?:RX|HOS|LONGSHOT|EDEN|NVN|TOTK|SDL)_[A-Z0-9_]+)"\)'
 PATH_VALUED = [re.compile(r"\b\w*(?:dir|path|file|folder|prefix)\w*\s*(?:\{|=)\s*" + GETENV, re.I),
                re.compile(r"\b(?:_w?fopen|fopen|open|CreateFile[AW]?|LoadLibrary[AW]?|dlopen)\s*\(\s*" + GETENV)]
-REVIEWED = {"RX_VK_DLSS_DIR"}   # (a local folder for NVIDIA's runtime: env_line_allowed's own rule for it)
+REVIEWED = set()   # (none; RX_VK_DLSS_DIR, read by vk_dlss.cpp's env_path, has its own check: check_dlss_dir)
 
 
 def path_valued_switches():
@@ -67,17 +67,14 @@ def check_path_valued(cc, main_c, tmp):
     print("PASS: none of the %d switches whose value is a path can be set from longshot_env.txt" % len(names))
 
 
-# (RX_VK_DLSS_DIR, the one path a shared file may set: a folder named in full on this PC, nothing relative, no share,
-# device path or .. step; True = taken)
+# (RX_VK_DLSS_DIR: where NGX loads DLSS's runtime from, the newest it finds. A shared file sets none of it, not even a
+# folder named in full on this PC (/tmp, /dev/shm and C:\Users\Public are such folders, which anyone can fill); the
+# environment and a file HOS_ENV_FILE names still do)
 DLSS_DIRS = {
-    "linux": [("/opt/ngx", True), ("/home/x/.local/share/longshot/ngx", True), ("/x/..dir/ngx", True),
-              ("ngx", False), (".", False), ("..", False), ("../../Downloads", False), ("~/ngx", False),
-              ("//server/share", False), ("/opt/../home/x", False), ("/opt/ngx/..", False), ("", False),
-              ("C:\\ngx", False)],
-    "windows": [("C:\\ngx", True), ("d:/games/ngx", True), ("C:\\x\\..dll\\ngx", True),
-                ("ngx", False), ("C:ngx", False), ("\\ngx", False), ("\\\\server\\share", False),
-                ("\\\\?\\C:\\ngx", False), ("//server/share", False), ("C:\\x\\..\\..\\Users", False),
-                ("C:\\ngx\\..", False), ("..\\ngx", False), ("/opt/ngx", False), ("", False)],
+    "linux": ["/opt/ngx", "/home/x/.local/share/longshot/ngx", "/tmp/x", "/dev/shm/x", "/proc/self/cwd", "ngx", ".", "..",
+              "../../Downloads", "~/ngx", "//server/share", "/opt/../home/x", "", "C:\\ngx"],
+    "windows": ["C:\\ngx", "d:/games/ngx", "C:\\Users\\Public\\ngx", "Z:\\ngx", "ngx", "C:ngx", "\\ngx",
+                "\\\\server\\share", "\\\\?\\C:\\ngx", "//server/share", "..\\ngx", "/opt/ngx", ""],
 }
 
 
@@ -122,20 +119,21 @@ def check_dlss_dir(cc, main_c, tmp):
     src.write_text("#include <stdio.h>\n#include <string.h>\n" + block(main_c, "static int env_line_allowed(") +
                    '\nint main(int c, char **v) { for (int i = 1; i < c; i++) '
                    'printf("%d\\n", env_line_allowed("RX_VK_DLSS_DIR", v[i])); return 0; }\n', encoding="utf-8")
-    bad = []
-    # (the rule is per system: Windows runs its own cases; Linux runs both, the Windows ones built with _WIN32 set)
+    taken = []
+    # (Windows runs its own cases; Linux runs both, the Windows ones built with _WIN32 set)
     for system, cases in DLSS_DIRS.items():
         if os.name == "nt" and system != "windows":
             continue
         exe = tmp / ("dlss_dir_" + system)
         subprocess.run([cc, "-std=c11", "-Wall", "-Werror", *(["-D_WIN32"] if system == "windows" and os.name != "nt" else []), str(src),
                         "-o", str(exe)], check=True)
-        got = subprocess.run([str(exe), *(v for v, _ in cases)], capture_output=True, text=True, check=True).stdout.split()
-        bad += ["%s %r: %s" % (system, v, "taken" if g == "1" else "refused") for (v, want), g in zip(cases, got)
-                if (g == "1") != want]
-    if bad:
-        raise SystemExit("RX_VK_DLSS_DIR from longshot_env.txt: " + "; ".join(bad))
-    print("PASS: a shared longshot_env.txt sets RX_VK_DLSS_DIR only to a folder named in full on this PC")
+        got = subprocess.run([str(exe), *cases], capture_output=True, text=True, check=True).stdout.split()
+        if len(got) != len(cases):
+            raise SystemExit("RX_VK_DLSS_DIR: %d answers for %d values" % (len(got), len(cases)))
+        taken += ["%s %r" % (system, v) for v, g in zip(cases, got) if g != "0"]
+    if taken:
+        raise SystemExit("RX_VK_DLSS_DIR from longshot_env.txt, taken: " + "; ".join(taken))
+    print("PASS: a shared longshot_env.txt does not set RX_VK_DLSS_DIR, to any folder")
 
 
 def main():
@@ -165,7 +163,7 @@ def main():
             "SDL_VIDEO_DUMMY_SAVE_FRAMES=1\nSDL_VIDEO_OFFSCREEN_SAVE_FRAMES=1\nSDL_AUDIO_DRIVER=disk\n"
             "SDL_AUDIODRIVER=pulseaudio,disk\nSDL_VIDEODRIVER=x11\nRX_VK_FRAME_TRACE=1\n", encoding="utf-8")
         (tmp / "test_env.txt").write_text("# a test run's own switches\nHOS_T_OTHER=1\nHOS_T_SHARED=other\n"
-                                          "VK_T_LAYER=/y\n", encoding="utf-8")
+                                          "VK_T_LAYER=/y\nRX_VK_DLSS_DIR=" + DLSS_OK + "\n", encoding="utf-8")
         (tmp / "precedence.txt").write_text("HOS_T_LAUNCH=file\nHOS_T_TWICE=first\nHOS_T_FRESH=1\nHOS_T_TWICE=second\n",
                                             encoding="utf-8")
         exe = str(game / "longshot").replace("\\", "\\\\")
@@ -208,7 +206,7 @@ int main(int argc, char **argv) {
     CHECK(is("HOS_INPUT_SCRIPT", NULL) && is("RX_VK_MENU_SCRIPT", NULL));
     CHECK(is("RX_VK_DUMP_NATIVE", NULL) && is("RX_DUMP_IR", NULL) && is("RX_SCREENSHOT", NULL) && is("RX_FLASH_LOG", NULL));
     CHECK(is("HOS_SCAN_DT", NULL) && is("RX_VK_FLASH_DUMPS", NULL) && is("RX_FRAMEGEN_DUMP", NULL));
-    CHECK(is("RX_VK_SKIP_CODE", "2c56,ab") && is("RX_VK_DLSS_DIR", "''' + DLSS_OK.replace("\\", "\\\\") + r'''"));
+    CHECK(is("RX_VK_SKIP_CODE", "2c56,ab") && is("RX_VK_DLSS_DIR", NULL));
     CHECK(is("SDL_VULKAN_LIBRARY", NULL) && is("SDL_VIDEO_EGL_DRIVER", NULL) && is("HOS_T_UP", NULL));
     CHECK(is("SDL_AUDIODRIVER", "pulseaudio") && is("HOS_SAMPLE_FILE", NULL) && is("RX_VK_FRAME_LOG", NULL));
     CHECK(is("SDL_VIDEO_DUMMY_SAVE_FRAMES", NULL) && is("SDL_VIDEO_OFFSCREEN_SAVE_FRAMES", NULL) && is("SDL_AUDIO_DRIVER", NULL));
@@ -226,6 +224,7 @@ int main(int argc, char **argv) {
     setenv("HOS_ENV_FILE", argv[1], 1);            /* a test run's own file, and only that one */
     load_longshot_env();
     CHECK(is("HOS_T_OTHER", "1") && is("HOS_T_SHARED", "other") && is("HOS_T_BESIDE", NULL) && is("VK_T_LAYER", "/y"));
+    CHECK(is("RX_VK_DLSS_DIR", "''' + DLSS_OK.replace("\\", "\\\\") + r'''"));   /* (the test run's file sets it) */
 
     clear();
     setenv("HOS_ENV_FILE", argv[2], 1);            /* a file that is not there: nothing, not the player's switches */
@@ -241,6 +240,11 @@ int main(int argc, char **argv) {
     CHECK(is("HOS_T_LAUNCH", "launch") && is("HOS_T_TWICE", "second") && is("HOS_T_FRESH", "1"));
     load_longshot_env();                           /* (read again in the same run: the same) */
     CHECK(is("HOS_T_LAUNCH", "launch") && is("HOS_T_TWICE", "second") && is("HOS_T_FRESH", "1"));
+    clear();                                       /* (RX_VK_DLSS_DIR set in the environment: the player's file keeps it) */
+    setenv("RX_VK_DLSS_DIR", "launch_ngx", 1);
+    unsetenv("HOS_ENV_FILE");
+    load_longshot_env();
+    CHECK(is("RX_VK_DLSS_DIR", "launch_ngx") && is("HOS_T_BESIDE", "1"));
     printf("PASS: HOS_ENV_FILE replaces longshot_env.txt; unset or empty reads it as before; the player's file sets only the game's switches; the environment goes over the file\n");
     return 0;
 }
