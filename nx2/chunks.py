@@ -631,6 +631,8 @@ def edit_c(gen, stats, supported, whole=True, took=None, jobs=None):
         if lines:
             print("\n".join(lines))
     oot_patches.report(paths, [counts for counts, _ in done], supported)
+    if supported:   # (the pause menu's Recomp Options button: its edits all over the files, or none)
+        oot_patches.apply_pause_menu(gen, lambda fn, items: _each(fn, items, jobs))
     took("patches (%d processes)" % jobs)
     found = [0] * len(oot_patches.OUT_EDITS)
     for here, lines, st in _each(_edit_marks, paths, jobs):
