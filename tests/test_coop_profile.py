@@ -71,6 +71,7 @@ static uint64_t args[8], result;
 #define G32(a) (*(uint32_t *)GP(a))
 #define RET(v) (result = (uint64_t)(v))
 #define R_NOT_MOUNTED 1
+#define R_PATH_NOT_FOUND 0x202
 static const char *gstr(uint64_t a) { return (const char *)(uintptr_t)a; }
 static void save_mounted(const char *p) { if (!strstr(p, "coop-sessions")) exit(13); }
 static int cache_list_pos;
