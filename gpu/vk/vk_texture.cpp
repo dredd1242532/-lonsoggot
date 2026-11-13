@@ -3646,10 +3646,21 @@ void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
         it->second.second = rec_value;
         return;
     }
-    for (auto e = gpu_wrote.lower_bound(lo); e != gpu_wrote.end() && e->first < hi;)   // (ranges it covers)
-        e = e->second.first <= hi ? gpu_wrote.erase(e) : std::next(e);
+    // (the records are kept apart, each part of the memory in one: gpu_wrote_into looks back at only the one record before a
+    // texture, and an older write that a later, smaller one sat inside was missed. One this write lands in keeps what is left
+    // of it before and after, with its own submission)
+    auto e = gpu_wrote.lower_bound(lo);
+    if (e != gpu_wrote.begin() && std::prev(e)->second.first > lo) {
+        const auto [end, value] = std::prev(e)->second;
+        std::prev(e)->second.first = lo;
+        if (end > hi) gpu_wrote[hi] = {end, value};
+    }
+    while (e != gpu_wrote.end() && e->first < hi) {
+        if (e->second.first > hi) gpu_wrote[hi] = e->second;
+        e = gpu_wrote.erase(e);
+    }
     gpu_wrote[lo] = {hi, rec_value};
-    if (gpu_wrote.size() > 65536) gpu_wrote.erase(gpu_wrote.begin());
+    while (gpu_wrote.size() > 65536) gpu_wrote.erase(gpu_wrote.begin());   // (a write inside one adds two)
 }
 /// A finished GPU write into the texture's storage it was not uploaded after (and notes it as seen)
 bool gpu_wrote_into(Texture& tex) {
