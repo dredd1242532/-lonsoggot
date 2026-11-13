@@ -115,6 +115,9 @@ FOLDER_WRITES = ["bin", "image.bin", "longshot_version.txt", "longshot_options.i
                  "longshot_pipeline_states_shipped.bin", "longshot_shaders.bin", "prompts", "ngx", "ffx", "romfs", ".game",
                  ".longshot_exefs", ".longshot_romfs", ".longshot_romfs_checked", ".longshot_romfs_heads",
                  ".longshot_write_check", ".longshot_builder_home"]
+# (of those, the folders the builder writes into: a link at one is refused as at a file, and the README's "Files at a link" names
+# them, since a player could otherwise link romfs to another drive and be stopped without knowing what to move)
+FOLDERS_WRITTEN = ["bin", "romfs", "prompts", "ngx", "ffx", ".game", ".longshot_exefs"]
 
 
 def refuse_written_links(out, launcher_dir="bin"):
@@ -130,9 +133,14 @@ def refuse_written_links(out, launcher_dir="bin"):
             tag = getattr(os.lstat(at), "st_reparse_tag", 0)
         except OSError:
             tag = 0
-        if os.path.islink(at) or (hasattr(os.path, "isjunction") and os.path.isjunction(at)) or tag in LINK_TAGS:
-            fail("%s is a link, which Longshot Builder never makes there: remove it, or choose an empty folder to build into."
-                 % path)
+        if not (os.path.islink(at) or (hasattr(os.path, "isjunction") and os.path.isjunction(at)) or tag in LINK_TAGS):
+            continue
+        if folder == out and name in FOLDERS_WRITTEN:
+            fail("%s is a link, which Longshot Builder never makes there: it writes into the %s folder, and would write wherever "
+                 "the link points. To keep %s on another drive (an SD card), move the whole game folder there and build into it "
+                 "instead; or remove the link, or choose an empty folder to build into." % (path, name, name))
+        fail("%s is a link, which Longshot Builder never makes there: remove it, or choose an empty folder to build into."
+             % path)
 
 
 def check_writable(out):

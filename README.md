@@ -256,8 +256,11 @@ The build reads your game and never changes it.
   build; **Free up space** in the launcher's settings deletes them later. Their folder can be moved there before a build
   (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
 - **Files at a link:** the game does not write through a symbolic link (or, on Windows, a junction) at the name of a
-  file it writes itself, such as `longshot_options.ini`, `mouse_sens.txt` or a pipeline cache: it leaves the file as it
-  is and says so once in the log. To keep these files elsewhere, link the folder that holds them, not the file.
+  file it writes itself, such as `longshot_options.ini`, `mouse_sens.txt`, `longshot_log.txt` or a pipeline cache: it
+  leaves the file as it is and says so once in the log. Longshot Builder stops when a name it writes in the game folder
+  is a link, the folders `bin`, `romfs`, `prompts`, `ngx`, `ffx`, `.game` and `.longshot_exefs` included. To keep the
+  game, or its `romfs`, on another drive (an SD card), move the whole game folder there and build into it, or link the
+  game folder itself; a link to the `user` folder (the saves) is fine.
 - **Uninstall:** uninstall the launcher (Windows: *Apps & features*), then delete its folder, the game folder and the
   shortcuts.
 

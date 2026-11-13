@@ -192,6 +192,18 @@ class GameFolderLinks(unittest.TestCase):
                     if rel == "bin":
                         os.rename(self.root / "bin-real", game / "bin")
         self.assertEqual(victim.read_bytes(), b"victim")
+        # (a folder it writes into, linked elsewhere: the error names it and says what to move; the README names each)
+        os.symlink(self.root, game / "romfs")
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said), self.assertRaises(SystemExit):
+            make_game.refuse_written_links(str(game))
+        (game / "romfs").unlink()
+        self.assertIn("writes into the romfs folder", said.getvalue())
+        self.assertIn("move the whole game folder there", said.getvalue())
+        self.assertLessEqual(set(make_game.FOLDERS_WRITTEN), set(make_game.FOLDER_WRITES))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        files_at_a_link = readme[readme.index("- **Files at a link:**"):readme.index("- **Uninstall:**")]
+        self.assertEqual([f for f in make_game.FOLDERS_WRITTEN if "`%s`" % f not in files_at_a_link], [])
         # (WSL's links: a tag islink does not see)
         import stat as st
         from types import SimpleNamespace
