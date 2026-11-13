@@ -521,10 +521,11 @@ bool memory_table_flush() {
     table_defer = false;
     if (table_pending.empty()) return false;
     std::vector<std::pair<uint64_t, uint64_t>> pages;   // (page, value), in the order they were set
-    // (longshot) a heap that has no room left (Windows' commit limit: #2941, 32 GB of RAM with a 2 GB page file, Longshot at 24 GB
-    // as Hyrule Field loaded) threw std::bad_alloc here, on the presenting thread, and nothing between it and the game's code
-    // catches: the game closed. Then the changes are written into the table at once, as RX_VK_TABLE_NOW does: work submitted
-    // before may read them early, against the game closing
+    // (longshot) a heap that has no room left (Windows' commit limit: https://github.com/NotRexed/Hookshot/pull/2941,
+    // 32 GB of RAM with a 2 GB page file, Longshot at 24 GB as Hyrule Field loaded) threw std::bad_alloc here, on the
+    // presenting thread, and nothing between it and the game's code catches: the game closed. Then the changes are
+    // written into the table at once, as RX_VK_TABLE_NOW does: work submitted before may read them early, against the
+    // game closing
     try {
         size_t n = 0;
         for (const TableRun& r : table_pending) n += r.count;

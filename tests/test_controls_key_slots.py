@@ -1,7 +1,8 @@
 """The Insert menu's Controls page gives each control two key cells, Key 1 and Key 2, one for each of the host's two key slots
-(issue #2885). Binding or clearing one cell changes its own slot and leaves the other key: before, a new key went into the first
-slot and cleared the second, so a control bound by default to two keys kept one after any rebind, and no second key could be
-given back. The page's key branches are cut from gpu/vk/vk_menu.cpp and compiled against a host that records the bindings.
+(issue https://github.com/NotRexed/Hookshot/issues/2885). Binding or clearing one cell changes its own slot and leaves
+the other key: before, a new key went into the first slot and cleared the second, so a control bound by default to two
+keys kept one after any rebind, and no second key could be given back. The page's key branches are cut from
+gpu/vk/vk_menu.cpp and compiled against a host that records the bindings.
 
     python -I -B tests/test_controls_key_slots.py [--cxx g++]
 """

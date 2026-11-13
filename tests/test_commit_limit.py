@@ -65,8 +65,9 @@ def main():
     refused = block(glue, "static void commit_refused(uint64_t lo, uint64_t size, DWORD err)")
     if "hos_out_of_memory_box" not in refused:
         raise SystemExit("FAIL: commit_refused does not show the out-of-memory notice")
-    # (#2941: std::bad_alloc on the presenting thread, in the page table's flush, closed the game: the flush writes the changes
-    # at once when its list cannot be made, and the renderer keeps a reserve that operator new's handler gives back)
+    # (https://github.com/NotRexed/Hookshot/pull/2941: std::bad_alloc on the presenting thread, in the page table's
+    # flush, closed the game: the flush writes the changes at once when its list cannot be made, and the renderer keeps
+    # a reserve that operator new's handler gives back)
     mem = (ROOT / "gpu" / "vk" / "vk_memory.cpp").read_text(encoding="utf-8")
     flush = block(mem, "bool memory_table_flush()")
     if "catch (const std::bad_alloc&)" not in flush or "guest_pages[r.first + i] =" not in flush.split("catch (const std::bad_alloc&)")[1]:

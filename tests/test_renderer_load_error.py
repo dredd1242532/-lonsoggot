@@ -3,7 +3,8 @@
 longshot_vk.so is opened with RTLD_NOW and takes symbols from the executable, so one from another build fails at dlopen,
 before mkwvk_init's version check, and the game falls back to WebGPU. The POSIX LoadLibraryA kept only
 ERROR_FILE_NOT_FOUND, so the log said "(2)" for that and for a missing file alike. It now keeps dlerror()'s text, which
-names the file or the symbol, and load_vulkan prints it (the dev-loop proposal's B1, #2636).
+names the file or the symbol, and load_vulkan prints it (the dev-loop proposal's B1,
+https://github.com/NotRexed/Hookshot/pull/2636).
 
 Everywhere: the source does so. On Linux it also builds host/posix/win32_posix.c as it is and loads, through
 LoadLibraryA, a .dll name with no library behind it, a library that needs a symbol nothing has, then a good one.

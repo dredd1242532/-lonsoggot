@@ -314,12 +314,13 @@ static bool commit_headroom(uint64_t* free_bytes) {
 #endif
 }
 // (longshot) and a reserve of commit for the renderer's own heap: at Windows' commit limit an allocation failed on the presenting
-// thread (#2941: std::bad_alloc in the page table's flush as Hyrule Field loaded, 32 GB of RAM with a 2 GB page file) and the
-// exception left the renderer for the game's code, which nothing catches: the game closed. The commit rule above shrinks the
-// textures only on its next pass, and a wait would not help where the presenting thread itself is short. So 128 MB is held
-// committed while there is room; the first allocation that fails gives it back (operator new's handler) and is tried again; the
-// commit rule then sees the headroom gone and the textures make room, and the reserve is held again once the headroom is back
-// above the rule's reserve. Windows only (Linux overcommits); RX_VK_COMMIT_RESERVE_MB=0 turns it off with the rule
+// thread (https://github.com/NotRexed/Hookshot/pull/2941: std::bad_alloc in the page table's flush as Hyrule Field
+// loaded, 32 GB of RAM with a 2 GB page file) and the exception left the renderer for the game's code, which nothing
+// catches: the game closed. The commit rule above shrinks the textures only on its next pass, and a wait would not help
+// where the presenting thread itself is short. So 128 MB is held committed while there is room; the first allocation
+// that fails gives it back (operator new's handler) and is tried again; the commit rule then sees the headroom gone and
+// the textures make room, and the reserve is held again once the headroom is back above the rule's reserve. Windows
+// only (Linux overcommits); RX_VK_COMMIT_RESERVE_MB=0 turns it off with the rule
 namespace {
 constexpr size_t kOomReserve = 128u << 20;
 std::atomic<void*> oom_block{nullptr};
