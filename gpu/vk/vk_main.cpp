@@ -20,6 +20,7 @@
 #include "vk_api.h"
 #include "vk_draw.h"
 #include "vk_framegen.h"
+#include "vk_anr.h"
 #include "vk_internal.h"
 #include "presenter_queue.h"
 static_assert(mkwvk::kQueueGraphics == VK_QUEUE_GRAPHICS_BIT && mkwvk::kQueueCompute == VK_QUEUE_COMPUTE_BIT);
@@ -1574,6 +1575,7 @@ void mkwvk_close_asked(void) {
         if (WaitForSingleObject(prep_ended, 10000) != WAIT_OBJECT_0) logf("vk: the preparation did not stop within 10 s: closing anyway");
     }
     dlss_fg_close();   // (NVIDIA DLSS Frame Generation through NGX: its feature let go before the process exits, vk_dlss.cpp)
+    anr_fg_close();
 }
 
 extern "C"

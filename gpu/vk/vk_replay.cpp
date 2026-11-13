@@ -39,6 +39,7 @@
 #include "vk_paths.h"   // (game_module_path: the frame trace beside the game)
 #include "vk_gprof.h"
 #include "vk_framegen.h"
+#include "vk_anr.h"
 #include "vk_dlss.h"   // (longshot: dlss_fg_idle)
 #include "vk_fps.h"
 #include "vk_menu.h"
@@ -3961,7 +3962,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             submit_recording(g, false);
         }
         // (frame generation at Off or Auto, where DLSS-G is not asked: its feature, if made, let go, vk_dlss.cpp)
-        if (swapchain_framegen() < 2) dlss_fg_idle();
+        if (swapchain_framegen() < 2 || anr_fg_selected()) dlss_fg_idle();
+        anr_fg_idle();   // (a different provider or Off releases ANR's history, never loading it)
         if (interpolated) {   // (NVIDIA Reflex: the game frame's rendering is submitted; the display thread presents it later)
             reflex_game_submitted();
             framegen_queue(value);

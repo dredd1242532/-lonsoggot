@@ -21,7 +21,7 @@ using VmaAllocation = void*;
 constexpr int kMaxMult = 8;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 /* ACTUAL_STATE */
-struct { int framegen = 2, hdr_white = 200, hdr_peak = 1000, hdr_contrast = 100; } opts;
+struct { int framegen = 2, framegen_by = 0, hdr_white = 200, hdr_peak = 1000, hdr_contrast = 100; } opts;
 struct { bool push_descriptor = true; std::mutex present_mu; } dev;
 constexpr bool vkCmdPushDescriptorSetKHR = true;
 constexpr uint32_t HDR_ENCODE_COMP_SPV[] = {0};
@@ -36,13 +36,20 @@ float hdr_uv[4]{};
 int blits = 0, clears = 0, initializations = 0, sizes = 0, dispatches = 0, copies = 0;
 uint32_t allocated_w = 0, allocated_h = 0;
 namespace fsr3fi { bool wanted = false; bool frames_wanted() { return wanted; } }
-// (NVIDIA DLSS Frame Generation through NGX, vk_dlss.cpp: not asked for here, so the sets are the renderer's own)
+int dlss_calls = 0, dlss_result = 0, anr_calls = 0, anr_result = 1;
+bool anr_fg_selected() { return opts.framegen_by == 2; }
+int anr_fg_frames(VkCommandBuffer, VkImage, VkImageView, uint32_t w, uint32_t h, int count,
+                  const VkImage*, const VkImageView*, bool, uint64_t sequence) {
+    CHECK(w == allocated_w && h == allocated_h && count == fg.mult - 1 && sequence > 0);
+    ++anr_calls; return anr_result;
+}
+// (DLSS's own selection remains its backend's; this spy distinguishes Auto, Built-in and ANR routing)
 bool dlss_fg_wanted() { return false; }
 int dlss_fg_frames(VkCommandBuffer, VkImage, VkImageView, uint32_t, uint32_t, int, const VkImage*, const VkImageView*, bool,
-                   uint64_t) { return 0; }   // (asked every present at 2x and up: makes none here)
+                   uint64_t) { ++dlss_calls; return opts.framegen_by == 0 ? dlss_result : 0; }
 uint64_t reflex_frame() { return 0; }   // (vk_reflex.cpp: NVIDIA Reflex not on here)
 // (who made each set's frames, for the Insert menu's Frame generation by row: the last one noted)
-enum class FgMaker { None, BuiltIn, Dlss, Fsr3 };
+/* ACTUAL_MAKER */
 FgMaker last_maker = FgMaker::Dlss;
 void note_maker(FgMaker m) { last_maker = m; }
 uint64_t antilag_frame() { return 0; }   // (vk_antilag.cpp: AMD Anti-Lag 2 not on here)
@@ -63,7 +70,7 @@ void vkCmdClearColorImage(VkCommandBuffer, VkImage, VkImageLayout, const VkClear
     CHECK(c->float32[0] == 0 && c->float32[1] == 0 && c->float32[2] == 0 && c->float32[3] == 1); ++clears;
 }
 bool init() { ++initializations; return true; }
-int multiplier() { return 2; }
+int multiplier() { return opts.framegen == 1 ? 2 : opts.framegen; }
 bool ensure_size(VkCommandBuffer, uint32_t w, uint32_t h) {
     // (the sets are made for the row's multiplier, which framegen_record then takes from fg.mult, as the real one)
     ++sizes; allocated_w = w; allocated_h = h; fg.mult = multiplier(); return true;
@@ -84,11 +91,18 @@ void vkCmdCopyImage(VkCommandBuffer, VkImage, VkImageLayout, VkImage, VkImageLay
     CHECK(count == 1 && c->extent.width == allocated_w && c->extent.height == allocated_h); ++copies;
 }
 /* ACTUAL_FUNCTIONS */
+bool record(uint32_t sw, uint32_t sh, const int* crop) {
+    const bool made = framegen_record(nullptr, 1, sw, sh, crop);
+    if (fg.recorded) fg.recorded->busy = false;   // The fixture's display consumer has finished this set.
+    return made;
+}
 void reset() {
     fg.~State(); new (&fg) State;
     fg.thread_started = true;
     blits = clears = initializations = sizes = dispatches = copies = 0;
     allocated_w = allocated_h = 0;
+    opts.framegen = 2; opts.framegen_by = 0;
+    dlss_calls = dlss_result = anr_calls = 0; anr_result = 1;
     fsr3fi::wanted = false; fsr_calls = 0; fsr_result = 1;
     std::memset(copy_pc, 0, sizeof copy_pc);
 }
@@ -106,7 +120,7 @@ void check(uint32_t sw, uint32_t sh, const int* crop, uint32_t x, uint32_t y, ui
     blit_crop(nullptr, 1, sw, sh, crop, 2, VK_IMAGE_LAYOUT_GENERAL, 320, 180);
     CHECK(blits == int(valid) && clears == int(!valid));
     if (valid) CHECK(last_blit.dstOffsets[0].x == 0 && last_blit.dstOffsets[1].x == 320);
-    const bool recorded = framegen_record(nullptr, 1, sw, sh, crop);
+    const bool recorded = record(sw, sh, crop);
     CHECK(recorded == valid && initializations == int(valid) && sizes == int(valid));
     if (valid) {
         CHECK(allocated_w == w && allocated_h == h && dispatches == 2 && copies == 1);
@@ -114,17 +128,36 @@ void check(uint32_t sw, uint32_t sh, const int* crop, uint32_t x, uint32_t y, ui
         CHECK(copy_pc[0] == int(x) && copy_pc[1] == int(y) && copy_pc[2] == int(w) && copy_pc[3] == int(h));
         // Newly merged FSR3 receives the same validated extent; fallback still uses the shared crop.
         fsr3fi::wanted = true;
-        CHECK(framegen_record(nullptr, 1, sw, sh, crop) && fsr_calls == 1 && fg.recorded->made == 1);
+        CHECK(record(sw, sh, crop) && fsr_calls == 1 && fg.recorded->made == 1);
         CHECK(dispatches == 4 && copies == 2 && last_maker == FgMaker::Fsr3);
         fsr_result = 0;
-        CHECK(framegen_record(nullptr, 1, sw, sh, crop) && fsr_calls == 2 && fg.recorded->made == 1);
+        CHECK(record(sw, sh, crop) && fsr_calls == 2 && fg.recorded->made == 1);
         CHECK(last_maker == FgMaker::BuiltIn);   // (FSR 3.1 made none: the renderer's own did)
         CHECK(dispatches == 9 && copies == 3);
         CHECK(copy_pc[0] == int(x) && copy_pc[1] == int(y) && copy_pc[2] == int(w) && copy_pc[3] == int(h));
+        // ANR takes the same cropped extent, and only an actually made set is labelled ANR.
+        opts.framegen_by = 2; dlss_result = 1;
+        const int old_dlss = dlss_calls, old_fsr = fsr_calls, old_dispatch = dispatches, old_copies = copies;
+        CHECK(record(sw, sh, crop));
+        CHECK(anr_calls == 1 && dlss_calls == old_dlss && fsr_calls == old_fsr);
+        CHECK(fg.recorded->made == 1 && last_maker == FgMaker::Anr);
+        CHECK(dispatches == old_dispatch + 2 && copies == old_copies + 1);
+        anr_result = 0;
+        CHECK(record(sw, sh, crop));
+        CHECK(anr_calls == 2 && dlss_calls == old_dlss && fsr_calls == old_fsr);
+        CHECK(fg.recorded->made == 1 && last_maker == FgMaker::BuiltIn);
+        CHECK(dispatches == old_dispatch + 7 && copies == old_copies + 2);
+        // Returning to the pre-existing choices retains their routing.
+        fsr3fi::wanted = false; opts.framegen_by = 0;
+        CHECK(record(sw, sh, crop) && last_maker == FgMaker::Dlss);
+        CHECK(anr_calls == 2 && dlss_calls == old_dlss + 1 && fsr_calls == old_fsr);
+        opts.framegen_by = 1;
+        CHECK(record(sw, sh, crop) && last_maker == FgMaker::BuiltIn);
+        CHECK(anr_calls == 2 && dlss_calls == old_dlss + 2 && fsr_calls == old_fsr);
     } else {
-        CHECK(dispatches == 0 && copies == 0 && !fg.recorded);
+        CHECK(dispatches == 0 && copies == 0 && !fg.recorded && anr_calls == 0);
         fsr3fi::wanted = true; fg.have_prev = true;
-        CHECK(!framegen_record(nullptr, 1, sw, sh, crop) && fsr_calls == 0);
+        CHECK(!record(sw, sh, crop) && fsr_calls == 0);
         CHECK(dispatches == 0 && copies == 0 && !fg.recorded);
     }
     // Execute the actual HDR consumer, keeping resources ready to isolate source validation.
@@ -160,5 +193,8 @@ int main() {
     }
     reset(); blit_crop_to_rect(nullptr, 1, 640, 480, nullptr, 2, VK_IMAGE_LAYOUT_GENERAL, {0, 0, 0, 100});
     CHECK(blits == 0 && clears == 0);
-    std::puts("PASS: presentation/capture/interpolation source crops agree; invalid input clears or skips, no signed overflow");
+    reset(); opts.framegen = 1; opts.framegen_by = 2;
+    CHECK(record(640, 480, nullptr));
+    CHECK(anr_calls == 0 && dlss_calls == 0 && fsr_calls == 0 && last_maker == FgMaker::None);
+    std::puts("PASS: crops/HDR/fuzz agree; ANR success names its maker, refusal uses Built-in, Auto/Built-in retain their routes");
 }

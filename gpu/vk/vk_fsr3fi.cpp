@@ -664,6 +664,7 @@ bool capable() {
 }
 
 uint32_t frames_wanted() {
+    if (opts.framegen_by == 2) return 0;   // The explicitly selected ANR provider owns these frames.
     // (the row first: a device is not asked anything, and nothing is logged, while frame generation is not at 2x)
     return asked() && capable() ? 1u : 0u;
 }

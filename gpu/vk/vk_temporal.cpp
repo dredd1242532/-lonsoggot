@@ -40,6 +40,7 @@
 // in it); =alternate: every other frame the game's own upscale (a test's reference beside the engine's). (The names are
 // DLSS's from before FSR came: they apply to every engine of the chain, FSR 3.1 on it too.)
 #include "vk_temporal.h"
+#include "vk_anr.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1141,6 +1142,7 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
     // (NVIDIA DLSS Frame Generation through NGX, vk_dlss.cpp: this frame's depth, motion and camera for the present's made
     // frames. Nothing unless the run asked for it)
     dlss_fg_inputs(cmd, f, cam.projection, cam.current, cam.jitter, motion);
+    anr_fg_inputs(cmd, f, cam.projection, cam.current, cam.jitter, motion);
     s.last_frame = now;
     s.drawn_mode = draw_mode;
     s.last_jitter[0] = cam.jitter[0], s.last_jitter[1] = cam.jitter[1];

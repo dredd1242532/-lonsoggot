@@ -626,7 +626,7 @@ bool fg_possible() {
 /// while the game runs)
 bool fg_asked() {
     static const bool forced = env_switch("RX_VK_DLSS_FG") > 0;
-    return fg_possible() && (forced || opts.framegen_by == 0);
+    return opts.framegen_by != 2 && fg_possible() && (forced || opts.framegen_by == 0);
 }
 
 /// A 4x4 inverse in doubles (a float one of a projection with a far plane in the thousands loses what reprojection needs)

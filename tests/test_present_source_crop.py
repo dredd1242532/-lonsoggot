@@ -31,7 +31,9 @@ def main():
     functions = "\n".join([block(replay, "void blit_crop_to_rect("), block(replay, "void blit_crop("),
                            block(fg, "bool framegen_record("), block(fg, "VkImage framegen_hdr(")])
     template = (ROOT / "tests/present_source_crop_test.cpp").read_text(encoding="utf-8")
+    maker = block((a.source / "gpu/vk/vk_framegen.h").read_text(encoding="utf-8"), "enum class FgMaker {") + ";"
     fixture = template.replace("/* ACTUAL_STATE */", structs).replace("/* ACTUAL_FUNCTIONS */", functions)
+    fixture = fixture.replace("/* ACTUAL_MAKER */", maker)
     with tempfile.TemporaryDirectory(prefix="present-source-crop-") as temp:
         cpp, exe = Path(temp) / "fixture.cpp", Path(temp) / "fixture.exe"
         cpp.write_text(fixture, encoding="utf-8")

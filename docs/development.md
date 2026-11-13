@@ -575,6 +575,7 @@ number is not the obvious one:
 | `quality_preset` | 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+) |
 | `gpu_device` | 0 Auto, n the n-th card with Vulkan 1.3 as the row lists them |
 | `frame_generation` | 0 Off, 2 to 8 the multiplier |
+| `frame_generation_by` | 0 Auto (unchanged), 1 Built-in FG, 2 ANR (experimental optional Windows x64 provider); applies immediately |
 | `resolution` | 0 Auto, 1 100%, 2 75%, 3 67%, 4 50% |
 | `output_res` | A size, `<width>x<height>`: 2048x1152 (the game's own), one of the screen's display modes (the menu's Aspect ratio and Output resolution rows), or any other with each side a multiple of 8 (rounded down), at least 640x360, at most 5120x2880's pixels, 5:4 to 48:9; anything else is the game's own. A size more than 1 % off 16:9 sets the picture's shape (`host/hos_wide_size.h` `hos_output_own_shape`). The Aspect ratio row saves `ultrawide=` 1 for the monitor's own shape, else 0; another shape is `output_res`'s own. The numbers saved before (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, 5 5120x2880) are still read |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
@@ -588,6 +589,24 @@ number is not the obvious one:
 | `microphone` | 0 Off, 1 Default, 2 and up a microphone (the name in `microphone_device` decides which) |
 | `mouse_camera` | 0 As the stick, 1 Native, 2 Off (the mouse is never captured) |
 | `layout_preset` | 0 Nintendo, 1 Xbox / PC, 2 Swap Face, 3 Custom |
+
+ANR is loaded only for `frame_generation_by=2` with a fixed multiplier (`frame_generation>=2`) and current temporal
+upscaler inputs. The optional package lives in `<game>/anr/`: `nvngx_dlssg.dll`, `nr_fg.ini`, `path_table.json`,
+`size_table.json` and the complete model/kernel tree from the official addon. Nothing is downloaded or bundled.
+The original loader in `gpu/vk/vk_anr.cpp` binds the provider's Vulkan exports directly, without NVIDIA's NGX core or
+its RTX gates; `anr_parameters.h` implements the published parameter ABI with an MSVC-layout table verified against
+an original MSVC-ABI mock provider from a MinGW host. NVIDIA's SDK and ANR's implementation are not vendored.
+
+The temporal chain copies owned depth/motion inputs for ANR; the present passes the finished cropped RGBA8 picture
+and the renderer's existing output images. ANR records into the same Vulkan command buffer; the renderer retains
+submission, output lifetime, presentation and pacing. A new scene, render size, output size or skipped sequence primes
+the provider's history; its reset output is not counted as a generated frame. Only a complete successful evaluation
+set is labeled ANR. The built-in GPU generator handles missing inputs, unsupported counts, failure and Native HDR,
+with the current reason in the menu and log. Off, Auto and Built-in FG do not load the provider. Linux keeps the
+existing generator and reports that this optional provider is unavailable. This adapter initially targets the
+[ANR FG-V.B15 provider](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15); binary/model redistribution terms
+have not been established, so keep the package external. Live provider output and performance require local GPU
+validation; neither the parameter ABI fixture nor the menu choice establishes those results.
 
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`

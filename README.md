@@ -391,7 +391,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS or FSR 4: Auto, Native (DLAA or FSR 4 Native AA: the 3D at full size), 92%, 83%, 75%, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With FSR 3.1: Auto, 100% (its native AA), then the same as DLSS from 92%. With Off: Auto, 100%, 75%, 67%, 50%, 33% | Auto; a quality preset sets it |
 | | Sharpness | 0 to 100%, in steps of 10 | 0%; a quality preset sets it |
 | | Frame generation | Off, Auto, 2x to 8x | Off |
-| | Frame generation by | Auto (NVIDIA DLSS Frame Generation where it runs: RTX 40 and newer, with a temporal Upscaler; else the built-in one; with frame generation on, the row shows who makes the frames, as Auto: DLSS FG, and why not DLSS FG when another does), Built-in FG. Changes at once | Auto |
+| | Frame generation by | Auto (NVIDIA DLSS Frame Generation where it runs: RTX 40 and newer, with a temporal Upscaler; else the built-in one; with frame generation on, the row shows who makes the frames, as Auto: DLSS FG, and why not DLSS FG when another does), Built-in FG, ANR (experimental, optional Windows x64 provider). Changes at once; the row names the generator actually making frames | Auto |
 | | Frame pacing | Off, On | Off; a quality preset turns it on |
 | | Game frame rate cap | 60 (the console's), 90, 120, 144, 165, 240, Uncapped (changes at once) | 60 |
 | | NVIDIA Reflex | Off, On, On + Boost (shown only on NVIDIA GPUs with `VK_NV_low_latency2`) | Off |
@@ -474,6 +474,17 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   show artifacts. The renderer's own interpolation makes the frames; at 2x, AMD FSR 3.1's frame interpolation can make
   it instead with `RX_VK_FSR_FG=1` (below: it moves the HUD with the scene, so it is not the default). **Frame pacing** shows frames at an even interval: less stutter, up to one frame of delay. It paces
   the frames that frame generation shows, so it has no effect while Frame generation is Off.
+- **ANR (experimental)** is an optional choice in **Frame generation by** on Windows x64. Install the contents of the
+  `dlssg` folder from the official [ANR FG addon](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15) into an `anr`
+  folder beside `image.bin`: keep its DLL, configuration, tables and all model/kernel subfolders together. The addon
+  is supplied separately; Longshot includes no ANR binaries or models and does not run its installer or replace the
+  normal frame generator. Choose a fixed multiplier, starting with **2x**, and a temporal Upscaler (FSR 3.1, DLSS or
+  FSR 4) to provide the scene's depth and motion. The provider's reported limit controls which multipliers it can make.
+  Native HDR and the Frame generation row's Auto use the built-in GPU generator. A missing package, unavailable inputs
+  or a refused frame also uses the built-in generator; the row and its help show that fallback and its reason.
+  **ANR FG** in the FPS counter means the provider made the frames, not merely that it was selected. Cuts and size
+  changes reset its history. This is experimental: HUD and fast-motion artifacts can remain. Choose Auto or Built-in
+  FG to return to the normal generator. The game's base FPS remains separate from generated frames.
 - **Game frame rate cap** limits the frames the game renders. With a cap of 60 and Frame generation at 2x, the output
   can reach 120 FPS. Choose **Auto** in Frame generation to target the display's refresh rate instead of a fixed multiplier.
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can

@@ -11,7 +11,7 @@ bool framegen_on();
 bool framegen_record(VkCommandBuffer cmd, VkImageView src, uint32_t sw, uint32_t sh, const int crop[4]);
 /// (longshot) Who made the made frames of the sets shown lately (the last 64, about a second at 60): what the Insert menu's
 /// Frame generation by row and the FPS counter name. None: none made (Off, nothing to blend from, none for half a second)
-enum class FgMaker { None, BuiltIn, Dlss, Fsr3 };
+enum class FgMaker { None, BuiltIn, Dlss, Fsr3, Anr };
 FgMaker framegen_maker();
 /// The first frame the last framegen_record made (null when it made none), w x h, GENERAL
 VkImage framegen_made_image(uint32_t* w, uint32_t* h);
