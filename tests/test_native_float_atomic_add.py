@@ -12,7 +12,9 @@ it, and without descriptor aliasing (no f32 view to add through). Each must pass
 OpAtomicFAddEXT and no compare-exchange, the others the loop and no float-add capability. The device's half (the
 extension asked for only when wanted, only that feature on, the profile and the program cache's stamp) and the
 global-address fallback are checked in the source. Whether it is wanted (native_fadd_wanted, vk_main.cpp) is compiled
-alone against a table: unset, NVIDIA's and Intel's Windows drivers (not RADV, AMD's, Mesa's Intel driver or NVK); set,
+alone against a table: unset, NVIDIA's driver, and Intel's Windows driver on the Meteor Lake and Arrow Lake iGPUs (PCI
+device 0x7Dxx) from driver 101.9175 on, the family and driver it was run on (not Intel's other GPUs, older drivers, RADV,
+AMD's, Mesa's Intel driver or NVK); set,
 RX_VK_NATIVE_FADD by #2042's rule on any driver, so =on is on and =off, =false, =no and empty are off. Nothing runs on a
 GPU.
 
@@ -188,8 +190,8 @@ def check_source():
         ("if (fadd_wanted) optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, atomic_float);",
          "VK_EXT_shader_atomic_float is not asked for, or is asked for where the native add is not wanted"),
         ('getenv("RX_VK_NATIVE_FADD")', "RX_VK_NATIVE_FADD is not read"),
-        ("const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID);",
-         "the native add is not decided by native_fadd_wanted from the switch and the driver"),
+        ("const bool fadd_wanted = native_fadd_wanted(fadd_env, fadd_driver.driverID, dev.props.deviceID, dev.props.driverVersion);",
+         "the native add is not decided by native_fadd_wanted from the switch, the driver, the GPU and its driver's version"),
         ("vkGetPhysicalDeviceProperties2(dev.physical, &p2);\n    }\n    const bool fadd_wanted",
          "the driver is not asked who it is before the native add is decided"),
         ("if (atomic_float) *tail = &afloat, tail = &afloat.pNext;", "the atomic float features are not queried"),
@@ -218,31 +220,42 @@ def check_source():
         raise SystemExit("FAIL: programs made with OpAtomicFAddEXT stay in the program cache for a GPU without it")
 
 
-# RX_VK_NATIVE_FADD's value (None: unset), the driver (VkDriverId: the Vulkan specification's numbers), and whether the
-# float add is then asked to be the GPU's own: unset, NVIDIA's and Intel's Windows drivers; set, #2042's rule
+# RX_VK_NATIVE_FADD's value (None: unset), the driver (VkDriverId: the Vulkan specification's numbers), the GPU (PCI
+# device), its driver's version (Intel's Windows encoding: 101.9175 is 101 << 14 | 9175), and whether the float add is then
+# asked to be the GPU's own: unset, NVIDIA's driver and Intel's Windows driver on 0x7Dxx from 101.9175; set, #2042's rule
 # (longshot_env.h env_value_off) whatever the driver
 DRIVERS = {"AMD_PROPRIETARY": 1, "MESA_RADV": 3, "NVIDIA_PROPRIETARY": 4, "INTEL_PROPRIETARY_WINDOWS": 5,
            "INTEL_OPEN_SOURCE_MESA": 6, "MESA_NVK": 24}
-NATIVE_BY_DEFAULT = ("NVIDIA_PROPRIETARY", "INTEL_PROPRIETARY_WINDOWS")
-SWITCH_CASES = ([(None, d, 1) for d in NATIVE_BY_DEFAULT] +
-                [(None, d, 0) for d in DRIVERS if d not in NATIVE_BY_DEFAULT] +
-                [(v, d, 1) for v in ("1", "on", "yes", "true", "2") for d in ("MESA_RADV", "NVIDIA_PROPRIETARY")] +
-                [(v, "AMD_PROPRIETARY", 1) for v in ("1", "on")] + [("1", "INTEL_OPEN_SOURCE_MESA", 1)] +
-                [(v, "NVIDIA_PROPRIETARY", 0) for v in ("0", " 0 ", "off", "OFF", "false", "no", "")] +
-                [("0", "MESA_RADV", 0), ("off", "AMD_PROPRIETARY", 0), ("0", "INTEL_PROPRIETARY_WINDOWS", 0)])
+MEASURED = 101 << 14 | 9175
+MTL, ARL, LNL, IRIS_XE, ARC_A770, BMG = 0x7D55, 0x7D51, 0x64A0, 0x9A49, 0x56A0, 0xE20B
+INTEL_WIN = "INTEL_PROPRIETARY_WINDOWS"
+SWITCH_CASES = ([(None, "NVIDIA_PROPRIETARY", 0x2684, 0, 1)] +
+                [(None, INTEL_WIN, MTL, MEASURED, 1), (None, INTEL_WIN, ARL, MEASURED + 100, 1),
+                 (None, INTEL_WIN, MTL, 101 << 14 | 9174, 0), (None, INTEL_WIN, MTL, 101 << 14 | 6000, 0)] +
+                [(None, INTEL_WIN, g, MEASURED, 0) for g in (LNL, IRIS_XE, ARC_A770, BMG)] +
+                [(None, d, MTL, MEASURED, 0) for d in DRIVERS if d not in ("NVIDIA_PROPRIETARY", INTEL_WIN)] +
+                [(v, d, 0, 0, 1) for v in ("1", "on", "yes", "true", "2") for d in ("MESA_RADV", "NVIDIA_PROPRIETARY")] +
+                [(v, "AMD_PROPRIETARY", 0, 0, 1) for v in ("1", "on")] + [("1", "INTEL_OPEN_SOURCE_MESA", MTL, 0, 1)] +
+                [("1", INTEL_WIN, IRIS_XE, 0, 1)] +
+                [(v, "NVIDIA_PROPRIETARY", 0, 0, 0) for v in ("0", " 0 ", "off", "OFF", "false", "no", "")] +
+                [("0", "MESA_RADV", 0, 0, 0), ("off", "AMD_PROPRIETARY", 0, 0, 0), ("0", INTEL_WIN, MTL, MEASURED, 0)])
 SWITCH_FIXTURE = r"""
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 enum VkDriverId { @@DRIVERS@@ };
 @@WANTED@@
 int main(int argc, char** argv) {
-    for (int i = 1; i + 2 < argc; i += 3) {   // (argv: value or -unset, the driver's number, 1 native or 0 the loop, ...)
+    // (argv: value or -unset, the driver's number, the PCI device, the driver's version, 1 native or 0 the loop, ...)
+    for (int i = 1; i + 4 < argc; i += 5) {
         const char* v = strcmp(argv[i], "-unset") ? argv[i] : nullptr;
         const VkDriverId driver = static_cast<VkDriverId>(atoi(argv[i + 1]));
-        if (native_fadd_wanted(v, driver) != (atoi(argv[i + 2]) != 0)) {
-            printf("FAIL: RX_VK_NATIVE_FADD=[%s], driver %d: %s\n", v ? v : "(unset)", static_cast<int>(driver),
-                   native_fadd_wanted(v, driver) ? "native" : "the loop");
+        const uint32_t device = (uint32_t)strtoul(argv[i + 2], nullptr, 0), version = (uint32_t)strtoul(argv[i + 3], nullptr, 0);
+        const bool got = native_fadd_wanted(v, driver, device, version);
+        if (got != (atoi(argv[i + 4]) != 0)) {
+            printf("FAIL: RX_VK_NATIVE_FADD=[%s], driver %d, device 0x%04x, version %u.%u: %s\n", v ? v : "(unset)",
+                   static_cast<int>(driver), device, version >> 14, version & 0x3fff, got ? "native" : "the loop");
             return 1;
         }
     }
@@ -263,16 +276,16 @@ def check_switch(cxx, tmp):
         print(r.stdout + r.stderr)
         raise SystemExit("FAIL: native_fadd_wanted did not build alone")
     argv = []
-    for value, driver, want in SWITCH_CASES:
-        argv += ["-unset" if value is None else value, str(DRIVERS[driver]), str(want)]
+    for value, driver, device, version, want in SWITCH_CASES:
+        argv += ["-unset" if value is None else value, str(DRIVERS[driver]), hex(device), str(version), str(want)]
     r = subprocess.run([str(exe), *argv], capture_output=True, text=True, timeout=30)
     if r.returncode:
         print(r.stdout + r.stderr)
-        raise SystemExit("FAIL: the native float add is not wanted as it should be (NVIDIA's and Intel's Windows drivers "
-                         "by default, "
-                         "RX_VK_NATIVE_FADD by the switches' rule)")
-    print("switch: %d cases: unset, NVIDIA's and Intel's Windows drivers; RX_VK_NATIVE_FADD by the switches' rule on "
-          "any driver" % len(SWITCH_CASES))
+        raise SystemExit("FAIL: the native float add is not wanted as it should be (NVIDIA's driver and Intel's Windows "
+                         "driver on Meteor Lake and Arrow Lake from 101.9175 by default, RX_VK_NATIVE_FADD by the "
+                         "switches' rule)")
+    print("switch: %d cases: unset, NVIDIA's driver and Intel's Windows driver on Meteor Lake and Arrow Lake from 101.9175; "
+          "RX_VK_NATIVE_FADD by the switches' rule on any driver" % len(SWITCH_CASES))
 
 
 def main():
