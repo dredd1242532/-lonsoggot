@@ -55,11 +55,12 @@ struct Options {
     int fullscreen = 0;   // borderless, at the monitor's size: F11 is the same setting
     int gpu_device = 0;   // graphics card index: 0 Auto, 1..N device 0..N-1 (gpu/vk/vk_main.cpp; RX_VK_DEVICE)
     int pad_background = 0;   // the controllers count while another window has the focus (host/nn_hid.c; HOS_INPUT_BACKGROUND)
-    int mouse_native = 0; // the mouse turns the camera's own angles (host/mouse_native.c); 0: as the right stick
+    int mouse_native = 0; // the mouse turns the camera's own angles (host/mouse_native.c); 0: as the right stick; 2: off (never captured)
     int disable_camera_centering = 0; // 0: stock movement-follow turning; 1: keep the player's horizontal direction
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
     int mouse_invert = 0; // the mouse's up and down swapped
     int text_speed = 0;   // how fast dialogue prints: 0 the game's, 1 2x, 2 4x, 3 instant (host/nn_vi.c, nx2/oot_patches.py; HOS_TEXT_SPEED)
+    int damage_taken = 1; // 0 Half, 1 Normal, 2 Double, 3 Quadruple (host/oot_damage.c)
     int fov = 100;        // vertical gameplay field of view, 50..150% of the game's current angle (host/oot_fov.c)
     int text_size = 0;    // dialogue and signs' text size: 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% (host/oot_text_size.c,
                           // nx2/oot_patches.py; HOS_TEXT_SIZE)
@@ -129,6 +130,7 @@ int menu_heart_protection();
 int menu_player_flight();
 int menu_free_camera();
 int menu_link_speed();   // (Movement speed in percent, 100 while the tools are off)
+int menu_damage_taken();   // (Damage taken, HOS_OPT_DAMAGE_TAKEN: 1, Normal, while the tools are off)
 int menu_take_cheat_action();
 void menu_note_frame(bool game_frame, int shown = 1);   // (the frame rates the FPS counter shows)
 /// The game's picture's size (the Output resolution, its crop) and the window's, at each present: the Window scaling filter

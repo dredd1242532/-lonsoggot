@@ -1,6 +1,6 @@
 # Contributing to Longshot
 
-Longshot is a static recompilation of the Switch 2 *The Legend of Zelda: Ocarina of Time* remake: the game's AArch64
+Longshot is a static recompilation of a supported console game: the game's AArch64
 code is lifted to C, the Horizon OS and NVN2 are implemented natively, and the GPU work is replayed on Vulkan. No
 emulator is involved, and the game is built on your PC from your own copy.
 
@@ -32,11 +32,16 @@ Five minutes, then a first build.
 1. **Clone:**
 
    ```
-   git clone https://git.magicbean.dev/MagicBeanDev/Longshot.git
+   git clone --depth 1 https://git.magicbean.dev/MagicBeanDev/Longshot.git
    cd Longshot
    ```
 
-   (jj users: `jj git clone --colocate https://git.magicbean.dev/MagicBeanDev/Longshot.git`.)
+   (jj users: `jj git clone --colocate --depth 1 https://git.magicbean.dev/MagicBeanDev/Longshot.git`.)
+
+   `--depth 1` fetches the newest commit only, not the whole history: about half the download, and half the work for
+   git.magicbean.dev. `git pull`, branches and pull requests work as usual. What needs the history: `git log` and
+   `git blame` past your clone, a version name from the tags (a shallow build calls itself by its commit, `2331f46`),
+   and cutting a release (`scripts/release.py`). For those, `git fetch --unshallow --tags` once.
 
 2. **Sign in:**
 
@@ -86,12 +91,12 @@ break.
 ## Development setup
 
 You need your own supported dump: program `0400486024DEC000`, update v131072, build `e0f3ccfa`. Other versions don't
-work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free and a run about
-10 GB of RAM. Build on an SSD if you can: a hard drive works but takes much longer.
+work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free. For runtime
+memory, see the README's [requirements](README.md#what-you-need): the game alone can exceed 16 GiB, depending on the
+build, driver and scene. Build on an SSD if you can: a hard drive works but takes much longer.
 
-Longshot has no releases of its own yet. Where a step below needs files from the Builder, use the newest
-[Hookshot release](https://github.com/NotRexed/Hookshot/releases/latest), which installs the same tools under the name
-Hookshot Builder.
+Where a step below needs files from the Builder, use the Windows builder of the newest
+[Longshot release](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
 
 ### Windows
 
@@ -107,7 +112,7 @@ Hookshot Builder.
    Windows SDK (`LONGSHOT_MSVC=1` forces that route).
 
 3. Copy what a clone doesn't carry from the Builder's `tools` folder. Run the Builder once; the folder is
-   `%LOCALAPPDATA%\HookshotBuilder\versions\<version>\HookshotBuilder\tools`.
+   `%LOCALAPPDATA%\LongshotBuilder\versions\<version>\LongshotBuilder\tools`.
 
    | From `tools` | To | Variable |
    |---|---|---|
@@ -159,21 +164,23 @@ On Windows, NVIDIA's static `nvsdk_ngx_s.lib` is linked into `longshot_vk.dll` (
 `host/mingw_msvc_shims.c` for the runtime it expects), and `make_game.py` copies `nvngx_dlss.dll` and
 `nvngx_dlssg.dll` into the game's `ngx` folder; never put NGX's core, `_nvngx.dll`, beside the game. On Linux it is
 `--platform linux` (or `scripts/linux/ngx-sdk.sh`). Never share a game folder built with the SDK. A change to the
-pinned SDK release updates `scripts/ngx_sdk.py`, `tests/test_ngx_sdk.py` and the release named in the Builder's license
-text (`builder/LongshotBuilder/MainWindow.xaml.cs`).
+pinned SDK release updates `scripts/ngx_sdk.py`, `tests/test_ngx_sdk.py` and the release named in the Longshot
+Launcher's license text (MagicBeanDev/LongshotLauncher, `App/ViewModels/SettingsStepViewModel.cs`).
 
 ### Longshot Builder
 
-The Builder is a .NET 8 WPF app: open `builder/LongshotBuilder.sln` in Visual Studio 2022 with the .NET desktop
-workload, or `dotnet build builder/LongshotBuilder.sln`. You only need Visual Studio for the Builder; the game builds
-with llvm-mingw. For a Builder that keeps its state on an external SSD, see
-[portable Builder setup](docs/windows-portable-builder.md).
+The Builder has no window: players use the [Longshot Launcher](https://longshot.magicbean.dev/download), which builds
+and starts the game. What is left is command-line only: on Windows a small .NET 8 program
+(`builder/LongshotBuilder`, `dotnet build builder/LongshotBuilder.sln`) whose `--cli` runs `nx2/make_game.py` with
+the release's own Python, for RecompLauncher through the setup (`builder/setup/setup.c`); on Linux the AppImage's
+`AppRun --cli` (`builder/linux`). Started any other way, both say to get the launcher. For a Builder that keeps its
+state on an external SSD, see [portable Builder setup](docs/windows-portable-builder.md).
 
 ## Building
 
 | Command | What it does |
 |---|---|
-| `python -I nx2/make_game.py --nup "C:\path\your-game.nup" --out "C:\Games\Longshot" --language en-US` | A complete game folder from a `.nup`, in about 40 minutes. |
+| `python -I nx2/make_game.py --nup "C:\path\your-game.nup" --out "C:\Games\Longshot" --language en-US` | A complete game folder from a `.nup`, in about 15 minutes on a 12-core desktop ([build times](docs/development.md#build-times)). |
 | `python -I nx2/make_game.py --romfs "C:\path\romfs" --exefs "C:\path\exefs" --out "C:\Games\Longshot"` | The same, from extracted folders. |
 | `python -I nx2/make_game.py --check --nup "C:\path\your-game.nup"` | Check the game and its version without building. |
 | `python -I nx2/dump.py --dump <folder with exefs/ and romfs/> --set` | Record the dump in `work/dump.txt`. |
@@ -244,7 +251,7 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 
 - Match the file you're editing: there is no formatter, so follow the indentation, comments and naming around you. Don't
   reformat unrelated code in the same change.
-- Keep OoT-specific code in new files where possible. `nx2/`, `host/` and `gpu/` stay close to mkw-recomp so upstream
+- Keep game-specific code in new files where possible. `nx2/`, `host/` and `gpu/` stay close to mkw-recomp so upstream
   fixes apply as a patch; each sync names its mkw-recomp base commit in the commit message.
 - Don't modify `third_party/`: its parts are upstream copies with their notices in `PROVENANCE.md` (a64-kit's note lists
   the changes Hookshot and Longshot made to it). Add a new folder and a provenance note instead. CI checks it
@@ -369,9 +376,9 @@ Baseline: nightly @ 55b976c0 (last nightly before #2602)
 main: 87991bc8 (2026-11-12), with #2602
 #2602 had merged already, so this is main against the last nightly before it; main also carried about 50 other merges.
 Hardware: RTX 3080, Windows 11
-Scene: adult Link in Hyrule Field, uncapped
+Scene: the player character in a demanding outdoor area, uncapped
 Method: 120 s each after a warm-up, two interleaved pairs (nightly, main, nightly, main)
-How to reproduce: a save in Hyrule Field by the ranch gate, Ultra preset, the FPS counter at Breakdown
+How to reproduce: a save in that same outdoor area, Ultra preset, the FPS counter at Breakdown
 
 | | nightly @ 55b976c0 (last nightly before #2602) | main @ 87991bc8 (with #2602) | Δ |
 |---|---|---|---|
@@ -440,7 +447,7 @@ SDK is not one of them: it is never in the repository ([NVIDIA DLSS](#nvidia-dls
 
 ## Where to talk
 
-- **Discord:** https://discord.gg/KX99srmQTe. Claim work and discuss pull requests in `#dev-work`; `#prs` shows every
+- **Discord:** https://discord.gg/magicbean. Claim work and discuss pull requests in `#dev-work`; `#prs` shows every
   open pull request, kept up to date.
 - **Issues:** [the forms on git.magicbean.dev](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new/choose).
 - **Agents:** [AGENTS.md](AGENTS.md); they post progress to the team chat (`scripts/team_chat.py`).

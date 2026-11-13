@@ -4,7 +4,7 @@
 # byte-compile of every tracked Python file, and writes a table of them to the run's summary. A check that needs a GPU,
 # the game or MSVC says so, and why, in its own file (RUN_ALL_SKIP). No game data is involved.
 # The tests run in two parts at once (run_all.py --shard, split by tests/run_all_times.json): each part is one job, and
-# every check is in exactly one of them. The Windows Builder's checks (its compile, its worker delivery) are in part 1, on
+# every check is in exactly one of them. The Windows Builder's checks (its compile, its --cli delivery) are in part 1, on
 # Linux with EnableWindowsTargeting. There is no Windows runner (docs/forgejo-runners.md): what only Windows can check
 # (the suite on Windows' Python, MSVC's compile of the native checks) is in RELEASING.md, "Needs a Windows tester".
 # On Linux the C and C++ compiles go through ccache (the compilers in its PATH), with the cache main's runs leave
@@ -137,18 +137,18 @@ jobs:
           echo "$tool_dir/bin" >> "$GITHUB_PATH"
 
       # (the steps below all run when one before them failed, so one run shows every failure)
-      # (the WPF builder and its worker checks are net8.0-windows: EnableWindowsTargeting brings Windows' reference packs to
-      # Linux. The worker checks run on Linux's .NET, with Linux's Python as the child)
+      # (the Windows builder, command-line only, and its --cli checks are net8.0-windows: EnableWindowsTargeting brings Windows'
+      # reference packs to Linux. The --cli checks run on Linux's .NET, with Linux's Python as the child)
       - name: Set up .NET for Windows Builder checks
         if: ${{ !cancelled() && matrix.shard == '1/2' }}
         uses: https://github.com/actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '8.0.x'
-      - name: Check Windows Builder worker delivery
+      - name: Check Windows Builder --cli delivery
         if: ${{ !cancelled() && matrix.shard == '1/2' }}
         run: |
-          dotnet restore tests/builder_workers/BuilderWorkersTests.csproj --configfile tests/builder_workers/NuGet.Config -p:EnableWindowsTargeting=true
-          dotnet run --project tests/builder_workers/BuilderWorkersTests.csproj --configuration Release --no-restore \
+          dotnet restore tests/builder_cli/BuilderCliTests.csproj --configfile tests/builder_cli/NuGet.Config -p:EnableWindowsTargeting=true
+          dotnet run --project tests/builder_cli/BuilderCliTests.csproj --configuration Release --no-restore \
             -p:EnableWindowsTargeting=true -- "$(command -v python)"
       - name: Compile Windows Builder
         if: ${{ !cancelled() && matrix.shard == '1/2' }}

@@ -30,7 +30,7 @@
       "--game",
       "{game}"
     ],
-    "label": "Building the game from your copy (10 to 45 minutes)",
+    "label": "Building the game from your copy (15 to 30 minutes)",
     "timeout": 7200
   },
   "config": [
@@ -495,6 +495,28 @@
       ],
       "defaults": {
         "mouse_camera": "0"
+      }
+    },
+    {
+      "id": "compile_shaders",
+      "label": "Compile shaders",
+      "help": "All: also builds the predicted pipelines, about 40% longer, for pipelines play almost never uses. Most (recommended): every shader and the pipelines the game is known to use. Applies at the next build, update or preparation.",
+      "choices": [
+        {
+          "label": "All",
+          "set": {
+            "compile_shaders": "1"
+          }
+        },
+        {
+          "label": "Most (recommended)",
+          "set": {
+            "compile_shaders": "0"
+          }
+        }
+      ],
+      "defaults": {
+        "compile_shaders": "0"
       }
     }
   ],

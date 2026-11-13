@@ -247,7 +247,7 @@ class ReleasePage(unittest.TestCase):
             with self.subTest(tag):
                 page = self.page(tag, "launcher", self.LAUNCHER)
                 head, notes = page.split("\n---\n", 1)
-                base = "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/download/%s/LongshotLauncher-%s" % (tag, tag)
+                base = "https://git-cdn.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/download/%s/LongshotLauncher-%s" % (tag, tag)
                 self.assertEqual(head.strip().split("\n\n")[:4], [
                     "# ⬇️ Download Longshot Launcher",
                     "### [🪟 &nbsp;Download for Windows](%s-windows-x64-setup.exe)" % base,
@@ -411,7 +411,7 @@ class Publish(unittest.TestCase):
         run("--product", "launcher", "publish", "v1.0.0-rc.1", "--target", "abc", "--notes", notes, f)
         body = FakeForgejo.releases[0]["body"]
         self.assertTrue(body.startswith("# ⬇️ Download Longshot Launcher\n"))
-        self.assertIn("### [🪟 &nbsp;Download for Windows](https://git.magicbean.dev/MagicBeanDev/Test/releases/download/"
+        self.assertIn("### [🪟 &nbsp;Download for Windows](https://git-cdn.magicbean.dev/MagicBeanDev/Test/releases/download/"
                       "v1.0.0-rc.1/LongshotLauncher-v1.0.0-rc.1-windows-x64-setup.exe)", body)
         self.assertIn(release.CHANNEL_SAYS["rc"], body)
 
@@ -615,6 +615,50 @@ class ReleasedAs(unittest.TestCase):
             self.assertEqual(run("--product", "longshot", "released-as", self.a), (0, "\n"))
             with self.assertRaises(SystemExit):
                 run("--product", "longshot", "released-as", self.b[:8])
+
+
+class TokenStaysHome(unittest.TestCase):
+    """Forgejo sends a release file to a signed link of its file store (Cloudflare R2), which refuses a request that also
+    carries a token: download() gives the token to the forge, and not to where it redirects"""
+
+    def test_a_redirect_to_the_file_store_goes_without_the_token(self):
+        seen = {}
+
+        class Store(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["store"] = self.headers.get("Authorization")
+                body = b"bad request" if self.headers.get("Authorization") else b"the sums"
+                self.send_response(400 if self.headers.get("Authorization") else 200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        store = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Store)
+
+        class Forge(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["forge"] = self.headers.get("Authorization")
+                self.send_response(303)
+                self.send_header("Location", "http://127.0.0.1:%d/bucket/SHA256SUMS?X-Amz-Signature=x" % store.server_port)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        forge = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Forge)
+        for s in (store, forge):
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+            self.addCleanup(s.server_close)
+            self.addCleanup(s.shutdown)
+        url = "http://127.0.0.1:%d/o/r/releases/download/v1/SHA256SUMS" % forge.server_port
+        with mock.patch.dict(os.environ, RELEASE_TOKEN="secret"):
+            os.environ.pop("FORGEJO_UPLOAD_API", None)
+            self.assertEqual(release.download(url), b"the sums")
+        self.assertEqual(seen, {"forge": "token secret", "store": None})
 
 
 if __name__ == "__main__":
