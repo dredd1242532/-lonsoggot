@@ -1263,9 +1263,9 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
     {TAB_GAMEPLAY, "Skip cutscenes (Experimental)", &opts.allow_cutscene_skip, 0, 1, 1, tx_onoff,
-     "Experimental and unfinished. Can skip the opening movie. It can leave story progress incomplete or soft-lock a save; save first. "
-     "Use the normal dialogue-skip shortcut to show the skip prompt, then the displayed button "
-     "to confirm. It may overlap dialogue; some conversations and chest sequences remain unsupported.", nullptr, false, true},
+     "Experimental: opening movie and Navi waking Link only. Other scenes keep native skip permissions. "
+     "Save first: can leave story progress incomplete or soft-lock a save. Use the normal dialogue-skip shortcut, then the displayed button to confirm. "
+     "Dialogue/chest support is incomplete; dialogue may overlap.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text size", &opts.text_size, 0, 4, 1, tx_text_size,
      "How large the text of dialogue, Navi and signs is drawn.", hn_text_size, false, true},
     {TAB_GAMEPLAY, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,

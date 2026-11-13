@@ -46,6 +46,7 @@ typedef struct { uint64_t x[32]; } Ctx;
 static uint8_t mem[0x4000];
 static char said[2048];
 static int opt;
+static int begin_calls;
 enum { HOS_OPT_SKIP_OPENING = %d };
 static uint64_t recomp_load8(Ctx *c, uint64_t a) { (void)c; return mem[a]; }
 static uint64_t recomp_load64(Ctx *c, uint64_t a) {
@@ -54,6 +55,7 @@ static uint64_t recomp_load64(Ctx *c, uint64_t a) {
 static void recomp_store8(Ctx *c, uint64_t a, uint64_t v) { (void)c; mem[a] = (uint8_t)v; }
 static void put64(uint64_t a, uint64_t v) { memcpy(mem + a, &v, 8); }
 int rx_option(int id, int otherwise) { return id == HOS_OPT_SKIP_OPENING ? opt : otherwise; }
+void hos_oot_cutscene_skip_begin(Ctx *c) { if (c) ++begin_calls; }
 void hos_log(const char *fmt, ...) {
     va_list ap; va_start(ap, fmt);
     vsnprintf(said + strlen(said), sizeof said - strlen(said), fmt, ap);
@@ -80,6 +82,7 @@ int main(void) {
     c.x[0] = 0x500; c.x[1] = 0x400; put64(0x400, 0x280); mem[0x500 + 0xf25] = 0xff;
     CHECK(hos_oot_opening(&c, 1) == 0);
     CHECK(mem[0x500 + 0xf25] == 0xff);
+    CHECK(begin_calls == 1);   /* the experimental diagnostic resets with Skip opening off */
 
     opt = 1;
     c.x[1] = 0x1000; put64(0x1000 + 6800, 0x100);

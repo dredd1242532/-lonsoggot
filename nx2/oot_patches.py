@@ -258,7 +258,7 @@ CUTSCENE_ANCHOR = ("L_83b6323c:;\n"
                    "    c->x[0]=recomp_load64(c,c->x[19] + 32);\n"
                    "    c->x[8]=recomp_load64(c,c->x[8] + 952);\n"
                    "    { uint64_t _s = c->x[8]; uint64_t _r; _r = (_s >> 26) & ((1ULL << 1) - 1); c->x[1] = _r; }\n")
-CUTSCENE_HOOK = "    c->x[1] = hos_oot_cutscene_skip_allowed(c->x[1]);\n"
+CUTSCENE_HOOK = "    c->x[1] = hos_oot_cutscene_skip_allowed(c, c->x[19], c->x[1]);\n"
 CUTSCENE_CALL = "{ uint64_t _t = c->x[8]; c->x[30] = 0x83b63258ULL; A64_ICALL(c, _t); }\n"
 
 
@@ -272,18 +272,20 @@ def patch_cutscene_skip(source):
     body = source[start:end]
     if body.count(CUTSCENE_ANCHOR) != 1 or body.count(CUTSCENE_CALL) != 1:
         return None
-    if CUTSCENE_ANCHOR + CUTSCENE_HOOK in body:
+    if "hos_oot_cutscene_skip_allowed(" in body:
+        if body.count(CUTSCENE_ANCHOR + CUTSCENE_HOOK) != 1 or body.count("hos_oot_cutscene_skip_allowed(") != 1:
+            return None
         return source
     body = body.replace(CUTSCENE_ANCHOR, CUTSCENE_ANCHOR + CUTSCENE_HOOK, 1)
     return (source[:start] + body + source[end:]).replace(
-        '#include "a64.h"\n', '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(uint64_t native_allowed);\n', 1)
+        '#include "a64.h"\n', '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(Ctx *c, uint64_t player, uint64_t native_allowed);\n', 1)
 
 
 # The other timeline player's authored bit gates a separate pane/readiness check. Override only the bit's branch,
 # so allowing skip still requires that native check before the controller is enabled.
 CUTSCENE_TIMELINE_HEAD = "void f_80ac8650(Ctx *__restrict A64_NOESC c) {\n"
 CUTSCENE_TIMELINE_BRANCH = "if (((c->x[8] >> 2) & 1)) { goto L_80ac9628; }\n"
-CUTSCENE_TIMELINE_ALLOW = "if (hos_oot_cutscene_skip_allowed((c->x[8] >> 2) & 1)) { goto L_80ac9628; }\n"
+CUTSCENE_TIMELINE_ALLOW = "if (hos_oot_cutscene_skip_allowed(c, c->x[19], (c->x[8] >> 2) & 1)) { goto L_80ac9628; }\n"
 CUTSCENE_TIMELINE_PREFIX = ("L_80ac87c8:;\n"
                             "    c->x[8]=recomp_load64(c,c->x[19] + 16);\n"
                             "    c->x[0]=recomp_load64(c,c->x[19] + 32);\n"
@@ -313,7 +315,7 @@ def patch_cutscene_skip_timeline(source):
         return None
     body = body.replace(old, new, 1)
     return (source[:start] + body + source[end:]).replace(
-        '#include "a64.h"\n', '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(uint64_t native_allowed);\n', 1)
+        '#include "a64.h"\n', '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(Ctx *c, uint64_t player, uint64_t native_allowed);\n', 1)
 
 
 MENU_FOCUS_HEAD = "void f_802ed660(Ctx *__restrict A64_NOESC c) {\n"

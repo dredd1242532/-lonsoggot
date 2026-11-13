@@ -13,6 +13,17 @@ sys.path.insert(0, str(ROOT / "nx2"))
 import oot_patches
 
 
+A64_HEADER = r'''
+#include <stddef.h>
+#include <stdint.h>
+typedef struct { uint64_t x[32]; } Ctx;
+#define A64_NOESC
+#define A64_PTR(a) ((void *)(uintptr_t)(a))
+uint64_t recomp_load64(Ctx *, uint64_t);
+uint64_t recomp_load8(Ctx *, uint64_t);
+'''
+
+
 class CutsceneSkipPatchTests(unittest.TestCase):
     def source(self, body):
         return ('#include "a64.h"\nvoid before(Ctx *c) {\n' + body + '\n}\n'
@@ -37,7 +48,7 @@ class CutsceneSkipPatchTests(unittest.TestCase):
                 oot_patches.CUTSCENE_ANCHOR + oot_patches.CUTSCENE_HOOK), 1)
         expected = expected.replace(
             '#include "a64.h"\n',
-            '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(uint64_t native_allowed);\n', 1)
+            '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(Ctx *c, uint64_t player, uint64_t native_allowed);\n', 1)
         self.assertEqual(patched, expected)
         self.assertEqual(oot_patches.patch_cutscene_skip(patched), patched)
         self.assertEqual(patched.count(oot_patches.CUTSCENE_HOOK), 1)
@@ -73,6 +84,11 @@ class CutsceneSkipPatchTests(unittest.TestCase):
         self.assertIsNone(oot_patches.patch_cutscene_skip(source.replace(oot_patches.CUTSCENE_HEAD, "")))
         self.assertIsNone(oot_patches.patch_cutscene_skip(source + oot_patches.CUTSCENE_HEAD + "\n}\n"))
         self.assertIsNone(oot_patches.patch_cutscene_skip(oot_patches.CUTSCENE_HEAD + self.body))
+        old = "    c->x[1] = hos_oot_cutscene_skip_allowed(c->x[1]);\n"
+        self.assertIsNone(oot_patches.patch_cutscene_skip(self.source(
+            self.body.replace(oot_patches.CUTSCENE_ANCHOR, oot_patches.CUTSCENE_ANCHOR + old))))
+        self.assertIsNone(oot_patches.patch_cutscene_skip(self.source(
+            self.body + oot_patches.CUTSCENE_HOOK)))
 
 
 class TimelineCutsceneSkipPatchTests(unittest.TestCase):
@@ -95,7 +111,7 @@ class TimelineCutsceneSkipPatchTests(unittest.TestCase):
                 oot_patches.CUTSCENE_TIMELINE_BRANCH, oot_patches.CUTSCENE_TIMELINE_ALLOW), 1)
         expected = expected.replace(
             '#include "a64.h"\n',
-            '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(uint64_t native_allowed);\n', 1)
+            '#include "a64.h"\nextern uint64_t hos_oot_cutscene_skip_allowed(Ctx *c, uint64_t player, uint64_t native_allowed);\n', 1)
         self.assertEqual(patched, expected)
         self.assertEqual(oot_patches.patch_cutscene_skip_timeline(patched), patched)
 
@@ -125,8 +141,10 @@ class MenuWiringTests(unittest.TestCase):
         self.assertIn("int allow_cutscene_skip = 0;", header)
         self.assertIn('{TAB_GAMEPLAY, "Skip cutscenes (Experimental)", &opts.allow_cutscene_skip, 0, 1, 1, tx_onoff,', menu)
         self.assertIn('"skip_unskippable_cutscenes"', menu)
-        self.assertIn("Can skip the opening movie.", menu)
-        self.assertIn("It may overlap dialogue; some conversations and chest sequences remain unsupported.", menu)
+        help_text = menu.split('"Skip cutscenes (Experimental)"', 1)[1].split("nullptr", 1)[0]
+        self.assertIn("Experimental: opening movie and Navi waking Link only.", help_text)
+        self.assertIn("Other scenes keep native skip permissions.", help_text)
+        self.assertIn("Save first: can leave story progress incomplete or soft-lock a save.", help_text)
         self.assertIn("if (id == HOS_OPT_ALLOW_CUTSCENE_SKIP) return menu_allow_cutscene_skip();", replay)
         self.assertEqual(menu.count("cutscene_skip_now.store(opts.allow_cutscene_skip, std::memory_order_relaxed);"), 2)
         self.assertIn("int menu_allow_cutscene_skip() { return cutscene_skip_now.load(std::memory_order_relaxed); }", menu)
@@ -134,34 +152,93 @@ class MenuWiringTests(unittest.TestCase):
 
 def check_host(cc):
     fixture = r'''
+#include "a64.h"
 #include <assert.h>
-#include <stdint.h>
-static int menu, calls;
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+static unsigned char mem[0x4000];
+static char said[2048];
+static int menu, logs, loads;
 int rx_option(int id, int otherwise) {
     assert(id == 56 && otherwise == 0);
-    ++calls;
     return menu;
 }
-uint64_t hos_oot_cutscene_skip_allowed(uint64_t native_allowed);
+int hos_mem_region(uint64_t address, uint64_t size) {
+    return address && address < sizeof mem && size <= sizeof mem - address;
+}
+uint64_t recomp_load64(Ctx *c, uint64_t address) {
+    uint64_t value; (void)c; assert(hos_mem_region(address, 8)); ++loads;
+    memcpy(&value, mem + address, 8); return value;
+}
+uint64_t recomp_load8(Ctx *c, uint64_t address) {
+    (void)c; assert(hos_mem_region(address, 1)); ++loads; return mem[address];
+}
+static void put64(uint64_t address, uint64_t value) { memcpy(mem + address, &value, 8); }
+void hos_log(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); ++logs;
+    vsnprintf(said, sizeof said, fmt, ap); va_end(ap);
+}
+uint64_t hos_oot_cutscene_skip_allowed(Ctx *c, uint64_t player, uint64_t native_allowed);
+void hos_oot_cutscene_skip_begin(Ctx *c);
 int main(void) {
-    assert(hos_oot_cutscene_skip_allowed(0) == 0);
-    assert(hos_oot_cutscene_skip_allowed(1) == 1);
+    Ctx c = {0};
+    enum { PLAYER=0x100, RESOURCE=0x200, HOLDER=0x400, NAME=0x500, OTHER=0x600 };
+    put64(PLAYER + 16, RESOURCE); put64(RESOURCE + 8, NAME);
+    memcpy(mem + NAME, "Dm_Kokiri_0000", sizeof "Dm_Kokiri_0000");
+    memcpy(mem + OTHER, "Dm_Kokiri_0030", sizeof "Dm_Kokiri_0030");
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 7) == 7);
+    assert(loads == 0 && logs == 0);
     menu = 1;
-    assert(hos_oot_cutscene_skip_allowed(0) == 1);
-    assert(hos_oot_cutscene_skip_allowed(1) == 1);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1);
+    assert(logs == 1 && strstr(said, "override allowed for timeline Dm_Kokiri_0000"));
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1 && logs == 1);
+    c.x[1] = HOLDER; put64(HOLDER, NAME);
+    hos_oot_cutscene_skip_begin(&c);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1 && logs == 2);
+    put64(RESOURCE + 8, OTHER); put64(HOLDER, OTHER);
+    hos_oot_cutscene_skip_begin(&c);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1);
+    assert(logs == 3 && strstr(said, "override allowed for timeline Dm_Kokiri_0030"));
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1 && logs == 3);
+    put64(RESOURCE + 8, NAME);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 1 && logs == 3);
+    const char *unknown[] = {"Meet_DekuTree", "ItemGet_Song", "Dm_Kokiri_0030_extra", "Dm_Kokiri_0070"};
+    for (unsigned i = 0; i < sizeof unknown / sizeof unknown[0]; ++i) {
+        memset(mem + NAME, 0, 64); strcpy((char *)mem + NAME, unknown[i]);
+        assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+        assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 9) == 9);
+    }
+    assert(logs == 3);
+    memcpy(mem + NAME, "Dm_Kokiri_0000x", sizeof "Dm_Kokiri_0000");
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(NULL, PLAYER, 0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, 0, 0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, UINT64_MAX - 8, 0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, sizeof mem - 16, 0) == 0);
+    put64(PLAYER + 16, UINT64_MAX - 8);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    put64(PLAYER + 16, RESOURCE); put64(RESOURCE + 8, sizeof mem - 8);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    put64(RESOURCE + 8, 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    hos_oot_cutscene_skip_begin(NULL);
+    c.x[1] = UINT64_MAX - 8; hos_oot_cutscene_skip_begin(&c);
     menu = 0;
-    assert(hos_oot_cutscene_skip_allowed(0) == 0);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
     menu = -1;
-    assert(hos_oot_cutscene_skip_allowed(0) == 0);
-    assert(calls == 6);
+    assert(hos_oot_cutscene_skip_allowed(&c, PLAYER, 0) == 0);
+    assert(logs == 3);
     return 0;
 }
 '''
     with tempfile.TemporaryDirectory(prefix="cutscene-skip-") as tmp:
         source = Path(tmp) / "fixture.c"
         exe = Path(tmp) / ("fixture.exe" if sys.platform == "win32" else "fixture")
+        (Path(tmp) / "a64.h").write_text(A64_HEADER, encoding="utf-8")
         source.write_text(fixture, encoding="utf-8")
-        subprocess.run([cc, "-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        subprocess.run([cc, "-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-I", tmp,
                         str(ROOT / "host" / "oot_cutscene_skip.c"), str(source), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
@@ -179,52 +256,54 @@ def check_timeline_branch(cc):
             + "    { uint64_t _r = ((uint64_t)0 | ((uint64_t)(uint32_t)(((uint32_t)(c->x[0])) << 0))); _r &= 0xFFFFFFFFULL; c->x[8] = _r; }\n"
             + "    { uint64_t _r = ((uint64_t)0 | ((c->x[20]) << 0)); c->x[0] = _r; }\n"
             + "{ A64_POLL(c); goto L_80ac87dc; }\n")
-    header = r'''
+    header = A64_HEADER + r'''
 #include <assert.h>
-#include <stdint.h>
-typedef struct { uint64_t x[32]; } Ctx;
-#define A64_NOESC
 #define A64_POLL(c) ((void)(c))
-static uint64_t recomp_load64(Ctx *, uint64_t);
-static uint64_t recomp_load8(Ctx *, uint64_t);
-static void f_83b60640(Ctx *);
-static void fixture_setter(Ctx *, uint64_t);
+void f_83b60640(Ctx *);
+void fixture_setter(Ctx *, uint64_t);
 #define A64_ICALL(c, t) fixture_setter(c, t)
 '''
     fixture = r'''
-enum { EVENT=0x100, RESOURCE=0x500, CONTROLLER=0xa00, VTABLE=0xb00 };
-static int native_allowed, ready, option, readiness_calls, setter_calls, allowed;
+enum { EVENT=0x100, RESOURCE=0x500, CONTROLLER=0xa00, VTABLE=0xb00, NAME=0xc00 };
+static int native_allowed, ready, option, known, readiness_calls, setter_calls, allowed;
 int rx_option(int id, int otherwise) { assert(id==56 && otherwise==0); return option; }
-static uint64_t recomp_load64(Ctx *c, uint64_t a) {
+int hos_mem_region(uint64_t address, uint64_t size) { return address && address < 0xd00 && size <= 0xd00 - address; }
+void hos_log(const char *fmt, ...) { (void)fmt; }
+uint64_t recomp_load64(Ctx *c, uint64_t a) {
     (void)c;
     if (a==EVENT+16) return RESOURCE;
     if (a==EVENT+32) return CONTROLLER;
+    if (a==RESOURCE+8) return NAME;
     if (a==CONTROLLER) return VTABLE;
     assert(a==VTABLE+40); return 0x1234;
 }
-static uint64_t recomp_load8(Ctx *c, uint64_t a) {
-    (void)c; assert(a==RESOURCE+955); return 0xa1 | (native_allowed<<2);
+uint64_t recomp_load8(Ctx *c, uint64_t a) {
+    (void)c;
+    if (a>=NAME && a<NAME+sizeof "Dm_Kokiri_0000")
+        return (known ? "Dm_Kokiri_0000" : "Dm_Kokiri_0070")[a-NAME];
+    assert(a==RESOURCE+955); return 0xa1 | (native_allowed<<2);
 }
-static void f_83b60640(Ctx *c) {
+void f_83b60640(Ctx *c) {
     assert(c->x[0]==CONTROLLER); ++readiness_calls; c->x[0]=(uint64_t)ready;
 }
-static void fixture_setter(Ctx *c, uint64_t target) {
+void fixture_setter(Ctx *c, uint64_t target) {
     assert(target==0x1234 && c->x[0]==CONTROLLER); ++setter_calls; allowed=(int)c->x[1];
 }
 int main(void) {
     int cases=0;
     for (option=-1; option<=1; ++option)
         for (native_allowed=0; native_allowed<=1; ++native_allowed)
-            for (ready=0; ready<=1; ++ready) {
+            for (ready=0; ready<=1; ++ready)
+              for (known=0; known<=1; ++known) {
                 Ctx c={0}; c.x[19]=EVENT;
                 readiness_calls=setter_calls=0; allowed=-1;
                 f_80ac8650(&c);
-                assert(readiness_calls==(native_allowed || option>0));
+                assert(readiness_calls==(native_allowed || (option>0 && known)));
                 assert(setter_calls==1);
-                assert(allowed==((native_allowed || option>0) && ready));
+                assert(allowed==((native_allowed || (option>0 && known)) && ready));
                 ++cases;
             }
-    assert(cases==12); return 0;
+    assert(cases==24); return 0;
 }
 '''
     source = '#include "a64.h"\n' + oot_patches.CUTSCENE_TIMELINE_HEAD + body + "\n}\n"
@@ -236,7 +315,7 @@ int main(void) {
         path = folder / "fixture.c"
         path.write_text(patched + fixture, encoding="utf-8")
         exe = folder / ("fixture.exe" if sys.platform == "win32" else "fixture")
-        subprocess.run([cc, "-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        subprocess.run([cc, "-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-I", tmp,
                         str(ROOT / "host" / "oot_cutscene_skip.c"), str(path), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 

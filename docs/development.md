@@ -584,17 +584,24 @@ number is not the obvious one:
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
 | `robust_buffers` | 0 Auto (on), 1 Off, 2 On |
 | `game_speed` | 0 Per frame, 1 Real time |
-| `skip_unskippable_cutscenes` | 0 Off (default), 1 experimental native skip permission override |
+| `skip_unskippable_cutscenes` | 0 Off (default), 1 experimental skip permission override for the opening movie and Navi waking Link only |
 | `text_speed` | 0 Normal, 1 2x, 2 4x, 3 Instant |
 | `microphone` | 0 Off, 1 Default, 2 and up a microphone (the name in `microphone_device` decides which) |
 | `mouse_camera` | 0 As the stick, 1 Native, 2 Off (the mouse is never captured) |
 | `layout_preset` | 0 Nintendo, 1 Xbox / PC, 2 Swap Face, 3 Custom |
 
-Gameplay's Skip cutscenes (Experimental) remains off by default. Use the normal dialogue-skip shortcut to reveal the
-native skip prompt, then its displayed confirmation button. It can skip the opening movie. This is unfinished: it may
-overlap other dialogue, and some conversations and chest sequences remain unsupported. Skipping can leave story
-progress incomplete or soft-lock a save; save first. The game retains its event completion path; the option does not
-force-stop the decoder or grant items.
+Gameplay's Skip cutscenes (Experimental) remains off by default and independent of Skip opening. It only overrides
+permission for the opening movie and Navi waking Link (`Dm_Kokiri_0000` and `Dm_Kokiri_0030`); other scenes keep
+their native skip permissions. Use the normal dialogue-skip shortcut to reveal the native skip prompt, then its
+displayed confirmation button. Dialogue/chest support is incomplete, and dialogue may overlap. Skipping can leave
+story progress incomplete or soft-lock a save; save first. The game retains its event completion path; the option
+does not force-stop the decoder or grant items.
+
+The `cutscene skip: override allowed for timeline ...` log names each permitted timeline once per start; it records
+permission, not confirmation that a skip finished. The allowlist reads the current player's resource at `+16` and
+that resource's name at `+8`, with mapped-memory checks. These relationships were confirmed locally on 2026-11-13
+against the supported `e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348` build's timeline lookup and both permission sites;
+they must be rechecked for another game build. Expand the two-name list only after skip and save/reload validation.
 
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`

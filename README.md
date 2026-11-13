@@ -417,7 +417,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
-| | Skip cutscenes (Experimental) | Off, On; use the normal dialogue-skip shortcut and displayed confirmation. Unfinished: may overlap dialogue; some conversations and chest sequences are unsupported. Can leave story progress incomplete or soft-lock a save; save first | Off |
+| | Skip cutscenes (Experimental) | Off, On; opening movie and Navi waking Link only, with the normal skip shortcut and prompt confirmation. Other scenes keep native skip permissions. Dialogue/chest support is incomplete; dialogue may overlap. Can leave story progress incomplete or soft-lock a save; save first. Independent of Skip opening | Off |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Microphone | Off, Default, or each microphone by name | Default |
 | | Game language | The game's 16 languages, each by its own name (after a restart) | `language.txt`'s, else English (US) |

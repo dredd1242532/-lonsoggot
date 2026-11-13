@@ -1483,6 +1483,8 @@ void hos_oot_flight_pose(Ctx *c, uint64_t actor, uint64_t matrix) {
    2 the skip query (return 1: x0 is 1), 3 Link is updating and no event is playing (the opening has let him go). */
 int hos_oot_opening(Ctx *c, int mode) {
     int rx_option(int id, int otherwise);
+    void hos_oot_cutscene_skip_begin(Ctx *c);
+    if (mode == 1) hos_oot_cutscene_skip_begin(c);
     static int armed;
     static char logged[64];
     char name[80];
