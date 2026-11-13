@@ -27,6 +27,7 @@
 #include <string.h>
 #include <wchar.h>
 #include "portable_home.h"
+#include "long_path.h"
 
 #define WM_STATUS (WM_APP + 1)
 #define WM_DONE (WM_APP + 2)
@@ -316,23 +317,33 @@ static int init_home(int portable) {
            SetEnvironmentVariableW(L"LONGSHOT_BUILDER_PORTABLE", g_home.portable ? L"1" : NULL);
 }
 
-/* a folder and everything in it (a version folder, a half-unpacked one) */
-static void rmtree(const wchar_t *dir) {
-    wchar_t pat[MAX_PATH], p[MAX_PATH];
+/* a folder and everything in it (a version folder, a half-unpacked one): p, n characters, long_path's form; a link is removed,
+   never what it points to */
+static void rmtree_at(wchar_t *p, size_t n, int depth) {
     WIN32_FIND_DATAW fd;
-    home_path(pat, L"%ls\\*", dir);
-    HANDLE h = FindFirstFileW(pat, &fd);
+    const size_t all = depth < TREE_DEPTH ? long_join(p, n, L"*") : 0;
+    const HANDLE h = all ? FindFirstFileW(p, &fd) : INVALID_HANDLE_VALUE;
+    p[n] = 0;
     if (h != INVALID_HANDLE_VALUE) {
         do {
             if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
-            home_path(p, L"%ls\\%ls", dir, fd.cFileName);
-            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) rmtree(p);
-            else if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) RemoveDirectoryW(p);   /* (a link: never what it points to) */
+            const size_t k = long_join(p, n, fd.cFileName);
+            if (!k) continue;
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) rmtree_at(p, k, depth + 1);
+            else if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) RemoveDirectoryW(p);
             else SetFileAttributesW(p, FILE_ATTRIBUTE_NORMAL), DeleteFileW(p);
+            p[n] = 0;
         } while (FindNextFileW(h, &fd));
         FindClose(h);
     }
-    RemoveDirectoryW(dir);
+    RemoveDirectoryW(p);
+}
+/* (paths past MAX_PATH, as copy_part_tree can make them: long_path.h) */
+static void rmtree(const wchar_t *dir) {
+    wchar_t *p = malloc(LONG_PATH * sizeof *p);
+    const size_t n = p ? long_path(p, dir) : 0;
+    if (n) rmtree_at(p, n, 0);
+    free(p);
 }
 
 static void read_small(const wchar_t *path, char *out, int n) {
@@ -363,48 +374,41 @@ static int part_folder(const Part *p, wchar_t *rel, int n) {
     return 1;
 }
 
+/* src (a file or a folder, ns characters) copied as dst (nd characters), both in long_path's form; a link is refused */
+static int copy_tree_at(wchar_t *src, size_t ns, wchar_t *dst, size_t nd, int depth) {
+    const DWORD attributes = GetFileAttributesW(src);
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) return CopyFileW(src, dst, TRUE) != 0;
+    if (depth >= TREE_DEPTH || !CreateDirectoryW(dst, NULL)) return 0;
+    WIN32_FIND_DATAW entry;
+    const size_t all = long_join(src, ns, L"*");
+    const HANDLE find = all ? FindFirstFileW(src, &entry) : INVALID_HANDLE_VALUE;
+    src[ns] = 0;
+    if (find == INVALID_HANDLE_VALUE) return all && GetLastError() == ERROR_FILE_NOT_FOUND;
+    int ok = 1;
+    do {
+        if (!wcscmp(entry.cFileName, L".") || !wcscmp(entry.cFileName, L"..")) continue;
+        const size_t a = long_join(src, ns, entry.cFileName), b = a ? long_join(dst, nd, entry.cFileName) : 0;
+        ok = b && copy_tree_at(src, a, dst, b, depth + 1);
+        src[ns] = 0, dst[nd] = 0;
+    } while (ok && FindNextFileW(find, &entry));
+    if (ok && GetLastError() != ERROR_NO_MORE_FILES) ok = 0;
+    FindClose(find);
+    return ok;
+}
 /* (players asked for less in %LOCALAPPDATA%: the downloaded zips are not kept beside the unpacked version any more. So that an update
    still downloads only what changed, a part whose checksum the installed version lists in its parts.txt (and whose folder it has)
    is moved over from it instead of downloaded: that version is deleted after the install anyway) */
 /* Portable updates keep the old installation usable until publication; copied parts belong only to staging. */
+/* (paths past MAX_PATH: the builder zip's deepest file is 163 characters below its folder, so a zip unpacked a little deep
+   failed here with "Could not copy the Longshot Builder": long_path.h. A folder copied into itself, or under itself, is
+   refused before anything is written: it would copy its own copy again, level after level, until the disk is full) */
 static int copy_part_tree(const wchar_t *from, const wchar_t *to) {
-    /* (paths past MAX_PATH: the builder zip's deepest file is 163 characters below its folder, so a zip unpacked a little
-       deep failed here with "Could not copy the Longshot Builder". An absolute path gets the \\?\ form (\\?\UNC\ for a
-       share), which Windows' file calls take up to 32767 characters, in heap buffers; a path already in it is kept) */
-    enum { CAP = 32768 };
-    wchar_t *buf = malloc(4 * CAP * sizeof *buf);
+    wchar_t *buf = malloc(2 * LONG_PATH * sizeof *buf);
     if (!buf) return 0;
-    wchar_t *src = buf, *dst = buf + CAP, *source = buf + 2 * CAP, *target = buf + 3 * CAP;
-    const wchar_t *in[2] = {from, to};
-    wchar_t *out[2] = {src, dst};
-    int ok = 1;
-    for (int i = 0; i < 2 && ok; i++) {
-        const wchar_t *p = in[i], *prefix = L"", *rest = p;
-        if (wcsncmp(p, L"\\\\?\\", 4)) {
-            if (p[0] && p[1] == L':' && p[2] == L'\\') prefix = L"\\\\?\\";
-            else if (p[0] == L'\\' && p[1] == L'\\') prefix = L"\\\\?\\UNC", rest = p + 1;
-        }
-        ok = wcslen(prefix) + wcslen(rest) < CAP;
-        if (ok) wcscpy(out[i], prefix), wcscat(out[i], rest);
-    }
-    const DWORD attributes = ok ? GetFileAttributesW(src) : INVALID_FILE_ATTRIBUTES;
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) ok = 0;
-    else if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) ok = CopyFileW(src, dst, TRUE) != 0;
-    else if (!CreateDirectoryW(dst, NULL) || !hb_home_join(source, CAP, src, L"*")) ok = 0;
-    else {
-        WIN32_FIND_DATAW entry;
-        HANDLE find = FindFirstFileW(source, &entry);
-        if (find == INVALID_HANDLE_VALUE) ok = GetLastError() == ERROR_FILE_NOT_FOUND;
-        else {
-            do {
-                if (!wcscmp(entry.cFileName, L".") || !wcscmp(entry.cFileName, L"..")) continue;
-                if (!hb_home_join(source, CAP, src, entry.cFileName) ||
-                    !hb_home_join(target, CAP, dst, entry.cFileName) || !copy_part_tree(source, target)) { ok = 0; break; }
-            } while (FindNextFileW(find, &entry));
-            if (ok && GetLastError() != ERROR_NO_MORE_FILES) ok = 0;
-            FindClose(find);
-        }
-    }
+    wchar_t *src = buf, *dst = buf + LONG_PATH;
+    const size_t ns = long_path(src, from), nd = long_path(dst, to);
+    const int ok = ns && nd && !long_within(dst, nd, src, ns) && copy_tree_at(src, ns, dst, nd, 0);
     free(buf);
     return ok;
 }
