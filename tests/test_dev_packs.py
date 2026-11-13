@@ -46,6 +46,7 @@ def test_route():
     check("the WebGPU renderer is in the game", r(["gpu/render/x.c"]) == "game")
     check("a build script builds the game", r(["nx2/build.py"]) == "game")
     check("docs and tests build nothing", r(["docs/development.md", "tests/test_a.py", "README.md"]) is None)
+    check("the forge's workflows build nothing", r([".forgejo/workflows/ci.yml", ".forgejo/pull_request_template.md"]) is None)
     check("an unknown path builds the game", r(["somewhere/new.c"]) == "game")
 
 

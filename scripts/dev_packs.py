@@ -72,7 +72,7 @@ STAMP_FILES = ("vk_shader.cpp", "vk_bank.cpp", "vk_state.h", "vk_api.h")
 TRANSLATOR = tuple("gpu/vk/%s/" % d for d in STAMP_DIRS) + tuple("gpu/vk/" + f for f in STAMP_FILES)
 RENDERER_ONLY = ("gpu/vk/", "third_party/imgui/", "third_party/fidelityfx")
 INCLUDE = re.compile(r'#\s*include\s+"([^"]+)"')
-NO_MODULE = ("docs/", "tests/", ".github/", ".claude/")
+NO_MODULE = ("docs/", "tests/", ".github/", ".forgejo/", ".claude/")   # (.forgejo: Longshot's workflows and templates)
 HEADERS = (".h", ".hpp", ".hh", ".inc", ".inl")
 SOURCES = (".c", ".cc", ".cpp") + HEADERS
 # (files the game writes beside itself while it runs, besides the caches: never a build's output, so never "deleted" by a pack)
