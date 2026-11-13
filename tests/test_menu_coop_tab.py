@@ -1166,7 +1166,7 @@ def main():
         if len(order) != 8 or order[0] != ("coop", "coop"):
             raise SystemExit("FAIL: vk_menu.cpp: coop_options is not co-op at the start and the seven rules")
         table = []
-        for field, key in order[1:-1]:
+        for field, key in order[1:]:
             r = re.search(r'\{TAB_RULES, "[^"]+", &opts\.%s, (\d+), (\d+), (\d+), tx_rule_(?:shared|pool),' % field, menu)
             default = re.search(r"\b%s = (\d+)[,;]" % field, header)
             if not (r and default):

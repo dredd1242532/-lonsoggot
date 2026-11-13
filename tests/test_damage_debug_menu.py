@@ -33,7 +33,7 @@ def main():
     assert len(entries) >= 18
     assert '{TAB_GAMEPLAY, "Damage taken"' not in table
     assert sum('"Damage taken"' in entry for entry in entries) == 1
-    source = '#include "vk_api.h"\n#include <cassert>\n#include <cstring>\n#include <iterator>\n'
+    source = '#define _Static_assert static_assert\n#include "vk_api.h"\n#include <cassert>\n#include <cstring>\n#include <iterator>\n'
     source += block(header, "struct Options {") + ';\nOptions opts;\n'
     source += block(menu, "enum MenuTab {") + ';\n'
     source += block(menu, "struct Row {") + ';\n'
@@ -45,7 +45,8 @@ def main():
     source += 'const char* hn_intel_compiles(int, int) { return nullptr; }\n'
     source += 'Row rows[] = {' + ',\n'.join(entries) + '};\n'
     source += 'constexpr int kRows = sizeof rows / sizeof rows[0];\n'
-    source += menu[menu.index("struct CoopTermRow {"):menu.index("bool coop_term_fixed(")]
+    terms_start = menu.index("struct CoopTermRow {")
+    source += menu[terms_start:menu.index("bool coop_term_fixed(", terms_start)]
     source += menu[menu.index("struct CoopFeatureRow {"):menu.index("const char* tx_feature(")]
     source += block(menu, "int menu_row_count(") + '\n' + block(menu, "Row& menu_row(") + '\n'
     source += '''

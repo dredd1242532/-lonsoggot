@@ -30,7 +30,8 @@ def main():
     a = p.parse_args()
     menu_source = a.source.read_text(encoding="utf-8")
     fn = block(menu_source, "void menu_record(") + "\n" + block(menu_source, "void menu_record_image(")
-    fixture = r'''#include "vk_api.h"
+    fixture = r'''#define _Static_assert static_assert
+#include "vk_api.h"
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
