@@ -1,6 +1,8 @@
 #!/bin/sh
-# The Longshot AppImage: the builder window (builder/linux/longshot_builder.py) with everything it builds the game with -
-# Python and the tools, clang and lld, a glibc 2.35 sysroot, FFmpeg, SDL2 and the Vulkan back end, built already.
+# The Longshot AppImage: the builder window (builder/linux/longshot_builder.py), its Python and Longshot's sources, with the
+# Vulkan back end built already. The build tools (clang and lld, a glibc 2.35 sysroot, FFmpeg, SDL2, the Vulkan headers) are
+# tools.lock's linux-x64 lines, outside the image: builder/linux/linux_tools.py finds them (the Longshot Launcher's, or the
+# builder's own toolchains folder) and, at the first start, downloads what is missing.
 #   Longshot.AppImage                  the builder window (Play is in the window, once a game is built)
 #   Longshot.AppImage --play           start the game the builder saved, without opening the window
 #   Longshot.AppImage --play <folder>  start the game in that folder
@@ -11,11 +13,7 @@
 HERE="$(dirname "$(readlink -f "$0")")"
 LIB="$HERE/usr/lib/longshot"
 export LONGSHOT_TOOLS="$HERE/usr/share/longshot"
-export EMSDK="$LIB/emsdk"
-export LONGSHOT_SYSROOT="$LIB/sysroot"
-export LONGSHOT_FFMPEG="$LIB/ffmpeg"
 export LONGSHOT_VK_PREBUILT="$LIB/longshot_vk.so"
-export LONGSHOT_SDL2="$LIB/libSDL2-2.0.so.0"
 # (written into the game folder's longshot_version.txt, so its launcher finds this builder)
 if [ -n "${APPIMAGE:-}" ]; then
     export LONGSHOT_BUILDER_EXE="$APPIMAGE"
@@ -23,11 +21,20 @@ else
     export LONGSHOT_BUILDER_EXE="$HERE/AppRun"
 fi
 PY="$HERE/usr/python/bin/python3"
+# The build tools' places (EMSDK, LONGSHOT_SYSROOT, LONGSHOT_FFMPEG, LONGSHOT_SDL2, RX_CPM), each downloaded first when it is
+# missing ("$@": --gui shows that in a window). A tool that cannot be had is left out: the window opens all the same, and
+# its build says what is missing; --cli stops
+build_tools() {
+    tools_env=$("$PY" -I "$LONGSHOT_TOOLS/builder/linux/linux_tools.py" env --install "$@") && tools_ok=1 || tools_ok=
+    eval "$tools_env"
+    [ -n "$tools_ok" ]
+}
 if [ "${1:-}" = "--cli" ]; then
     shift
+    build_tools || exit 1
     exec "$PY" -I "$LONGSHOT_TOOLS/nx2/make_game.py" "$@"
 fi
-# Play is the same AppImage: the start script drops this image's libraries, then runs the built game.
+# Play is the same AppImage: the start script drops this image's libraries, then runs the built game. It needs no build tool.
 if [ "${1:-}" = "--play" ]; then
     shift
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$@"
@@ -35,4 +42,5 @@ fi
 if [ -n "${1:-}" ] && [ -d "$1" ]; then
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$1"
 fi
+build_tools --gui || true
 exec "$PY" -I "$LONGSHOT_TOOLS/builder/linux/longshot_builder.py" "$@"

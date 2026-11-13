@@ -33,6 +33,7 @@
 #include "vk_menu_hit.h"
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
+#include "vk_texture.h"   // (the FPS counter's Dev level: texture_count, texture_bytes, texture_stats)
 #include "oot_cheat_items.h"
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
 #include "vk_ui.h"
@@ -55,7 +56,7 @@
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
 #endif
-#include "pipeline_share.h"   // (Save my pipeline list: the zip for issue 2034)
+#include "pipeline_share.h"   // (Save my pipeline list: the zip for issue 14)
 #ifndef _WIN32   // (Save my pipeline list: the desktop's programs. On Windows, shell32 and ole32 are loaded when it is used)
 #include <fcntl.h>
 #include <spawn.h>
@@ -1134,7 +1135,9 @@ MENU_HINTS(hn_fps, 0, nullptr, "The frame rate. With frame generation on, the ga
            "And the game's frame time, with its 1% low: the rate of its slowest 1% of frames over the last 10 seconds.",
            "And a graph of the last 4 seconds' frame times, with a line at the Game frame rate cap's.",
            "And where each frame's time goes: the game, the renderer, waiting for the GPU, waiting for its turn (frame pacing, "
-           "vsync); the GPU's own time; red marks where shaders were built or draws left out.")
+           "vsync); the GPU's own time; red marks where shaders were built or draws left out.",
+           "And the renderer's own numbers, for debugging: video memory, textures, draws, dispatches and render passes a "
+           "frame, draws skipped, texture uploads and pipelines built.")
 MENU_HINTS(hn_menu_size, 1, "Smaller, for a desk.", "The usual size.", "Larger, for a TV across the room.")
 MENU_HINTS(hn_speed, 0, "A step each frame: the game slows down whenever it runs below 60 fps.",
            "Normal speed down to 15 fps, by taking longer steps.")
@@ -1198,11 +1201,11 @@ Row rows[] = {
      "the scene's depth and motion. Changes at once.", hn_framegen_by, false, true},
     {TAB_GRAPHICS, "Frame pacing", &opts.pace, 0, 1, 1, tx_onoff, "When each frame is shown.", hn_pace},
     {TAB_GRAPHICS, "Game frame rate cap", &opts.fps_cap, 0, 6, 1, tx_fps_cap,
-     "Limits frames rendered by the game. Generated frames are additional. Takes a restart. "
+     "Limits frames rendered by the game. Generated frames are additional. Changes at once. "
      "Past 60 is experimental: the game keeps real time, but some cutscenes and bosses can misbehave (Gohma, the intro's "
      "narration). 60 is the safe choice. Uncapped: as fast as the PC can, still at real time; with V-Sync on, the display's "
      "refresh rate is the limit.",
-     nullptr, true, true},
+     nullptr, false, true},
     {TAB_GRAPHICS, "NVIDIA Reflex", &opts.reflex, 0, 2, 1, tx_reflex,
      "NVIDIA GPUs: each frame starts as late as it can, for less input delay. With frame generation too: it paces the "
      "game's frames.", hn_reflex, false, true},
@@ -1389,10 +1392,10 @@ Row rows[] = {
      "Attach the zip there and paste the report. Nothing is uploaded for you."},
     {TAB_DEBUG, "Descriptor reuse", &opts.descriptor_reuse, 0, 1, 1, tx_onoff,
      "A draw keeps its descriptors while the texture slots it samples are unchanged, so streaming elsewhere in the game no longer "
-     "rebuilds every set each frame. Applies after restart.", nullptr, true, true},
+     "rebuilds every set each frame. Changes at once.", nullptr, false, true},
     {TAB_DEBUG, "Sampler cache", &opts.sampler_cache, 0, 1, 1, tx_onoff,
      "What a sampler holds is kept beside it on the replay thread, so resolving a sampler that was not registered anew takes no "
-     "lock. Helps while the game streams textures. Applies after restart.", nullptr, true, true},
+     "lock. Helps while the game streams textures. Changes at once.", nullptr, false, true},
     {TAB_DEBUG, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Applies after a "
      "restart.", hn_robust, true, true},
@@ -1758,7 +1761,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.vsync) return "vsync";
     // (rows renamed since their values were first saved keep their keys: an options file from before still loads)
     if (r.value == &opts.resolution) return "resolution";
-    if (r.value == &opts.fps_cap) return "frame_rate_cap";   // (host/nn_vi.c reads it at the start)
+    if (r.value == &opts.fps_cap) return "frame_rate_cap";   // (host/nn_vi.c reads it at the start, then HOS_OPT_FPS_CAP)
     if (r.value == &opts.upscale) return "upscaling";
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
     if (r.value == &opts.handheld) return "handheld_profile";   // (the Profile row; host/nn_applet.c reads it at the start)
@@ -1945,7 +1948,7 @@ namespace ps = pipeline_share;
 std::string share_said;    // (the help box's line after a save: where the zip went and what to do, or why there is none)
 std::string share_value;   // (the row's value after a save: Saved, or Not saved)
 constexpr const char* kShareSaidLongest = "Saved longshot-pipelines-2026-12-31.zip (123456 pipelines) in Downloads. The report "
-    "is in the zip. Open github.com/NotRexed/Longshot/issues/2034 and attach the zip to a comment, then paste the report and say "
+    "is in the zip. Open git.magicbean.dev/MagicBeanDev/Longshot/issues/14 and attach the zip to a comment, then paste the report and say "
     "where you played.";   // (measure_help: the help box's room)
 std::string share_saved;   // (the first sentence: the zip's name, its pipelines and its folder)
 std::atomic<bool> share_busy{false};   // (the worker is copying and opening: presses wait for it)
@@ -1955,7 +1958,7 @@ void share_finish() {
     const int r = share_result.exchange(-1);
     if (r < 0) return;
     share_said = share_saved + ((r & 1) ? "The report is copied. " : "The report is in the zip. ") +
-                 ((r & 2) ? "Issue 2034 is open in your browser: attach" : "Open github.com/NotRexed/Longshot/issues/2034 and attach") +
+                 ((r & 2) ? "Issue 14 is open in your browser: attach" : "Open git.magicbean.dev/MagicBeanDev/Longshot/issues/14 and attach") +
                  " the zip to a comment, then paste the report and say where you played.";
     share_busy.store(false);
     menu_refresh = true;
@@ -2377,6 +2380,8 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         samplers_changed();
     if (r.value == &opts.dlss || r.value == &opts.resolution || r.value == &opts.dlss_model)
         temporal_reset_failure();
+    if (r.value == &opts.descriptor_reuse || r.value == &opts.sampler_cache)   // (longshot: in play, vk_draw.cpp)
+        menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);
     prompts_at_once(r);   // (longshot)
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
@@ -2522,11 +2527,14 @@ double fps_rate_now = 0;   // (the number's rate, the game's own with frame gene
 char fps_part_text[fps_stats::kParts][24];
 char fps_gpu_text[24] = "";
 char fps_built_text[16] = "", fps_left_text[16] = "";
-int fps_cap_started = 0;   // (the Game frame rate cap the game started with: the graph's line)
-/// The FPS counter's target frame time, ms: the cap the game started with (HOS_FPS_MAX over it, as host/nn_vi.c), or the
-/// display's refresh with V-Sync On and no frame generation when that is slower; 0 for none (Uncapped without V-Sync)
+char fps_dev_text[fps_stats::kDevLines][32];   // (the Dev level's values, fps_texts)
+bool fps_vram_over = false;                    // (the VRAM line in red: past what the driver allows)
+/// The FPS counter's target frame time, ms: the Game frame rate cap row's (HOS_FPS_MAX over it, as host/nn_vi.c, which follows
+/// the row in play), or the display's refresh with V-Sync On and no frame generation when that is slower; 0 for none (Uncapped
+/// without V-Sync)
 double fps_target_ms() {
-    static const int cap = fps_stats::cap_rate(fps_cap_started, getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0);
+    static const int env_max = getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0;
+    const int cap = fps_stats::cap_rate(opts.fps_cap, env_max);
     const bool fifo = menu_vsync() == 1 && opts.framegen == 0;
     return fps_stats::target_ms_for(cap, fifo, fifo ? (display_refresh_mhz() + 500) / 1000 : 0);
 }
@@ -2971,7 +2979,7 @@ const char* bug_report_cell() {
 /// Under its help once saved: where the report is and what to do with it (the game opens nothing: no browser or file manager is
 /// sure to be there, as on a Steam Deck in Game Mode)
 std::string bug_report_saved_text(const std::string& folder) {
-    return "Saved in the game folder as " + folder + ". To send it, open github.com/NotRexed/Longshot/issues, choose New issue and "
+    return "Saved in the game folder as " + folder + ". To send it, open git.magicbean.dev/MagicBeanDev/Longshot/issues, choose New issue and "
            "Game problem, copy report.txt's answers into the form and drag the folder's files into it: on Windows from File "
            "Explorer, on Linux from a file manager (on a Steam Deck, in Desktop Mode).";
 }
@@ -3768,6 +3776,7 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     if (level >= fs::kFrameTime && fps_ms_text[0]) h += row;
     if (level >= fs::kGraph) h += 8 * s + gh + 4 * s;
     if (level >= fs::kBreakdown) h += 10 * s + 6 * s + 4 * lh + 6 * s + 3 * lh;
+    if (level >= fs::kDev) h += 6 * s + fs::kDevLines * lh;
     const float edge = left ? c.safe : c.w - c.safe;
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe;
     // (x for a width at the column's edge)
@@ -3934,6 +3943,14 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const ImU32 red = ui::rgba(240, 100, 85);
     line(0, "Shaders built (4 s)", fps_built_text, strcmp(fps_built_text, "0") ? red : dim);
     line(0, "Draws left out (4 s)", fps_left_text, strcmp(fps_left_text, "0") ? red : dim);
+    if (level < fs::kDev) return;
+    // (Dev: the renderer's own numbers, for debugging)
+    c.d->AddLine(ImVec2(x0, std::floor(by + 3 * s) + 0.5f), ImVec2(x1, std::floor(by + 3 * s) + 0.5f), ui::rgba(255, 255, 255, 40), std::max(1.0f, s));
+    by += 6 * s;
+    for (int i = 0; i < fs::kDevLines; i++) {
+        const bool alarm = (i == fs::kVram && fps_vram_over) || (i == fs::kSkipped && strcmp(fps_dev_text[i], "0") && strcmp(fps_dev_text[i], "-"));
+        line(0, fs::dev_name(i), fps_dev_text[i], alarm ? red : ink);
+    }
 }
 
 /// The start-up screen: the logo, the wordmark, what the start is doing, a bar, on a warm dark. A little below the middle; what
@@ -4131,7 +4148,7 @@ void menu_init() {
     if (opts.preset == kAutoPreset && !has_memory_budget) opts.budget = 0;   // (Auto: its tier's, menu_auto_for_gpu)
     if (!has_vram_budget) opts.vram_budget = preset_vram_budget(opts.budget);   // (a file from before the row)
     vram_budget_sync();
-    fps_cap_started = opts.fps_cap;   // (the FPS counter's graph: the cap applies from the start, host/nn_vi.c)
+    menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);   // (the Debug rows that apply in play: what was loaded)
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
     // (the environment over the saved rows, for this run only: env_override, save)
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
@@ -4269,6 +4286,32 @@ void fps_texts(int64_t now) {
     const fs::Summary graph = fps_summary(now, fs::kGraphWindow, 0);
     snprintf(fps_built_text, sizeof fps_built_text, "%d", graph.pipelines);
     snprintf(fps_left_text, sizeof fps_left_text, "%d", graph.left_out);
+    if (level < fs::kDev) return;
+    // (Dev: the renderer's counters since the last time, every half second, by the frames presented in that time)
+    static int64_t at = 0, last[5] = {};
+    if (at && now - at < fs::kSecond / 2 && now >= at) return;
+    int64_t draws = 0, skipped = 0, dispatches = 0, pipelines = 0, passes = 0, mesh = 0, uploads = 0, astc = 0, bytes = 0;
+    double pipeline_ms = 0;
+    draw_stats(&draws, &skipped, &dispatches, &pipelines);
+    draw_stats2(&passes, &mesh, &pipeline_ms);
+    texture_stats(&uploads, &astc, &bytes);
+    const int64_t counts[5] = {draws, dispatches, passes, skipped, bytes};
+    const bool first = !at || now < at || now - at > 2 * fs::kSecond;   // (Dev just chosen again: no stretch from before)
+    const double seconds = first ? 0 : (double)(now - at) / fs::kSecond;
+    const int frames = first ? 0 : fps_summary(now, now - at, 0).frames;
+    uint64_t used = 0, allowed = 0;
+    const bool known = vram_usage(&used, &allowed) && dev.memory_budget;   // (the status line asks the driver anew: vram_usage_now)
+    fps_vram_over = known && allowed && used > allowed;
+    fs::vram_line(fps_dev_text[fs::kVram], sizeof fps_dev_text[0], used, allowed, known);
+    fs::textures_line(fps_dev_text[fs::kTextures], sizeof fps_dev_text[0], texture_count(), texture_bytes());
+    fs::per_frame_line(fps_dev_text[fs::kDraws], sizeof fps_dev_text[0], counts[0] - last[0], frames);
+    fs::per_frame_line(fps_dev_text[fs::kDispatches], sizeof fps_dev_text[0], counts[1] - last[1], frames);
+    fs::per_frame_line(fps_dev_text[fs::kPasses], sizeof fps_dev_text[0], counts[2] - last[2], frames);
+    fs::per_frame_line(fps_dev_text[fs::kSkipped], sizeof fps_dev_text[0], counts[3] - last[3], frames);
+    fs::rate_line(fps_dev_text[fs::kUploads], sizeof fps_dev_text[0], counts[4] - last[4], seconds);
+    snprintf(fps_dev_text[fs::kPipelines], sizeof fps_dev_text[0], "%lld", (long long)pipelines);
+    at = now;
+    std::memcpy(last, counts, sizeof last);
 }
 
 /// A rate over the half-second that just ended. The first call only starts that interval: the frames since launch,

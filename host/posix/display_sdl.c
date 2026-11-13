@@ -13,7 +13,7 @@
 #include "../hos_sdl.h"
 
 /* (the window's app id: the applications menu's entry names it as its StartupWMClass, builder/linux/longshot_builder.py) */
-#define HOS_APP_ID "io.github.NotRexed.Longshot"
+#define HOS_APP_ID "dev.magicbean.Longshot"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

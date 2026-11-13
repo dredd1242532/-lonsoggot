@@ -1,6 +1,6 @@
 """The OptimizeChangeBank thread's allocations are tried again when their heap is full (host/oot_heap_retry.c, nx2/oot_patches.py).
 
-Issue 1697 (thread OptimizeChangeBanc writes guest 0x8 a few frames after loading a save) and TomShafford/Longshot's crash at
+Issue 1697 (thread OptimizeChangeBanc writes guest 0x8 a few frames after loading a save) and TomShafford/Hookshot's crash at
 backflip + attack: a model's CPU buffer (a heap's tryAlloc) or GPU memory (f_80522050) came back null from a full heap and the
 game wrote through it. Builds host/oot_heap_retry.c, as it is, over a guest memory of its own with made-up sead heaps (name,
 size, parent, a vtable with tryAlloc and getFreeSize) and a stand-in for the game's f_80522050, then checks:
