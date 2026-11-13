@@ -21,8 +21,6 @@ ORDER = [
 # (the code that used to ask GitHub for a release or install a newer builder, and must not now)
 SOURCES = [
     "builder/linux/linux_update.py", "builder/linux/longshot_builder.py", "builder/linux/AppRun", "builder/linux/longshot-folder",
-    "builder/py/longshot_builder/__init__.py", "builder/py/longshot_builder/updater.py",
-    "builder/py/longshot_builder/setup_parts.py", "builder/py/longshot_builder/window.py", "builder/py/longshot_builder_start.py",
     "builder/LongshotBuilder/Updater.cs", "builder/LongshotBuilder/MainWindow.xaml.cs", "builder/setup/setup.c", "host/hos_main.c",
 ]
 
