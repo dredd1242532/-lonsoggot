@@ -63,7 +63,16 @@ int main(void) {
     send_digest(a, 2, send_to, a);
     assert(coop_sync_offer(b, &o, 17000) && !o.accepted); /* identity consent is not acceptance of changed terms */
     assert(observations == before);
+    coop_sync_temporary(b, 1);
+    assert(coop_sync_offer(b, &o, 17001) && coop_sync_presence_accept(b, o.token));
+    assert(coop_sync_offer(b, &o, 17002) && o.presence_accepted && !o.accepted);
+    assert(!coop_sync_accept(b, o.token));
+    coop_sync_copied(b, 1);
+    for (int i = 0; i < COOP_SYNC_SECTIONS; i++) send_section(a, i, 2, send_to, a);
+    CoopApply apply;
+    assert(observations == before && !coop_sync_flag(b, COOP_CAT_ITEMS, 123));
+    assert(!coop_sync_open(b) && !coop_sync_take(b, &apply, 1)); // see/talk on a copy cannot publish progress notices or writes
     coop_sync_free(a); coop_sync_free(b);
-    puts("PASS chat-progress: signed shared flags only after acceptance, unchanged/duplicate/forged sections do not repeat notices");
+    puts("PASS chat-progress: signed shared flags only after acceptance, unchanged/duplicate/forged sections do not repeat notices; copy presentation grants no progress");
     return 0;
 }

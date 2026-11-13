@@ -51,6 +51,10 @@ static void refused(int mode, int absent, int format, const char *reason) {
 }
 int main(void) {
     CoopRules permissions; coop_rules_default(&permissions);
+    assert(COOP_PRESENCE_SUPPORTED == 95);
+    assert(coop_feature_set(&permissions, COOP_RULE_PRESENCE, 2)); // adult bodies
+    assert(!coop_feature_set(&permissions, COOP_RULE_PRESENCE, 32));
+    assert(!coop_feature_set(&permissions, COOP_RULE_PRESENCE, 128));
     for (int mask = 0; mask <= 255; mask++) {
         const int supported = !(mask & ~COOP_PRESENCE_SUPPORTED);
         assert(coop_feature_set(&permissions, COOP_RULE_PRESENCE, mask) == supported);
@@ -58,7 +62,7 @@ int main(void) {
     assert(!coop_feature_set(&permissions, COOP_RULE_PRESENCE, -1));
     assert(coop_feature_set(&permissions, COOP_RULE_PRESENCE, COOP_PRESENCE_SUPPORTED));
     int mask = 0;
-    assert(coop_feature_present(&permissions, COOP_RULE_PRESENCE, &mask) && mask == 19);
+    assert(coop_feature_present(&permissions, COOP_RULE_PRESENCE, &mask) && mask == 95);
     refused(0, 1, 5, "Missing signed room mode");
     refused(-1, 0, 5, "mode is off");
     refused(7, 0, 5, "unknown mode");

@@ -15,6 +15,7 @@
 #include "coop_state.h"
 #include "coop_gameplay.h"
 #include "oot_coop_kit.h"
+#include "coop_chat.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* (env_on, env_value_off: the switches' rule, as host/oot_coop.c has it) */
 
 static int failures;
@@ -126,18 +127,24 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
     accepted_members = members;
 }
 void coop_download_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
-void coop_presence_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
+static uint32_t presented_members;
+void coop_presence_members(const CoopView *v, uint32_t members) { presented_members = v ? members : 0; }
 static int temporary_profile;
 static volatile int hos_oot_coop_kit_active;
 int coop_profile_active(void) { return temporary_profile; }
-static int hos_oot_hits_active;
+static int hos_oot_hits_active, hits_share;
 static void hos_oot_hits_start(void) {}
-static void hos_oot_hits_room(const CoopRules *r, int accepted) { (void)r; (void)accepted; }
+static void hos_oot_hits_room(const CoopRules *r, int accepted) { hits_share = r && accepted; }
 static void hos_oot_hits_frame(const char *area, int playing) { (void)area; (void)playing; }
 int hos_oot_current_map(char *out, size_t cap) { (void)out; (void)cap; return 0; }
-static int chat_safe;
+static int chat_safe, chat_accepted;
+static uint32_t chat_members, chat_epoch;
 void hos_coop_chat_start(void) {}
-void hos_coop_chat_room(const CoopView *v, const CoopOffer *o, uint32_t mask) { (void)v; (void)o; (void)mask; }
+void hos_coop_chat_room(const CoopView *v, const CoopOffer *o, uint32_t mask) {
+    chat_accepted = v && v->state == COOP_JOINED && o && o->accepted;
+    chat_members = mask;
+    chat_epoch = o ? o->rules.epoch : 0;
+}
 void hos_coop_chat_scene(int safe) { chat_safe = safe; }
 void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
 /* (the same layer's tick: each present that read the flags, with the gate's answer) */
@@ -275,25 +282,36 @@ static void check_consent_publication(void) {
     G.eng = one;
     current_view = (CoopView){.state = COOP_JOINED, .version = 7, .self = 1, .session = 101, .n = 2,
                              .member = {{.id = 1, .session = 101}, {.id = 2, .session = 202}}};
+    G.view = current_view;
     publish_members();
     CHECK(accepted_members == 0);   /* in the roster and identified, not accepted */
+    CHECK(!presented_members && !chat_accepted && !chat_members && !hits_share);
     CoopOffer offer;
     CHECK(coop_sync_offer(one, &offer, now_ms) && coop_sync_accept(one, offer.token));
     publish_members();
     CHECK(accepted_members == (1u << 2) && accepted_view.version == 7 && accepted_view.member[1].session == 202);
+    CHECK(!presented_members && !chat_accepted && !chat_members && !hits_share); /* identity consent alone has no presentation */
+    coop_sync_copied(one, 1);
+    publish_members();
+    CHECK(presented_members == (1u << 2) && hits_share);
+    CHECK(chat_accepted && chat_members == presented_members && chat_epoch == offer.rules.epoch);
     current_view.member[1].session = 303;
     publish_members();
     CHECK(!accepted_members);       /* publication reads the live view, not the cached G.view */
+    CHECK(!presented_members && !chat_members);
     current_view.member[1].session = 202;
     CHECK(coop_sync_remove(one, 2));
     publish_members();
     CHECK(!accepted_members);       /* removed, still in the roster */
+    CHECK(!presented_members && !chat_members);
     current_view.state = COOP_LEFT;
     publish_members();
     CHECK(!accepted_members);
+    CHECK(!presented_members && !chat_accepted && !chat_members && !hits_share);
     accepted_members = 1u << 2;
     publish_none();
     CHECK(!accepted_members && !accepted_view.session);
+    CHECK(!presented_members && !chat_accepted && !chat_members && !chat_epoch && !chat_safe);
     G.eng = NULL;
     coop_sync_free(one), coop_sync_free(two);
 }

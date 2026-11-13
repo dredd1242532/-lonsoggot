@@ -11,7 +11,7 @@ static uint64_t clock_ms = 10000;
 static uint8_t packet[COOP_CHAT_PACKET];
 static size_t packet_n;
 static CoopEventFn event_fn;
-static int accepted = 1, queued = 1, sends;
+static int accepted = 1, present = 1, queued = 1, sends;
 uint64_t coop_now_ns(void) { return clock_ms * 1000000; }
 void coop_once(CoopOnce *o, void (*fn)(void *), void *arg) { static int done; (void)o; if (!done) { done = 1; fn(arg); } }
 void coop_lock_init(CoopLock *l) { (void)l; }
@@ -20,6 +20,7 @@ void coop_unlock(CoopLock *l) { (void)l; }
 int hos_ini_option(const char *key, int otherwise) { assert(!strcmp(key, "coop_notices")); return otherwise; }
 int coop_on_event(uint8_t kind, CoopEventFn fn, void *user) { assert(kind == COOP_K_CHAT && !user); event_fn = fn; return 1; }
 int coop_member_accepted(int member) { return accepted && member == 2; }
+int coop_member_present(int member) { return present && member == 2; }
 int coop_send_event(int member, uint8_t kind, const void *bytes, size_t n) {
     assert(member == 0 && kind == COOP_K_CHAT && n <= sizeof packet);
     if (!queued) return COOP_EVENT_FULL;
@@ -160,16 +161,18 @@ static void runtime(void) {
     queued = 1; assert(hos_coop_chat_command(HOS_COOP_CHAT_SEND, "hi", 0) && sends == 1);
     assert(!hos_coop_chat_command(HOS_COOP_CHAT_SEND, "fast", 0) && sends == 1);
     assert(hos_coop_feed(&feed) && !strcmp(feed.line[0].text, "hi"));
-    clock_ms += 2000; message(20, "remote", 6); accepted = 0;
+    clock_ms += 2000; message(20, "remote", 6); present = 0;
     event_fn(2, 202, 20, packet, packet_n, NULL);
     assert(hos_coop_feed(&feed) && strcmp(feed.line[0].text, "remote"));
-    accepted = 1; event_fn(2, 202, 21, packet, packet_n, NULL);
+    accepted = 0; present = 1;
+    assert(!coop_member_accepted(2) && coop_member_present(2)); /* a copy's see/talk consent is not durable acceptance */
+    event_fn(2, 202, 21, packet, packet_n, NULL);
     assert(hos_coop_feed(&feed) && !strcmp(feed.line[0].text, "remote"));
     hos_coop_chat_scene(0); assert(hos_coop_feed(&feed) && !feed.visible && !feed.can_chat);
     assert(!hos_coop_chat_command(HOS_COOP_CHAT_SEND, "cutscene", 0));
     hos_coop_chat_room(NULL, NULL, 0); assert(!hos_coop_feed(&feed));
     assert(!hos_coop_chat_command(HOS_COOP_CHAT_SEND, "off", 0));
-    puts("PASS chat-runtime: real callbacks, queue failure/no echo, accepted EVENT receive, scene cancellation, off");
+    puts("PASS chat-runtime: real callbacks, queue failure/no echo, presentation-only EVENT receive, scene cancellation, off");
 }
 int main(void) {
     text_cases(); wire_cases(); receive_cases(); history_notices(); runtime();

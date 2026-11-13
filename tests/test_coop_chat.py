@@ -35,7 +35,7 @@ MENU = r'''#define _Static_assert static_assert
 #include <cstring>
 #include "gpu/vk/vk_api.h"
 #include "host/coop_chat_text.h"
-constexpr int VK_BACK=8, VK_RETURN=13, VK_ESCAPE=27, VK_END=35, VK_HOME=36, VK_LEFT=37, VK_RIGHT=39, VK_DELETE=46;
+constexpr int VK_BACK=8, VK_RETURN=13, VK_ESCAPE=27, VK_END=35, VK_HOME=36, VK_LEFT=37, VK_UP=38, VK_RIGHT=39, VK_DOWN=40, VK_INSERT=45, VK_DELETE=46;
 static int64_t now_ns=100000000;
 static int64_t prof_now() { return now_ns; }
 static int key_held;
@@ -79,7 +79,7 @@ int main() {
     now_ns+=100000000; chat_focus_tick(true,0);
     chat_open(); chat_focus_tick(false,0); assert(!editing); /* focus loss cancels, not sends */
     now_ns+=100000000; chat_focus_tick(true,0); permitted=0; live.can_chat=0; chat_open(); assert(!editing);
-    TextField utf{{},0,0,192,nullptr,true};
+    TextField utf{{},0,0,192,nullptr,nullptr,true};
     text_edit(utf,0x00e9); text_edit(utf,0x4e2d); text_edit(utf,0x1f600); assert(utf.len==9);
     text_edit(utf,HOS_TEXT_KEY|VK_LEFT); assert(utf.caret==5);
     text_edit(utf,HOS_TEXT_KEY|VK_BACK); assert(utf.len==6 && utf.caret==2);

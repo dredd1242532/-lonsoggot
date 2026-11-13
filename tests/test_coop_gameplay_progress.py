@@ -29,6 +29,8 @@ static struct {
     CoopView view;
     CoopGameplay gameplay;
     uint64_t save_generation, area_generation, applied_log_at;
+    uint32_t kit_offer, kit_epoch;
+    uint64_t kit_session, kit_generation;
     unsigned applied[COOP_CAT_N], applied_total;
 } G;
 static CoopOffer current;
@@ -42,7 +44,7 @@ int coop_sync_offer(CoopSync *engine, CoopOffer *out, uint64_t now) { (void)engi
 int coop_sync_open(CoopSync *engine) { (void)engine; return current.accepted; }
 int coop_sync_member_accepted(const CoopSync *engine, int id, uint64_t session) { (void)engine; return id == 2 && session == 202 && current.accepted; }
 void coop_sync_temporary(CoopSync *engine, int active) { (void)engine; (void)active; }
-uint32_t coop_sync_presence_members(CoopSync *engine) { (void)engine; return 0; }
+uint32_t coop_sync_presence_members(CoopSync *engine) { (void)engine; return current.presence_accepted ? 1u << 2 : 0; }
 static int presence_rule_present, presence_rule_value;
 static int warp_rule_present, warp_rule_value;
 int coop_feature_present(const CoopRules *rules, int id, int *value) {
@@ -113,6 +115,28 @@ int main(void) {
     apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1);
     G.gate = 1; temporary = 1;
     apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1 && !G.gameplay.context.capabilities);
+    current.accepted = 0; current.presence_accepted = 1;
+    presence_rule_value = COOP_PRESENCE_SUPPORTED;
+    warp_rule_present = warp_rule_value = 1;
+    apply(&ctx, 1234);
+    assert(takes == 2 && guest_calls == before && writes == 1);
+    assert(G.gameplay.context.capabilities == COOP_GAMEPLAY_PRESENTATION); // see/talk, even with warp enabled, is not kit consent
+    G.kit_offer = current.token; G.kit_epoch = current.rules.epoch;
+    G.kit_session = room.session; G.kit_generation = G.save_generation;
+    gameplay_context_locked();
+    assert(G.gameplay.context.capabilities == (COOP_GAMEPLAY_PRESENTATION | COOP_GAMEPLAY_TEMPORARY));
+    apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1); // even kit consent grants no durable writer
+    for (int stale = 0; stale < 4; stale++) {
+        if (stale == 0) G.kit_offer++;
+        if (stale == 1) G.kit_epoch++;
+        if (stale == 2) G.kit_session++;
+        if (stale == 3) G.kit_generation++;
+        gameplay_context_locked(); assert(G.gameplay.context.capabilities == COOP_GAMEPLAY_PRESENTATION);
+        G.kit_offer = current.token; G.kit_epoch = current.rules.epoch;
+        G.kit_session = room.session; G.kit_generation = G.save_generation;
+    }
+    current.presence_accepted = 0;
+    gameplay_context_locked(); assert(!G.gameplay.context.capabilities); // a kit stamp cannot revive revoked see/talk consent
     assert(!untaken);
     puts("PASS: actual progress apply uses one registered writer; off, revoked queued ticket, revoked acceptance and invalid game context make no native calls");
 }
@@ -129,7 +153,8 @@ def main():
     spec.loader.exec_module(module)
     source = (args.source_root / "host/oot_coop.c").read_text()
     markers = ["typedef struct { Ctx *ctx; uint64_t mgr; } ProgressWrite;", "static int progress_write(",
-               "static int presentation_locked(", "static void gameplay_context_locked(", "static void apply("]
+               "static int presentation_locked(", "static int kit_consent_locked(",
+               "static void gameplay_context_locked(", "static void apply("]
     production = "\n".join(module.piece(source, marker) for marker in markers)
     with tempfile.TemporaryDirectory(prefix="coop-progress-owner-") as name:
         folder = Path(name)

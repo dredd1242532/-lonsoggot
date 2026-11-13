@@ -7,9 +7,12 @@
 #include "coop.h"
 #include "coop_gameplay.h"
 #include "coop_players.h"
+#include "coop_chat.h"
+#include "oot_coop_kit.h"
 
-static int temporary, native_writes, hit_share;
-static uint32_t accepted_mask, presence_mask, download_mask;
+static int temporary, native_writes, hit_share, chat_accepted;
+static volatile int hos_oot_coop_kit_active;
+static uint32_t accepted_mask, presence_mask, download_mask, chat_mask, chat_epoch;
 static uint64_t now = 1000;
 static CoopView live;
 static struct {
@@ -19,12 +22,16 @@ static struct {
     CoopOffer pub;
     CoopGameplay gameplay;
     uint64_t save_generation, area_generation;
+    OotCoopKitRun kit;
+    uint32_t kit_offer, kit_epoch;
+    uint64_t kit_session, kit_generation;
     uint32_t pub_shown, want_accept;
 } G;
 static struct {
     int lock, trace;
     CoopPlayers store;
     CoopGameplayTicket ticket[COOP_MAX_MEMBERS + 1];
+    uint64_t mismatch[COOP_MAX_MEMBERS + 1], mismatch_warned[COOP_MAX_MEMBERS + 1];
     struct { int any; uint8_t flags; char area[COOP_POS_TEXT + 1]; } heard[COOP_MAX_MEMBERS + 1];
 } P;
 int coop_profile_active(void) { return temporary; }
@@ -39,6 +46,11 @@ void coop_accept_members(const CoopView *v, uint32_t mask) { accepted_mask = v ?
 void coop_presence_members(const CoopView *v, uint32_t mask) { presence_mask = v ? mask : 0; }
 void coop_download_members(const CoopView *v, uint32_t mask) { download_mask = v ? mask : 0; }
 static void hos_oot_hits_room(const CoopRules *rules, int accepted) { hit_share = rules && accepted; }
+void hos_coop_chat_room(const CoopView *v, const CoopOffer *o, uint32_t members) {
+    chat_accepted = v && v->state == COOP_JOINED && o && o->accepted;
+    chat_mask = members;
+    chat_epoch = o ? o->rules.epoch : 0;
+}
 static void hos_log(const char *fmt, ...) { (void)fmt; }
 static void say_heard(int from, const CoopPos *pose) { (void)from; (void)pose; }
 static void publish(const CoopOffer *offer, int has, uint64_t at);
@@ -104,11 +116,13 @@ static void closed(void) {
     publish_members(); gameplay_context_locked();
     assert(!hos_oot_coop_presentation(&rules, &members) && !members && !rules.epoch);
     assert(!presence_mask && !accepted_mask && !G.presence && !G.gameplay.context.capabilities && !hit_share);
+    assert(!chat_accepted && !chat_mask && !chat_epoch && !G.kit_offer && !hos_oot_coop_kit_active);
 }
 static void no_durable(void) {
     assert(!coop_sync_open(G.eng) && !coop_sync_member_accepted(G.eng, 1, 101));
     assert(!G.eng->accepted && !G.eng->nacc && !coop_sync_copy_wanted(G.eng));
     assert(!(G.gameplay.context.capabilities & (COOP_GAMEPLAY_DURABLE | COOP_GAMEPLAY_TEMPORARY)));
+    assert(!G.kit_offer && !hos_oot_coop_kit_active);
     CoopApply apply;
     assert(!coop_sync_take(G.eng, &apply, 1));
     for (unsigned slot = 0; slot < COOP_GAMEPLAY_WRITERS; slot++) {
@@ -120,12 +134,15 @@ static void no_durable(void) {
 }
 static void grant_presence(void) {
     CoopOffer o = offer();
+    const uint32_t downloads = coop_sync_download_members(G.eng);
     assert(hos_oot_coop_presence_accept(o.token));
     gameplay_context_locked();
     CoopRules rules; uint32_t members = 0;
     assert(hos_oot_coop_presentation(&rules, &members) && rules.epoch == o.rules.epoch && members == (1u << 1));
     assert(G.presence && G.gameplay.context.capabilities == COOP_GAMEPLAY_PRESENTATION);
     assert(!accepted_mask && presence_mask == members && G.pub_shown == members && hit_share);
+    assert(chat_accepted && chat_mask == members && chat_epoch == rules.epoch);
+    assert(download_mask == downloads && coop_sync_download_members(G.eng) == downloads);
     no_durable();
 }
 static void pose_arrival(int expected) {
@@ -135,6 +152,15 @@ static void pose_arrival(int expected) {
     unsigned before = P.store.taken;
     on_pos(1, bytes, n, NULL);
     assert(P.store.taken == before + (unsigned)expected);
+    if (expected) assert(!P.mismatch[1]);
+}
+static void pose_mismatch(void) {
+    const uint8_t wrong_version[] = {COOP_POS_VERSION + 1};
+    const unsigned before = P.store.taken;
+    on_pos(1, wrong_version, sizeof wrong_version, NULL);
+    assert(P.store.taken == before && !P.store.r[1].n);
+    assert(P.mismatch[1] == 101 && P.mismatch_warned[1] == 101);
+    pose_arrival(1); /* a current compatible packet clears the session's mismatch */
 }
 int main(void) {
     setup();
@@ -167,6 +193,7 @@ int main(void) {
     assert(!sections[1] && !G.eng->nregs && !G.eng->npools);
     closed();
     grant_presence(); pose_arrival(1);
+    pose_mismatch();
     assert(hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, 1, &old));
     coop_sync_presence_revoke(G.eng);
     closed(); pose_arrival(0);

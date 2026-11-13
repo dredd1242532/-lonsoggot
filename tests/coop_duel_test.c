@@ -10,11 +10,38 @@ static unsigned checks, observed;
 #define CHECK(x) do { checks++; if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
 static CoopView menu_view;
 static CoopOffer menu_offer;
-static int temporary = 1;
+static CoopRules presentation_rules;
+static uint32_t presented_members;
+static int temporary = 1, presentation_ready = 1, kit_ready = 1;
+static unsigned presentation_queries, kit_queries, chat_queries, menu_queries;
+static int chat_input, menu_input;
+static char menu_log[256];
 void coop_view_get(CoopView *v) { *v = menu_view; }
 int hos_oot_coop_offer(CoopOffer *o) { *o = menu_offer; return 1; }
+int hos_oot_coop_presentation(CoopRules *r, uint32_t *members) {
+    presentation_queries++;
+    memset(r, 0, sizeof *r); *members = 0;
+    if (!presentation_ready) return 0;
+    *r = presentation_rules; *members = presented_members;
+    return 1;
+}
+int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch) {
+    kit_queries++;
+    CHECK(offer == menu_offer.token && epoch == menu_offer.rules.epoch);
+    return kit_ready;
+}
+int rx_option(int id, int otherwise) {
+    CHECK(!otherwise && (id == 1 || id == HOS_OPT_CHAT_FOCUS));
+    if (id == HOS_OPT_CHAT_FOCUS) { chat_queries++; return chat_input; }
+    menu_queries++; return menu_input;
+}
 int coop_profile_active(void) { return temporary; }
-void hos_log(const char *fmt, ...) { (void)fmt; }
+void hos_log(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(menu_log, sizeof menu_log, fmt, args);
+    va_end(args);
+}
 static void setting(const char *key, const char *value) {
 #ifdef _WIN32
     CHECK(_putenv_s(key, value ? value : "") == 0);
@@ -237,28 +264,72 @@ static void interruptions(void) {
     puts("PASS: leave, revoke, relay loss, menu/chat, save/area/kit generations, fresh-at-apply and zero-work off path");
 }
 static void menu_tests(const char *path) {
-    menu_offer.rules=rules(); menu_offer.accepted=1; menu_offer.token=55; strcpy(menu_offer.maker_key,"0000-0000-0000-0021");
-    menu_view.state=COOP_JOINED; menu_view.n=2; menu_view.self=1;
+    menu_offer.rules=rules(); menu_offer.accepted=0; menu_offer.presence_accepted=1;
+    menu_offer.token=55; strcpy(menu_offer.maker_key,"0000-0000-0000-0021");
+    presentation_rules=menu_offer.rules; presented_members=1u<<2; // the live owner returns remote members only
+    menu_view.state=COOP_JOINED; menu_view.n=2; menu_view.self=1; menu_view.session=101;
     menu_view.member[0].id=1; menu_view.member[0].session=101; menu_view.member[1].id=2; menu_view.member[1].session=202;
     MkwVkCoopView out={0}; setting("HOS_COOP_HITS_TRACE",NULL);
     hos_coop_duel_menu_view(&out,&menu_view,&menu_offer); CHECK(!out.duel_diagnostic); CHECK(!hos_coop_duel_menu_ready("x",3));
     setting("HOS_COOP_HITS_TRACE","0"); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer); CHECK(!out.duel_diagnostic);
+    CHECK(!presentation_queries && !kit_queries && !chat_queries && !menu_queries);
     setting("HOS_COOP_HITS_TRACE","1"); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
     CHECK(out.duel_diagnostic && strlen(out.duel_digest)==64 && strstr(out.duel_note,"cannot start a fight"));
     CHECK(strstr(out.duel_terms,"10 duel hearts") && strstr(out.duel_terms,"best of 3"));
+    CHECK(presentation_queries==1); // copy presentation works without ordinary progress acceptance
     CHECK(!hos_coop_duel_menu_ready(out.duel_digest,2)); setting("HOS_COOP_ARENA_FILE",NULL);
+    CHECK(!kit_queries && !chat_queries && !menu_queries);
     CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));
+    CHECK(kit_queries==1 && strstr(menu_log,"no valid local surveyed arena descriptor"));
+    const unsigned kit_before=kit_queries, chat_before=chat_queries, menu_before=menu_queries;
+    chat_input=1;
+    CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));
+    CHECK(chat_queries==chat_before+1 && menu_queries==menu_before && kit_queries==kit_before);
+    CHECK(strstr(menu_log,"menu or chat owns input"));
+    chat_input=0; menu_input=1;
+    CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));
+    CHECK(chat_queries==chat_before+2 && menu_queries==menu_before+1 && kit_queries==kit_before);
+    CHECK(strstr(menu_log,"menu or chat owns input"));
+    menu_input=0; kit_ready=0;
+    CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));
+    CHECK(kit_queries==kit_before+1 && strstr(menu_log,"kit is not verified"));
+    kit_ready=1;
     CoopArena a=arena(); uint8_t bytes[COOP_ARENA_BYTES];
     CHECK(coop_arena_pack(bytes,sizeof bytes,&a)==sizeof bytes);
     FILE *f=fopen(path,"wb"); CHECK(f); CHECK(fwrite(bytes,1,sizeof bytes,f)==sizeof bytes); CHECK(!fclose(f));
     setting("HOS_COOP_ARENA_FILE",path);
     CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));   // valid private data never invents a native capability
+    CHECK(kit_queries==kit_before+2 && strstr(menu_log,"native sword contact, damage, shield and arena safety are not proven"));
+    menu_view.member[1].session++;
+    CHECK(!hos_coop_duel_menu_ready(out.duel_digest,3));
+    CHECK(kit_queries==kit_before+2 && strstr(menu_log,"participant sessions changed"));
+    menu_view.member[1].session--;
     setting("HOS_COOP_ARENA_FILE",NULL);
-    menu_offer.accepted=0; memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+    presentation_ready=0; menu_offer.accepted=1;
+    memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
     CHECK(!out.duel_digest[0] && strstr(out.duel_note,"Accept"));
+    presentation_ready=1; menu_offer.accepted=0; presentation_rules.epoch++;
+    memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+    CHECK(!out.duel_digest[0] && strstr(out.duel_note,"Accept")); // a stale live charter cannot authorize the preview
+    presentation_rules.epoch--; temporary=0;
+    memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+    CHECK(!out.duel_digest[0] && strstr(out.duel_note,"temporary save copy"));
+    temporary=1;
+    for (int self=1; self<=2; self++) {
+        menu_view.self=self; menu_view.session=(uint64_t)self*101; presented_members=1u<<(3-self);
+        memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+        CHECK(strlen(out.duel_digest)==64); // neither roster position needs a remote grant for self
+        presented_members=0;
+        memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+        CHECK(!out.duel_digest[0] && strstr(out.duel_note,"Exactly two"));
+    }
+    presented_members=1u<<1; menu_view.member[0].away=1;
+    memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
+    CHECK(!out.duel_digest[0] && strstr(out.duel_note,"Exactly two"));
+    menu_view.member[0].away=0;
     menu_offer.accepted=1; menu_view.state=COOP_OFF; memset(&out,0,sizeof out); hos_coop_duel_menu_view(&out,&menu_view,&menu_offer);
     CHECK(!out.duel_diagnostic); setting("HOS_COOP_HITS_TRACE",NULL);
-    puts("PASS: diagnostic menu terms and native-capability refusal; switch absent/0 and co-op off stay closed");
+    puts("PASS: live presentation/epoch/participant and independent kit readiness, both input fences, diagnostic native-capability refusal; switch absent/0 and co-op off stay closed");
 }
 int main(int argc,char **argv) {
     CHECK(argc==2); descriptors(argv[1]); ready_tests(); ledger_tests(); interruptions(); menu_tests(argv[1]);

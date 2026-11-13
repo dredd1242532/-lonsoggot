@@ -60,7 +60,7 @@ PIECES = [
     "static GFlag *add_flag(", "static int cmp_pool_last(", "static int cmp_by_hash(", "static int build_table(", "static int32_t raw_of(",
     "static uint32_t reg_of(", "static GFlag *flag_by_hash(", "static int int_pending(", "static int apply_value(",
     "static int game_get_bool(", "static int set_flag(", "static int check_table(", "static uint32_t limit_fn(",
-    "static int presentation_locked(", "static void gameplay_revoke_locked(", "static void publish_members(", "static void publish_none(", "static void sync_on(", "static void on_view(",
+    "static int presentation_locked(", "static int kit_consent_locked(", "static void gameplay_revoke_locked(", "static void publish_members(", "static void publish_none(", "static void sync_on(", "static void on_view(",
     "static int accept_always(", "static int offer_of(", "static int key_accepted(", "static uint32_t shown_of(",
     "static void publish(", "static void offer_update(",
     "static void unbind(", "static void say_counts(", "static void bind_tables(", "static int player_in_world(",

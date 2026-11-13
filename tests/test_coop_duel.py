@@ -1,4 +1,4 @@
-"""Compile the real game-free arena/Ready/ledger and diagnostic menu; no game, GPU or real save.
+"""Compile the real game-free arena/Ready/ledger and diagnostic menu, including live consent/kit/input fences; no game, GPU or real save.
 
 --mutations runs deliberately broken disposable copies, each of which must fail a behavioral assertion.
 """
@@ -17,6 +17,9 @@ MUTATIONS = {
     "grace": ("coop_duel.c", "now - d->last_hit_ms < d->terms.grace_ms", "now - d->last_hit_ms > UINT64_MAX - d->terms.grace_ms"),
     "arena-age": ("coop_arena.c", "a->age > 1", "a->age > 2"),
     "off": ("coop_duel_menu.c", "!env_on(\"HOS_COOP_HITS_TRACE\")) return;", "0) return;"),
+    "kit-ready": ("coop_duel_menu.c", "if (!hos_oot_coop_kit_ready(offer.token, offer.rules.epoch))", "if ((void)hos_oot_coop_kit_ready(offer.token, offer.rules.epoch), 0)"),
+    "chat-input": ("coop_duel_menu.c", "rx_option(HOS_OPT_CHAT_FOCUS, 0) || rx_option(1, 0)", "((void)rx_option(HOS_OPT_CHAT_FOCUS, 0), 0) || rx_option(1, 0)"),
+    "menu-input": ("coop_duel_menu.c", "rx_option(HOS_OPT_CHAT_FOCUS, 0) || rx_option(1, 0)", "rx_option(HOS_OPT_CHAT_FOCUS, 0) || ((void)rx_option(1, 0), 0)"),
 }
 
 

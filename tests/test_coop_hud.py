@@ -38,9 +38,11 @@ int hos_oot_destination(int index,const char **child,const char **adult) {
 @@HELPERS@@
 int main(void) {
     CoopRules rules={.epoch=1};
-    assert(coop_feature_set(&rules,COOP_RULE_PRESENCE,COOP_PRESENCE_SUPPORTED));
-    assert(!coop_feature_set(&rules,COOP_RULE_PRESENCE,2));
+    assert(COOP_PRESENCE_SUPPORTED==95);
+    assert(coop_feature_set(&rules,COOP_RULE_PRESENCE,2)); // adult bodies are supported
+    assert(!coop_feature_set(&rules,COOP_RULE_PRESENCE,32));
     assert(!coop_feature_set(&rules,COOP_RULE_PRESENCE,128));
+    assert(coop_feature_set(&rules,COOP_RULE_PRESENCE,COOP_PRESENCE_SUPPORTED));
     assert(!coop_feature_set(&rules,COOP_RULE_NAMES,2));
     sample=(CoopPos){.flags=COOP_POS_IN_WORLD,.health_q=9,.max_health_q=12,.area="Forest_Child"};
     MkwVkCoopMember m={.id=2,.accepted=1};

@@ -72,7 +72,8 @@ def main():
                 "if (!hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)from, &ticket)) return;",
                 "memset(&ticket, 0, sizeof ticket); (void)hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)from, &ticket);")
         (folder / "coop_state.c").write_text(engine)
-        markers = ["static int presentation_locked(", "static void gameplay_revoke_locked(", "static void publish_members(",
+        markers = ["static int presentation_locked(", "static int kit_consent_locked(",
+                   "static void gameplay_revoke_locked(", "static void publish_members(",
                    "static int offer_of(", "int hos_oot_coop_presentation(", "int hos_oot_coop_gameplay_ticket(",
                    "int hos_oot_coop_gameplay_dispatch(", "int hos_oot_coop_presence_accept(", "int hos_oot_coop_accept(",
                    "static void gameplay_context_locked("]
