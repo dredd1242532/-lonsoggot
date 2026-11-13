@@ -93,8 +93,9 @@ LongshotLauncher. Until the counterpart exists, the Launcher UI/release author m
 `--launcher-source` during UI review and before a release, using the actual proposed release checkout. Record
 its commit, output and any companion Longshot docs PR in that review. `NOT CHECKED` is not completion of this step.
 
-The proposed Launcher-side PR/release job checks out the candidate Launcher source and an explicit Longshot docs
-revision, then runs the same checker from the Longshot checkout with the candidate path as `--launcher-source`.
+The proposed Launcher-side PR/release job checks out the exact candidate Launcher commit SHA (the final release
+commit for a release, not a moving branch name), verifies checkout HEAD matches that expected SHA, and checks out
+an explicit Longshot docs revision. It then runs the same checker from the Longshot checkout with the candidate path as `--launcher-source`.
 It must supply that checkout (and fail if unavailable), retain the affected screenshot filenames in its output,
 and link any companion docs PR. The Launcher maintainer owns installing that job and deciding whether its status
 is required; the release reviewer confirms it ran against the final release commit. Keep the images in Longshot,
