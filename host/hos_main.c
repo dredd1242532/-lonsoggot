@@ -2089,7 +2089,13 @@ static void static_tls_room(char **argv) {
     char *keep = was ? strdup(was) : NULL;
     setenv("HOS_STATIC_TLS_DONE", "1", 1);   /* (once: the game started again does not try again) */
     setenv("GLIBC_TUNABLES", tunables, 1);
-    execv("/proc/self/exe", argv);
+    /* (the executable's own path, not /proc/self/exe: the process is named by the path's last part, and "exe" was what pgrep,
+       earlyoom and the harnesses saw after the restart) */
+    char self[4096];
+    const ssize_t len = readlink("/proc/self/exe", self, sizeof self - 1);
+    const char *path = "/proc/self/exe";
+    if (len > 0) self[len] = 0, path = self;
+    execv(path, argv);
     if (keep) setenv("GLIBC_TUNABLES", keep, 1);   /* (the exec failed: on as before) */
     else unsetenv("GLIBC_TUNABLES");
     free(keep);

@@ -4,7 +4,7 @@ sampler_for's table).
 hookshot_vk.so is dlopen'ed: its thread_local data is reached through TLS descriptors (-mtls-dialect=gnu2, RX_VK_TLS=gd: the default
 model), and the game starts itself again once with room for that data in the static TLS block (glibc.rtld.optional_static_tls), so
 the descriptors resolve to constant offsets. static_tls_room is cut from the source and run with execv stubbed: the tunable is added
-to what GLIBC_TUNABLES held, the restart is tried once, and HOS_STATIC_TLS=0, a tunable already named or a restart already made leave
+to what GLIBC_TUNABLES held, the restart is tried once (with the executable's own path, so the process keeps its name), and HOS_STATIC_TLS=0, a tunable already named or a restart already made leave
 everything as it was; a failed exec puts GLIBC_TUNABLES back. The wiring is checked: the room is made first in main, and the back
 end's big per-thread table is on the heap, not in the TLS segment.
 python -I -B tests/test_static_tls.py [--cc gcc]
@@ -38,6 +38,7 @@ FIXTURE = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 static int execs = 0;
 static char seen[4096];
 static int fake_execv(const char *path, char *const argv[]) {
@@ -110,7 +111,9 @@ def main():
             ({"GLIBC_TUNABLES": "glibc.rtld.optional_static_tls=4096"}, "0 - glibc.rtld.optional_static_tls=4096"),
             ({"HOS_STATIC_TLS": "1"}, "1 /proc/self/exe|%s|done (unset)" % want),
         ]
+        self_path = os.path.realpath(str(exe))
         for env, expect in cases:
+            expect = expect.replace("/proc/self/exe", self_path)
             got = run(exe, env)
             if got != expect.rstrip():
                 raise SystemExit("FAIL: %r: got %r, want %r" % (env, got, expect))
