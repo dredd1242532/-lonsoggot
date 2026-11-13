@@ -275,8 +275,8 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 Proposed exception, pending maintainer agreement: the optional local MCP adapter and its protocol tests use the exact
 FastMCP pin in `scripts/mcp_requirements.txt`. No game, build pipeline, control client, fake bridge or general
 documentation check may depend on it. Use a separate virtual environment and `python -I`; see [the MCP guide](docs/mcp.md).
-The Forgejo CI workflow (`.forgejo/workflows/ci.yml`) installs it in a separate step before the game-free tests
-on both Linux and Windows. This proposal is for this tool alone, not for other scripts.
+The Forgejo CI workflow (`.forgejo/workflows/ci.yml`) installs it in a separate step before every configured
+game-free source-check shard. This proposal is for this tool alone, not for other scripts.
 
 ## Commits and pull requests
 

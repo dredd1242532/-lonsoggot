@@ -33,8 +33,8 @@ class OptionalMcp(unittest.TestCase):
         step = source_job.split("- name: Python package for MCP protocol tests", 1)[1].split("\n      - ", 1)[0]
         self.assertNotIn("if:", step)
         self.assertLess(source_job.index(install), source_job.index("name: Every test"))
-        self.assertIn("os: ubuntu-24.04", source_job)
-        self.assertIn("os: windows-2022", source_job)
+        self.assertIn("matrix:", source_job)
+        self.assertIn("runs-on: ${{ matrix.os }}", source_job)
         self.assertFalse((ROOT / ".github" / "workflows" / "source-regressions.yml").exists())
 
 

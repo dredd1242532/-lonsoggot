@@ -243,7 +243,7 @@ calls, cancellation, output bounds, failed launch cleanup and explicit force. Ge
 The documentation checker excludes the dedicated `tests/pr_description/` data directory, whose sample PRs intentionally
 name fictional files. Ordinary Markdown guides, including guides under `tests/`, keep their link and command checks.
 `RUN_ALL_MODULES = ["fastmcp"]` lets the runner skip only the SDK checks without the package; `--strict` fails a
-missing dependency. `.forgejo/workflows/ci.yml` installs the optional SDK in a separate step before the game-free
-tests on Linux and Windows. For local SDK checks, install the separate optional environment. Game-free checks are
+missing dependency. `.forgejo/workflows/ci.yml` installs the optional SDK in a separate step before every configured
+game-free source-check shard. For local SDK checks, install the separate optional environment. Game-free checks are
 not proof of Windows gameplay, a visible window, WebGPU capture or save-safe shutdown. The narrow dependency
 exception remains a question for maintainer review.
