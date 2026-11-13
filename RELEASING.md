@@ -163,14 +163,16 @@ To check before pushing: `python -I scripts/release.py check-tag <tag>` (it read
 ## Needs a Windows tester (Longshot)
 
 There is no Windows runner: every job runs on Linux, and Longshot's Windows files are cross-built there (the setup and the
-Vulkan back end with llvm-mingw's Linux build of `tools.lock`'s release, the WPF builder with `dotnet publish -r win-x64
+Vulkan back end with llvm-mingw's Linux build of `tools.lock`'s release, the builder (command-line only) with `dotnet publish -r win-x64
 -p:EnableWindowsTargeting=true`). CI checks them as Windows files (PE headers, imports, resources, the .NET runtime:
 `scripts/check_windows_files.py`) and starts the setup and the builder under Wine, which only shows that they load. For each
 release candidate, before its stable, a tester on Windows 10 or 11:
 
-- **Builds and plays.** Unzip `LongshotBuilder-<v>-windows-x64.zip` and run `LongshotBuilder.exe`: the setup installs the
-  builder and downloads the tools; build the game from your own copy and play to the title screen. The setup shows its
-  icon, the builder its fonts and image.
+- **Builds and plays.** With the Longshot Launcher, build this version from your own copy and play to the title screen.
+  Then unzip `LongshotBuilder-<v>-windows-x64.zip` and run `LongshotBuilder.exe --cli --prepare --game <your copy>` (as
+  RecompLauncher does): the setup installs the builder and downloads the tools, then builds. Started by a double-click,
+  the setup and `LongshotBuilder\LongshotBuilder.exe` each show only the message that sends players to the launcher; the
+  setup shows its icon.
 - **Notes what Windows says.** Nothing is signed: what SmartScreen and the antivirus do with the zip and the setup.
 - **Runs the checks only Windows can** (they were `ci.yml`'s `windows-2022` jobs, which nothing could run): the suite on
   Windows' Python, `python -I -B tests/run_all.py --strict` (the 15 checks Linux skips, their `RUN_ALL_SKIP` naming why: the setup's Win32
@@ -224,7 +226,7 @@ for Linux. A bump is a pull request that changes its line:
      `build-linux/tools`, and `check_player_build.sh` starts a build from the image with them), then the pull request
      (`build(linux): LLVM 23.1.6`).
 
-  The AppImage itself carries Python with `requirements.txt`'s packages and Tk (`deps.sh` without `tools`); a change to
+  The AppImage itself carries Python with `requirements.txt`'s packages (`deps.sh` without `tools`); a change to
   those is an ordinary pull request.
 
 Uploads over 100 MB (llvm-mingw, both emsdk) go to the address without Cloudflare: `FORGEJO_UPLOAD_API=<it>/api/v1` (One-time

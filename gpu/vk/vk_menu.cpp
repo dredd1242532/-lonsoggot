@@ -155,7 +155,7 @@ const char* tx_gyro(int v) {
     if (status == 0) return v ? "On (no controller)" : "Off (no controller)";
     return v ? "On" : "Off";
 }
-const char* tx_mousecam(int v) { return v ? "Native" : "As the stick"; }
+const char* tx_mousecam(int v) { return v == 2 ? "Off" : v ? "Native" : "As the stick"; }
 const char* tx_sens(int v) {
     static char b[12];
     snprintf(b, sizeof b, "%.2f", v / 100.0);
@@ -625,6 +625,7 @@ const char* tx_resolution(int v) {
         snprintf(b, sizeof b, "Native (%s, %ux%u)", up == ur::DLAA ? "DLAA" : "FSR 4", o.w, o.h);
         return b;
     }
+    v = ur::snap_render(up, v);   // (show the active engine's size without overwriting the player's saved scale)
     if (!ur::percent(v)) return "Auto (dynamic)";
     uint32_t w, h;
     game_size(ur::percent(v) / 100.0f, w, h);
@@ -642,7 +643,7 @@ const char* hn_resolution(int v, int variant) {
     // (Native is the slider's top: the 3D at the picture's full size)
     if (up == ur::DLAA) return "DLAA: the 3D at the picture's full size, anti-aliased by DLSS. The sharpest, and the heaviest.";
     if (up == ur::FSR4_AA) return "FSR 4's native AA: the 3D at the picture's full size. The sharpest, and the heaviest.";
-    const int p = ur::percent(v);
+    const int p = ur::percent(ur::snap_render(up, v));
     if (up == ur::DLSS) {
         switch (p) {
         case 0: return "The game lowers it when the GPU is busy, and DLSS follows. Set Sharpness to around 80%.";
@@ -879,9 +880,6 @@ void env_release(const int* value);   // (below: a row the environment held, set
 uint64_t auto_for = 0;               // (the fingerprint of the hardware the options' Auto settings were chosen for: auto_for=)
 uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
 uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in play finished for: auto_tuned=)
-// (the Output resolution Auto set, by its size: auto_output=<w>x<h>. Another size there is the player's; 0 x 0: unknown. Not the
-// choice's number: the choices follow the screen's modes (#2566), and a new screen is when Auto chooses again)
-struct { uint32_t w = 0, h = 0; } auto_output;
 ::auto_settings::Tuning auto_tuning;   // (the measured tuning in play, menu_auto_tune; its steps kept as auto_steps=)
 void apply_auto(bool keep_own);   // (below: the Auto preset's rows)
 void apply_preset(int p) {
@@ -923,38 +921,20 @@ void apply_preset(int p) {
     opts.budget = p;   // (Custom chosen on this row: no budget, as before)
     sync_preset_budgets(p);
 }
-/// keep_own (Auto choosing again for new hardware): the preset-exempt rows the player set under Auto stay theirs, the Output
-/// resolution (another than the one Auto set, auto_output) and the VRAM budget row (budget 0, set_row). Mesh shaders Auto never
-/// sets (RX_VK_MESH_SHADERS), and the fingerprint has the card's mesh shaders, not this run's mode
+/// keep_own (Auto choosing again for new hardware): the VRAM budget row the player set under Auto stays theirs (budget 0,
+/// set_row). The Output resolution Auto never sets (auto_settings.h Choice: the game's own or the player's, read at boot), nor
+/// Mesh shaders (RX_VK_MESH_SHADERS), and the fingerprint has the card's mesh shaders, not this run's mode
 void apply_auto(bool keep_own) {
     const ::auto_settings::Choice& c = auto_choice;
     if (c.tier < 1) return;
-    const Out set = output_at(opts.output_res);
-    const bool own_output = keep_own && auto_output.w && !(set.w == auto_output.w && set.h == auto_output.h);
     const bool own_budget = keep_own && opts.preset == kAutoPreset && opts.budget == 0;
-    const int output = opts.output_res, vram_budget = opts.vram_budget;
+    const int vram_budget = opts.vram_budget;
     env_release(&opts.dlss);
     opts.dlss = c.upscaler;   // (before the tier's rows: apply_preset snaps its Render resolution to this upscaler)
     apply_preset(c.tier);   // (the tier's scaling rows and memory budgets)
     if (c.tier == 1) opts.upscale = 0, opts.sharpness = 0;   // (the plain scale, as RX_VK_LOW_SPEC: the lightest)
     opts.handheld = 0;   // (docked: the handheld profile gave a GTX 1050 a black picture; the Render resolution lightens the card)
     if (c.resolution) opts.resolution = ur::snap_render(c.upscaler, c.resolution);
-    if (own_output) {
-        opts.output_res = output;
-    } else {
-        env_release(&opts.output_res);
-        // (the size Auto chose, among the menu's choices: the screen's resolutions and the common ones; a size the menu does not
-        // offer is the game's own, never the player's custom size)
-        int at = 0;
-        const std::vector<Out>& offered = outputs();
-        for (int i = 1; c.output_w && i < (int)offered.size(); i++)
-            if ((int)offered[i].w == c.output_w && (int)offered[i].h == c.output_h) at = i;
-        if (c.output_w && !at)
-            logf("vk: Auto (this PC): the screen's %dx%d is not among the Output resolution's choices: 2048x1152", c.output_w, c.output_h);
-        opts.output_res = at;
-        const Out o = output_at(at);
-        auto_output.w = o.w, auto_output.h = o.h;
-    }
     if (own_budget) {
         opts.budget = 0;
         opts.vram_budget = vram_budget;
@@ -1149,7 +1129,8 @@ MENU_HINTS(hn_text_size, 0, "The game's original size.", "A little larger.", "La
 MENU_HINTS(hn_background, 0, "Only while the game's window has the focus.",
            "Also behind other windows, for streaming or other apps. The keyboard and mouse still need the game's window.")
 MENU_HINTS(hn_mousecam, 0, "The mouse stands in for the right stick, with its curve and top speed.",
-           "The mouse turns the camera itself, one to one, as in a PC game.")
+           "The mouse turns the camera itself, one to one, as in a PC game.",
+           "The mouse plays no part: a click in the window doesn't capture it. For a controller or the keyboard alone.")
 MENU_HINTS(hn_mouse_invert, 0, nullptr, "Moving the mouse forward tilts the camera down.")
 MENU_HINTS(hn_gyro, 0, "The sticks alone aim.",
            "Switch Pro controllers and pads in Switch mode, DualSense and DualShock 4. The value says whether the "
@@ -1296,7 +1277,7 @@ Row rows[] = {
     // Controls (12 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
      "Whether the controller plays the game while another window has the focus.", hn_background, false, true},
-    {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 1, 1, tx_mousecam, "How the captured mouse turns the camera.",
+    {TAB_CONTROLS, "Mouse camera", &opts.mouse_native, 0, 2, 1, tx_mousecam, "How the captured mouse turns the camera.",
      hn_mousecam, false, true},
     {TAB_CONTROLS, "Disable camera centering", &opts.disable_camera_centering, 0, 1, 1, tx_onoff,
      "Stops the camera gradually turning toward the direction you move, useful with native mouse look. Off keeps the "
@@ -1737,7 +1718,7 @@ int saved_value(int* value) {
     }
     return *value;
 }
-/// The menu set the row (the player, a preset, the Upscaler's snap): its value is saved from now on, even where it is the
+/// The menu set the row (the player or a preset): its value is saved from now on, even where it is the
 /// one the environment forced
 void env_release(const int* value) {
     for (int i = 0; i < env_override_count; i++)
@@ -1875,7 +1856,8 @@ void save() {
             const char* eq = strchr(line, '=');
             if (!eq || eq == line) continue;
             const std::string key(line, (size_t)(eq - line));
-            // (memory_budget and auto_for too: save() writes them, and the file's old line, kept after it, won at the next start)
+            // (memory_budget and auto_for too: save() writes them, and the file's old line, kept after it, won at the next start;
+            // auto_output, the Output resolution Auto once set, is no longer written: its old line is dropped)
             bool mine = key == "microphone_device" || key == "options_version" || key == "memory_budget" || key == "auto_for" ||
                         key == "auto_tuned" || key == "auto_output" || key == "auto_steps";
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
@@ -1907,8 +1889,6 @@ void save() {
         fprintf(f, "memory_budget=%d\n", opts.budget);
         if (auto_for) fprintf(f, "auto_for=%016llx\n", (unsigned long long)auto_for);   // (the hardware Auto (this PC) chose for)
         if (auto_tuned) fprintf(f, "auto_tuned=%016llx\n", (unsigned long long)auto_tuned);   // (and measured in play for)
-        if (auto_for && auto_output.w)   // (the Output resolution Auto set, by its size)
-            fprintf(f, "auto_output=%ux%u\n", (unsigned)auto_output.w, (unsigned)auto_output.h);
         // (the tuning's steps so far and whether one went down: the no-seesaw rule and the two steps hold across restarts)
         if (auto_for && auto_tuning.steps) fprintf(f, "auto_steps=%d,%d\n", auto_tuning.steps, auto_tuning.went_down ? 1 : 0);
         // (2: game_speed below 2 was only ever the old default, see menu_init; 3: the mouse's buttons are bindings, see
@@ -2331,9 +2311,9 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (r.value == &opts.dlss) v = ur::step_engine(upscaler(), dir, upscalers_available());
     if (r.value == &opts.resolution) {
         int up = upscaler(), res = *r.value;
-        ur::step_render(upscaler(), *r.value, dir, &up, &res);
+        ur::step_render(upscaler(), ur::snap_render(upscaler(), *r.value), dir, &up, &res);
         if (up != upscaler()) opts.dlss = up;   // (Native in or out: DLAA / DLSS, FSR 4's native AA / FSR 4)
-        v = res;
+        v = ur::full_scale(up) ? *r.value : res;   // (Native changes the mode, not the saved numeric scale)
     }
     if (r.value == &opts.output_res) {   // (smallest to largest: step_output_choice)
         v = step_output_choice(*r.value, dir);
@@ -2358,11 +2338,6 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         if (r.value == &opts.ultrawide) {
             const int out = output_for_aspect(*r.value);
             if (out != opts.output_res) opts.output_res = out, env_release(&opts.output_res);
-        }
-        // (another Upscaler: the Render resolution moves to the nearest of its steps, DLSS's modes or the game's)
-        if (r.value == &opts.dlss) {   // (a slider stop kept)
-            opts.resolution = ur::snap_render(upscaler(), opts.resolution);
-            env_release(&opts.resolution);
         }
         if (r.value == &opts.vram_budget) {   // (longshot: set on the row, the budget is the player's, on any card)
             opts.budget = 0;
@@ -3067,12 +3042,11 @@ void draw_options(ui::Ctx& c) {
         hits.add(x, 0, x + tw[i], hh, menu_hit::kTab, i);
         x += tw[i];
     }
-    {   // (which build, at the banner's left, so a report can say it without opening the log; the release alone when the whole
-        // line would run into the tabs)
-        std::string ver = std::string("Longshot ") + LONGSHOT_VERSION;
+    {   // (which build, at the banner's left, so a report can say it without opening the log: as players see it, version_text,
+        // "Longshot v3.0.0-rc.1" or "Longshot Nightly 46 · 434712bb"; the log and the bug report keep the whole name)
+        std::string ver = std::string("Longshot ") + version_text(LONGSHOT_VERSION);
         const float room = (c.w - total) * 0.5f - 60 * s - c.safe, px = 15 * s;
         const auto width = [&](float p) { return ui::size_of(c.f.body, p, ver.c_str()).x; };
-        if (width(px) > room && ver.find(" (") != std::string::npos) ver.resize(ver.find(" ("));
         // (still too long, as a source build's "v2.0.11-821-g7b81752-dirty" since the Audio tab: at Small and Medium smaller
         // until it fits, on half-point steps, 10 points at the least; at Large, the size for a TV across the room, at its size
         // or not at all, as before)
@@ -4057,6 +4031,7 @@ void menu_init() {
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
     bool has_options = false;
+    bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
     bool has_vram_budget = false;   // (longshot: a file from before the VRAM budget row: its preset's, memory_budget's)
     bool has_memory_budget = false;   // (a file from before memory_budget: its preset's)
     const char* cheats = getenv("HOS_OOT_CHEATS");
@@ -4066,7 +4041,6 @@ void menu_init() {
         protect_hearts.store(hearts && !strcmp(hearts, "1"));
     }
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
-        has_options = true;
         char line[80];
         bool has_resolution = false;
         bool v2 = false;
@@ -4077,22 +4051,22 @@ void menu_init() {
             char* eq = strchr(line, '=');
             if (!eq) continue;
             *eq = 0;
+            // (a file with only the builders' Compile shaders in it, compile_shaders=, which make_game.py writes into a new
+            // folder before the game ever started: still a first start, so Auto (this PC) chooses as it would with no file)
+            has_options |= strcmp(line, "compile_shaders") != 0;
             for (Row& r : rows) {
                 if (!r.value || r.value == &opts.game_lang || strcmp(line, ini_key(r))) continue;
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
             has_resolution |= !strcmp(line, "resolution");
+            has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");
             if (!strcmp(line, "options_version")) version = atoi(eq + 1);
             if (!strcmp(line, "dynamic_resolution")) old_dynres = atoi(eq + 1);
             if (!strcmp(line, "menu_size") && atoi(eq + 1) == 0) menu_auto = true;
             if (!strcmp(line, "auto_for")) auto_for = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "auto_tuned")) auto_tuned = strtoull(eq + 1, nullptr, 16);
-            if (!strcmp(line, "auto_output")) {   // (<w>x<h>; a number from before is unknown: 0 x 0)
-                unsigned w = 0, h = 0;
-                if (sscanf(eq + 1, "%ux%u", &w, &h) == 2) auto_output.w = w, auto_output.h = h;
-            }
             if (!strcmp(line, "auto_steps")) {
                 int steps = 0, down = 0;
                 if (sscanf(eq + 1, "%d,%d", &steps, &down) == 2)
@@ -4137,6 +4111,17 @@ void menu_init() {
         }
     }
     first_start = !has_options;
+    const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
+    if (!has_output && !(handheld_env ? atoi(handheld_env) != 0 : opts.handheld != 0)) {
+        // (none chosen, a new install: the size host/nn_applet.c took at boot, the main screen's where it has fewer pixels than
+        // the game's own (a Steam Deck's 1280x800), hos_output_default. Saved from now on, so the two never part. HOS_OUTPUT_RES,
+        // below, is over it, as over a chosen one)
+        uint32_t sw = 0, sh = 0, w = 0, h = 0;
+        if (host_screen_size(&sw, &sh) && hos_output_default(sw, sh, &w, &h)) {
+            opts.output_res = output_choice_of(w, h);
+            logf("vk: the Output resolution: none chosen, the screen's %ux%u (smaller than the game's 2048x1152)", w, h);
+        }
+    }
     // An opt-in profile for 4 GB cards: keep existing options authoritative, but make a first run usable on
     // low-VRAM hardware without requiring the menu to render first.
     if (!has_options && env_on("RX_VK_LOW_SPEC")) {
@@ -4173,9 +4158,10 @@ void menu_init() {
 /// picks from the hardware. A first start (no options file yet) starts on it. With Auto on, the profile is applied when the
 /// hardware it was chosen for changes (another card, its memory, the screen's size, a build with or without DLSS or FSR 4):
 /// the fingerprint is kept in the options file (auto_for=). Changing a row yourself comes back to Custom, and then nothing here
-/// touches the settings; the rows no preset sets (the Output resolution, the VRAM budget) leave it on Auto, and
-/// what the player set on them is kept when Auto chooses again (apply_auto keep_own). Before Auto, a first start chose Minimum or Low by the card's memory alone: an older or smaller card no
-/// longer starts at the docked 2048 x 1152 with the full-size budget (a GTX 1050 lost the device at the first scene that way,
+/// touches the settings; the rows no preset sets (the Output resolution, the VRAM budget) leave it on Auto, Auto never sets
+/// the Output resolution, and the VRAM budget the player set is kept when Auto chooses again (apply_auto keep_own). Before Auto,
+/// a first start chose Minimum or Low by the card's memory alone: an older or smaller card no longer starts with the full-size
+/// budget (a GTX 1050 lost the device at the first scene that way,
 /// Discord 2026-11-10). RX_VK_AUTO_PRESET=0: a first start keeps the defaults, as before Auto.
 /// RX_VK_AUTO_PRESET_VRAM_MB=<n>: the card's memory taken as n MB, to try the choice for a smaller or larger card
 void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings::Hardware hw) {
@@ -4198,16 +4184,24 @@ void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings:
         logf("vk: Auto (this PC): the settings chosen for this PC before (%s)", hw_line);
         return;
     }
-    apply_auto(!first);   // (the hardware changed: the Output resolution and VRAM budget the player set stay theirs)
-    restart_init();   // (what this run starts with: the Output resolution applies at the next start, unless this is the first)
-    save();   // (host/nn_applet.c reads handheld_profile and output_res from the file when the game first asks its mode, after this)
+    apply_auto(!first);   // (the hardware changed: the VRAM budget the player set stays theirs)
+    // (a row that takes a restart Auto sets, the Profile (docked), applies at the next start, a first start's too: host/hos_main.c
+    // read it at boot, before the device, and this run keeps what menu_init recorded. It is Auto's, not the player's: closing the
+    // menu does not ask to restart for it, as after Later. The row still says After restart, and a change of the player's own to
+    // any restart row asks again, about all of them)
+    {
+        int now[mr::kMax];
+        restart_values(now);
+        if (restart_state.pending(now)) restart_state.choose_later(now);
+    }
+    save();   // (for the next start: host/nn_applet.c read handheld_profile and output_res once, at boot in host/hos_main.c, before this)
     logf("vk: Auto (this PC): %s: %s (%s)", first ? "first start" : "the hardware changed", auto_choice.why, hw_line);
 }
 
 int menu_vsync() { return env_on("RX_VK_FIFO") ? 1 : env_on("RX_VK_IMMEDIATE") ? 2 : opts.vsync; }
 bool resolution_auto() { return opts.resolution == 0; }
 int resolution_scale() {
-    const float s = upscaler_rows::percent(opts.resolution) / 100.0f;
+    const float s = upscaler_rows::percent(ur::snap_render(upscaler(), opts.resolution)) / 100.0f;
     return s > 0 ? (int)(twelfths(s) * 10000.0f / 12.0f + 0.5f) : 0;   // (the twelfth game_size labels)
 }
 
@@ -4499,7 +4493,6 @@ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
         // (the Render resolution's Native is a place of its own, DLAA or FSR 4's native AA, whatever the value it kept; the
         // Upscaler that runs, as set_row steps it: a saved DLAA that cannot run here is the game's own, and its values count)
         const auto native = [&] { return r.value == &opts.resolution && ur::full_scale(upscaler()); };
-        const int render = opts.resolution, upscaler_was = opts.dlss;
         // (a value none of the steps reach: everything the steps on the way changed is put back, the Quality preset and the
         // rows the environment holds too)
         const Options opts_was = opts;
@@ -4516,9 +4509,6 @@ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
             bridge_fill(i, out);
             return -2;
         }
-        // (each Upscaler on the way snapped the Render resolution to its own steps: snapped once, from where it was, as one
-        // step there would, and as it was when the Upscaler is. FSR 3.1 to DLSS through Off and the game's own took 58 % to 50 %)
-        if (r.value == &opts.dlss) opts.resolution = opts.dlss == upscaler_was ? render : ur::snap_render(upscaler(), render);
         save();
     } else if (want != *r.value) {
         set_row(r, want, want > *r.value ? 1 : -1);

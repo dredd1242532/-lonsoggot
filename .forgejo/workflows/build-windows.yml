@@ -10,7 +10,7 @@
 # zip's job checks that package's dav1d under Wine.
 # Every job runs on the Linux runner (ubuntu-24.04): there is no Windows one (docs/forgejo-runners.md). The setup and the
 # Vulkan back end are cross-compiled with llvm-mingw's Linux build of tools.lock's release (scripts/builder_package.py,
-# LINUX_LLVM_MINGW), the WPF builder is published for win-x64 with EnableWindowsTargeting, and the files are checked as
+# LINUX_LLVM_MINGW), the builder (command-line only) is published for win-x64 with EnableWindowsTargeting, and the files are checked as
 # Windows files (their PE headers, resources and runtime) and started under Wine. What only a Windows PC can check is in
 # RELEASING.md, "Needs a Windows tester".
 name: Windows builder
@@ -75,8 +75,7 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # (llvm-objdump and llvm-readobj below read the Windows files; Wine starts them, in Xvfb: WPF makes a hidden window
-      # before the builder reads its arguments)
+      # (llvm-objdump and llvm-readobj below read the Windows files; Wine starts them)
       - name: Wine
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends wine64 xvfb xauth
 
@@ -108,7 +107,7 @@ jobs:
           echo "version: $tag"
 
       # (--dependent-load-flag 0x800, LOAD_LIBRARY_SEARCH_SYSTEM32: the libraries it imports come from System32, not from
-      # the folder it was downloaded to. It is in the package for the builder's Repair; players get the Longshot Launcher)
+      # the folder it was downloaded to. It is in the package as a game folder's longshot.exe; players get the Longshot Launcher)
       - name: LongshotBuilder-Setup.exe
         working-directory: builder/setup
         run: |
@@ -119,7 +118,7 @@ jobs:
             -o "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
           ls -l "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
 
-      # (self-contained for win-x64, as the project's Release configuration has it; EnableWindowsTargeting: the WPF
+      # (self-contained for win-x64, as the project's Release configuration has it; EnableWindowsTargeting: the Windows
       # targeting and runtime packs come from NuGet on a system that is not Windows)
       - name: Longshot Builder
         run: >-
@@ -141,14 +140,14 @@ jobs:
           ls -l dist
 
       # (what a Windows build gave and a Linux one could quietly lose: the setup's icon, manifest and version (windres),
-      # and its imports; the builder's GUI subsystem, its apphost's version and manifest, win-x64 self-contained .NET 8
-      # with WPF. scripts/check_windows_files.py says what is wrong)
+      # and its imports; the builder's GUI subsystem (no console window), its apphost's version and manifest, win-x64
+      # self-contained .NET 8 without WPF. scripts/check_windows_files.py says what is wrong)
       - name: Check the Windows files
         run: >-
           python -I scripts/check_windows_files.py --objdump "$LLVM_MINGW/bin/llvm-objdump"
           --readobj "$LLVM_MINGW/bin/llvm-readobj" "dist/LongshotBuilder-$TAG-windows-x64.zip"
       # (the setup's --play of an empty folder and the builder's --cli with no Python: each says why it stops, with no
-      # window and nothing downloaded. A sign that they load and their imports, .NET and WPF resolve, not a test of what
+      # window and nothing downloaded. A sign that they load and their imports and .NET resolve, not a test of what
       # they do. Wine's mscoree must stay on: its loader maps .NET's IL assemblies through it. Gecko is not wanted)
       - name: Start them under Wine
         run: |

@@ -828,6 +828,7 @@ void play_cache_begin() {
         logf("vk: pipeline cache: what play makes goes into play files (RX_VK_PLAY_CACHE=0: into the one cache)");
     }
 }
+void predicted_use_log();   // (below, with the predicted pipelines)
 /// (pipeline_cache_save's thread, or the window's close) play's generation taken away once nothing is being made with it, a new one
 /// in its place, and written alone. One not written is kept and tried again at the next save
 void play_cache_save() {
@@ -850,6 +851,7 @@ void play_cache_save() {
                  "more from the start's cache",
                  play_seq, wrote >> 10, (long long)old->built.load(), (long long)old->from_driver.load(), (long long)old->compiled.load(),
                  (long long)old->from_start.load());
+            predicted_use_log();
             vkDestroyPipelineCache(dev.device, old->cache, nullptr);
             old->cache = VK_NULL_HANDLE;
             it = unsaved.erase(it);
@@ -1422,10 +1424,11 @@ void notes_open_locked(const std::vector<std::unique_ptr<PipeNote>>* known) {
         fwrite(h, 8, 2, note_file);
     }
 }
-void pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo,
+/// Whether key was new to the notes (play meets it for the first time on this install)
+bool pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo,
                    const uint8_t* color_types = nullptr) {
     static const bool off = env_on("RX_VK_NO_PROGRAM_CACHE");
-    if (off) return;
+    if (off) return false;
     if (color_types) state_record(p, s, at, topo, color_types);
     auto rec = std::make_unique<PipeNote>();
     rec->key = key, rec->prog = p.key, rec->variant = p.variant, rec->topo = (uint32_t)topo, rec->n = (uint32_t)at.n;
@@ -1434,7 +1437,9 @@ void pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targ
     rec->s = s;
     std::lock_guard lk(note_mu);
     if (!note_file) notes_open_locked(nullptr);
-    if (note_file && noted.insert(key).second) fwrite(rec.get(), sizeof(PipeNote), 1, note_file), fflush(note_file);
+    if (!note_file || !noted.insert(key).second) return false;
+    fwrite(rec.get(), sizeof(PipeNote), 1, note_file), fflush(note_file);
+    return true;
 }
 
 // ---- (longshot) The compute programs play dispatches, each key once, in longshot_computes.bin beside the executable. The precompile
@@ -2144,6 +2149,8 @@ uint64_t pipeline_key(const Program& p, const NvnState& s, const Targets& at, Vk
     return key;
 }
 
+bool predicted_key(uint64_t key);   // (the predicted pipelines' keys, below)
+void predicted_use(int how);
 PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, const uint8_t color_types[8]) {
     // the key: what is baked into it (the rest is dynamic state)
     // (longshot: and which variant: p.key is the same for all the variants of a program by its textures' types, and a draw of
@@ -2206,7 +2213,9 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
         }
     }
     use_counters.pipes_new++, census.play_pipes_new++;
-    pipeline_note(key, p, s, at, topo, color_types);
+    // (new to the notes and one the preparation predicted: only the prediction put it in a cache. Counted once made, by how)
+    const bool fresh = pipeline_note(key, p, s, at, topo, color_types);
+    const bool predicted = fresh && predicted_key(key);
     static const bool sync = env_on("RX_VK_SYNC_PIPELINES");
     if (sync) {
         e->pipeline = build_graphics(p, s, at, topo);
@@ -2233,14 +2242,17 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
         Targets at;
         VkPrimitiveTopology topo;
         uint64_t cold[2];
+        bool predicted;
     };
     auto job = std::make_shared<Job>();
     job->e = e, job->p = &p, job->s = s, job->at = at, job->topo = topo, job->cold[0] = cold[0], job->cold[1] = cold[1];
+    job->predicted = predicted;
     jobs_push([job] {
         // (over a linked one, which is left alone: draws recorded with it may still be on their way)
         use_counters.made_how = 0;
         if (const VkPipeline full = build_graphics(*job->p, job->s, job->at, job->topo)) job->e->pipeline = full;
         job->e->how.store(use_counters.made_how, std::memory_order_relaxed);
+        if (job->predicted) predicted_use(use_counters.made_how);
         job->e->ready.store(true, std::memory_order_release);
         // (the cold libraries after it and behind what is queued, with no flag: the draw waits for the pipeline above, and
         // jobs_wait runs one job)
@@ -2766,8 +2778,8 @@ struct Dummies {
 /// A handle word pair as the shader reads it (Eden's TexturePair: primary, optionally ORed with a secondary)
 template <class D>
 uint32_t handle_of(const NvnState& s, const Stage& st, const D& d, uint32_t k) {
-    if constexpr (requires { d.handle_program; }) {   // (read from a storage buffer: its handle program's)
-        if (d.handle_program != ~0U) return stage_handle(s, st, d.handle_program);
+    if constexpr (requires { d.handle_program; }) {   // (read from a storage buffer: its handle program's; of a table, element k's)
+        if (d.handle_program != ~0U) return stage_handle(s, st, d.handle_program, k);
     }
     const uint32_t step = 1u << d.size_shift;
     uint32_t h = stage_cbuf_word(s, st, d.cbuf_index, d.cbuf_offset + k * step);
@@ -2783,10 +2795,12 @@ uint32_t handle_of(const NvnState& s, const Stage& st, const D& d, uint32_t k) {
 }
 
 /// (Fritchii d603d98bb, HandleIsStoragePointer) The handle word of texture k is where a storage buffer of the same program
-/// keeps its 8-byte address (and the handle is not computed per draw)
+/// keeps its 8-byte address (and the handle is not computed per draw). (Lichii 282a585a) Or the translation saw the word
+/// reach the handle only as a load's address (TextureDescriptor::handle_is_pointer_word), storage buffer or not
 bool handle_is_storage_pointer(const Shader::Info& info, const Shader::TextureDescriptor& d, uint32_t k) {
     static const bool off = getenv("RX_VK_HANDLE_POINTER") && getenv("RX_VK_HANDLE_POINTER")[0] == '1';
     if (off || d.handle_program != ~0U) return false;
+    if (d.handle_is_pointer_word) return true;
     const uint32_t at = d.cbuf_offset + (k << d.size_shift);
     for (const auto& sb : info.storage_buffers_descriptors) {
         if (sb.cbuf_index != d.cbuf_index) continue;
@@ -3617,6 +3631,17 @@ void build_descriptors(const NvnState& s, const Program& p) {
             VkWriteDescriptorSet w = write(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, d.count);
             const size_t first = out.imgs.size();
             const VkImageViewType vt = view_type(d.type);
+            // (Lichii bd0171f7) A handle table's array: the shader indexes it per pixel with an index it read itself (OoT's
+            // clustered lights: a light index from the pixel's list), and element k is table entry k's texture (that light's
+            // shadow map). The handles of all elements at once: the constant words and storage addresses the program reads
+            // are read once
+            static thread_local std::vector<uint32_t> table;
+            const bool is_table = d.handle_program != ~0U && d.count > 1;
+            if (is_table) table.resize(d.count), stage_handles(s, st, d.handle_program, d.count, table.data());
+            uint32_t prev_handle = 0;
+            VkImageView prev_view = VK_NULL_HANDLE;
+            Texture* prev_tex = nullptr;
+            bool have_prev = false;
             for (uint32_t k = 0; k < d.count; k++) {
                 // (Fritchii d603d98bb) A handle word where a storage buffer of the same program keeps its address is not a
                 // handle: OoT's water samples each light's texture with a handle loaded per pixel from the light buffer, and
@@ -3625,15 +3650,41 @@ void build_descriptors(const NvnState& s, const Program& p) {
                 // every other frame. No texture there now. RX_VK_HANDLE_POINTER=1: the old handle
                 // (fragment stages only, the water's case: in other stages (the foliage culling's) the textures went missing and
                 // the foliage was culled whenever Link swung his sword. RX_VK_HANDLE_POINTER_ALL=1: every stage, as before)
+                // (Handle tables now give those samples their own textures: this is for what the translation still cannot
+                // compute per draw)
                 static const bool all_stages = env_on("RX_VK_HANDLE_POINTER_ALL");
-                const uint32_t handle = ((all_stages || st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) && handle_is_storage_pointer(info, d, k))
+                const uint32_t handle = is_table ? table[k]
+                                        : ((all_stages || st.vk_stage == VK_SHADER_STAGE_FRAGMENT_BIT) && handle_is_storage_pointer(info, d, k))
                                             ? 0u : handle_of(s, st, d, k);
                 desc_fp_note(handle);   // (Descriptor reuse)
                 Texture* tex = nullptr;
-                upload_defer_ok = st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT;   // (a draw's: its new ASTC textures may wait a frame)
-                VkImageView view = handle ? texture_view_of(handle, vt, ViewUse::Sample, VK_FORMAT_UNDEFINED, &tex)
-                                          : VK_NULL_HANDLE;
-                upload_defer_ok = false;
+                VkImageView view = VK_NULL_HANDLE;
+                if (is_table && have_prev && handle == prev_handle) {   // (a table repeats entries: unused ones are 0)
+                    view = prev_view, tex = prev_tex;
+                } else {
+                    upload_defer_ok = st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT;   // (a draw's: its new ASTC textures may wait a frame)
+                    view = handle ? texture_view_of(handle, vt, ViewUse::Sample, VK_FORMAT_UNDEFINED, &tex) : VK_NULL_HANDLE;
+                    upload_defer_ok = false;
+                    // (Lichii bd0171f7) A depth-compare sample of a colour texture is undefined and differs between vendors: a
+                    // handle read from memory (an unused or stale table entry) that names one binds nothing
+                    if (is_table && view && tex && d.is_depth && !is_depth_format(tex->format)) {
+                        static std::atomic<int> told{0};
+                        if (told++ < 8)
+                            logf("vk: handle table: element %u of program %016llx names texture #%u (format %d) for a depth "
+                                 "comparison: bound as nothing", k, (unsigned long long)p.key, tex->id, (int)tex->format);
+                        view = VK_NULL_HANDLE, tex = nullptr;
+                    }
+                    if (is_table) prev_handle = handle, prev_view = view, prev_tex = tex, have_prev = true;
+                }
+                // (the shader clamps its index to the last element: a table that names a texture there may run past the
+                // array, and its lights from that index on all take this one's texture. Said once)
+                if (is_table && k + 1 == d.count && view) {
+                    static std::atomic<bool> told{false};
+                    if (!told.exchange(true))
+                        logf("vk: handle table: last element %u of program %016llx names texture #%u: the table may have more "
+                             "entries than the array, and those take this texture (said once)", k, (unsigned long long)p.key,
+                             tex ? tex->id : 0);
+                }
                 if (dump_on()) dump_input('t', (uint32_t)(out.imgs.size() - 0), handle, view ? tex : nullptr);
                 if (view && tex && trace_tex_wanted(tex)) trace_tex_hit = tex;
                 if (log_img_wanted(p.key)) {
@@ -4769,7 +4820,7 @@ void clear_after_draws(VkCommandBuffer cmd) {
 /// chain: it is given no mask, so nothing is copied for it
 void reactive_scene_draw(VkCommandBuffer cmd, const Program& p, const NvnState& s, const Targets& at) {
     if (!reactive::wanted()) return;
-    if (!at.n || !at.color[0] || !at.depth || at.color_format[0] != VK_FORMAT_B10G11R11_UFLOAT_PACK32) return;
+    if (!at.n || !at.color[0] || !at.depth || !temporal_scene_format(at.color_format[0])) return;
     const uint64_t now = texture_frame_no();
     struct Seen { uint64_t frame; uint32_t w, h; };
     static thread_local Seen seen{~0ull, 0, 0};
@@ -6336,7 +6387,7 @@ bool fallback_pipelines_ready(Program& p) {
         std::this_thread::sleep_for(std::chrono::microseconds(200));
     if (p.compute_state.load(std::memory_order_acquire) != 2) {
         static std::atomic<int> told{0};
-        if (told++ < 40) logf("vk: fallback draw of %016llx left out: its compute pipelines are still compiling", (unsigned long long)p.key);
+        if (told++ < 40) logf_at(log_debug, "vk: fallback draw of %016llx left out: its compute pipelines are still compiling", (unsigned long long)p.key);
         st_pending_skips++;
         return false;
     }
@@ -6492,7 +6543,7 @@ static void dlss_trace_draw(const NvnState& s, const Program& p, const DrawArgs&
 /// binding 3: 3 x 4 matrices, a whole number of them) and the object's origin in its buffer 4 (binding 1, at 0x40)
 static void skin_check(const NvnState& s, const Program& p, const DrawArgs& d, const Targets& at) {
     if (d.mesh || !d.indexed || d.indirect || d.instances != 1 || !at.n || !at.color[0] || !at.depth ||
-        !temporal_scene_size(at.width, at.height) || at.color_format[0] != VK_FORMAT_B10G11R11_UFLOAT_PACK32 || s.nvattr < 7 ||
+        !temporal_scene_size(at.width, at.height) || !temporal_scene_format(at.color_format[0]) || s.nvattr < 7 ||
         !temporal_wanted())
         return;
     const auto attr = [&](int i) { return *reinterpret_cast<const nvn_va_st*>(&s.vattr[i]); };
@@ -6827,9 +6878,16 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     auto wait_for = [&](const std::atomic<bool>& ready) {
         PROF_EXACT();
         const auto t0 = std::chrono::steady_clock::now();
-        jobs_wait(ready);
+        const int queued = jobs_pending();
+        const bool here = jobs_wait(ready);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         st_waits++;
-        st_wait_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        st_wait_ms += ms;
+        static std::atomic<int> told{0};
+        if (here && told++ < 10)   // (longshot: that the steal ran, with the queue the wait would have stood behind)
+            logf("vk: a draw's %s ran where it waited, ahead of the queue (%d other jobs queued or running), in %.1f ms "
+                 "(RX_VK_JOB_STEAL=0: waited in turn)",
+                 &ready == &cp->ready ? "shader translation" : "pipeline build", queued > 0 ? queued - 1 : 0, ms);
     };
     // (longshot) RX_VK_TRANSLATE_WAIT_MS=<ms> (off unless set): a translation not ready, for a draw whose targets hold an
     // earlier frame's picture, is waited for at most this long a frame in all, on each recording thread, without taking the
@@ -7094,6 +7152,19 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     {
         FINE_SCOPE(FT_HAZARD);
         begin_pass(cmd, at);
+    }
+    // (longshot) the draw's occlusion query (vk_replay.cpp, RX_VK_OCC_QUERIES): begun in its pass and ended as draw() returns,
+    // before each_guard can end the pass. A draw that returns before this point leaves its query unused: its report stays
+    // "visible"
+    struct OccGuard {
+        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkQueryPool pool = VK_NULL_HANDLE;
+        uint32_t q = 0;
+        ~OccGuard() { if (pool) vkCmdEndQuery(cmd, pool, q); }
+    } occ_guard;
+    if (d.occ_pool) {
+        vkCmdBeginQuery(cmd, d.occ_pool, d.occ_query, dev.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+        occ_guard.cmd = cmd, occ_guard.pool = d.occ_pool, occ_guard.q = d.occ_query;
     }
     probe_draw(s, p, pass().draws);   // (longshot: RX_VK_PROBE)
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
@@ -7873,7 +7944,12 @@ bool temporal_stand_in(VkCommandBuffer cmd, const NvnState& s, const Program& p)
     uint32_t level = 0;
     const uint32_t out_handle = handle_of(s, st, od, 0);
     if (out_handle) texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, image_format(od.format), &out, &level);
-    const bool done = temporal_upscale(cmd, p.key, gameplay_network(p.key), in, dw().imgs[0].imageView, out, dw().imgs[ntex].imageView, level);
+    VkImageView in_view = dw().imgs[0].imageView, out_view = dw().imgs[ntex].imageView;
+    if (in && out && temporal_colour_pair(in->format, out->format) && out->format == VK_FORMAT_R16G16B16A16_SFLOAT) {
+        in_view = texture_view_of(in_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, VK_FORMAT_R16G16B16A16_SFLOAT);
+        out_view = texture_view_of(out_handle, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, VK_FORMAT_R16G16B16A16_SFLOAT);
+    }
+    const bool done = temporal_upscale(cmd, p.key, gameplay_network(p.key), in, in_view, out, out_view, level);
     // (its actor motion may have drawn with a pipeline, viewport and descriptors of its own: the next draw sets all of its again)
     last_dyn_valid = false, last_desc_valid = false, last_vb_valid = false, last_pipeline = VK_NULL_HANDLE;
     vertex_set.on = false, last_ib.on = false;
@@ -7889,13 +7965,15 @@ static bool temporal_rejected_network(VkCommandBuffer cmd, uint64_t key, Texture
     end_pass(cmd);
     VkFormat in_format = VK_FORMAT_UNDEFINED, out_format = VK_FORMAT_UNDEFINED;
     const VkImageView in_view = texture_view(src, in, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample, &in_format);
+    const bool rgba_pair = temporal_colour_pair(src->format, dst->format) && dst->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     const VkImageView out_view = texture_view(dst, out, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Storage, &out_format,
-                                              VK_FORMAT_B10G11R11_UFLOAT_PACK32);
+                                              rgba_pair ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_B10G11R11_UFLOAT_PACK32);
     // (the gameplay networks' own formats: their input is the square root of the scene colour, which the fixed shares' networks
     // sample as RGB9E5 from the B10G11R11 image it is kept in (shaders/taau_upscale.comp), the 3/4 one as B10G11R11. Decoded,
     // both are what the temporal upscaler's prep pass takes. The movies' (RGBA8) are not the scene)
-    if (!in_view || !out_view || out_format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 ||
-        (in_format != VK_FORMAT_B10G11R11_UFLOAT_PACK32 && in_format != VK_FORMAT_E5B9G9R9_UFLOAT_PACK32))
+    const bool packed_pair = out_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 &&
+                             (in_format == VK_FORMAT_B10G11R11_UFLOAT_PACK32 || in_format == VK_FORMAT_E5B9G9R9_UFLOAT_PACK32);
+    if (!in_view || !out_view || (!packed_pair && !temporal_colour_pair(in_format, out_format)))
         return false;
     // (FSR 3.1 first, as fsr3_stand_in comes before temporal_stand_in: its upscale, or its frame interpolation's inputs while
     // another upscaler draws. Without it, on a card that leaves these networks out, FSR 3.1's own Render resolution steps
@@ -8832,6 +8910,7 @@ void note_color_types(const PipeNote& n, uint8_t types[8]) {
 }
 
 void predicted_sample_write(const std::vector<std::unique_ptr<PipeNote>>& predicted);
+void predicted_keys_write(std::vector<uint64_t> keys);
 // (longshot) The prediction under way: longshot_pipelines.bin.predicting from its start to its end. A start closed (or ended) in it
 // left the rest of the predicted pipelines unbuilt for good: the next start found the programs prepared, so it skipped the
 // prediction, and play compiled them as they were drawn. With the marker there, the next start runs it again; what the driver
@@ -8842,6 +8921,49 @@ bool predict_pending() {
     if (!f) return false;
     fclose(f);
     return true;
+}
+// (longshot) Compile shaders, the Builder's, make_game.py's and the launcher's choice (compile_shaders= in longshot_options.ini:
+// 0 Most, the default; 1 All; any other number is Most). All builds the predicted pipelines too: about 50,000 for the driver's own cache, over 40 % more time (a full preparation on an RTX
+// 3090 with 24 threads: 415 and 413 s against 292 s without them), for pipelines play almost never draws ("vk: predicted
+// pipelines met in play"). RX_VK_COMPILE_SHADERS=all or most over the file (the game's --compile-shaders sets it, host/hos_main.c).
+// Asked only where a prediction would run: on Most it says so in the log, and takes away what an earlier preparation on All left
+// (the marker of one not finished, its sample and its keys), which would otherwise speak of pipelines this preparation did not
+// build
+bool compile_all() {
+    static const bool all = [] {
+        const char* why = "the default";
+        int v = 0;
+        if (const char* e = getenv("RX_VK_COMPILE_SHADERS")) {
+            v = !strcmp(e, "all") || !strcmp(e, "1") ? 1 : 0;
+            why = "RX_VK_COMPILE_SHADERS";
+        } else {
+            char exe[MAX_PATH];
+            const DWORD n = game_module_path(exe, MAX_PATH);
+            std::string ini(exe, n);
+            ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "longshot_options.ini";
+            if (FILE* f = fopen(ini.c_str(), "r")) {
+                char line[80];
+                while (fgets(line, sizeof line, f))
+                    if (!strncmp(line, "compile_shaders=", 16)) {
+                        v = atoi(line + 16) == 1 ? 1 : 0;
+                        why = "compile_shaders in longshot_options.ini";
+                        break;
+                    }
+                fclose(f);
+            }
+        }
+        if (v) {
+            logf("vk: Compile shaders: All (%s): the predicted pipelines are built too", why);
+        } else {
+            logf("vk: Compile shaders: Most (%s): the predicted pipelines are left out; a pipeline no list names is made when it "
+                 "is first drawn", why);
+            remove(predict_pending_path().c_str());
+            remove((pipe_notes_path() + ".predicted").c_str());
+            remove((pipe_notes_path() + ".predicted_keys").c_str());
+        }
+        return v != 0;
+    }();
+    return all;
 }
 void predict_run(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
@@ -8883,7 +9005,8 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
         std::vector<uint64_t> keys;
         std::atomic<size_t> next{0}, done{0}, made{0}, same{0};
         std::atomic<bool> out_of_time{false}, abandoned{false}, graphics_begun{false};
-        std::mutex first_graphics;
+        std::mutex first_graphics, keys_mu;
+        std::vector<uint64_t> made_keys;   // (each made pipeline's key, as play looks it up: predicted_keys_write)
     };
     Pre* pre = new Pre;
     pre->notes = std::move(notes), pre->predicted = std::move(predicted);
@@ -8918,6 +9041,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
             // layout at all, so several predictions can be the one pipeline. Over the whole key, not each record: a variant kept
             // twice is borrowed twice. The program's form (mesh, mesh fallback) goes with it: pipeline_key does not hold it)
             std::unordered_set<uint64_t> built;
+            std::vector<uint64_t> made_keys;
             program_cache_borrow(pre->keys[i], [&](Program& p) {
                 ensure_layout(p);
                 for (const PipeNote* n : list)
@@ -8940,10 +9064,14 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
                         const VkPipeline pl = build_graphics(p, n->s, at, topo);
                         pre->graphics_begun = true;
                         if (first.owns_lock()) first.unlock();
-                        if (pl) vkDestroyPipeline(dev.device, pl, nullptr), pre->made++;
+                        if (pl) vkDestroyPipeline(dev.device, pl, nullptr), pre->made++, made_keys.push_back(pipeline_key(p, n->s, at, topo));
                         pre->done++, counted++;   // (each pipeline as it finishes: the stall check below sees a slow program move)
                     }
             });
+            if (!made_keys.empty()) {
+                std::lock_guard lk(pre->keys_mu);
+                pre->made_keys.insert(pre->made_keys.end(), made_keys.begin(), made_keys.end());
+            }
             if (counted < list.size()) pre->done += list.size() - counted;   // (and the notes no kept variant answered)
         }
     };
@@ -8997,7 +9125,10 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
          gone_on ? " (gone on without the pipelines the driver did not finish)"
          : out_of_time.load() ? " (the time budget, RX_VK_PREDICT_S, ran out: the rest are built in play)"
          : prepare_stopped() ? " (stopped: the window was closed; the driver keeps what was built)" : "");
-    if (!prepare_stopped() && !out_of_time.load() && !gone_on) predicted_sample_write(pre->predicted);
+    if (!prepare_stopped() && !out_of_time.load() && !gone_on) {
+        predicted_sample_write(pre->predicted);
+        predicted_keys_write(pre->made_keys);
+    }
     // (gone on: what is stuck is left to play, as the stall guard says; a start that does it again would only stall again)
     if (!prepare_stopped()) remove(predict_pending_path().c_str());
     else if (FILE* f = fopen(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began), fclose(f);   // (closed: not counted)
@@ -9026,6 +9157,58 @@ void predicted_sample_write(const std::vector<std::unique_ptr<PipeNote>>& predic
         if (fclose(f) != 0 || !ok) remove(path.c_str());
     }
 }
+// ---- (longshot) How often play meets a pipeline only the prediction made: longshot_pipelines.bin.predicted_keys holds the keys of
+// the pipelines the last prediction built (sorted, as graphics_pipeline looks them up). A pipeline play makes that no note named and
+// whose key is there is counted once, by how it was made: from the driver's cache (the prediction saved its compile), compiled
+// (the driver did not keep it), or from the start's cache. The line "vk: predicted pipelines met in play" follows each play file
+// saved, for the session so far. What decides whether the prediction's minutes in the preparation are worth it ----
+namespace {
+std::string predicted_keys_path() { return pipe_notes_path() + ".predicted_keys"; }
+std::atomic<int64_t> predicted_met[4];   // (by UseCounters::made_how: 0 not made, 1 from the driver's cache, 2 the start's, 3 compiled)
+}
+void predicted_keys_write(std::vector<uint64_t> keys) {
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    const std::string path = predicted_keys_path();
+    if (FILE* f = fopen(path.c_str(), "wb")) {
+        const uint64_t head[2] = {program_cache_stamp(), keys.size()};
+        const bool ok = fwrite(head, 8, 2, f) == 2 && fwrite(keys.data(), 8, keys.size(), f) == keys.size();
+        if (fclose(f) != 0 || !ok) remove(path.c_str());
+    }
+}
+namespace {   // (declared in the anonymous namespace of graphics_pipeline and the play caches)
+/// (read once, at the first pipeline play makes: a few hundred KB)
+const std::vector<uint64_t>& predicted_keys() {
+    static const std::vector<uint64_t> keys = [] {
+        std::vector<uint64_t> k;
+        if (FILE* f = fopen(predicted_keys_path().c_str(), "rb")) {
+            uint64_t head[2]{};
+            if (fread(head, 8, 2, f) == 2 && head[0] == program_cache_stamp() && head[1] <= (64u << 20)) {
+                k.resize((size_t)head[1]);
+                if (fread(k.data(), 8, k.size(), f) != k.size()) k.clear();
+            }
+            fclose(f);
+        }
+        return k;
+    }();
+    return keys;
+}
+bool predicted_key(uint64_t key) {
+    const std::vector<uint64_t>& k = predicted_keys();
+    return std::binary_search(k.begin(), k.end(), key);
+}
+void predicted_use(int how) {
+    predicted_met[how >= 0 && how < 4 ? how : 0]++;
+}
+void predicted_use_log() {
+    const size_t known = predicted_keys().size();
+    if (!known) return;
+    logf("vk: predicted pipelines met in play (this session): %lld of the %zu the preparation predicted; %lld from the driver's cache, "
+         "%lld compiled, %lld from the start's cache, %lld not made",
+         (long long)(predicted_met[0] + predicted_met[1] + predicted_met[2] + predicted_met[3]), known, (long long)predicted_met[1].load(),
+         (long long)predicted_met[3].load(), (long long)predicted_met[2].load(), (long long)predicted_met[0].load());
+}
+}  // namespace
 /// The driver's shader cache folders this process uses (NVIDIA's, Mesa's; on Windows NVIDIA's, AMD's, Intel's), in bytes
 uint64_t driver_cache_bytes(std::string* where) {
     namespace fs = std::filesystem;
@@ -9277,7 +9460,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             std::this_thread::sleep_for(std::chrono::microseconds(200));
         if (p.compute_state.load(std::memory_order_acquire) != 2) {
             static std::atomic<int> told{0};
-            if (told++ < 40) logf("vk: dispatch of %016llx left out: its compute pipeline is still compiling", (unsigned long long)p.key);
+            if (told++ < 40) logf_at(log_debug, "vk: dispatch of %016llx left out: its compute pipeline is still compiling", (unsigned long long)p.key);
             st_pending_skips++;
             use.skipped();
             return;
@@ -9292,7 +9475,7 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         const auto t0 = std::chrono::steady_clock::now();
         {   // (EvilOOT, 11-07: a freeze after Load was the driver's compiler on one compute pipeline, here, on the submit's thread)
             static std::atomic<int> told{0};
-            if (told++ < 400) logf("vk: compute pipeline of %016llx: compiling", (unsigned long long)p.key);
+            if (told++ < 400) logf_at(log_trace, "vk: compute pipeline of %016llx: compiling", (unsigned long long)p.key);
         }
         if (const VkResult made = cached_compute(&ci, &p.compute_pipeline); made != VK_SUCCESS) {
             static std::atomic<int> told{0};
