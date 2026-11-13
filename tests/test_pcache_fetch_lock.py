@@ -1,9 +1,13 @@
-"""The pipeline cache's fetches and builds take turns on Intel (gpu/vk/vk_draw.cpp PcacheFetch, PcacheUse; issue 999).
+"""The pipeline cache's fetches and builds take turns on Intel (gpu/vk/vk_draw.cpp PcacheFetch, PcacheUse;
+https://github.com/NotRexed/Hookshot/issues/999).
 
 Intel's Windows driver faults in vkGetPipelineCacheData while other threads build pipelines with the cache. The check cuts the
 lock out of vk_draw.cpp and runs it with no Vulkan: a fetch that may not wait is refused while a build holds the cache and had
-once it is let go, a waiting fetch waits for the build, a fetch inside a fetch on the same thread (pcache_saved_now's save)
-and a build inside one do not lock themselves out, and with the lock off nothing is held.
+once it is let go, a waiting fetch waits for the build, a queued fetch with a bound gives up on a build that does not end,
+a fetch inside a fetch on the same thread and a build inside one do not lock themselves out, and with the lock off nothing
+is held. The source is checked for the lock held around vkGetPipelineCacheData alone: never across play_cache_save, whose
+wait for a generation's users would wait for a build that waits for the lock (tests/test_pipeline_play_cache.py lock-users
+runs that save against such a build).
 """
 import argparse
 import os
@@ -23,6 +27,7 @@ HEAD = r'''
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
 #include <thread>
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); std::exit(1); } } while (0)
 typedef struct VkPipelineCache_T* VkPipelineCache;
@@ -38,7 +43,7 @@ int main(int argc, char** argv) {
     VkPipelineCache cache = (VkPipelineCache)0x10;
     if (!lock_on) {   // (off: a fetch is had at once, a build holds nothing)
         PcacheUse use(cache);
-        PcacheFetch fetch(false);
+        PcacheFetch fetch(kFetchPollMs, false);
         CHECK(fetch.held());
         return 0;
     }
@@ -58,11 +63,11 @@ int main(int argc, char** argv) {
     std::atomic<bool> other_built{false};
     std::thread other;
     {
-        PcacheFetch fetch(true);   // (waits for the build)
+        PcacheFetch fetch(-1);   // (waits for the build)
         CHECK(fetch.held());
         CHECK(std::chrono::steady_clock::now() - t0 >= std::chrono::milliseconds(40));
         {
-            PcacheFetch inner(true);   // (pcache_saved_now -> pipeline_cache_save: the same thread again)
+            PcacheFetch inner(-1);     // (a fetch inside a fetch on the same thread)
             CHECK(inner.held());
             PcacheUse use(cache);      // (a build on the fetching thread does not wait for itself)
         }
@@ -75,15 +80,19 @@ int main(int argc, char** argv) {
     CHECK(other_built.load());
     build.join();
     {   // (no build now: a fetch that may not wait is had)
-        PcacheFetch fetch(false);
+        PcacheFetch fetch(kFetchPollMs, false);
         CHECK(fetch.held());
     }
     {   // (a build held for longer than the background save's patience: the save is put off, not stalled)
         std::atomic<bool> go{false};
         std::thread slow([&] { PcacheUse u(cache); go = true; std::this_thread::sleep_for(std::chrono::milliseconds(2500)); });
         while (!go.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        PcacheFetch fetch(false);
+        PcacheFetch fetch(kFetchPollMs, false);
         CHECK(!fetch.held());
+        {   // (queued with a bound, the window's close: gives up too, it does not hang)
+            PcacheFetch queued(100, true);
+            CHECK(!queued.held());
+        }
         slow.join();
     }
     std::printf("ok\n");
@@ -102,13 +111,18 @@ def main():
     parser.add_argument("--cxx", default="g++")
     args = parser.parse_args()
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
-    lock = cut(draw, "std::shared_mutex pcache_fetch_mu;", "// ---- (longshot) What play makes goes into a cache of its own")
-    # (every fetch of a cache's data is a PcacheFetch, every build with a cache a PcacheUse)
+    lock = cut(draw, "std::shared_timed_mutex pcache_fetch_mu;", "// ---- (longshot) What play makes goes into a cache of its own")
+    # (every fetch of a cache's data is a PcacheFetch, every build with a cache a PcacheUse; a fetch is held around
+    # vkGetPipelineCacheData alone, in a scope of its own, never across play_cache_save and its wait for a generation's users)
     save = cut(draw, "void pipeline_cache_save(bool force) {", "\n}\n")
-    assert "PcacheFetch fetch(force);" in save and "if (!fetch.held())" in save
-    assert "PcacheFetch fetch(true);" in cut(draw, "size_t play_file_write(", "\n}\n")
-    assert "PcacheFetch fetch(true);" in cut(draw, "bool pcache_saved_now() {", "\n}\n")
-    assert "PcacheFetch fetch(true);" in cut(draw, "void pipeline_cache_close() {", "\n}\n")
+    assert "PcacheFetch lock(wait_ms, queue);" in save and "if (!had)" in save and "kFetchPutOffs" in save
+    assert save.count("vkGetPipelineCacheData") == 1, "a fetch in the save outside its locked fetch"
+    write = cut(draw, "size_t play_file_write(", "\n}\n")
+    assert write.count("PcacheFetch fetch(wait_ms, queue);") == 2 and write.count("vkGetPipelineCacheData") == 2
+    assert "PcacheFetch fetch(-1);" in cut(draw, "bool pcache_saved_now() {", "\n}\n")
+    for name in ("void pipeline_cache_close() {", "void pipeline_cache_save_play() {", "void play_cache_save("):
+        assert "PcacheFetch" not in cut(draw, name, "\n}\n"), name + " holds the fetch lock across play_cache_save"
+    assert "play_cache_save(kFetchQueueMs)" in cut(draw, "void pipeline_cache_close() {", "\n}\n")
     assert "create_cached(guarded_graphics_held, ci, pl)" in draw and "create_cached(guarded_compute_held, ci, pl)" in draw
     assert "guarded_compute(pcache," not in draw, "a build with pcache that does not hold it from a fetch"
     with tempfile.TemporaryDirectory(prefix="pcache-fetch-") as tmp:

@@ -744,11 +744,16 @@ PipelineCacheFile pcache_file_read(const std::string& path) {
 std::string pcache_dir;
 
 // (longshot) Intel's Windows driver faults in vkGetPipelineCacheData (igvk64.dll+0x79ddf3, an access violation) when it fetches
-// a cache's data while other threads build pipelines with that cache: the game closes with no message (NotRexed/Hookshot#999: the Arc 140V,
-// and 4 runs of 6 on a Core Ultra 7 155H, driver 101.9175). Vulkan allows it; on Intel the fetches and the builds take turns:
-// a build holds this shared, a fetch alone. The background save does not wait for the builds: it tries a while, then leaves the
-// save to the next one. RX_VK_PCACHE_FETCH_LOCK=0: off, =1: on any GPU
-std::shared_mutex pcache_fetch_mu;
+// a cache's data while other threads build pipelines with that cache: the game closes with no message
+// (https://github.com/NotRexed/Hookshot/issues/999: the Arc 140V, and 4 runs of 6 on a Core Ultra 7 155H, driver 101.9175).
+// Vulkan allows it; on Intel the fetches and the builds take turns: a build holds this shared, a fetch alone.
+// The fetch holds it around the vkGetPipelineCacheData calls only, never across a file's write nor across a wait for the
+// builds (play_cache_save's wait for a generation's users: a builder counted in there may be between two of its builds, waiting
+// for this lock, and would never count itself out). The background save does not queue behind the builds: it tries a while,
+// then leaves the save to the next one; after kFetchPutOffs saves put off in a row it queues, for a bounded time. The window's
+// close waits a bounded time too: a build stuck in the driver costs the play file, not the close.
+// RX_VK_PCACHE_FETCH_LOCK=0: off, =1: on any GPU
+std::shared_timed_mutex pcache_fetch_mu;
 bool pcache_fetch_lock_on() {
     static const bool on = [] {
         const char* e = getenv("RX_VK_PCACHE_FETCH_LOCK");
@@ -761,19 +766,25 @@ bool pcache_fetch_lock_on() {
     return on;
 }
 thread_local int pcache_fetch_depth = 0;   // (a fetch inside a fetch on the same thread: pcache_saved_now's save)
-/// A fetch of a pipeline cache's data, the builds held off while it lasts. wait=false: only if no build is under way within
-/// about 2 s (held() says whether it was had)
+constexpr int kFetchPollMs = 2000;    // (the background save's patience, polled)
+constexpr int kFetchPutOffs = 3;      // (saves put off in a row before the next one queues)
+constexpr int kFetchQueueMs = 10000;  // (how long a queued fetch waits: the window's close, a save put off kFetchPutOffs times)
+/// A fetch of a pipeline cache's data, the builds held off while it lasts (held() says whether it was had).
+/// wait_ms < 0: waits until the builds under way are done. queue: waits in the lock, as a writer (new builds wait behind it), at
+/// most wait_ms; not queue: polled for wait_ms, had only at a moment no build is under way (a writer waiting in the lock would
+/// stall the builds behind it, the replay thread's draw-time asks among them)
 struct PcacheFetch {
     bool owns = false, outer = true;
-    explicit PcacheFetch(bool wait) {
+    explicit PcacheFetch(int wait_ms, bool queue = true) {
         if (!pcache_fetch_lock_on()) return;
         if (pcache_fetch_depth > 0) {
             outer = false, pcache_fetch_depth++;
             return;
         }
-        if (wait) pcache_fetch_mu.lock(), owns = true;
-        else   // (polled: a writer waiting in the lock would stall the builds behind it)
-            for (const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        if (wait_ms < 0) pcache_fetch_mu.lock(), owns = true;
+        else if (queue) owns = pcache_fetch_mu.try_lock_for(std::chrono::milliseconds(wait_ms));
+        else
+            for (const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(wait_ms);
                  !(owns = pcache_fetch_mu.try_lock()) && std::chrono::steady_clock::now() < until;)
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
         if (owns) pcache_fetch_depth = 1;
@@ -816,13 +827,20 @@ constexpr size_t kPlayFilesKept = 16;
 std::string play_path(uint32_t n) {
     return pcache_dir + "mkw_vk_pipelines_play_" + std::to_string(n) + ".bin";
 }
-/// A cache's data written whole to path, through a .tmp moved over it: its size, 0 when it is not in place
-size_t play_file_write(VkPipelineCache cache, const std::string& path) {
-    PcacheFetch fetch(true);
+/// A cache's data written whole to path, through a .tmp moved over it: its size, 0 when it is not in place (also when the
+/// fetch lock was not had within wait_ms, PcacheFetch: the file's write is outside it)
+size_t play_file_write(VkPipelineCache cache, const std::string& path, int wait_ms = -1, bool queue = true) {
     size_t n = 0;
-    if (vkGetPipelineCacheData(dev.device, cache, &n, nullptr) != VK_SUCCESS || !n) return 0;
+    {
+        PcacheFetch fetch(wait_ms, queue);
+        if (!fetch.held() || vkGetPipelineCacheData(dev.device, cache, &n, nullptr) != VK_SUCCESS || !n) return 0;
+    }
     auto data = PipelineCacheFile::writable(path, n);
-    if (data.empty() || vkGetPipelineCacheData(dev.device, cache, &n, data.data()) != VK_SUCCESS) return 0;
+    if (data.empty()) return 0;
+    {   // (a cache grown since its size was asked does not fit: not written, tried again at the next save)
+        PcacheFetch fetch(wait_ms, queue);
+        if (!fetch.held() || vkGetPipelineCacheData(dev.device, cache, &n, data.data()) != VK_SUCCESS) return 0;
+    }
     return data.publish(n) ? n : 0;
 }
 /// (pcache_init, before any other thread has pcache) the play files the last starts wrote, merged into pcache; at kPlayFilesKept
@@ -885,8 +903,10 @@ void play_cache_begin() {
 }
 void predicted_use_log();   // (below, with the predicted pipelines)
 /// (pipeline_cache_save's thread, or the window's close) play's generation taken away once nothing is being made with it, a new one
-/// in its place, and written alone. One not written is kept and tried again at the next save
-void play_cache_save() {
+/// in its place, and written alone. One not written is kept and tried again at the next save. wait_ms and queue: the fetch lock's
+/// (PcacheFetch), which is never held across the wait for a generation's users. Queued with a bound (the window's close), the
+/// wait for the users has that bound too: a build stuck in the driver leaves its generation for a next save, it does not hang
+void play_cache_save(int wait_ms = -1, bool queue = true) {
     static std::mutex mu;   // (a save's thread and the window's close, pipeline_cache_close)
     std::lock_guard lk(mu);
     static std::vector<PlayCache*> unsaved;
@@ -894,13 +914,22 @@ void play_cache_save() {
         unsaved.reserve(unsaved.size() + 1);   // (before it is taken away: it cannot then be lost to a failed allocation)
         if (PlayCache* next = play_cache_make()) {
             play_cache.store(next);
-            while (g->users.load()) Sleep(1);
             unsaved.push_back(g);
         }
     }
+    const bool bounded = queue && wait_ms >= 0;
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(bounded ? wait_ms : 0);
     for (auto it = unsaved.begin(); it != unsaved.end();) {
         PlayCache* old = *it;
-        if (const size_t wrote = play_file_write(old->cache, play_path(play_seq + 1))) {
+        // (written once nothing is being made with it)
+        while (old->users.load() && (!bounded || std::chrono::steady_clock::now() < until)) Sleep(1);
+        if (old->users.load()) {
+            static std::atomic<int> told{0};
+            if (told++ < 4) logf("vk: pipeline cache: a play file not written yet: a pipeline was still being built in it");
+            ++it;
+            continue;
+        }
+        if (const size_t wrote = play_file_write(old->cache, play_path(play_seq + 1), wait_ms, queue)) {
             play_seq++;
             logf("vk: pipeline cache: play file %u saved (%zu KB): %lld pipelines, %lld from the driver's cache, %lld compiled; %lld "
                  "more from the start's cache",
@@ -1037,7 +1066,7 @@ void pcache_init() {
     if (pcache) play_files_merge();
     // (what it holds as read, the play files too: a save of data that size has nothing to add to the files)
     size_t held = 0;
-    PcacheFetch fetch(true);
+    PcacheFetch fetch(-1);
     if (pcache && vkGetPipelineCacheData(dev.device, pcache, &held, nullptr) == VK_SUCCESS) pcache_saved_size = held;
 }
 
@@ -8468,9 +8497,12 @@ bool prepare_is_update() {
 /// The pipeline cache written now, and whether the file then holds what the cache did (a warm pass's libraries have to be on disk
 /// before the stamp says they are: a start that ended before the save would otherwise find them cold for good)
 bool pcache_saved_now() {
-    PcacheFetch fetch(true);
     size_t before = 0;
-    if (!pcache || vkGetPipelineCacheData(dev.device, pcache, &before, nullptr) != VK_SUCCESS) return false;
+    if (!pcache) return false;
+    {
+        PcacheFetch fetch(-1);
+        if (vkGetPipelineCacheData(dev.device, pcache, &before, nullptr) != VK_SUCCESS) return false;
+    }
     pipeline_cache_save(true);
     std::error_code ec;
     const auto size = std::filesystem::file_size(pcache_path, ec);
@@ -10164,9 +10196,8 @@ std::string load_fallback_path() {
 void program_layout(Program& p) { ensure_layout(p); }
 std::vector<std::pair<uint64_t, uint64_t>> compute_variants_learned() { return compute_variants_read(); }
 void pipeline_cache_close() {
-    PcacheFetch fetch(true);
-    try {
-        if (play_cache.load()) play_cache_save();
+    try {   // (a bounded wait: a build stuck in the driver costs the play file, not the close)
+        if (play_cache.load()) play_cache_save(kFetchQueueMs);
     } catch (const std::exception& e) {
         logf("vk: pipeline cache save failed: %s", e.what());
     }
@@ -10174,7 +10205,6 @@ void pipeline_cache_close() {
 /// What play made since the last save, into a play file now (vk_fsr4.cpp: its tuned layers, minutes to build the first time,
 /// kept even when the game does not close normally)
 void pipeline_cache_save_play() {
-    PcacheFetch fetch(true);
     try {
         if (play_cache.load()) play_cache_save();
     } catch (const std::exception& e) {
@@ -10195,13 +10225,18 @@ void pipeline_cache_save(bool force) {
     }
     auto save = [force, built] {
         struct Done { ~Done() { busy = false; } } done;
-        PcacheFetch fetch(force);   // (Intel: no build under way while the caches' data is fetched)
-        if (!fetch.held()) {
-            static std::atomic<int> told{0};
-            if (told++ < 4) logf("vk: pipeline cache save put off: pipelines were being built throughout");
-            pcache_built_since_save += built;   // (still to save: the next request writes them, not only after 32 more)
-            return;
-        }
+        // (Intel: no build under way while the caches' data is fetched, PcacheFetch, the lock held around each fetch alone. A
+        // forced save waits for the builds; the background one polls, and is put off when builds ran throughout; after
+        // kFetchPutOffs of those in a row it queues for kFetchQueueMs, so a stretch of back-to-back builds cannot put it off for good)
+        static std::atomic<int> put_off{0};
+        const bool queue = force || put_off.load() >= kFetchPutOffs;
+        const int wait_ms = force ? -1 : queue ? kFetchQueueMs : kFetchPollMs;
+        bool had = true;
+        auto fetch = [&](size_t* n, void* data) {
+            PcacheFetch lock(wait_ms, queue);
+            had = lock.held();
+            return had && vkGetPipelineCacheData(dev.device, pcache, n, data) == VK_SUCCESS;
+        };
         try {
             size_t n = 0;
             // (the size last read or written: nothing new, not fetched nor written again; see pcache_saved_size)
@@ -10211,7 +10246,15 @@ void pipeline_cache_save(bool force) {
             // so a folder prepared before the warm pass keeps its libraries through a crash. The window's close does not write it
             // (pipeline_cache_close saves the generation only); a forced save does: Restart now, the prepare. RX_VK_PLAY_SAVE_START_MB=<n>: the growth it is written at in play (64; 0: any, as before))
             static const size_t play_grown = (size_t)(getenv("RX_VK_PLAY_SAVE_START_MB") ? std::max<long long>(0, atoll(getenv("RX_VK_PLAY_SAVE_START_MB"))) : 64) << 20;
-            bool write = vkGetPipelineCacheData(dev.device, pcache, &n, nullptr) == VK_SUCCESS && n && n != pcache_saved_size;
+            bool write = fetch(&n, nullptr) && n && n != pcache_saved_size;
+            if (!had) {
+                const int times = ++put_off;
+                if (times <= 4 || times % 16 == 0)
+                    logf("vk: pipeline cache save put off (%d in a row): pipelines were being built throughout", times);
+                pcache_built_since_save += built;   // (still to save: the next request writes them, not only after 32 more)
+                return;
+            }
+            put_off = 0;
             if (write && !force && play_grown && play_cache_in_use() && n < pcache_saved_size + play_grown) {
                 write = false;
                 static std::atomic<int> told{0};
@@ -10221,7 +10264,7 @@ void pipeline_cache_save(bool force) {
             }
             if (write) {
                 auto data = PipelineCacheFile::writable(pcache_path, n);
-                if (!data.empty() && vkGetPipelineCacheData(dev.device, pcache, &n, data.data()) == VK_SUCCESS && data.publish(n)) {
+                if (!data.empty() && fetch(&n, data.data()) && data.publish(n)) {
                     pcache_saved_size = n;
                     logf("vk: pipeline cache saved (%zu KB)", n >> 10);
                 }
@@ -10230,7 +10273,7 @@ void pipeline_cache_save(bool force) {
             logf("vk: pipeline cache save failed: %s", e.what());
         }
         try {
-            play_cache_save();   // (what play made since the last save, alone)
+            play_cache_save(wait_ms, queue);   // (what play made since the last save, alone)
         } catch (const std::exception& e) {
             logf("vk: pipeline cache save failed: %s", e.what());
         }
