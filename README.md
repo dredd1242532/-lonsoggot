@@ -125,11 +125,12 @@ there is nothing else to install.
 5. Press **Build**, then **Play**. The launcher can also add desktop and Start menu shortcuts.
 
 The build prepares the game's shaders at its end, which takes a while; later starts are faster. To keep everything on an
-external SSD, see [Portable Longshot Builder](docs/windows-portable-builder.md).
+external SSD, run [the launcher's portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable) from
+there: its data stays in `LongshotLauncher-data` beside it.
 
 #### Compile shaders
 
-**Compile shaders** (in the Builder, the launcher's settings, or `make_game.py --compile-shaders`) chooses what that
+**Compile shaders** (in the launcher's settings, or `make_game.py --compile-shaders`) chooses what that
 preparation builds:
 
 - **Most** (recommended, the default): every shader and the pipelines the game is known to use (the shipped list and
@@ -152,11 +153,11 @@ changed what the shaders are translated for) follows the same choice, kept as `c
    launcher can add it to your applications menu as "Longshot".
 
 Each version's builder is also released on its own, as `Longshot-<version>-x86_64.AppImage` (about 95 MB) on
-[Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases), for building without the launcher.
-At its first start it downloads its build tools (the compiler, the C library it links against, FFmpeg and SDL2: about
-170 MB) into `~/.local/share/longshot/builder/toolchains`, and later versions reuse the ones that didn't change; the
-launcher downloads the same tools itself. The AppImage also builds and starts the game without a window, over SSH or
-from a script: see [Linux, the AppImage from the command line](#build-from-source).
+[Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases). It has no window: it is what the
+launcher builds with, and it builds and starts the game from the command line, over SSH or from a script (see
+[Linux, the AppImage from the command line](#build-from-source)). Its first `--cli` downloads its build tools (the
+compiler, the C library it links against, FFmpeg and SDL2: about 170 MB) into `~/.local/share/longshot/builder/toolchains`,
+and later versions reuse the ones that didn't change; the launcher downloads the same tools itself.
 
 #### Advanced Linux setup
 
@@ -203,7 +204,7 @@ Before updating, copy your saves somewhere safe: the `user` folder in the game f
 | `mods` | |
 
 Without the launcher: from a clone, `git pull`, then `python -I nx2/make_game.py --update <game folder>`; a builder
-does the same with `--update <game folder>`.
+does the same with `--cli --update <game folder>`.
 
 ### Release channels
 
@@ -233,9 +234,8 @@ The build reads your game and never changes it.
 |---|---|---|
 | The game | The folder you chose (`Games\Longshot` by default) | The folder you chose (`~/Games/Longshot` by default) |
 | Your saves | `user` in the game folder | `~/.local/share/longshot` |
-| The builder and its tools | `%LOCALAPPDATA%\LongshotBuilder` | `~/.cache/longshot-builder` |
+| The builder and its tools, without the launcher (`--cli`) | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
 | The in-game menu's choices | `longshot_options.ini` in the game folder | `longshot_options.ini` in the game folder |
-| The builder's settings | | `~/.config/longshot` |
 
 - **Saves elsewhere:** start the game with `--user <folder>` ([command line arguments](#running-the-game-from-the-command-line)).
   A `user` folder from an earlier Linux build is moved to `~/.local/share/longshot` once. To carry on with a save from
@@ -243,8 +243,8 @@ The build reads your game and never changes it.
   [saves guide](docs/saves.md).
 - **Build files:** the translated code and compiled objects (about 4 GB) are deleted once the game is ready; none are
   needed to play. To keep them, so that an update compiles only what changed, set `LONGSHOT_KEEP_BUILD_FILES=1` for the
-  builder; on Windows, **Free up space** on the "Your game is ready" page deletes them later. Their folder can be moved
-  before a build (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
+  build; **Free up space** in the launcher's settings deletes them later. Their folder can be moved there before a build
+  (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
 - **Uninstall:** delete the game folder, the builder's folder and the shortcuts.
 
 ### What Longshot connects to
@@ -265,8 +265,6 @@ everything it does on the network or with other programs:
   for them. **Bug report** (Gameplay tab) writes a folder in `bug-reports` in the game folder, with your home folder and
   user name taken out of its logs, and **Save my pipeline list** saves a zip in your Downloads folder: you decide whether
   to send them anywhere.
-- **On Linux,** the game starts through a small script, `play-diagnostics.sh`, which keeps its first error messages in
-  `longshot_startup.log` in the game folder (using a private temporary folder there, removed when the game exits).
 
 Only download Longshot from [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)
 and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev, or through
@@ -285,11 +283,10 @@ line with the video memory in use against what the driver allows, and DLSS's det
 |---|---|
 | **Building** | |
 | "Longshot supports build e0f3ccfa" or "This version isn't supported" | Check that you chose the right game, with its update installed. |
-| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, or add `%LOCALAPPDATA%\LongshotBuilder` to its exclusions, then press **Repair**. |
+| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, or add the launcher's folder to its exclusions, then build again. |
 | **Starting** | |
 | The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
 | Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
-| Linux: **Play** closed before the game's log appeared | Once the game exits, `longshot_startup.log` in the game folder has up to 64 KiB of its startup errors and its exit status. |
 | **Graphics** | |
 | Parts of the picture are missing, or a message says your card has no mesh shader support | The card or its driver has no mesh shaders, so Longshot draws through its compute fallback, which leaves some draws out. Update the driver; a card with mesh shaders draws everything ([#640](https://github.com/NotRexed/Hookshot/issues/640)). |
 | A place has a wrong texture, or a floor or wall is missing | Look for `longshot_damaged_files.txt` in the game folder. The build writes it when your dump is incomplete (about 23.3 GB instead of 23.8 GB), listing each damaged file and what was put in its place. Dump the game again and build from the new dump; the file is then removed. |
@@ -708,7 +705,7 @@ not the first table found in the mod. Other versions' tables do not change the p
 
 ## Build from source
 
-For developers, and for players who prefer the command line. The builder windows run the same script,
+For developers, and for players who prefer the command line. The launcher and the builders run the same script,
 `nx2/make_game.py`. [CONTRIBUTING.md](CONTRIBUTING.md) has more.
 
 <details>
@@ -733,7 +730,8 @@ You need:
   clone or with `LONGSHOT_MINGW` set to its folder. Without it the build uses the clang from
   [emsdk](https://github.com/emscripten-core/emsdk) at `C:\emsdk` with Visual Studio's C++ tools and the Windows SDK
   (`LONGSHOT_MSVC=1` forces that route).
-- What the builder's `tools` folder carries and a clone does not. Run `LongshotBuilder.exe` once: the folder is
+- What the builder's `tools` folder carries and a clone does not. From an unpacked release zip, run
+  `LongshotBuilder.exe --cli --help` once (it installs the tools, then runs `make_game.py --help`): the folder is
   `%LOCALAPPDATA%\LongshotBuilder\versions\<version>\LongshotBuilder\tools`. The builder sets the variables itself;
   from the command line, set them before you run `make_game.py`:
   - `tools\cpm`: the Vulkan headers and FFmpeg. Set `RX_CPM` to this folder. Without it (and without system
@@ -744,7 +742,7 @@ You need:
     `.exe`, `.lib` and `.sha1` files to the same places under `third_party\`.
   - `tools\work`: copy it to `work\`. It holds the hot-function list, the link order, the profile and the icon;
     without them the game builds but runs slower.
-- Visual Studio 2022 with .NET 8, only if you want to change the builder itself.
+- .NET 8, only if you want to change the builder's `--cli` program itself (`builder/LongshotBuilder`).
 
 </details>
 
@@ -753,17 +751,16 @@ You need:
 
 ```sh
 ./Longshot-<version>-x86_64.AppImage --cli --nup ~/your-game.nup --out ~/Games/Longshot   # make_game.py's options
-./Longshot-<version>-x86_64.AppImage --play                    # the game the builder built last, without the window
 ./Longshot-<version>-x86_64.AppImage --play ~/Games/Longshot   # the game in that folder
-./Longshot-<version>-x86_64.AppImage --update ~/Games/Longshot # the new release, and that folder built again
+./Longshot-<version>-x86_64.AppImage --cli --update ~/Games/Longshot # that folder built again with this release
 ```
 
 `LONGSHOT_JOBS=<n>` (or `--jobs <n>` with `--cli`) limits how many files compile at once.
 `LONGSHOT_MEM_LIMIT_GB=<n>` lets the compilers take that many GB together, whatever is free now. Linux stops a compiler
 that does not fit; it is then compiled again alone at the end.
 
-In a game folder, `longshot` is the launcher and the game itself is `bin/longshot`. The builder's settings are in
-`~/.config/longshot/builder.ini`.
+In a game folder, `longshot` is the launcher and the game itself is `bin/longshot`. Started with no arguments, the
+AppImage only says to get the Longshot Launcher.
 
 </details>
 
@@ -847,10 +844,12 @@ every build). NVIDIA's files are NVIDIA's, under its own license, the
 Longshot never includes or redistributes them: each build downloads them for itself, and only after you accept that
 license. Never share a game folder built with them, and do not post builds made with them.
 
-- **Windows, the Longshot Builder:** tick **NVIDIA DLSS (downloads NVIDIA's SDK under NVIDIA's license)** before you
-  build. It is off by default and shows NVIDIA's license when you tick it. The build downloads the SDK into
-  `%LOCALAPPDATA%\LongshotBuilder\ngx-sdk` and puts DLSS's runtime, `nvngx_dlss.dll`, and DLSS Frame Generation's,
-  `nvngx_dlssg.dll`, in the game folder's `ngx` folder.
+- **The Longshot Launcher, Windows and Linux:** turn on **DLSS** in the build's settings. It is off by default and shows
+  NVIDIA's license when you turn it on. The build downloads the SDK into the launcher's folder and puts DLSS's runtime
+  (`nvngx_dlss.dll`, `libnvidia-ngx-dlss.so.<version>` on Linux) and DLSS Frame Generation's (`nvngx_dlssg.dll`,
+  `libnvidia-ngx-dlssg.so.<version>`) in the game folder's `ngx` folder. An update of that folder keeps DLSS.
+- **A builder from the command line:** `--cli` with make_game.py's `--fetch-ngx-sdk --accept-nvidia-license`
+  (below: what they do).
 - **Windows, the command line:** `python -I scripts/ngx_sdk.py --platform windows <sdk folder>` asks you to accept
   NVIDIA's license (or pass `--accept-nvidia-license`) and fetches the headers, `nvsdk_ngx_s.lib`, `nvngx_dlss.dll` and
   `nvngx_dlssg.dll`, each checked against its SHA-256. Then build with `LONGSHOT_NGX_SDK=<sdk folder>`: `make_game.py`
@@ -859,13 +858,6 @@ license. Never share a game folder built with them, and do not post builds made 
   other folder has a newer one). Without `nvngx_dlssg.dll` there, frame generation takes the driver's own copy, which
   may be older: one that makes 1 frame at most, or refuses every set. Never copy NGX's core, `_nvngx.dll`, beside
   the game: it comes with NVIDIA's driver.
-- **Linux, the Longshot Builder (the AppImage):** the same tick as on Windows, and nothing else to do: no variable is
-  passed to the AppImage and no file is copied by hand. The build downloads the SDK into the builder's cache folder,
-  `$XDG_CACHE_HOME/longshot-builder/ngx-sdk` (`~/.cache/longshot-builder/ngx-sdk`), builds the game with it and puts
-  DLSS's runtime, `libnvidia-ngx-dlss.so.<version>`, and frame generation's, `libnvidia-ngx-dlssg.so.<version>`, in
-  the game folder's `ngx` folder. The builder's settings
-  (`~/.config/longshot/builder.ini`) remember that you accepted NVIDIA's license, so an update keeps DLSS even after the
-  cache was emptied: it downloads the SDK again.
 - **Linux, a build from source:** `scripts/linux/ngx-sdk.sh <sdk folder>` (it runs `scripts/ngx_sdk.py --platform
   linux`) asks you to accept NVIDIA's license and fetches `libnvsdk_ngx.a` for the build,
   `libnvidia-ngx-dlss.so.<version>`, DLSS's runtime, and `libnvidia-ngx-dlssg.so.<version>`, frame generation's. Then
@@ -915,9 +907,9 @@ With HDR on **Native**, it takes the game's HDR colour as linear light, so highl
 Unlike FSR 3.1 (above), it runs AMD's own DLLs, so it needs them beside the game. Choose it in the menu (`dlss=4` or `5`
 in `longshot_options.ini`, `RX_VK_FSR4=1` or `2` for one run, `RX_VK_FSR4=0` to leave it out).
 
-- **Windows, the Longshot Builder:** tick **AMD FSR 4** before you build. It shows AMD's license first and stays ticked
-  only if you accept; the build then fetches AMD's DLLs for you (below), into the builder's `ffx-sdk` folder and the
-  game folder.
+- **Windows, the Longshot Launcher:** turn on **FSR 4** in the build's settings. It shows AMD's license first and stays
+  on only if you accept; the build then fetches AMD's DLLs for you (below), into the launcher's folder and the game
+  folder.
 - **The command line:** `make_game.py --fsr` (or `LONGSHOT_FSR=1` for `nx2/build.py`). Rebuilding a folder built with
   it (`--update`) keeps it; `--no-fsr` takes it out.
 - **AMD's files:** Longshot includes only AMD's MIT-licensed API headers (`third_party/fidelityfx`). Put
@@ -1046,8 +1038,8 @@ game than anyone has yet.
 The first time the game meets a pipeline it builds it on the spot, which stutters. Releases build a list of known
 pipelines before the title, and every player's play adds to it. To send yours:
 
-1. In the game, open the menu (Insert or F1), go to the **Debug** tab and choose **Save my pipeline list** (under Developer). Or, in
-   Longshot Builder's launcher page for the game folder, press **Save my pipeline list**.
+1. In the game, open the menu (Insert or F1), go to the **Debug** tab and choose **Save my pipeline list** (under Developer). Or,
+   from a clone, run `python -I nx2/pipeline_share.py <game folder>`.
 2. It saves `longshot-pipelines-<date>.zip` in your Downloads folder, copies a filled-in report to the clipboard and
    opens the [Submit your pipelines](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/14) issue in your browser.
 3. Attach the zip to a comment there, paste the report and fill in where you played.
