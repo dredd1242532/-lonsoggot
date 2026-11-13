@@ -407,7 +407,8 @@ struct RecordingRes {
     size_t si = 0;                 // (the one in use)
     uint64_t before = 0;           // (what the recording used of the streams before this one)
     uint32_t idle = 0;             // (recordings of the slot that stayed in the first stream)
-    std::unordered_map<const void*, std::pair<VkBuffer, uint64_t>> c1_at;   // (c1 of a stage: uploaded once a recording)
+    // (flat (flat_map.h): an unordered_map put a malloc into every c1 upload kept, and a free into the next recording's clear)
+    FlatMap<uintptr_t, std::pair<VkBuffer, uint64_t>> c1_at;   // (c1 of a stage, by the stage's address: uploaded once a recording)
 };
 // (a recording's first stream: one for each of the kRecordings slots. RX_VK_STREAM_MB=<n>: that size, 2 by default; a recording
 // that needs more is given a bigger stream for the rest of it (RX_VK_STREAM_GROW_OFF=1: draws are skipped instead, and the default
@@ -3140,7 +3141,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
     if (index == 1) {
         FINE_SCOPE(FT_C1);
         FINE_N(FC_C1_CALLS, 1);
-        const void* key = &st;
+        const uintptr_t key = (uintptr_t)&st;
         auto it = cur->c1_at.find(key);
         const uint64_t n = std::max<uint64_t>((st.c1.size() + 15) & ~15ull, 16);
         if (it != cur->c1_at.end()) return {it->second.first, it->second.second, n};
