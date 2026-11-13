@@ -113,6 +113,8 @@ class ShaderStampCacheTests(unittest.TestCase):
             "NGX_SDK": ngx,   # ("": no NVIDIA NGX SDK, vk_dlss.cpp built without DLSS, as by default)
             "NGX_MSVC_RT": "vk_ngx_msvc_rt.cpp",
             "FSR": fsr,   # (LONGSHOT_FSR=1: vk_fsr4.cpp built with AMD FSR 4)
+            # (nx2/build.py's own, as on an x86-64 Linux without RX_VK_TLS: TLS descriptors there, none on Windows)
+            "vk_tls_flags": lambda: ["-mtls-dialect=gnu2"] if linux else [],
         }
         with mock.patch.dict(os.environ, {"RX_RELEASE": "1"} if release else {}, clear=True), warnings.catch_warnings():
             # The production key/header helpers use short-lived open(...).read() expressions.
