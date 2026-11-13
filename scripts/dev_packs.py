@@ -54,9 +54,15 @@ WINDOWS = os.name == "nt" or os.environ.get("RX_TARGET", "").strip().lower() == 
 CROSS = WINDOWS and os.name != "nt"   # (the Windows game built on Linux: it cannot run here, so it prepares on the PC that plays it)
 # (the game's own caches beside it, kept between runs and stamped by the translator (gpu/vk/vk_progcache.cpp): a stale one is
 # not used, so a base can start from an older base's)
-CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted",
-          "longshot_computes.bin", "longshot_pipeline_states.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin",
-          "mkw_vk_pipelines.stamp")   # (the stamp: without it the pipeline cache and its play files are dropped, pcache_stamp.h)
+# (all of them, from the renderer's sources, 2026-11-13: the program cache plain or compressed and its index
+# (vk_progcache.cpp, the index is the cache's name with .idx for .bin), its modules' ids (vk_programs.cpp), the pipeline
+# notes, predicted and built (vk_draw.cpp pipe_notes_path, precompile_built_path), the compute pipelines and their
+# variants, the state lists (and the older one still read), the prepare's record, and the driver's pipeline cache with
+# its stamp (without it the cache and its play files are dropped, pcache_stamp.h))
+CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.zst.bin", "longshot_programs.zst.idx",
+          "longshot_module_ids.bin", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted", "longshot_pipelines.bin.built",
+          "longshot_computes.bin", "longshot_compute_variants.bin", "longshot_pipeline_states.bin",
+          "longshot_pipeline_states_v1.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin", "mkw_vk_pipelines.stamp")
 PLAY_FILES = re.compile(r"mkw_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
 BUSY = "dev_packs.busy"   # (in a base's folder while a job builds, warms or copies from it)
 SEED = "longshot_shaders.bin"   # (the shader list the prepare goes through: a new one is prepared again)
@@ -77,7 +83,12 @@ NO_MODULE = ("docs/", "tests/", ".github/", ".forgejo/", ".claude/")   # (.forge
 HEADERS = (".h", ".hpp", ".hh", ".inc", ".inl")
 SOURCES = (".c", ".cc", ".cpp") + HEADERS
 # (files the game writes beside itself while it runs, besides the caches: never a build's output, so never "deleted" by a pack)
-WRITTEN_IN_PLAY = ("longshot_options.ini", "longshot_log.txt", "longshot_driver_faults.txt", "longshot_prepared.bin.warming")
+# (what the game writes beside itself while it runs, never a build's output: settings, logs and reports, and the markers of a
+# skipped preparation and of a slow load (vk_main.cpp, vk_draw.cpp); not seeded either)
+WRITTEN_IN_PLAY = ("longshot_options.ini", "longshot_log.txt", "longshot_log.1.txt", "longshot_driver_faults.txt",
+                   "longshot_prepared.bin.warming", "longshot_prepare_skipped", "longshot_load_start.txt",
+                   "longshot_load_start.txt.waited", "longshot_pipeline_report.txt", "longshot_frames.csv",
+                   "longshot_damaged_files.txt")
 
 
 def load_make_game(root=ROOT):

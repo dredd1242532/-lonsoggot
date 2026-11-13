@@ -46,6 +46,8 @@ def test_route():
     check("the WebGPU renderer is in the game", r(["gpu/render/x.c"]) == "game")
     check("a build script builds the game", r(["nx2/build.py"]) == "game")
     check("docs and tests build nothing", r(["docs/development.md", "tests/test_a.py", "README.md"]) is None)
+    check("a renderer shader and its generated header build the renderer alone (only the renderer is kept)",
+          r(["gpu/vk/shaders/fg_copy.comp", "gpu/vk/shaders/fg_copy_comp_spv.h"]) == "renderer")
     check("the forge's workflows build nothing", r([".forgejo/workflows/ci.yml", ".forgejo/pull_request_template.md"]) is None)
     check("an unknown path builds the game", r(["somewhere/new.c"]) == "game")
 
@@ -82,8 +84,15 @@ def test_stamped_objects_match_build():
 def test_caches_named_in_renderer():
     text = "".join(p.read_text(encoding="utf-8", errors="replace") for g in ("*.cpp", "*.h") for p in (ROOT / "gpu" / "vk").glob(g))
     for c in packs.CACHES + (packs.SEED,):
-        check("the renderer still names %s" % c.replace(".predicted", ""), c.replace(".predicted", "") in text)
-    check("the predicted notes' suffix", '".predicted"' in text)
+        # (some are a named file with a suffix the renderer adds: .predicted and .built to the notes, .idx for .bin)
+        name = c.replace(".predicted", "").replace(".built", "").replace(".zst.idx", ".zst.bin")
+        check("the renderer still names %s" % name, name in text)
+    check("the predicted and built notes' suffixes, and the index's", all(s in text for s in ('".predicted"', '".built"', '".idx"')))
+    # (and the other way round: every .bin or .idx the renderer names beside the game is a cache, or one of the two files a
+    # build makes (the shader seed, the shipped state list); a new cache file in the renderer fails here until it is classified)
+    named = set(re.findall(r'"(longshot_[A-Za-z0-9_.]*\.(?:bin|idx))"', text))
+    unknown = sorted(n for n in named if not packs.is_cache(n) and n not in (packs.SEED, "longshot_pipeline_states_shipped.bin"))
+    check("every file the renderer keeps beside the game is classified (unknown: %s)" % unknown, not unknown)
 
 
 def test_module_changed(d):
