@@ -4013,7 +4013,8 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             choice_cell(c, va, vb, r.text(*r.value), selected, *r.value > r.lo, *r.value < r.hi);
         } else {
             const char* says = k == kCoopTemp ? (v.temporary_save ? "Return to normal saves" : "Copy and restart") :
-                              k == kCoopChat ? "Chat" : k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
+                              k == kCoopChat ? (chat_feed.can_chat ? "Chat" : "Unavailable") :
+                              k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : says, selected, false, false);
         }
         if (y + rh >= top + box_h + 8 * s && y <= bottom + 8 * s)

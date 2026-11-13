@@ -28,6 +28,8 @@ int wheel_rows[TAB_MOTION + 2];
 int scrolled_to[TAB_MOTION + 2] = {-1, -1, -1, -1, -1, -1};
 float scroll_want[TAB_MOTION + 2];
 float ease_step = 1;
+enum { TAB_COOP = 1, HOS_COOP_MEMBERS = 8 };
+int tab_row_count(int tab) { return tab == TAB_COOP ? 13 : 0; }
 %(scroll_rows)s
 #define CHECK(name, c) do { if (!(c)) { std::fprintf(stderr, "FAIL %%s at line %%d\n", name, __LINE__); return 1; } } while (0)
 int main() {
@@ -49,6 +51,13 @@ int main() {
         const int under_cursor = (int)first;   // (the top row's place)
         if (mark) CHECK("the mouse's choice stays under the cursor", under_cursor == kUpscaler);
         else CHECK("unmarked: the list slides down a row, the Output resolution under the cursor", under_cursor == kOutput);
+    }
+    for (int height : {240, 480, 720}) for (int members : {1, 8}) for (int sel = 0; sel < 13; sel++) {
+        const float top = 20, bottom = (float)height, s = 1, pitch = 48, box_h = 70;
+        const struct { int n; } v = {members};
+        %(coop_scroll)s
+        CHECK("every co-op action is reachable above the reserved member list",
+              sel >= first && sel < first + shown && rows_bottom >= rows_top + pitch);
     }
     std::puts("PASS: a row chosen by the mouse stays under the cursor");
     return 0;
@@ -75,9 +84,13 @@ def main():
                          "the cursor, and the next click lands on another row)")
     if "scroll_rows(cur_tab, " not in menu:
         raise SystemExit("draw_menu: the options' rows do not scroll by the tab's slot (scrolled_to[cur_tab] would not match)")
+    coop = function(menu, "void draw_coop_rows(")
+    coop_scroll = coop[coop.index("    const int count = tab_row_count(TAB_COOP);"):coop.index("    scroll_bar(")]
+    if "scroll_rows(TAB_COOP, count, sel," not in coop_scroll:
+        raise SystemExit("the added Chat/Mute rows must scroll, not disappear below the member list")
     with tempfile.TemporaryDirectory(prefix="menu-mouse-scroll-") as tmp:
         src, exe = Path(tmp) / "fixture.cpp", Path(tmp) / "fixture"
-        src.write_text(FIXTURE % {"scroll_rows": function(menu, "float scroll_rows(")}, encoding="utf-8")
+        src.write_text(FIXTURE % {"scroll_rows": function(menu, "float scroll_rows("), "coop_scroll": coop_scroll}, encoding="utf-8")
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", str(src), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 

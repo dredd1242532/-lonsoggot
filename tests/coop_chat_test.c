@@ -62,6 +62,32 @@ static void text_cases(void) {
     assert(!coop_text_clean(out, sizeof out, (const uint8_t *)" \n ", 3));
     puts("PASS chat-text: UTF-8, malformed encodings, controls/bidi, exact byte cap, empty refusal");
 }
+static void wire_cases(void) {
+    CoopChat s; setup(&s); MkwVkCoopFeed feed;
+    message(1, "valid", 5);
+    assert(!coop_chat_receive(&s, 2, 202, packet, COOP_CHAT_HEAD, 12000));
+    assert(!coop_chat_receive(&s, 2, 202, packet, COOP_CHAT_PACKET + 1, 12000));
+    packet[0] = 2; assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 12000));
+    packet[0] = 1; packet[1] = 5; assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 12000));
+    message(0, "valid", 5); assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 12000));
+    message(1, "valid", 5); packet[13] = 6;
+    assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 12000));
+    packet[13] = 5; assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 14000)); /* malformed stays consumed */
+    const uint8_t malformed[] = {0xed, 0xa0, 0x80};
+    message(2, malformed, sizeof malformed);
+    assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 15000));
+    const char cleanable[] = "hé\\n\\t\\342\\200\\256llo";
+    message(3, cleanable, sizeof cleanable - 1);
+    assert(coop_chat_receive(&s, 2, 202, packet, packet_n, 17000));
+    assert(coop_chat_snapshot(&s, &feed, 17000, 1) && !strcmp(feed.line[0].text, "héllo"));
+    char boundary[HOS_COOP_CHAT_BYTES]; memset(boundary, 'x', sizeof boundary);
+    message(4, boundary, sizeof boundary);
+    assert(coop_chat_receive(&s, 2, 202, packet, packet_n, 19000));
+    assert(coop_chat_snapshot(&s, &feed, 19000, 1) && strlen(feed.line[0].text) == sizeof boundary);
+    assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 100000)); /* no silence reset */
+    puts("PASS chat-wire: version/epoch/sequence/length refusals, malformed UTF-8 consumed, controls cleaned, exact maximum and delayed replay");
+}
+
 static void receive_cases(void) {
     CoopChat s; setup(&s);
     MkwVkCoopFeed feed;
@@ -146,6 +172,6 @@ static void runtime(void) {
     puts("PASS chat-runtime: real callbacks, queue failure/no echo, accepted EVENT receive, scene cancellation, off");
 }
 int main(void) {
-    text_cases(); receive_cases(); history_notices(); runtime();
+    text_cases(); wire_cases(); receive_cases(); history_notices(); runtime();
     return 0;
 }

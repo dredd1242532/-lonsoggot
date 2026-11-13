@@ -1053,6 +1053,7 @@ Its default is0 and an absent rule is off. Once both players accept those terms,
 Enter sends the line to the currently accepted members; Esc cancels. The keyboard, mouse,
 controller, scripted inputs and duel readiness belong to the text field until the finishing
 keys/buttons are released. Losing focus, entering an event, leaving or changed terms cancels it.
+The Co-op action rows scroll while the member list stays below, so Chat and Mute remain reachable.
 The existing controller confirm/back/paste controls work in the field; controller-only text
 entry requires the platform's keyboard or a prepared clipboard, not a new on-screen keyboard.
 
@@ -1071,8 +1072,8 @@ Messages hold at most192 UTF-8 bytes. Malformed encodings and oversized messages
 control, direction and invisible-format characters are removed. A player sends at most one
 message per1.5 seconds; each receiver independently applies that rate per sender. The
 volatile history holds16 entries; the feed shows at most4, each for8 seconds. Notices share
-a one-per-second per-member budget. Muted, malformed and rate-refused accepted messages
-stay consumed, so an old message cannot appear after unmuting or waiting.
+a one-per-second per-member budget. Recognized current-rule sequences refused for mute,
+invalid text or rate stay consumed, so they cannot appear after unmuting or waiting.
 No chat text is written to the log, options or any other file.
 
 The feed sits above the dialogue region and is hidden throughout every native event,
