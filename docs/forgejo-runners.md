@@ -15,6 +15,7 @@ MagicBeanDev/LongshotLauncher. The secrets and the variable the release workflow
 |---|---|---|
 | `ubuntu-latest` | `release.yml`, `ci.yml` (its title check and its Linux checks run on `ubuntu-24.04`), `third-party.yml`, the launcher's `ci.yml` and `release.yml` | Linux, Docker: e.g. `ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04` (Node for the actions, git, Python 3, curl, sudo and apt) |
 | `ubuntu-24.04` | `ci.yml`'s tests (with the Windows Builder's compile and worker checks), `build-linux.yml`, `build-windows.yml` (all of it), `vulkan-dlss.yml` | the same image; the AppImage job builds inside Ubuntu 22.04 itself (`scripts/linux/deps.sh` runs in its container) and needs Docker or enough disk (about 30 GB). The Windows jobs install Wine and Xvfb with apt, and download llvm-mingw's Linux build and the .NET 8 SDK |
+| `quick` | the short jobs of 5 minutes or less: `ci.yml`'s title check and actionlint, `pr-description.yml`, `third-party.yml`'s check, `release.yml`'s *The version*; the launcher's title check and *The version* | the same image. A runner kept for them only (label `quick`, capacity 1) means they never wait behind a build; the other runners carry `quick` too and take them when they have room |
 
 ### Windows files, built on Linux
 
@@ -32,9 +33,12 @@ not built by CI and not part of a release.
 1. Download [forgejo-runner](https://code.forgejo.org/forgejo/runner/releases) for the machine.
 2. In MagicBeanDev's *Settings > Actions > Runners*, *Create new runner*, and copy the token.
 3. `forgejo-runner register --instance https://git.magicbean.dev --token <token> --name <name> --labels
-   'ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04,ubuntu-24.04:docker://ghcr.io/catthehacker/ubuntu:act-24.04'`
+   'ubuntu-latest:docker://ghcr.io/catthehacker/ubuntu:act-24.04,ubuntu-24.04:docker://ghcr.io/catthehacker/ubuntu:act-24.04,quick:docker://ghcr.io/catthehacker/ubuntu:act-24.04'`
 4. Run it as a service (`forgejo-runner daemon`). One Linux runner is enough to start; the builder jobs are long (an hour
    and more) and want 4+ cores, 16 GB of memory and about 50 GB of disk.
+5. Keep one runner for the quick jobs: register a second one with `--labels 'quick:docker://ghcr.io/catthehacker/ubuntu:act-24.04'`
+   only and `capacity: 1` in its config (it can share the machine and its Docker), so a pull request's checks start at once
+   however many builds are queued. A job that takes longer than a few minutes does not belong on `quick`.
 
 ## Actions from outside
 
@@ -42,6 +46,16 @@ The workflows name actions by full URL: `https://github.com/actions/...` pinned 
 `https://data.forgejo.org/forgejo/upload-artifact@v4` / `download-artifact@v4` (GitHub's v4 and later refuse a server
 that is not github.com). The runners must reach github.com and data.forgejo.org, or those actions must be mirrored and
 the URLs changed. `actions/cache` needs the runner's cache server (on by default in forgejo-runner).
+
+Another project's repository is not checked out with `actions/checkout`'s `repository:`: on Forgejo that names a
+repository of this instance (`github.server_url`), not GitHub's. `scripts/fetch_commit.sh <URL> <commit> <folder>` fetches
+it by its full URL and commit, with no token. The actions are JavaScript (Node 24): a job in a `container:` without Node
+(the AppImage's `ubuntu:22.04`) installs Node.js's own build, pinned by its SHA-256, before its first action.
+
+An artifact goes to Forgejo, and comes back, by the address Forgejo signs its links with: its `ROOT_URL`
+(git.magicbean.dev, behind Cloudflare), whatever address the runner registered with; Forgejo has no setting for another.
+The actions send an artifact in 8 MB blocks, under Cloudflare's 100 MB limit, but a block that fails is not sent again,
+so each upload and download step is tried once more when it fails.
 
 ## Uploads larger than 100 MB
 

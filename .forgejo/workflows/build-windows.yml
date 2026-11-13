@@ -145,7 +145,18 @@ jobs:
           xvfb-run -a python -I scripts/check_windows_files.py \
             --wine "$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)" "dist/LongshotBuilder-$TAG-windows-x64.zip"
 
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
+      # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
+      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
+      - id: upload_1
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: LongshotBuilder-windows
+          path: dist/
+          if-no-files-found: error
+      - if: steps.upload_1.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: LongshotBuilder-windows
           path: dist/
@@ -163,26 +174,11 @@ jobs:
           persist-credentials: false
       # (the headers in the CPM cache layout nx2/build.py reads, at the versions scripts/linux/deps.sh pins)
       - name: Check out pinned Vulkan headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/Vulkan-Headers
-          ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
-          path: _deps/cpm/vulkanheaders/v1.4.345
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/cpm/vulkanheaders/v1.4.345   # v1.4.345
       - name: Check out pinned SPIR-V headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/SPIRV-Headers
-          ref: 04f10f650d514df88b76d25e83db360142c7b174 # vulkan-sdk-1.4.341.0
-          path: _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0   # vulkan-sdk-1.4.341.0
       - name: Check out pinned VulkanMemoryAllocator
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
-          ref: 1d8f600fd424278486eade7ed3e877c99f0846b1 # v3.3.0
-          path: _deps/cpm/vulkanmemoryallocator/v3.3.0
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator 1d8f600fd424278486eade7ed3e877c99f0846b1 _deps/cpm/vulkanmemoryallocator/v3.3.0   # v3.3.0
       - name: Set up Python
         uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -255,7 +251,18 @@ jobs:
         with:
           path: ${{ runner.temp }}/vk-work/objcache
           key: ${{ steps.objkey.outputs.key }}
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
+      # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
+      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
+      - id: upload_2
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: longshot_vk-windows
+          path: ${{ runner.temp }}/vk-work/sa/build/longshot_vk.dll
+          if-no-files-found: error
+      - if: steps.upload_2.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot_vk-windows
           path: ${{ runner.temp }}/vk-work/sa/build/longshot_vk.dll
@@ -288,7 +295,18 @@ jobs:
           export WINEPREFIX="$RUNNER_TEMP/wine" WINEDEBUG=-all
           python3 -I -B tests/test_dav1d_av1.py --cross "$LONGSHOT_MINGW/bin/x86_64-w64-mingw32-clang" --run "$wine" \
             --dav1d "$(ls -d "$RUNNER_TEMP"/cpm/dav1d/*)"
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      # (an artifact goes to Forgejo by its public address, ROOT_URL, behind Cloudflare, whatever address the runner has: a
+      # request there can fail once, and the action does not send a block again (2026-11-13, the launcher's nightly: one
+      # 8 MB block, "SSL alert bad record mac"). Sent once more when it failed: Forgejo takes the same name again)
+      - id: upload_3
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+        with:
+          name: dav1d-windows
+          path: ${{ runner.temp }}/cpm
+          if-no-files-found: error
+      - if: steps.upload_3.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: dav1d-windows
           path: ${{ runner.temp }}/cpm
