@@ -26,6 +26,8 @@ struct Options { int framegen = 2; } opts;
 auto vkCmdPushDescriptorSetKHR = reinterpret_cast<PFN_vkCmdPushDescriptorSetKHR>(uintptr_t(1));
 constexpr uint32_t FG_COPY_COMP_SPV[] = {0}, FG_LUMA_COMP_SPV[] = {0}, FG_FLOW_COMP_SPV[] = {0},
                    FG_MEDIAN_COMP_SPV[] = {0}, FG_SYNTH_COMP_SPV[] = {0}, FG_SCALE_COMP_SPV[] = {0};
+constexpr uint32_t CRT_DOWNSAMPLE_COMP_SPV[] = {0}, CRT_LOTTES_COMP_SPV[] = {0},
+                   CRT_HYLLIAN_COMP_SPV[] = {0}, CRT_ZFAST_COMP_SPV[] = {0};
 /* ACTUAL_STRUCTS */
 int multiplier() { return opts.framegen; }
 int display_refresh_mhz() { return 60000; }
@@ -96,6 +98,7 @@ void clear_model() {
     for (int i = 0; i < 2; ++i) fg.frames[i] = fg.lumas[i] = fg.flows[i] = {};
     for (auto& set : fg.sets) { set.busy = false; for (auto& image : set.frame) image = {}; }
     scale.init = scale.failed = false; scale.pipe = {}; scale.linear = 0;
+    crt = {};
     attempts = fail_at = barriers = waits = 0; submitted = false; idle = true;
 }
 void inspect_disabled() {
@@ -131,6 +134,31 @@ int run(const std::string& phase) {
     for (int failure = 1; failure <= 5; ++failure) {
         clear_model(); fail_at = failure; CHECK(!init_scale() && scale.failed && live.empty());
     }
+    // CRT's shared downsample/samplers roll back every setup failure, before any image is used.
+    for (int failure = 1; failure <= 6; ++failure) {
+        clear_model(); fail_at = failure;
+        CHECK(!init_crt(0) && crt.failed && live.empty());
+        const int attempted = attempts;
+        CHECK(!init_crt(0) && attempts == attempted);
+    }
+    // A selected filter pipeline can fail independently; its partial objects are all released.
+    for (int failure = 7; failure <= 10; ++failure) {
+        clear_model(); fail_at = failure; CHECK(!init_crt(0));
+        CHECK(!crt.failed && crt.tried[0] && live.size() == 5);
+        const int attempted = attempts;
+        CHECK(!init_crt(0) && attempts == attempted);
+        drop_pipe(crt.downsample);
+        vkDestroySampler(dev.device, crt.nearest, nullptr);
+        vkDestroySampler(dev.device, crt.linear, nullptr);
+        CHECK(live.empty());
+    }
+    clear_model(); CHECK(init_crt(0) && attempts == 10);
+    CHECK(init_crt(0) && attempts == 10);   // no per-frame construction
+    CHECK(init_crt(1) && attempts == 14);   // another shader, same samplers/downsample
+    drop_pipe(crt.filter[0]); drop_pipe(crt.filter[1]); drop_pipe(crt.downsample);
+    vkDestroySampler(dev.device, crt.nearest, nullptr);
+    vkDestroySampler(dev.device, crt.linear, nullptr);
+    CHECK(live.empty());
     std::puts("PASS: framegen setup/image rollback, checked samplers, no stale size, queue drain and direct fallback gate");
     return 0;
 }

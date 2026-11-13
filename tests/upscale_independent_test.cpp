@@ -12,6 +12,8 @@
 #include <mutex>
 #include <utility>
 #include "vk_present_rect.h"
+#include "crt_policy.h"
+namespace crt_policy = mkwvk::crt_policy;
 using mkwvk::PresentSourceRect;
 using mkwvk::present_source_rect;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
@@ -42,7 +44,7 @@ struct Layers { int aspect = 0, level = 0, first = 0, count = 0; };
 struct VkImageBlit { Layers srcSubresource, dstSubresource; Offset srcOffsets[2], dstOffsets[2]; };
 struct Extent { uint32_t width = 0, height = 0, depth = 0; };
 struct VkImageCopy { Layers srcSubresource; Offset srcOffset; Layers dstSubresource; Offset dstOffset; Extent extent; };
-struct { int upscale = 0, sharpness = 0, framegen = 0; } opts;
+struct { int upscale = 0, sharpness = 0, framegen = 0, crt_filter = 0; } opts;
 struct SpyMutex {
     bool held = false;
     void lock() { CHECK(!held); held = true; }
@@ -121,12 +123,23 @@ void pass(int, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSam
     dispatched_w = w; dispatched_h = h; sampled_view = b.begin()->first; dispatched_pipe = p.pipe;
 }
 void logf(const char*, ...) { CHECK(dispatches > 0); ++logs; }
+// This spy covers the production scaler's routing into CRT, not the shader's pixels/resources.
+int crt_calls = 0;
+uint32_t crt_sw = 0, crt_sh = 0, crt_dw = 0, crt_dh = 0;
+bool crt_available = true;
+VkImageView crt_source = 0;
+VkImage record_crt(int, VkImageView src, uint32_t sw, uint32_t sh, uint32_t dw, uint32_t dh, VkImageView& view) {
+    ++crt_calls; crt_sw = sw; crt_sh = sh; crt_dw = dw; crt_dh = dh; crt_source = src;
+    if (!crt_available) return VK_NULL_HANDLE;
+    view = 99; return 98;
+}
 // PRODUCTION_FUNCTIONS
 void reset() {
     scale = {}; fg = {}; opts = {}; wide_now = WideSides{}; dev.push_descriptor = true; vkCmdPushDescriptorSetKHR = true;
     pipe_calls = sampler_calls = image_calls = dispatches = blits = copies = waits = flushes = 0;
     destroyed_pipes = destroyed_layouts = destroyed_sets = 0;
     pipe_fail = sampler_fail = image_fail = pq_pipe_fail = false;
+    crt_calls = 0; crt_available = true;
 }
 VkImage draw(const int* crop = nullptr, uint32_t dw = 2560, uint32_t dh = 1440, bool pq = false) {
     return framegen_scale(1, 12, 11, 2560, 1440, crop, dw, dh, pq);
@@ -208,6 +221,28 @@ int main() {
     CHECK(!draw(nullptr, 2560, 1440, true) && pipe_calls == 2 && logs == logged + 1 && dispatches == 1);
     CHECK(!draw(nullptr, 2560, 1440, true) && pipe_calls == 2 && logs == logged + 1);
     CHECK(draw() && dispatched_pipe == 3 && dispatches == 2);
+    // CRT is independent of interpolation and of the old window effects; Off keeps the old zero-work route.
+    for (int mode = 1; mode <= 4; ++mode) {
+        reset(); opts.crt_filter = mode;
+        CHECK(draw(nullptr, 1920, 1080) == 98 && scale.output_view == 99);
+        CHECK(crt_calls == 1 && pipe_calls == 0 && image_calls == 0 && dispatches == 0);
+        CHECK(crt_sw == 2560 && crt_sh == 1440 && crt_dw == 1920 && crt_dh == 1080 && crt_source == 12);
+        CHECK(!fg.init && !fg.thread_started);
+        opts.crt_filter = 0; CHECK(!draw() && crt_calls == 1);
+    }
+    reset(); opts.crt_filter = 1;
+    CHECK(draw(crop, 1920, 1080) == 98 && crt_sw == 60 && crt_sh == 40 && crt_source == scale.cropped.view);
+    CHECK(blits == 1 && image_calls == 1 && pipe_calls == 0);
+    reset(); opts.crt_filter = 2; opts.sharpness = 50;
+    CHECK(draw(nullptr, 1920, 1080) == 98 && dispatches == 1 && crt_source == scale.scaled.view);
+    CHECK(crt_sw == 1920 && crt_sh == 1080);
+    crt_available = false;
+    CHECK(draw() == scale.scaled.image && scale.output_view == scale.scaled.view);
+    opts.sharpness = 0; CHECK(!draw());
+    reset(); opts.crt_filter = 1;
+    CHECK(!draw(nullptr, 1920, 1080, true) && crt_calls == 0 && image_calls == 0 && pipe_calls == 0);
+    opts.sharpness = 50;
+    CHECK(draw(nullptr, 1920, 1080, true) && crt_calls == 0 && made_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32);
     std::puts("PASS: production scaler works independently, caches/retries safely, scales Native HDR's picture in 10 bits, "
               "and leaves interpolation uninitialized");
 }

@@ -3931,6 +3931,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
     uint32_t sw = 0, sh = 0;
     bool shot = false, interpolated = false;
     VkImage made_src = VK_NULL_HANDLE;
+    VkImage headless_fx = VK_NULL_HANDLE;   // CRT output at the capture pixel grid, reused by both screenshot routes
     {
         std::lock_guard lk(replay_mu);
         bench_frame(presents);
@@ -3973,7 +3974,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                                                                                         : "the SDR picture expanded to HDR10");
             }
         }
-        if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || dev.hdr || wide_sides_possible())) {   // (and ultrawide's menu sides)
+        if (tex && !dev.offscreen && (opts.upscale || opts.sharpness || opts.crt_filter || dev.hdr || wide_sides_possible())) {
             // Keep the sampled view with the same cached image as the direct present, before advancing its age.
             direct_view = texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample);
             tex->last_frame = texture_frame_no();
@@ -4014,8 +4015,18 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         if (src && (dev.offscreen || shots) && offscreen_init()) {
             if (dev.offscreen) {
                 image_barrier(r.cmd, off_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-                blit_crop(r.cmd, src, sw, sh, crop, off_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                          dev.swap_extent.width, dev.swap_extent.height);
+                // No swapchain exists here. Exercise the same output effects on every frame, at the
+                // requested capture size, not only when a screenshot is due. Off keeps the original blit.
+                if (opts.crt_filter && tex)
+                    headless_fx = framegen_scale(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample),
+                                                 src, sw, sh, crop, kShotW, kShotH,
+                                                 present_native_pq.load(std::memory_order_relaxed));
+                if (headless_fx)
+                    blit_crop(r.cmd, headless_fx, kShotW, kShotH, nullptr, off_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              dev.swap_extent.width, dev.swap_extent.height);
+                else
+                    blit_crop(r.cmd, src, sw, sh, crop, off_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              dev.swap_extent.width, dev.swap_extent.height);
             }
             // (RX_VK_SHOT_FROM / _TO: every present in that range too)
             static const int64_t shot_from = getenv("RX_VK_SHOT_FROM") ? atoll(getenv("RX_VK_SHOT_FROM")) : -1;
@@ -4054,7 +4065,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 // shot, and it is not under present_image_mu, which frame generation's display thread takes for the same pass)
                 static const bool shot_fx = env_on("RX_VK_SHOT_FX");
                 // (pq as the window's present has it: Native HDR's picture through the 10-bit pass, not a format switch each shot)
-                const VkImage fx_img = shot_fx && tex ? framegen_scale(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample),
+                const VkImage fx_img = headless_fx ? headless_fx : shot_fx && tex ? framegen_scale(r.cmd, texture_view(tex, t, nullptr, VK_IMAGE_VIEW_TYPE_2D, ViewUse::Sample),
                                                                        src, sw, sh, crop, kShotW, kShotH,
                                                                        present_native_pq.load(std::memory_order_relaxed))
                                                         : VK_NULL_HANDLE;
@@ -4067,7 +4078,8 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 capture_host_read_barrier(r.cmd, shot_bufs[presents & 1], (VkDeviceSize)kShotW * kShotH * 4);
             }
         }
-        shot_ask_record(r.cmd, src, sw, sh, crop, value);   // (the control bridge's, host/control.c)
+        shot_ask_record(r.cmd, headless_fx ? headless_fx : src, headless_fx ? kShotW : sw, headless_fx ? kShotH : sh,
+                        headless_fx ? nullptr : crop, value);   // the bridge captures the same CRT output, without Longshot overlays
         memory_end_submission(r.cmd, r.part);
         full_barrier(r.cmd);
         submit_recording(r);   // (nothing is stopped at a present: drain)

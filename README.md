@@ -438,6 +438,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Fullscreen | Off, On (the same as <kbd>F11</kbd>) | Off |
 | | V-Sync | Auto, On, Off | Auto |
 | | Window scaling filter | Off, Catmull-Rom, Lanczos (shows "Not needed (window = output)" while the window is the Output resolution's size) | Off; a quality preset sets it |
+| | CRT filter | Off, Lottes aperture grille, Lottes consumer TV, Hyllian Fast, zfast CRT (changes at once; Native HDR bypasses it) | Off |
+| | CRT lines | 240, 480, 720 virtual lines (changes at once; capped at half the destination height) | 240 |
 | | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
 | | HDR | Off, Expanded, Native (the game's) | Off |
 | | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
@@ -597,6 +599,15 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Window scaling filter** matters only when your window's size differs from the Output resolution: for the sharpest
   picture, set the Output resolution to your screen's, and the row shows "Not needed (window = output)". It and
   **Sharpness** also work when Frame generation is Off.
+- **CRT filter** adds scanlines and a phosphor mask to the finished SDR picture, including the game's HUD, after
+  window scaling and sharpening. Longshot's menu and overlays stay clean. Lottes aperture grille is a flat PVM-style
+  look, not a calibrated Sony model; Lottes consumer TV adds curved glass, a shadow mask and beam bloom. Hyllian Fast
+  uses cubic reconstruction and a magenta/green mask; zfast CRT has softer scanlines and a monochrome aperture mask.
+  **CRT lines** chooses a virtual raster, independent of Render resolution: 240, 480 or 720 lines, capped at half the
+  destination height (at least one line), with width following its aspect. Exact integer multiples give the most regular
+  lines; non-integer scaling can cause moire. Neither option forces 4:3 or integer scaling. Both apply at once and
+  quality presets, including Auto, preserve them. Expanded HDR expands the filtered SDR picture; Native HDR (PQ)
+  bypasses CRT and keeps the choice for SDR. **Off**, the default, adds no CRT passes or GPU images.
 - **Anisotropic filtering** keeps textures sharp on surfaces seen at a slant: the paths and floors ahead of Link. The game
   asks for 1x or 2x, which at a PC's resolutions smears the ground a few metres off; 16x costs little on most cards, and
   Game's is the console's own. `RX_VK_ANISO=<n>` sets it for one run (0: the game's).

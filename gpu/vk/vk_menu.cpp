@@ -76,6 +76,7 @@ extern char** environ;
 namespace mkwvk {
 int display_refresh_mhz();   // (vk_main.cpp: the window's display, asked once a second at most: the FPS counter's V-Sync target)
 HWND app_window();
+extern std::atomic<bool> present_native_pq;   // (vk_replay.cpp: the presented picture is Native HDR, bypassing the SDR CRT filters)
 
 Options opts;
 
@@ -175,6 +176,14 @@ const char* tx_upscale(int v) {
 }
 /// The Window scaling filter row's value: its filter, or that none is needed (the saved value stays, for another window size)
 const char* tx_filter(int v) { return filter_needed() ? tx_upscale(v) : "Not needed (window = output)"; }
+const char* tx_crt_filter(int v) {
+    static const char* const t[] = {"Off", "Lottes aperture grille", "Lottes consumer TV", "Hyllian Fast", "zfast CRT"};
+    return (unsigned)v < std::size(t) ? t[v] : t[0];
+}
+const char* tx_crt_lines(int v) {
+    static const char* const t[] = {"240", "480", "720"};
+    return (unsigned)v < std::size(t) ? t[v] : t[0];
+}
 const char* tx_reflex(int v) {
     static const char* t[] = {"Off", "On", "On + Boost"};
     return t[reflex_available() ? std::clamp(v, 0, 2) : 0];
@@ -1104,6 +1113,22 @@ const char* hn_filter(int v, int variant) {
     if (variant < 0) return filter_needed() ? t[std::clamp(v, 0, 2)] : none;
     return variant == 0 ? t[std::clamp(v, 0, 2)] : variant == 1 ? none : nullptr;
 }
+const char* hn_crt_filter(int v, int variant) {
+    static const char* const t[] = {
+        "Off: no extra CRT passes or image allocations.",
+        "Timothy Lottes' crt-lottes: flat aperture grille, a PVM-style look, not a calibrated Sony model.",
+        "Timothy Lottes' crt-lottes: curved consumer TV with a shadow mask and beam bloom.",
+        "Hyllian's crt-hyllian-fast: cubic reconstruction, scanlines and a magenta/green mask.",
+        "Greg Hogan's zfast CRT: softer scanlines and a monochrome aperture mask."};
+    if (variant < 0)
+        variant = v > 0 && (unsigned)v < std::size(t) && present_native_pq.load(std::memory_order_relaxed) ? 1 : 0;
+    if (variant == 1)
+        return "Bypassed: the game is presenting Native HDR (PQ). The saved CRT choice is kept; SDR and Expanded HDR can use it.";
+    return hint_in(t, (int)std::size(t), 0, v, variant);
+}
+MENU_HINTS(hn_crt_lines, 0, "240 virtual lines: a coarser raster and wider scanline spacing.",
+           "480 virtual lines: a finer raster, reduced when the destination is too small.",
+           "720 virtual lines: the finest raster, reduced when the destination is too small.")
 /// Sharpness: with DLSS or DLAA, the amount that suits them
 const char* hn_sharpness(int v, int variant) {
     static const char* const dlss = "DLSS and DLAA look softer than the game's own upscaler: around 80% suits them.";
@@ -1301,6 +1326,12 @@ Row rows[] = {
      "Whether a frame waits for the display's refresh before it is shown. Changes at once.", hn_vsync, false, true},
     {TAB_GRAPHICS, "Window scaling filter", &opts.upscale, 0, 2, 1, tx_filter,
      "How the finished picture is scaled to the window, when its size differs from the Output resolution.", hn_filter},
+    {TAB_GRAPHICS, "CRT filter", &opts.crt_filter, 0, 4, 1, tx_crt_filter,
+     "Filters the finished picture, including the game's HUD, after window effects. Longshot's menu and overlays stay "
+     "clean. Changes at once; quality presets leave it alone.", hn_crt_filter, false, true},
+    {TAB_GRAPHICS, "CRT lines", &opts.crt_lines, 0, 2, 1, tx_crt_lines,
+     "Virtual CRT raster, not Render resolution. Capped at half the destination height (at least one line); width follows "
+     "its aspect. Non-integer scaling can cause moire.", hn_crt_lines, false, true},
     {TAB_GRAPHICS, "Ultrawide menus", &opts.wide_menus, 0, 2, 1, tx_wide_menus,
      "With the Aspect ratio at the monitor's shape: the pause, item and map menus, and what shows beside them. Loading "
      "screens and pre-rendered movies, which draw no world either, get the same sides. Changes at once.", hn_wide_menus, false, true},

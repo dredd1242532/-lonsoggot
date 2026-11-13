@@ -745,6 +745,8 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 | `output_res` | A size, `<width>x<height>`: 2048x1152 (the game's own reduced size), one of the screen's display modes (the menu's Aspect ratio and Output resolution rows), or any other with each side a multiple of 8 (rounded down), at least 640x360, at most 5120x2880's pixels, 5:4 to 48:9; anything else is 2048x1152. No line: 2560x1440, the game's own picture, or the screen's size where that has fewer pixels, at the screen's shape (2560x1080 and 2256x1504 start at their own size, as 1280x800 and 1920x1200 did before). The menu marks 2048x1152 "(reduced)". A size more than 1 % off 16:9 sets the picture's shape (`host/hos_wide_size.h` `hos_output_own_shape`). The Aspect ratio row saves `ultrawide=` 1 for the monitor's own shape, else 0; another shape is `output_res`'s own. The numbers saved before (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, 5 5120x2880) are still read |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
 | `compile_shaders` | No menu row: the Builder's, `make_game.py --compile-shaders`'s and the launcher's Compile shaders, read by a preparation (`vk_draw.cpp` `compile_all`). 0 Most (the default), 1 All (the predicted pipelines too). A file with only this line still makes the game's first start a first start |
+| `crt_filter` | 0 Off (default), 1 Lottes aperture grille, 2 Lottes consumer TV, 3 Hyllian Fast, 4 zfast CRT |
+| `crt_lines` | 0 240 virtual lines (default), 1 480, 2 720; capped at half the destination height, at least one line |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y`, `walk_speed` | percent |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
@@ -776,6 +778,30 @@ as its client. `status.game` holds Link's position/facing, the camera's yaw, eve
 rupees, A-button prompt and music. `subscribe` with `events:["oot"]`, `every`, `flags` and `changes` streams those
 samples and optional watched/changed flags. There is no separate state file; off unless `HOS_CONTROL` is set.
 See [control.md](control.md) for the fields, sampling, bounds and examples.
+
+### CRT output stage
+
+The Graphics tab's **CRT filter** and **CRT lines** rows follow Window scaling filter. Both are live, preset-exempt
+options in `gpu/vk/vk_menu.h`; the usual row-name key generation, read-time clamp and save path handle `crt_filter`
+and `crt_lines`. Neither needs an environment switch, host/renderer API field or restart. Missing keys keep Off/240.
+
+The CRT stage takes the finished SDR picture after window scaling, sharpness and ultrawide-side treatment, on each
+displayed frame after frame generation. It downsamples to a virtual raster, then applies the selected CRT shader at
+the destination size. The game's HUD is already in that picture; Longshot's menu, FPS counter and other overlays
+are drawn afterwards. Keep the mask out of temporal upscalers and frame-generation history.
+
+The requested virtual height is 240, 480 or 720, capped at `max(1, destination_height / 2)` using integer division;
+the virtual width follows the destination aspect. This does not change Render resolution, force 4:3, or introduce
+integer scaling. Destination-pixel masks and non-integer raster scaling can show moire; the cap limits scanline
+undersampling but does not make every output size regular. Lottes' flat aperture-grille setting is a PVM-style look,
+not calibration to a particular Sony model; its consumer-TV setting uses curvature and the TV shadow mask.
+Hyllian Fast and zfast CRT are the small upstream algorithms, not their larger multipass relatives.
+
+These filters expect SDR. Expanded HDR runs after CRT through the existing HDR expansion. An actual Native HDR PQ
+picture bypasses CRT without changing the saved selection; it must never be processed as sRGB. Native-HDR CRT
+presets, composite/NTSC simulation, phosphor persistence, bezels and arbitrary downloaded presets are not supported.
+Off allocates no CRT GPU resources and records no CRT dispatches. New menu text uses the existing English fallback
+where no translation is available.
 
 ## Layout
 
