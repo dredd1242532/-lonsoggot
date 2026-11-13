@@ -350,9 +350,11 @@ report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
 
 What [#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252) changes was made from one laptop's logs (Unity's:
 Intel UHD Graphics with driver 101.7088, a 4-thread CPU of which the game reserves 2, 16 GB, Windows, 1920x1080 at
-60 Hz, the Auto preset: Minimum). There the game closed in Intel's driver (`igvk64.dll`, an access violation) while
-shaders were built on several threads, the build's shader preparation had stopped, and the title and the opening movie
-ran at about 35 fps. It has not been tested on an Intel GPU yet. On such a PC:
+60 Hz, the Auto preset: Minimum; later an i3-1115G4). There the game closed in Intel's driver (`igvk64.dll`+0x14d102,
+an access violation) in 5 of 7 runs of v3.0.0-rc.3, each time in the background save of the pipeline cache
+(`vkGetPipelineCacheData`) while other threads built pipelines into the same cache. The build's shader preparation had
+stopped, so every run built its shaders in play, and the title ran at about 35 fps. It has not been tested on an Intel
+GPU yet. On such a PC:
 
 1. Build with **Prepare shaders now** ticked. If the folder has a `longshot_prepare_skipped` file from an earlier build,
    delete it first.
@@ -360,7 +362,9 @@ ran at about 35 fps. It has not been tested on an Intel GPU yet. On such a PC:
    CPU with many cores, but Intel's driver can crash the game then.
 3. A shader the driver faulted on is listed in `longshot_driver_faults.txt` and left out, with its draws, on later starts
    on the same driver. After a driver update the list starts again; delete the file to try them all again sooner.
-4. If it still crashes or runs slowly, [report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with
+4. Leave **ASTC as RGBA8** off: it is the [AMD texture workaround](#amd-texture-workaround), and its larger textures
+   come out of the memory that integrated graphics share with the rest of the PC.
+5. If it still crashes or runs slowly, [report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with
    `longshot_log.txt` from a run with `HOS_VIDEO_LOG=1` in `longshot_env.txt`, the build's details, and the FPS on the
    title and in the first scene.
 
