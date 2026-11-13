@@ -65,6 +65,7 @@ def main():
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include "gpu/vk/auto_settings.h"
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL: %d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 struct Options { int gfx_foliage, gfx_objects, gfx_grass, gfx_shadows, gfx_uncapped, gfx_contact_shadows, gfx_base_quality; } opts;
 struct Row { int* value; int hi; };
@@ -87,6 +88,21 @@ void set_env(const char* key, const char* value) {
                    "int saved_value(int* value) {", "const char* gfx_env(",
                    "void gfx_env_init() {"):
         source += definition(menu, marker) + "\n"
+    auto = definition(menu, "void apply_auto(bool keep_own) {")
+    fields = ("foliage", "objects", "grass", "shadows", "contact_shadows", "base_quality")
+    assignments = []
+    for field in fields:
+        lines = [line for line in auto.splitlines() if
+                 re.search(r"\bopts\.gfx_" + field + r"\s*=\s*c\.", line)]
+        if len(lines) != 1:
+            raise SystemExit("expected one production default assignment for " + field)
+        assignments.append(lines[0])
+    source += "static unsigned gfx_saved_mask = 0;\n"
+    source += "void apply_draw_defaults(bool apply, bool keep_own) {\n"
+    source += "    const struct { bool apply; } deck = {apply};\n"
+    source += "    auto_settings::Hardware hardware; hardware.deck = true;\n"
+    source += "    const auto_settings::Choice c = auto_settings::choose(hardware);\n"
+    source += "\n".join(assignments) + "\n}\n"
     source += r'''
 void reset() {
     const char* keys[] = {"RX_OOT_FOLIAGE", "RX_OOT_OBJECTS", "RX_OOT_GRASS", "RX_OOT_SHADOWS",
@@ -94,6 +110,12 @@ void reset() {
         "RX_OOT_CONTACT_SHADOWS", "RX_OOT_BASE_QUALITY", "RX_OOT_UNCAP_DETAIL_SLIDERS"};
     for (const char* key : keys) set_env(key, nullptr);
     env_override_count = 0;
+    gfx_saved_mask = 0;
+}
+void check_distances(const Options& want) {
+    CHECK(opts.gfx_foliage == want.gfx_foliage && opts.gfx_objects == want.gfx_objects &&
+          opts.gfx_grass == want.gfx_grass && opts.gfx_shadows == want.gfx_shadows &&
+          opts.gfx_contact_shadows == want.gfx_contact_shadows && opts.gfx_base_quality == want.gfx_base_quality);
 }
 int main() {
     reset();
@@ -140,14 +162,53 @@ int main() {
     gfx_env_init();
     CHECK(opts.gfx_foliage == 100 && saved_value(&opts.gfx_foliage) == 75);
     reset();
-    std::puts("PASS: distance caps, aliases and run-only saved values");
+    /* Rechoosing Auto must not reapply a previously settled Deck profile. */
+    const Options player = {75, 175, 50, 125, 0, 1, 1};
+    const Options low = {25, 100, 0, 25, 0, 0, 0};
+    reset(); opts = player;
+    apply_draw_defaults(false, false); check_distances(player);
+    apply_draw_defaults(false, true); check_distances(player);
+    apply_draw_defaults(true, false); check_distances(low);
+
+    /* Each saved-row bit is independent, and explicit selection ignores it. */
+    for (unsigned bit = 0; bit < 6; ++bit) {
+        reset(); opts = player; gfx_saved_mask = 1u << bit;
+        Options want = low;
+        switch (bit) {
+        case 0: want.gfx_foliage = player.gfx_foliage; break;
+        case 1: want.gfx_objects = player.gfx_objects; break;
+        case 2: want.gfx_grass = player.gfx_grass; break;
+        case 3: want.gfx_shadows = player.gfx_shadows; break;
+        case 4: want.gfx_contact_shadows = player.gfx_contact_shadows; break;
+        case 5: want.gfx_base_quality = player.gfx_base_quality; break;
+        }
+        apply_draw_defaults(true, true); check_distances(want);
+        opts = player; apply_draw_defaults(true, false); check_distances(low);
+    }
+    reset(); opts = player; gfx_saved_mask = 63;
+    apply_draw_defaults(true, true); check_distances(player);
+
+    /* All canonical switches win even over an explicit profile selection. */
+    reset(); opts = player;
+    const char* canonical[] = {"RX_OOT_FOLIAGE", "RX_OOT_OBJECTS", "RX_OOT_GRASS",
+        "RX_OOT_SHADOWS", "RX_OOT_CONTACT_SHADOWS", "RX_OOT_BASE_QUALITY"};
+    for (const char* key : canonical) set_env(key, "1");
+    apply_draw_defaults(true, false); check_distances(player);
+    reset(); opts = player;
+    const char* aliases[] = {"RX_OOT_FOLIAGE_DISTANCE", "RX_OOT_OBJECT_DETAIL",
+        "RX_OOT_GRASS_DENSITY", "RX_OOT_SHADOW_DISTANCE",
+        "RX_OOT_CONTACT_SHADOWS", "RX_OOT_BASE_QUALITY"};
+    for (const char* key : aliases) set_env(key, "1");
+    apply_draw_defaults(true, true); check_distances(player);
+    reset();
+    std::puts("PASS: distance caps, aliases, saved values and Deck rechoose");
 }
 '''
     with tempfile.TemporaryDirectory(prefix="deck-distances-") as temp:
         cpp = Path(temp) / "caps.cpp"
         exe = Path(temp) / "caps.exe"
         cpp.write_text(source, encoding="utf-8")
-        subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(exe)], check=True)
+        subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT), str(cpp), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 
 
