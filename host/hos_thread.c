@@ -488,6 +488,7 @@ HosThread *hos_thread_of(uint64_t guest_tt) {
     return r;
 }
 
+static int vc_first_named(const char *name);   /* (HOS_VCORE_FIRST, below) */
 Ctx *hos_boot_main_thread(uint64_t stack_size) {
     HosThread *t = (HosThread *)calloc(1, sizeof *t);
     t->guest_tt = hos_sys_alloc(0x400, 0x10);      /* a ThreadType for the main thread; the SDK never made one */
@@ -498,6 +499,7 @@ Ctx *hos_boot_main_thread(uint64_t stack_size) {
     t->ideal_core = 0;
     t->started = 1;
     snprintf(t->name, sizeof t->name, "MainThread");
+    t->vc_first = vc_first_named(t->name);
     __atomic_store_n(&t->serial, 1, __ATOMIC_RELAXED);
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &t->handle, 0, FALSE,
                     DUPLICATE_SAME_ACCESS);   /* a real handle, for the profiler */
@@ -561,6 +563,7 @@ HosThread *hos_thread_create(uint64_t guest_tt, uint64_t entry, uint64_t arg, ui
     t->ideal_core = core;
     t->id = InterlockedIncrement64(&next_id);
     snprintf(t->name, sizeof t->name, "Thread_%llx", (unsigned long long)entry);
+    t->vc_first = vc_first_named(t->name);
     setup_guest(t);   /* FPCR starts at 0, as the kernel does it; TOTK sets FZ itself (nnMain+0x474, thread entries) */
     track(t);
     return t;
@@ -1661,6 +1664,12 @@ static unsigned vc_allowed(HosThread *t) {
 }
 /* the priority the virtual cores go by */
 static int vc_prio(const HosThread *t) { return __atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) ? -1 : t->priority; }
+/* w may take t's core in a turn (a yield of t's, or after the time slice): as good in that order, or, t being a first
+   thread, as good by guest priority: a first thread comes first, but its yields and slices stay as they were (a first
+   thread waiting by yielding for a job thread pinned to its own core kept that core until the 2 s escape) */
+static int vc_turn(const HosThread *w, const HosThread *t) {
+    return vc_prio(w) <= vc_prio(t) || (__atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) && w->priority <= t->priority);
+}
 /* a runs before b */
 static int vc_better(HosThread *a, HosThread *b) {
     return vc_prio(a) != vc_prio(b) ? vc_prio(a) < vc_prio(b) : a->vc_since < b->vc_since;
@@ -1750,7 +1759,7 @@ static void vc_acquire(HosThread *t) {
         }
         if (!worst && hos_now_ns() - t0 > slice)
             for (int k = 0; k < vc_cores() && !worst; k++)
-                if ((m >> k & 1) && vc_owner[k] && vc_prio(vc_owner[k]) == vc_prio(t)) worst = vc_owner[k];
+                if ((m >> k & 1) && vc_owner[k] && vc_turn(t, vc_owner[k])) worst = vc_owner[k];
         if (worst && !worst->vc_kick) {
             worst->vc_kick = vc_prio(worst) > vc_prio(t) ? 1 : 2;
             Ctx *rc = worst->run_ctx;   /* (a fiber's context while it runs one) */
@@ -1777,9 +1786,9 @@ static void vc_acquire(HosThread *t) {
                 for (int k = 0; k < vc_cores() && len < 200; k++)
                     if (m >> k & 1)
                         len += snprintf(who + len, sizeof who - len, " core %d: %s (%d)%s;", k,
-                                        vc_owner[k] ? vc_owner[k]->name : "-", vc_owner[k] ? vc_owner[k]->priority : 0,
+                                        vc_owner[k] ? vc_owner[k]->name : "-", vc_owner[k] ? vc_prio(vc_owner[k]) : 0,
                                         vc_owner[k] && vc_owner[k]->vc_kick ? " asked" : "");
-                hos_log("vcores: %s (priority %d) ran without a core after %.1f ms:%s", t->name, t->priority, waited / 1e6, who);
+                hos_log("vcores: %s (priority %d) ran without a core after %.1f ms:%s", t->name, vc_prio(t), waited / 1e6, who);
             }
             break;
         }
@@ -1809,7 +1818,7 @@ static void vc_yield(HosThread *t, int strict) {
     int any = 0;
     for (int i = 0; i < vc_nq && !any; i++) {
         HosThread *w = vc_queue[i];
-        any = (vc_allowed(w) >> c & 1) && (strict ? vc_prio(w) < vc_prio(t) : vc_prio(w) <= vc_prio(t));
+        any = (vc_allowed(w) >> c & 1) && (strict ? vc_prio(w) < vc_prio(t) : vc_turn(w, t));
     }
     t->vc_kick = 0;
     if (any) vc_st.yields++;
