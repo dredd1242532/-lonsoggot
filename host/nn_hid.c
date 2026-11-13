@@ -815,10 +815,11 @@ static int pads_behind(void) {
 }
 
 /* (longshot) Whether a pad's motion counts: when its buttons do, with the game's window in front, or behind another
-   window when the player asked for the pads there. Otherwise GetSixAxisSensorStates hands out the pad at rest, so a
-   gyro moved while the player is in another window does not turn the camera. tests/test_motion_background.py */
-static int motion_counts(int front, const char *env, int menu) {
-    return front || pads_in_background(env, menu);
+   window when the player asked for the pads there, and never while the Insert menu is open (insert: read_input holds the
+   buttons and sticks back then). Otherwise GetSixAxisSensorStates hands out the pad at rest, so a gyro moved while the
+   player is in another window or in the menu does not turn the camera. tests/test_motion_background.py */
+static int motion_counts(int front, const char *env, int menu, int insert) {
+    return !insert && (front || pads_in_background(env, menu));
 }
 
 #ifndef VK_XBUTTON1
@@ -1187,7 +1188,7 @@ HLE(_ZN2nn3hid22GetSixAxisSensorStatesEPNS0_18SixAxisSensorStateEiRKNS0_19SixAxi
     static const char *background_env;
     static int background_looked;
     if (!background_looked) background_looked = 1, background_env = getenv("HOS_INPUT_BACKGROUND");
-    const int counts = motion_counts(game_in_front(), background_env, rx_option(4, 0));
+    const int counts = motion_counts(game_in_front(), background_env, rx_option(4, 0), rx_option(1, 0));
     const int live = count && counts ? hos_sdl_motion_history(h, count) : 0;
     /* (each switch between live and at rest moves the numbers a whole history past the last ones given out, so no entry
        of one ever has a number an entry of the other had) */
