@@ -36,8 +36,20 @@ test('below-target memory and space warn, exact thresholds pass', () => {
     assert.equal(checkCompatibility({ ...ready, [field]: value }).status, 'warning');
   }
 });
-test('invalid numbers and shared-memory unknowns cannot count as passing', () => {
+test('invalid dedicated VRAM values cannot count as passing', () => {
   for (const value of ['', ' ', 'oops', 'Infinity', '-1', '0', null, undefined]) {
     assert.equal(checkCompatibility({ ...ready, vram: value }).status, 'unknown');
   }
+});
+test('shared memory needs no invented VRAM value and is never a dedicated-memory pass', () => {
+  for (const gpu of ['nvidia', 'deck']) {
+    const report = checkCompatibility({ ...ready, gpu, memoryType: 'shared', vram: '' });
+    assert.equal(report.status, 'warning');
+    const row = report.rows.find(row => row.title === 'Video memory');
+    assert.equal(row.level, 'warning');
+    assert.match(row.text, /No dedicated VRAM value is needed/);
+  }
+  assert.equal(checkCompatibility({ ...ready, gpu: 'deck', vram: '' }).status, 'warning');
+  assert.equal(checkCompatibility({ ...ready, memoryType: 'shared', driver: 'no' }).status, 'block');
+  assert.equal(checkCompatibility({ ...ready, memoryType: 'unknown' }).status, 'unknown');
 });

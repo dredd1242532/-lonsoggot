@@ -38,6 +38,14 @@ export function checkCompatibility(input) {
     ['vram', 'Video memory', 8, 'Below the recommended 8 GB VRAM. Lower Quality presets may help; this does not establish that your GPU will work.', 'Meets the 8 GB VRAM recommendation.'],
     ['disk', 'Free build space', 60, 'The build needs about 60 GB free. Free up space before starting; the exact amount can vary.', 'Meets the approximate 60 GB build-space allowance. An SSD is recommended.'],
   ]) {
+    if (key === 'vram' && (input.memoryType === 'shared' || input.gpu === 'deck')) {
+      add('warning', title, 'Shared system memory cannot be compared directly with the 8 GB dedicated VRAM recommendation. No dedicated VRAM value is needed here. Check tested configurations and your device’s known issues; this is not a confirmation that the memory requirement is met.');
+      continue;
+    }
+    if (key === 'vram' && input.memoryType === 'unknown') {
+      add('unknown', title, 'Check whether your GPU uses dedicated VRAM or shares system memory, then select that memory type.');
+      continue;
+    }
     const raw = input[key];
     const value = Number(raw);
     if (raw == null || String(raw).trim() === '' || !Number.isFinite(value) || value <= 0) add('unknown', title, `Enter the available ${title.toLowerCase()} in GB to check it.`);

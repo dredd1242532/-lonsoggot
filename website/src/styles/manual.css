@@ -10,9 +10,11 @@
 .sl-markdown-content .manual-jumps small { font-size: .85rem; color: var(--soft-text); line-height: 1.5; }
 .sl-markdown-content .manual-shortcuts { display: flex; gap: .3rem 1.2rem; flex-wrap: wrap; margin: 0 0 2.5rem; }
 .sl-markdown-content .manual-shortcuts a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; margin: 0; }
-.sl-markdown-content .manual-requirements { margin: 2.5rem 0; }
+.sl-markdown-content .manual-requirements { margin: 2.5rem 0; container-type: inline-size; }
 .sl-markdown-content .manual-requirements > p:first-of-type { padding: 1.2rem 1.4rem; border: 1px solid var(--border); border-left: 3px solid var(--sl-color-text-accent); border-radius: 8px; background: var(--panel); }
 .sl-markdown-content .specs-scroll { overflow-x: auto; margin-block: 1.5rem; border: 1px solid var(--border); border-radius: 10px; }
+.sl-markdown-content .specs-scroll-hint { color: var(--soft-text); font-size: .85rem; margin-bottom: -.75rem; }
+@container (min-width: 36rem) { .sl-markdown-content .specs-scroll-hint { display: none; } }
 .sl-markdown-content .specs-scroll:focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 4px; }
 .sl-markdown-content .manual-requirements .specs-scroll table { display: table; table-layout: fixed; width: 100%; min-width: 36rem; margin: 0; font-size: .95rem; line-height: 1.6; border-collapse: collapse; }
 .sl-markdown-content .specs-scroll :is(th,td) { padding: 1rem; vertical-align: top; border: 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
@@ -59,6 +61,7 @@
   .sl-markdown-content .manual-platform > ol > li::before { left: .8rem; }
 }
 @media print {
+  .specs-scroll-hint { display: none; }
   .manual-guide .manual-toolbar { display: none !important; }
   .manual-guide details::details-content { display: block; content-visibility: visible; }
   .manual-guide details > :not(summary) { display: block; }

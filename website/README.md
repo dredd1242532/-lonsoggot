@@ -31,6 +31,12 @@ controls, and team credits. The main Grappling Hook Bean becomes the Glowing Fai
 Bean after three clicks, taps or keyboard button activations. Reload resets it.
 A failed image load keeps the original artwork and allows a retry.
 
+At narrower widths the main links use an Explore Longshot disclosure, including a
+no-JavaScript fallback. With JavaScript, Escape, an outside click or choosing a link
+closes it. Shared-memory GPUs have a separate checker choice; their memory remains
+a caution rather than being compared to dedicated VRAM. GPU changes update the
+automatic choice until the user chooses a memory type themselves; Reset restores it.
+
 The team logo, Longshot icon and supplied bean illustrations are copied unchanged
 from `../assets/branding/`; their provenance is recorded there. The upstream README's
 own `../assets/longshot.png` is preserved separately.

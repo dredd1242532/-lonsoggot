@@ -22,7 +22,7 @@ const fold = (label, body) => `\n<details class="manual-detail">\n<summary>${lab
 export function formatRequirements(body) {
   // Keep the canonical Markdown table intact, with a keyboard-accessible scroll area on narrow screens.
   return body.replace(/(^\|[^\n]+\n(?:\|[^\n]+(?:\n|$))+)/m, table =>
-    '\n<div class="specs-scroll" role="region" aria-label="Minimum and recommended system requirements" tabindex="0">\n\n' + table.trim() + '\n\n</div>\n');
+    '\n<p class="specs-scroll-hint">Scroll sideways to compare minimum and recommended specs →</p>\n\n<div class="specs-scroll" role="region" aria-label="Minimum and recommended system requirements; scroll horizontally to compare columns" tabindex="0">\n\n' + table.trim() + '\n\n</div>\n');
 }
 const jumps = `<nav class="manual-jumps" aria-label="Installation shortcuts">
 <a href="#what-you-need"><span>01 / CHECK YOUR SETUP</span><strong>Requirements</strong><small>Game version, hardware and space</small></a>

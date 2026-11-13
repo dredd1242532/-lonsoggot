@@ -26,10 +26,11 @@ const options = [
       </div>
       <div class="compatibility-fields memory-fields">
         <label for="compat-ram"><span>System RAM (GB)</span><input id="compat-ram" name="ram" type="number" min="0.1" step="any" placeholder="e.g. 16" inputmode="decimal" /></label>
-        <label for="compat-vram"><span>Dedicated VRAM (GB)</span><input id="compat-vram" name="vram" type="number" min="0.1" step="any" placeholder="e.g. 8" inputmode="decimal" aria-describedby="shared-memory-note" /></label>
+        <label for="compat-memory-type"><span>Graphics memory</span><select id="compat-memory-type" name="memoryType" aria-describedby="shared-memory-note"><option value="dedicated">Dedicated VRAM</option><option value="shared">Shared system memory (e.g. Steam Deck)</option><option value="unknown">Not sure</option></select></label>
+        <label id="vram-field" for="compat-vram"><span>Dedicated VRAM (GB)</span><input id="compat-vram" name="vram" type="number" min="0.1" step="any" placeholder="e.g. 8" inputmode="decimal" aria-describedby="shared-memory-note" /></label>
         <label for="compat-disk"><span>Free build space (GB)</span><input id="compat-disk" name="disk" type="number" min="0.1" step="any" placeholder="e.g. 60" inputmode="decimal" /></label>
       </div>
-      <p id="shared-memory-note" class="form-help">For shared-memory GPUs such as Steam Deck, leave VRAM blank. System RAM is not the same as dedicated VRAM.</p>
+      <p id="shared-memory-note" class="form-help">For Steam Deck or another shared-memory GPU, select Shared system memory. Its RAM cannot be compared directly with the dedicated VRAM recommendation.</p>
     </fieldset>
     <div class="checker-actions"><button class="button-primary" type="submit">Check compatibility <span aria-hidden="true">→</span></button><button class="checker-reset" type="reset">Reset</button></div>
   </form>
@@ -47,17 +48,33 @@ const options = [
   const result = document.querySelector<HTMLElement>('#compatibility-result')!;
   const list = document.querySelector('#compatibility-results')!;
   const os = form.elements.namedItem('os') as HTMLSelectElement;
+  const memoryType = form.elements.namedItem('memoryType') as HTMLSelectElement;
+  const vram = form.elements.namedItem('vram') as HTMLInputElement;
+  const gpu = form.elements.namedItem('gpu') as HTMLSelectElement;
+  const vramField = document.querySelector<HTMLElement>('#vram-field')!;
+  let automaticMemoryType = true;
   const linuxFields = document.querySelector<HTMLElement>('#linux-fields')!;
   const avx2Field = document.querySelector<HTMLElement>('#avx2-field')!;
   function updateFields() {
     linuxFields.hidden = !os.value.startsWith('linux-');
     avx2Field.hidden = os.value !== 'linux-appimage';
+    vramField.hidden = memoryType.value !== 'dedicated';
+    vram.disabled = vramField.hidden;
   }
   const labels = { pass: 'Meets requirement', block: 'Unsupported', warning: 'Check before building', unknown: 'Not checked', note: 'Build note' };
-  form.addEventListener('change', () => { updateFields(); result.hidden = true; });
+  form.addEventListener('change', event => {
+    if (event.target === memoryType) automaticMemoryType = false;
+    if (event.target === gpu && automaticMemoryType) {
+      memoryType.value = gpu.value === 'deck' ? 'shared'
+        : ['nvidia', 'amd', 'intel'].includes(gpu.value) ? 'dedicated' : 'unknown';
+    }
+    updateFields();
+    result.hidden = true;
+  });
   form.addEventListener('input', () => { result.hidden = true; });
   form.addEventListener('reset', () => {
     result.hidden = true;
+    automaticMemoryType = true;
     queueMicrotask(updateFields);
   });
   form.addEventListener('submit', (event) => {
@@ -91,7 +108,7 @@ const options = [
   legend { font-size: 1.25rem; font-weight: 600; }
   .form-help { font-size: .85rem; color: var(--sl-color-gray-2); margin: .6rem 0 1.2rem; }
   .compatibility-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; margin-bottom: 1.2rem; }
-  .memory-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .memory-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wide-field { grid-column: 1 / -1; }
   label { display: grid; gap: .4rem; align-content: start; font-size: .85rem; font-weight: 600; }
   select, input { width: 100%; min-width: 0; padding: .7rem; border: 1px solid var(--sl-color-gray-4); border-radius: 5px; background: var(--sl-color-bg); color: var(--sl-color-text); font: inherit; }

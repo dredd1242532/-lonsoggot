@@ -2,12 +2,35 @@
 import Search from '@astrojs/starlight/components/Search.astro';
 import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+const links = [['Guides', `${base}#guides`], ['Help', `${base}#help`], ['Development', `${base}#development`], ['Team', `${base}team/`], ['About', `${base}about/`]];
 ---
 <div class="studio-header">
   <a class="studio-brand" href={base} aria-label="Longshot by team magicbean home">
     <img class="studio-brand-mark" src={`${base}branding/longshot.png`} alt="" width="512" height="512" decoding="async" />
     <span>longshot<small>TEAM MAGICBEAN</small></span>
   </a>
-  <nav class="studio-nav" aria-label="Main navigation"><a href={`${base}#guides`}>Guides</a><a href={`${base}#help`}>Help</a><a href={`${base}#development`}>Development</a><a href={`${base}team/`}>Team</a><a href={`${base}about/`}>About</a></nav>
+  <nav class="studio-nav" aria-label="Main navigation">{links.map(([label, href]) => <a href={href}>{label}</a>)}</nav>
+  <details class="studio-mobile-menu">
+    <summary>Explore Longshot</summary>
+    <nav aria-label="Main navigation">{links.map(([label, href]) => <a href={href}>{label}</a>)}</nav>
+  </details>
   <div class="studio-tools"><Search /><ThemeSelect /></div>
 </div>
+<script>
+  const menu = document.querySelector<HTMLDetailsElement>('.studio-mobile-menu');
+  if (menu) {
+    menu.querySelectorAll('a').forEach(link => link.addEventListener('click', () => { menu.open = false; }));
+    menu.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && menu.open) {
+        event.preventDefault();
+        event.stopPropagation();
+        menu.open = false;
+        menu.querySelector('summary')?.focus();
+      }
+    });
+    document.addEventListener('click', event => {
+      if (event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    });
+    window.matchMedia('(max-width: 70rem)').addEventListener('change', () => { menu.open = false; });
+  }
+</script>
