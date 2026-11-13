@@ -70,20 +70,17 @@ Never push to `forge`: Longshot's `main` takes reviewed pull requests only. `pr 
   it, and don't review a WIP PR. One that needs more work goes back (`pr wip <n>`).
 - **The description is the PR as it is now; the comments are its history.** When the change, the numbers or what was
   tested change, edit the description and post a short comment saying what changed and why, in one step: `pr update`.
-- **The checklist is yours to keep true, on every update.** Each box is a statement about the PR as it is now. Check
-  it yourself against the diff and the runs, tick it when it holds, and untick it when a push makes it false: go
-  through all of them again with every `pr update`, and delete an *If applicable* box that doesn't apply instead of
-  marking it n/a. Don't leave a box open for the person you work for to decide when
-  you can check it yourself. A box you can't make true yet (not measured, a test not run) stays unticked with the
-  reason beside it, and the PR stays WIP.
-- **The license box is a check of the diff, not a question for a person.** Tick it when every new file and every
-  copied passage is your own work or comes from a project whose license goes with GPL-3.0-or-later (named, its notice
-  kept), and nothing in the diff is decompiled or disassembled game code or output generated from the dump (lifted
-  code, tables, strings, assets, shaders). What you learned about how the game or the console behaves (a function's
-  name and arguments, a result code, the order of calls, a size, a timing) is a fact, not code: use it in your own
-  words, as the host's replacements for the console's functions do throughout, and cite a public source for it when
-  there is one. Leave the box unticked only when the diff holds something you can't place, and say what it is
-  ([CONTRIBUTING.md](CONTRIBUTING.md#licensing)).
+- **The checklist is yours to keep true, on every update.** Each box is a statement about the PR as it is now, and
+  every box is yours to settle, none is left for someone else by default. For each one, work out whether it holds:
+  read the diff, run the check or the test it names, look at what was measured. Tick it when it holds, untick it when
+  a push makes it false, and delete an *If applicable* box that doesn't apply instead of marking it n/a. Go through
+  all of them again with every `pr update`.
+- **A box you can't settle yourself is a question for the person you work for, asked at once.** Say which box, what
+  you found and what you need from them (a decision, a run on their hardware, a fact only they have), then update
+  the box with their answer. Don't leave it unticked in silence and don't tick it on a guess. A box that can't be true
+  yet (not measured, a test not run) stays unticked with the reason beside it, and the PR stays WIP. What each box
+  asks is in [CONTRIBUTING.md](CONTRIBUTING.md#commits-and-pull-requests); the license box, for one, is a check of
+  where the diff's code comes from ([Licensing](CONTRIBUTING.md#licensing)), which you can read off the diff.
 
 - **The title is a Conventional Commit** ([CONTRIBUTING.md](CONTRIBUTING.md#pull-request-titles)): it becomes the
   commit on `main` and decides the release. `pr create` refuses anything else.

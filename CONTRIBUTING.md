@@ -310,6 +310,8 @@ python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missi
      The author keeps it true: check each box against the PR as it is now, and again after every push (tick what
      holds, untick what no longer does, delete what stopped applying). A *For everyone* box that can't be true yet
      stays unticked with the reason beside it, and the PR stays WIP.
+     Every box is the author's to settle: work it out from the diff, the tests and the runs, and ask the person you
+     work for only about what you can't settle yourself.
 4. **A pull request is work in progress until it is measured and ready for review.** On Forgejo that is a title
    starting with `WIP:` (or `[WIP]`). `pr create` opens it so (`--ready` when the description is complete already);
    `pr ready <n>` marks it ready once the Measurements have real numbers and every *For everyone* box is ticked, and
