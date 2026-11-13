@@ -25,7 +25,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 # (env_on, the switches' rule, before the code cut out of the sources)
-ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "hookshot_env.h")
+ENV_ON_H = str(ROOT / "gpu" / "vk" / "compat" / "longshot_env.h")
 LONG_NAME = "_ZN2nn5audio42SetI3dl2ReverbLateReverbDecayHighFrequencyRatioEPNS0_15I3dl2ReverbTypeEf"
 OVERLOAD_A = "_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_9EventTypeE"
 OVERLOAD_B = "_ZN2nn2os25InitializeMultiWaitHolderEPNS0_19MultiWaitHolderTypeEPNS0_10ThreadTypeE"
@@ -363,7 +363,7 @@ def check_windows(report, folder):
         raise AssertionError("legacy counters without clock boundaries were normalized")
     (folder / "game.log").write_text(log)
     stack = "# t0_ns %d\n" % origin + "".join(
-        "%d MainThread|hookshot.exe+%s\n" % (ms, "2000" if 15000 <= ms <= 30000 else "2100")
+        "%d MainThread|longshot.exe+%s\n" % (ms, "2000" if 15000 <= ms <= 30000 else "2100")
         for ms in range(0, 35001, 500))
     (folder / "all.txt").write_text(stack)
 
@@ -372,7 +372,7 @@ def check_windows(report, folder):
 
         def of(self, frame):
             sym = name if frame.endswith("2000") else OVERLOAD_B
-            return "imp_" + sym, "nn_os_sync.o", "hookshot.exe", "os/sync"
+            return "imp_" + sym, "nn_os_sync.o", "longshot.exe", "os/sync"
 
         def blocked(self, _):
             return False
@@ -381,12 +381,12 @@ def check_windows(report, folder):
     assert set(costs) == {name} and abs(costs[name] - 15000000 / 900) < 1e-8, costs
     (folder / "all.txt").write_text(stack.replace("# t0_ns %d\n" % origin, ""))
     assert not report.hle_sampled_costs(str(folder), Names(), measured), "stacks with no clock origin were used"
-    (folder / "all.txt").write_text("# t0_ns %d\n0 MainThread|\n20000 MainThread|hookshot.exe+2000\n"
+    (folder / "all.txt").write_text("# t0_ns %d\n0 MainThread|\n20000 MainThread|longshot.exe+2000\n"
                                    "35000 MainThread|\n" % origin)
     assert not report.hle_sampled_costs(str(folder), Names(), measured), "empty stacks supplied false clock coverage"
     (folder / "all.txt").write_text(stack)
     (folder / "load.json").write_text(json.dumps(dict(window_present_s=[12, 32])))
-    (folder / "hookshot.map").write_text(
+    (folder / "longshot.map").write_text(
         "Preferred load address is 0000000140000000\n"
         " 0001:00001000 imp_%s 0000000140002000 f nn_os_sync.o\n"
         " 0001:00001100 imp_%s 0000000140002100 f nn_os_sync.o\n" % (name, OVERLOAD_B))
@@ -419,7 +419,7 @@ def main():
     # (an HLE body the compiler did not inline is the symbol hle_<sym> in the linker map: the report names it as its
     # imp_<sym> entry, so its samples meet its call counts)
     with tempfile.TemporaryDirectory(prefix="hle-map-") as temporary:
-        path = Path(temporary) / "hookshot.map"
+        path = Path(temporary) / "longshot.map"
         path.write_text("Preferred load address is 0000000140000000\n"
                         " 0001:00001000       hle__ZN2nn2os9LockMutexEPNS0_9MutexTypeE 0000000140002000 f   nn_os_sync.o\n"
                         " 0001:00001100       imp__ZN2nn2os9LockMutexEPNS0_9MutexTypeE 0000000140002100 f   nn_os_sync.o\n",
