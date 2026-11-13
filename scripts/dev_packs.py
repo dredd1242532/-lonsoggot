@@ -55,7 +55,8 @@ CROSS = WINDOWS and os.name != "nt"   # (the Windows game built on Linux: it can
 # (the game's own caches beside it, kept between runs and stamped by the translator (gpu/vk/vk_progcache.cpp): a stale one is
 # not used, so a base can start from an older base's)
 CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted",
-          "longshot_computes.bin", "longshot_pipeline_states.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin")
+          "longshot_computes.bin", "longshot_pipeline_states.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin",
+          "mkw_vk_pipelines.stamp")   # (the stamp: without it the pipeline cache and its play files are dropped, pcache_stamp.h)
 PLAY_FILES = re.compile(r"mkw_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
 BUSY = "dev_packs.busy"   # (in a base's folder while a job builds, warms or copies from it)
 SEED = "longshot_shaders.bin"   # (the shader list the prepare goes through: a new one is prepared again)

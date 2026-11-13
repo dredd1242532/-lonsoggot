@@ -80,7 +80,7 @@ def test_stamped_objects_match_build():
 
 
 def test_caches_named_in_renderer():
-    text = "".join(p.read_text(encoding="utf-8", errors="replace") for p in (ROOT / "gpu" / "vk").glob("*.cpp"))
+    text = "".join(p.read_text(encoding="utf-8", errors="replace") for g in ("*.cpp", "*.h") for p in (ROOT / "gpu" / "vk").glob(g))
     for c in packs.CACHES + (packs.SEED,):
         check("the renderer still names %s" % c.replace(".predicted", ""), c.replace(".predicted", "") in text)
     check("the predicted notes' suffix", '".predicted"' in text)
@@ -226,10 +226,12 @@ def test_generated_and_runtime(d):
     write(game / "longshot_pipeline_states_shipped.bin", b"shipped")
     write(game / "longshot_options.ini", b"[menu]")
     write(game / "mkw_vk_pipelines_play_2.bin", b"seeded play cache")   # (what --seed brings, before the build records outputs)
+    write(game / "mkw_vk_pipelines.stamp", b"the pipeline cache's stamp")
     if packs.MODULES[0][1]:   # (the game's map: Windows only)
         write(game / packs.MODULES[0][1], b"map")
     outputs = packs.build_outputs(str(game))
-    check("a play cache is not a build output (%s)" % outputs, "mkw_vk_pipelines_play_2.bin" not in outputs)
+    check("a play cache and the pipeline stamp are not build outputs (%s)" % outputs,
+          "mkw_vk_pipelines_play_2.bin" not in outputs and "mkw_vk_pipelines.stamp" not in outputs)
     write(game / "user" / "save0.bin", b"a save, made in play")
     write(game / "longshot_env.txt", b"HOS_X=1")
     os.makedirs(out / "romfs" / "a")
@@ -412,6 +414,7 @@ def test_seed(d):
     nothing else"""
     seed = d / "seed"
     for name, data in (("mkw_vk_pipelines.bin", b"p"), ("mkw_vk_pipelines_play_3.bin", b"play"), (packs.CACHES[0], b"c"),
+                       ("mkw_vk_pipelines.stamp", b"stamp"),
                        ("longshot_log.txt", b"log"), ("image.bin", b"game")):
         write(seed / name, data)
 
@@ -428,7 +431,7 @@ def test_seed(d):
     finally:
         packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved
     game = d / "b" / "game"
-    for name in ("mkw_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin", packs.CACHES[0]):
+    for name in ("mkw_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin", packs.CACHES[0], "mkw_vk_pipelines.stamp"):
         check("the seed's %s is copied" % name, (game / name).exists())
     for name in ("longshot_log.txt", "image.bin"):
         check("the seed's %s is not" % name, not (game / name).exists())
