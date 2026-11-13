@@ -49,8 +49,10 @@ typedef struct {
 int hos_sdl_wait_event(HosSdlEvent *e, int timeout_ms);   /* 1 when there was one */
 int hos_sdl_poll_event(HosSdlEvent *e);
 
-/* ---- sound: the default output, pull() asked for len more bytes as it runs low (s16: 16-bit samples, else float) ---- */
-int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user);
+/* ---- sound: the default output, pull() asked for len more bytes as it runs low (s16: 16-bit samples, else float).
+   NULL when it does not open; hos_sdl_audio_close closes what it opened ---- */
+void *hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user);
+void hos_sdl_audio_close(void *out);
 int hos_sdl_audio_channels(void);   /* the default output's channels (6 for 5.1); 2 when SDL cannot say */
 
 /* ---- (longshot) microphones: SDL3's recording devices or SDL2's capture devices, for the game's input streams
