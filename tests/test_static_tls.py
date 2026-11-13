@@ -49,6 +49,11 @@ static int fake_execv(const char *path, char *const argv[]) {
     return -1;   /* (as a failed exec: the caller goes on) */
 }
 #define execv fake_execv
+/* (gpu/vk/compat/longshot_env.h's env_on: set, not empty and not 0) */
+static int env_on(const char *name) {
+    const char *v = getenv(name);
+    return v && *v && strcmp(v, "0");
+}
 /* DEFINE */
 /* FN */
 int main(void) {
