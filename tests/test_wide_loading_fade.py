@@ -28,6 +28,7 @@ def block(source, marker):
 
 
 FIXTURE = r'''
+#define _CRT_SECURE_NO_WARNINGS
 #include <atomic>
 #include <cmath>
 #include <cstdint>
