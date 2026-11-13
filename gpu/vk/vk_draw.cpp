@@ -3284,8 +3284,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         // (updates the stream made to this range in this submission or ones still in flight: a copy with them in)
         // (room first: the overlay copies into the stream's mapping, which a move to a bigger stream in the middle would change)
         if (stream_reserve(n, align))
-            if (const uint64_t at = ub_overlay(u.addr, n, cur->mapped, [&](uint64_t bytes) { return stream_alloc(bytes, align); });
-                at != UINT64_MAX) {
+            if (const uint64_t at = ub_overlay(u.addr, n, cur->mapped, stream_alloc, align); at != UINT64_MAX) {
                 FINE_N(FC_UBO_OVERLAY, 1);
                 return {cur->stream, at, n};
             }
@@ -3302,7 +3301,7 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
             return e ? env_on("RX_VK_UB_SNAPSHOT") : dev.props.vendorID == 0x8086 && !pools_mirrored();
         }();
         BufferRef b = snapshot ? BufferRef{} : gpu_buffer_bind(u.addr, n, false);
-        if (b && b.offset % align == 0) return {b.buffer, b.offset, n};
+        if (b && !(b.offset & (align - 1))) return {b.buffer, b.offset, n};   // (a power of two: Vulkan's, and stream_reserve asks it)
         const uint64_t at = stream_alloc(n, align);   // (unaligned or outside the pools: copied into the stream)
         if (at == UINT64_MAX) return bi;
         FINE_N(FC_UBO_STREAM, 1);
@@ -5682,7 +5681,7 @@ void log_dump_draw(const NvnState& s, const Program& p, const DrawArgs& d) {
         const nvn_p_bind_buf& u = s.ubo[0][i];
         if (!u.addr) continue;
         float f[16] = {};
-        const bool upd = ub_overlay(u.addr, sizeof f, (uint8_t*)f, [](uint64_t) { return (uint64_t)0; }) != UINT64_MAX;
+        const bool upd = ub_overlay(u.addr, sizeof f, (uint8_t*)f, [](uint64_t, uint64_t) { return (uint64_t)0; }, 0) != UINT64_MAX;
         if (!upd) host->gpu_read(u.addr, f, sizeof f);
         n += snprintf(line + n, sizeof line - n, " C%d%s %#llx+%#llx [", i + 3, upd ? "*" : "", (unsigned long long)u.addr,
                       (unsigned long long)u.size);
@@ -5710,7 +5709,7 @@ void log_dump_draw(const NvnState& s, const Program& p, const DrawArgs& d) {
         if (!u.addr) continue;
         float f[16] = {};
         // (as the draw reads it: guest memory with the stream's uniform updates over it; '*': updated)
-        const bool upd = ub_overlay(u.addr, sizeof f, (uint8_t*)f, [](uint64_t) { return (uint64_t)0; }) != UINT64_MAX;
+        const bool upd = ub_overlay(u.addr, sizeof f, (uint8_t*)f, [](uint64_t, uint64_t) { return (uint64_t)0; }, 0) != UINT64_MAX;
         if (!upd) host->gpu_read(u.addr, f, sizeof f);
         n += snprintf(line + n, sizeof line - n, " c%d%s %#llx+%#llx [", i + 3, upd ? "*" : "", (unsigned long long)u.addr,
                       (unsigned long long)u.size);

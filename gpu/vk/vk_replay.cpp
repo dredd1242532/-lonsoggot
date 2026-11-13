@@ -1077,7 +1077,7 @@ void ub_copy_keep(uint64_t addr, uint64_t n, const uint8_t* base, size_t first, 
     c.on = true, c.base = base, c.addr = addr, c.n = n, c.at = at, c.first = first, c.lim = lim;
     c.rec = rec_value_now, c.view = view, c.epoch = epoch;
 }
-uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::function<uint64_t(uint64_t)>& alloc) {
+uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, uint64_t (*alloc)(uint64_t n, uint64_t align), uint64_t align) {
     // (a worker: those before its place in the stream; a background thread: none, not even the list's size)
     const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
     static const bool cur_only = env_on("RX_VK_UB_CUR_ONLY");   // (A/B: this submission's updates only)
@@ -1097,7 +1097,7 @@ uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::functio
         }
     }
     if (!any) return UINT64_MAX;
-    const uint64_t at = alloc(n);
+    const uint64_t at = alloc(n, align);
     if (at == UINT64_MAX) return UINT64_MAX;
     uint8_t* p = base + at;
     if (!memory_read_as_submitted(addr, p, n)) std::memset(p, 0, n);
