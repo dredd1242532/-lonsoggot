@@ -553,6 +553,17 @@ static void test_read(const char *path) {
     hos_log("coop: players: HOS_COOP_PLAYERS_TEST: %d steps from %s; member %d is made up", P.nsteps, path, TEST_MEMBER);
 }
 
+/* P.lock held. A fresh grant starts fresh interpolation, but never resets the session's replay floor. */
+static int receive_pose(int from, const uint8_t *bytes, size_t n, uint64_t now, const CoopGameplayTicket *ticket) {
+    if (from < 1 || from > COOP_MAX_MEMBERS) return 0;
+    const CoopGameplayTicket *old = &P.ticket[from];
+    if (old->owner != ticket->owner || old->generation != ticket->generation || old->session != ticket->session)
+        P.store.r[from].n = 0;
+    const int taken = coop_players_receive(&P.store, from, bytes, n, now);
+    if (taken) P.ticket[from] = *ticket;
+    return taken;
+}
+
 /* The made-up member's position now, sent through the message path (packed, parsed, checked, kept). me: Link's own. */
 static void test_feed(const CoopPos *me, uint64_t now) {
     if (!P.began_ms) {
@@ -614,7 +625,7 @@ static void test_feed(const CoopPos *me, uint64_t now) {
     CoopGameplayTicket ticket;
     if (!hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, TEST_MEMBER, &ticket)) return;
     AcquireSRWLockExclusive(&P.lock);
-    if (n && coop_players_receive(&P.store, TEST_MEMBER, buf, n, now)) P.ticket[TEST_MEMBER] = ticket;
+    if (n) receive_pose(TEST_MEMBER, buf, n, now, &ticket);
     ReleaseSRWLockExclusive(&P.lock);
 }
 
@@ -635,8 +646,7 @@ static void on_pos(int from, const uint8_t *bytes, size_t n, void *user) {
     CoopGameplayTicket ticket;
     if (!hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)from, &ticket)) return;
     AcquireSRWLockExclusive(&P.lock);
-    const int taken = coop_players_receive(&P.store, from, bytes, n, coop_now_ms());
-    if (taken) P.ticket[from] = ticket;
+    const int taken = receive_pose(from, bytes, n, coop_now_ms(), &ticket);
     if (taken && P.trace && coop_players_last(&P.store, from, 0, &last, NULL)) {
         say = !P.heard[from].any || last.flags != P.heard[from].flags || strcmp(last.area, P.heard[from].area);
         P.heard[from].any = 1, P.heard[from].flags = last.flags;

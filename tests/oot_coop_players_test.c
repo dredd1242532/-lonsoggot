@@ -1009,9 +1009,14 @@ static void game_side(const char *steps_path) {
     presence = 1; owner_context();
     frame(16);
     CHECK(!calls[FN_CREATE] && !P.blocks);
-    they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    uint8_t replay[COOP_MAX_MESSAGE];
+    const size_t replay_n = pos_bytes(replay, their_pseq, (uint32_t)now_ms, "Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    pos_fn(2, replay, replay_n, NULL);
     frame(16);
-    CHECK(calls[FN_CREATE] == 1);
+    CHECK(!calls[FN_CREATE] && !P.store.r[2].n);   /* a new grant is not a replay-window reset */
+    they_are_at("Forest", 8, 2, 9, 0, COOP_POS_IN_WORLD);
+    frame(16);
+    CHECK(calls[FN_CREATE] == 1 && P.store.r[2].n == 1 && made_place[0] == 8 && made_place[2] == 9);
     const CoopGameplayWriter second_writer = gameplay.writer[COOP_GAMEPLAY_BODIES];
     CHECK(!hos_oot_coop_gameplay_register(&second_writer));
     /* Native animation storage is bounded independently from the packet's slot count. */
