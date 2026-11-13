@@ -356,6 +356,10 @@ a thread of its own and keeps no graphics pipelines ready before the title, whic
 `RX_VK_STEAM_DECK=0` in `longshot_env.txt` (or a line `steam_deck=0` in `longshot_options.ini`) turns it off (Auto then
 gives back Minimum's VRAM budget; Frame generation stays as it is), and `=1` turns it on elsewhere.
 The log's `vk: Steam Deck profile:` and `Auto (this PC)` lines say what it did.
+Auto also starts new draw-distance rows at foliage/shadows 25%, grass/contact shadows Off,
+object detail 100% and base quality Normal. Saved choices and `RX_OOT_*` overrides win.
+These values reduced draws 2400 to 2330 and GPU time 41 to 37 ms in Hookshot on the Deck;
+Longshot's warm-run FPS and draw count still need measurement on the Deck.
 
 The largest gain on the Deck is its GPU clock, which the game cannot set itself. In Gaming Mode, open the Quick Access
 menu (the **...** button), then **Performance**: turn on **Use per-game profile** and **Manual GPU clock control**, and
@@ -461,6 +465,12 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS/DLAA with their NVIDIA frame-generation inputs, and AMD FSR 4, can be tried with `RX_VK_PSYCHOV35_DLSS=1`; FSR 3.1, TAAU and Upscaler Off still fall back to the game's network) | Vanilla |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
+| | Foliage distance | 25% to 150% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Object detail | 100% to 250% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Grass density | None, 25% to 200% (300% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Shadow distance | 25% to 200% (400% uncapped), in steps of 25; applies immediately | 100% (original) |
+| | Contact shadows | On, Off | On |
+| | Base quality | Normal, Low (handheld) | Normal |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
@@ -501,6 +511,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Developer: Descriptor reuse | Off, On (changes at once) | On |
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
+| | Developer: Uncap detail sliders | Off, On: the four detail rows above past their safe max | Off |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
 | | Developer: Intel shader compiles | One at a time, Side by side (after a restart; Intel graphics on Windows only) | One at a time |
 

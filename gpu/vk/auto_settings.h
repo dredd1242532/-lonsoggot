@@ -42,6 +42,8 @@ struct Choice {
     int resolution = 0;         // (0: the tier's own, as the preset sets it)
     int framegen = -1;          // (the Frame generation row's value; -1: as the player set it. The Steam Deck profile's 2x)
     bool vram_auto = false;     // (the VRAM budget row at Auto, the renderer's own rule, over the tier's: the Steam Deck profile)
+    int foliage_distance = -1, object_detail = -1, grass_density = -1, shadow_distance = -1;
+    int contact_shadows = -1, base_quality = -1;
     char why[480] = {};
 };
 
@@ -137,7 +139,9 @@ inline Choice choose(const Hardware& h) {
     }
     if (h.deck) {
         c.framegen = 2, c.vram_auto = true;
-        add(c, "Frame generation 2x; the VRAM budget Auto (the integrated GPU's own)");
+        c.foliage_distance = 25, c.object_detail = 100, c.grass_density = 0;
+        c.shadow_distance = 25, c.contact_shadows = 0, c.base_quality = 0;
+        add(c, "Frame generation 2x; the VRAM budget Auto (the integrated GPU's own); foliage/shadows 25%; grass/contact shadows off; object detail 100%; base quality Normal");
     }
     return c;
 }

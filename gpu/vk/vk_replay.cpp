@@ -5545,6 +5545,13 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_TEXT_SIZE) return opts.text_size;
         if (id == HOS_OPT_CAMERA_SPEED) return opts.camera_speed;
         if (id == HOS_OPT_PROMPTS) return opts.prompts;
+        if (id == HOS_OPT_GFX_FOLIAGE) return opts.gfx_foliage;
+        if (id == HOS_OPT_GFX_OBJECTS) return opts.gfx_objects;
+        if (id == HOS_OPT_GFX_GRASS) return opts.gfx_grass;
+        if (id == HOS_OPT_GFX_SHADOWS) return opts.gfx_shadows;
+        if (id == HOS_OPT_GFX_CONTACT_SHADOWS) return opts.gfx_contact_shadows;
+        if (id == HOS_OPT_GFX_BASE_QUALITY) return opts.gfx_base_quality;
+        if (id == HOS_OPT_GFX_UNCAPPED) return opts.gfx_uncapped;
         if (id == HOS_OPT_FOV) return opts.fov;
         if (id == HOS_OPT_DAMAGE_TAKEN) return menu_damage_taken();
         if (id == HOS_OPT_SKIP_OPENING) return opts.skip_opening;

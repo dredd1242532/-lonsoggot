@@ -739,6 +739,16 @@ const char* tx_damage_taken(int v) {
     return names[v >= 0 && v < 4 ? v : 1];
 }
 const char* tx_fov(int v) { return v == 100 ? "100% (original)" : tx_percent(v); }
+const char* tx_grass(int v) { return v == 0 ? "None" : tx_fov(v); }
+const char* tx_base_quality(int v) { return v ? "Low (handheld)" : "Normal"; }
+// detail caps: past them foliage flickers (GPU instance budget), grass thins, shadows step (fixed shadow map res)
+constexpr int kCapFoliage = 150, kCapObjects = 250, kCapGrass = 200, kCapShadows = 200;
+#define GFX_HINT(fn, cap) \
+    const char* fn(int v, int variant) { return variant <= 0 && v > cap ? "May be unstable." : nullptr; }
+GFX_HINT(hn_foliage, kCapFoliage)
+GFX_HINT(hn_objects, kCapObjects)
+GFX_HINT(hn_grass, kCapGrass)
+GFX_HINT(hn_shadows, kCapShadows)
 const char* tx_prompts(int v) {
     static const char* t[HOS_PROMPT_N + 1] = {"Auto", "Switch", "Xbox", "PlayStation 4", "PlayStation 5", "Steam Deck",
                                               "Keyboard"};
@@ -895,6 +905,17 @@ uint64_t auto_for = 0;               // (the fingerprint of the hardware the opt
 uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
 uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in play finished for: auto_tuned=)
 ::auto_settings::Tuning auto_tuning;   // (the measured tuning in play, menu_auto_tune; its steps kept as auto_steps=)
+const char* gfx_env(const char* primary, const char* alias) {
+    if (const char* e = getenv(primary)) return e;
+    return getenv(alias);
+}
+static unsigned gfx_saved_mask = 0;
+static unsigned gfx_bit(const int* value) {
+    const int* const values[] = {&opts.gfx_foliage, &opts.gfx_objects, &opts.gfx_grass,
+        &opts.gfx_shadows, &opts.gfx_contact_shadows, &opts.gfx_base_quality};
+    for (unsigned i = 0; i < 6; ++i) if (value == values[i]) return 1u << i;
+    return 0;
+}
 void apply_auto(bool keep_own);   // (below: the Auto preset's rows)
 static bool auto_deck_turned = false;   // (the Steam Deck profile turned on or off since Auto chose last: menu_auto_for_gpu)
 void apply_preset(int p) {
@@ -963,6 +984,12 @@ void apply_auto(bool keep_own) {
     // (Frame generation is the player's, as with every preset, but for the Steam Deck profile's 2x when the profile is chosen: not
     // again when Auto chooses again for another screen or build. RX_VK_FRAMEGEN_MULT still wins)
     if (deck.apply && c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;
+    if (deck.apply && c.foliage_distance >= 0 && !gfx_env("RX_OOT_FOLIAGE", "RX_OOT_FOLIAGE_DISTANCE") && (!keep_own || !(gfx_saved_mask & 1u))) opts.gfx_foliage = c.foliage_distance;
+    if (deck.apply && c.object_detail >= 0 && !gfx_env("RX_OOT_OBJECTS", "RX_OOT_OBJECT_DETAIL") && (!keep_own || !(gfx_saved_mask & 2u))) opts.gfx_objects = c.object_detail;
+    if (deck.apply && c.grass_density >= 0 && !gfx_env("RX_OOT_GRASS", "RX_OOT_GRASS_DENSITY") && (!keep_own || !(gfx_saved_mask & 4u))) opts.gfx_grass = c.grass_density;
+    if (deck.apply && c.shadow_distance >= 0 && !gfx_env("RX_OOT_SHADOWS", "RX_OOT_SHADOW_DISTANCE") && (!keep_own || !(gfx_saved_mask & 8u))) opts.gfx_shadows = c.shadow_distance;
+    if (deck.apply && c.contact_shadows >= 0 && !getenv("RX_OOT_CONTACT_SHADOWS") && (!keep_own || !(gfx_saved_mask & 16u))) opts.gfx_contact_shadows = c.contact_shadows;
+    if (deck.apply && c.base_quality >= 0 && !getenv("RX_OOT_BASE_QUALITY") && (!keep_own || !(gfx_saved_mask & 32u))) opts.gfx_base_quality = c.base_quality;
     auto_tuned = 0;   // (chosen again: measured again in play)
     auto_tuning = {};
     opts.preset = kAutoPreset;   // (apply_preset set the tier's number)
@@ -1260,6 +1287,20 @@ Row rows[] = {
     {TAB_GRAPHICS, "Anisotropic filtering", &opts.anisotropy, 0, 4, 1, tx_anisotropy,
      "Keeps textures sharp on surfaces seen at a slant, such as the ground ahead: higher is sharper in the distance, for a "
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},
+    {TAB_GRAPHICS, "Foliage distance", &opts.gfx_foliage, 25, 400, 25, tx_fov,
+     "How far away small trees, bushes and flowers are drawn. Higher costs CPU and GPU time. Changes apply at once.",
+     hn_foliage, false, true},
+    {TAB_GRAPHICS, "Object detail", &opts.gfx_objects, 100, 400, 25, tx_fov,
+     "How far away 3D objects keep their detailed models. Changes apply at once.", hn_objects, false, true},
+    {TAB_GRAPHICS, "Grass density", &opts.gfx_grass, 0, 300, 25, tx_grass,
+     "How much grass is drawn: None hides it. Changes apply at once.", hn_grass, false, true},
+    {TAB_GRAPHICS, "Shadow distance", &opts.gfx_shadows, 25, 400, 25, tx_fov,
+     "How far away scenery and characters cast shadows (160 m and 30 m in the game). Changes apply at once.",
+     hn_shadows, false, true},
+    {TAB_GRAPHICS, "Contact shadows", &opts.gfx_contact_shadows, 0, 1, 1, tx_onoff,
+     "The small screen-space shadows where objects touch. Off saves a little GPU time.", nullptr, false, true},
+    {TAB_GRAPHICS, "Base quality", &opts.gfx_base_quality, 0, 1, 1, tx_base_quality,
+     "Low uses the game's own handheld preset, for weaker GPUs. Changes apply at once.", nullptr, false, true},
     // (the rows to change when something is wrong, or on a card short of memory: last)
     {TAB_GRAPHICS, "GPU and memory", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GRAPHICS, "GPU device", &opts.gpu_device, 0, 8, 1, tx_gpu,
@@ -1419,6 +1460,9 @@ Row rows[] = {
     {TAB_DEBUG, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Applies after a "
      "restart.", hn_robust, true, true},
+    {TAB_DEBUG, "Uncap detail sliders", &opts.gfx_uncapped, 0, 1, 1, tx_onoff,
+     "Lets Foliage distance, Object detail, Grass density and Shadow distance go past their safe maximum. Past it, far "
+     "foliage can flicker, grass can thin out and shadows move in steps.", nullptr, false, true},
     {TAB_DEBUG, "ASTC as RGBA8", &opts.astc_rgba8, 0, 1, 1, tx_onoff,
      "Big ASTC textures kept as decoded RGBA8 instead of re-encoded to BC3: a workaround for texture artifacts seen on some AMD "
      "cards (issues 57 and 1006). Takes far more video memory. Applies after restart.", hn_astc_rgba8, true, true},
@@ -1610,6 +1654,16 @@ const char* cheat_button_text(int i) {
 }
 constexpr int kRows = sizeof rows / sizeof rows[0];
 
+/// Detail rows' max: table hi (uncapped) or the cap; a capped value is pulled back (after the ini, on the Debug row)
+void gfx_limits() {
+    static const struct { int* v; int cap, max; } caps[] = {
+        {&opts.gfx_foliage, kCapFoliage, 400}, {&opts.gfx_objects, kCapObjects, 400},
+        {&opts.gfx_grass, kCapGrass, 300}, {&opts.gfx_shadows, kCapShadows, 400}};
+    for (Row& r : rows)
+        for (const auto& k : caps)
+            if (r.value == k.v) r.hi = opts.gfx_uncapped ? k.max : k.cap, *k.v = std::min(*k.v, r.hi);
+}
+
 int ultrawide_read = 1;   // (ultrawide= as read: saved again while HOS_OUTPUT_RES holds the Output resolution and the row is as it was)
 /// (longshot) The Aspect ratio and Output resolution rows' ends from the screen's sizes and the player's own (known once the
 /// options and HOS_OUTPUT_RES are read), and the Aspect ratio of the size chosen: a size of a shape of its own is that shape,
@@ -1738,9 +1792,9 @@ constexpr int64_t kMarqueeStep = 150000000LL, kMarqueeRest = 1200000000LL;   // 
 int hover_tab = -1;
 int drag_row = -1;
 bool mouse_read = false;   // (the menu has read the mouse since it opened)
-bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov || r.value == &opts.gfx_foliage || r.value == &opts.gfx_objects || r.value == &opts.gfx_grass || r.value == &opts.gfx_shadows; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
-bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov || r.value == &opts.gfx_foliage || r.value == &opts.gfx_objects || r.value == &opts.gfx_grass || r.value == &opts.gfx_shadows; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
 // (longshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
@@ -1750,7 +1804,7 @@ struct EnvOverride {
     int* value;
     int saved, forced;
 };
-EnvOverride env_overrides[16];
+EnvOverride env_overrides[32];
 int env_override_count = 0;
 void env_override(int* value, int v) {
     for (int i = 0; i < env_override_count; i++)
@@ -1792,6 +1846,13 @@ std::string ini_path() {
     return dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_options.ini";
 }
 const char* ini_key(const Row& r) {
+    if (r.value == &opts.gfx_foliage) return "foliage_distance";
+    if (r.value == &opts.gfx_objects) return "object_detail";
+    if (r.value == &opts.gfx_grass) return "grass_density";
+    if (r.value == &opts.gfx_shadows) return "shadow_distance";
+    if (r.value == &opts.gfx_contact_shadows) return "contact_shadows";
+    if (r.value == &opts.gfx_base_quality) return "base_quality";
+    if (r.value == &opts.gfx_uncapped) return "uncap_detail_sliders";
     if (r.value == &opts.output_res) return "output_res";   // (host/nn_applet.c reads it at the start)
     if (r.value == &opts.vsync) return "vsync";
     // (rows renamed since their values were first saved keep their keys: an options file from before still loads)
@@ -2391,6 +2452,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         apply_preset(*r.value);
     } else {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;   // (Game language: written when the row is left, game_lang_tick)
+        if (r.value == &opts.gfx_uncapped) gfx_limits();
         // (another shape: the Output resolution moves to one of its sizes, the screen's own when it has that shape)
         if (r.value == &opts.ultrawide) {
             const int out = output_for_aspect(*r.value);
@@ -4131,6 +4193,27 @@ void startup_screen(const StartupView* view) {
     probe_upscalers_soon();
 }
 
+void gfx_env_init() {
+    gfx_limits();
+    const char* uncap = getenv("RX_OOT_UNCAP_DETAIL_SLIDERS");
+    if (uncap) env_override(&opts.gfx_uncapped, !env_value_off(uncap));
+    if (const char* e = gfx_env("RX_OOT_FOLIAGE", "RX_OOT_FOLIAGE_DISTANCE"))
+        env_override(&opts.gfx_foliage, std::min(std::max(atoi(e), 25), opts.gfx_uncapped ? 400 : kCapFoliage));
+    else if (uncap) env_override(&opts.gfx_foliage, std::min(opts.gfx_foliage, opts.gfx_uncapped ? 400 : kCapFoliage));
+    if (const char* e = gfx_env("RX_OOT_OBJECTS", "RX_OOT_OBJECT_DETAIL"))
+        env_override(&opts.gfx_objects, std::min(std::max(atoi(e), 100), opts.gfx_uncapped ? 400 : kCapObjects));
+    else if (uncap) env_override(&opts.gfx_objects, std::min(opts.gfx_objects, opts.gfx_uncapped ? 400 : kCapObjects));
+    if (const char* e = gfx_env("RX_OOT_GRASS", "RX_OOT_GRASS_DENSITY"))
+        env_override(&opts.gfx_grass, std::min(std::max(atoi(e), 0), opts.gfx_uncapped ? 300 : kCapGrass));
+    else if (uncap) env_override(&opts.gfx_grass, std::min(opts.gfx_grass, opts.gfx_uncapped ? 300 : kCapGrass));
+    if (const char* e = gfx_env("RX_OOT_SHADOWS", "RX_OOT_SHADOW_DISTANCE"))
+        env_override(&opts.gfx_shadows, std::min(std::max(atoi(e), 25), opts.gfx_uncapped ? 400 : kCapShadows));
+    else if (uncap) env_override(&opts.gfx_shadows, std::min(opts.gfx_shadows, opts.gfx_uncapped ? 400 : kCapShadows));
+    if (const char* e = getenv("RX_OOT_CONTACT_SHADOWS")) env_override(&opts.gfx_contact_shadows, !env_value_off(e));
+    if (const char* e = getenv("RX_OOT_BASE_QUALITY")) env_override(&opts.gfx_base_quality, !env_value_off(e));
+    gfx_limits();
+}
+
 static bool first_start = false;   // (menu_init: no options file yet. menu_first_start_for_gpu picks the preset for the card)
 static int steam_deck_saved = -1;   // (steam_deck= in the options file: the Steam Deck profile, auto_settings.h deck_mode)
 int menu_steam_deck() { return steam_deck_saved; }
@@ -4165,6 +4248,7 @@ void menu_init() {
             has_options |= strcmp(line, "compile_shaders") != 0;
             for (Row& r : rows) {
                 if (!r.value || r.value == &opts.game_lang || strcmp(line, ini_key(r))) continue;
+                gfx_saved_mask |= gfx_bit(r.value);
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
@@ -4252,6 +4336,7 @@ void menu_init() {
     menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);   // (the Debug rows that apply in play: what was loaded)
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
     // (the environment over the saved rows, for this run only: env_override, save)
+    gfx_env_init();
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
     if (const char* e = getenv("RX_VK_PACE")) env_override(&opts.pace, !env_value_off(e));
     if (const char* e = getenv("RX_VK_UPSCALE"))
@@ -4268,6 +4353,7 @@ void menu_init() {
         env_override(&opts.output_res, parse_output(e));
     }
     outputs_sync();   // (the Aspect ratio follows the size read)
+    gfx_limits();
     restart_init();   // (what this run started with: the rows that take a restart differ from it once changed)
 }
 
@@ -4297,7 +4383,7 @@ void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings:
         logf("vk: Auto (this PC) would be: %s (%s)", auto_choice.why, hw_line);   // (for a bug report: what Auto would choose)
         return;
     }
-    if (fp == auto_for) {
+    if (fp == auto_for && (!hw.deck || gfx_saved_mask == 63)) {
         logf("vk: Auto (this PC): the settings chosen for this PC before (%s)", hw_line);
         return;
     }

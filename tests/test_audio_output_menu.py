@@ -41,7 +41,8 @@ static int device_channels, device_asked;
 static int au_device_channels(void) { device_asked++; return device_channels; }
 HOST
 struct Row { int tab; const char* name; int* value; };
-struct { int output_res, vsync, resolution, fps_cap, upscale, dlss, handheld, ultrawide, audio_output; } opts;   // (ultrawide: the Aspect ratio row's key)
+struct { int output_res, vsync, resolution, fps_cap, upscale, dlss, handheld, ultrawide, audio_output;
+    int gfx_foliage, gfx_objects, gfx_grass, gfx_shadows, gfx_contact_shadows, gfx_base_quality, gfx_uncapped; } opts;   // (ultrawide: the Aspect ratio row's key)
 MENU
 int main(int argc, char **argv) {
     assert(argc == 7);

@@ -50,6 +50,7 @@ Options opts;
 /* ROW */
 int saves = 0;
 void save() { ++saves; }
+void gfx_limits() {}
 void apply_pad_layout(int) {}
 int detect_pad_layout() { return opts.pad_layout; }
 void sync_preset_budgets(int) {}

@@ -232,6 +232,12 @@ int main() {
         const Choice on = choose(on_hw);
         expect(on.tier == 1 && on.upscaler == GAME && on.resolution == 0 && on.framegen == 2 && on.vram_auto,
                "the Steam Deck profile: Minimum, the game's own, 2x, VRAM Auto");
+        expect(on.foliage_distance == 25 && on.object_detail == 100 && on.grass_density == 0 &&
+               on.shadow_distance == 25 && on.contact_shadows == 0 && on.base_quality == 0,
+               "Deck low draw distances, normal base quality");
+        expect(off.foliage_distance == -1 && off.object_detail == -1 && off.grass_density == -1 &&
+               off.shadow_distance == -1 && off.contact_shadows == -1 && off.base_quality == -1,
+               "non-Deck player choices unchanged");
         expect(std::strstr(on.why, "Steam Deck profile") && std::strstr(on.why, "Frame generation 2x"), on.why);
         expect(fingerprint(on_hw, 0x1002, 0x1435) != fingerprint(sd, 0x1002, 0x1435), "the profile on or off: another fingerprint");
         Hardware docked = on_hw;   // (docked to a 1080p screen: still Minimum's memory and the profile)

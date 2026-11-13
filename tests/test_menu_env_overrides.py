@@ -51,6 +51,9 @@ FIXTURE = r"""
 using namespace mkwvk;
 // (the screen's display modes: HOS_DISPLAY_MODES names them here)
 std::vector<display_modes::Size> screen_modes() { return {}; }
+void gfx_limits() {}
+void gfx_env_init() {}
+unsigned gfx_bit(const int*) { return 0; }
 void outputs_sync() {}   // (the rows' ends and the Aspect ratio from the sizes read: not what this checks)
 // (the main screen: not known here, so no shape is the monitor's and ultrawide= is saved as read)
 bool screen_size(uint32_t*, uint32_t*) { return false; }

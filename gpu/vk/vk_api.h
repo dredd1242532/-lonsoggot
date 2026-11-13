@@ -60,6 +60,10 @@ enum { HOS_OPT_HOLD_TOGGLE = 54 };
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* Graphics distance rows: keep existing controls/reservations and optional voices (62) separate. */
+enum { HOS_OPT_GFX_FOLIAGE = 63, HOS_OPT_GFX_OBJECTS, HOS_OPT_GFX_GRASS,
+       HOS_OPT_GFX_SHADOWS, HOS_OPT_GFX_CONTACT_SHADOWS, HOS_OPT_GFX_BASE_QUALITY };
+enum { HOS_OPT_GFX_UNCAPPED = 69 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

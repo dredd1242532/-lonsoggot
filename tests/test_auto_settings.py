@@ -35,7 +35,7 @@ def check_source():
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     need("vk_menu.cpp", menu, ['{TAB_GRAPHICS, "Quality preset", &opts.preset, 0, 6, 1, tx_preset,', '"Auto (this PC)"',
                                "if (first) opts.preset = kAutoPreset;",
-                               "::auto_settings::choose(hw)", "if (fp == auto_for)", 'fprintf(f, "auto_for=%016llx\\n"',
+                               "::auto_settings::choose(hw)", "if (fp == auto_for && (!hw.deck || gfx_saved_mask == 63))", 'fprintf(f, "auto_for=%016llx\\n"',
                                # (save() keeps the lines it does not write: each auto_ key must be one it writes, or the old
                                # line, kept after the new one, wins at the next start)
                                '|| key == "memory_budget" || key == "auto_for" ||',
@@ -105,6 +105,8 @@ def check_deck_profile(menu, main, auto):
     if not chooses.index("auto_deck_turned = ::auto_settings::deck_turned(auto_for, hw, props.vendorID, props.deviceID);") < \
             chooses.index("apply_auto(!first);"):
         raise SystemExit("menu_auto_for_gpu: whether the profile turned must be known before apply_auto")
+    for field in ("foliage_distance", "object_detail", "grass_density", "shadow_distance", "contact_shadows", "base_quality"):
+        need("apply_auto distance defaults", auto, ["if (deck.apply && c." + field + " >= 0"])
     pick = main[main.index("bool pick_device() {"):]
     pick = pick[:pick.index("\n}\n")]
     if not pick.index("menu_init();") < pick.index("vkGetPhysicalDeviceProperties(dev.physical, &dev.props);") < \
