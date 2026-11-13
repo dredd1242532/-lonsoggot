@@ -207,6 +207,11 @@ Forgejo doesn't run these on pull requests or on `main` for now: CI runs only th
 description, workflow lint, the third-party notes), and a maintainer can start the full checks by hand (*Actions* >
 *CI* > *Run workflow*). So run them before you open a pull request and put their results in it.
 
+The full checks, started by hand, also run `tests/run_vulkan_fixtures.py` on Ubuntu 24.04 with Mesa's lavapipe software driver and the Khronos
+validation layer. It executes the authored write-back shader, copy-span and seven offscreen aspect/crop cases;
+missing devices, skipped cases and validation errors fail the job. This is CPU Vulkan execution, not hardware GPU
+coverage, a swapchain or a game run. The ordinary source checks keep their GPU opt-ins/skips for machines without Vulkan.
+
 ### Checks that need your dump or a run
 
 Slow and local; they need `work/dump.txt` from `nx2/dump.py --set`:
