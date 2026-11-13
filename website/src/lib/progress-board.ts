@@ -1,7 +1,7 @@
-import { STATUSES, REFRESH_MS, filterItems, validateFeed } from './progress.mjs';
-import { currentVersionWatch } from './progress-watch.mjs';
-import { progressOverview } from './progress-overview.mjs';
-import { readProblemSearchHash, prioritizeProblemSearch } from './problem-search.mjs';
+import { STATUSES, REFRESH_MS, filterItems, validateFeed } from './progress.ts';
+import { currentVersionWatch } from './progress-watch.ts';
+import { progressOverview } from './progress-overview.ts';
+import { readProblemSearchHash, prioritizeProblemSearch } from './problem-search.ts';
 
 function element(tag: string, text = '', className = '') {
   const node = document.createElement(tag);
@@ -101,9 +101,9 @@ export class ProgressBoard extends HTMLElement {
   renderFreshness() {
     const feed = this.feed;
     this.region('freshness').textContent = feed ? `Data checked ${date(feed.generatedAt)}. Checks automatically every 5 minutes while this page is open.` : 'No progress snapshot available.';
-    const old = feed && Date.now() - Date.parse(feed.generatedAt) > 15 * 60 * 1000;
+    const old = feed && Date.now() - Date.parse(feed.generatedAt) > 2 * 60 * 60 * 1000;
     const warning = this.failed ? feed ? 'Update unavailable. Your previous results are still shown.' : 'Could not load progress data. Use the Forgejo links below or try again.' :
-      feed?.warning || (old ? 'This snapshot is over 15 minutes old. Check the linked Forgejo pages for newer activity.' : '');
+      feed?.warning || (old ? 'This snapshot is over 2 hours old. Check the linked Forgejo pages for newer activity.' : '');
     this.region('warning').textContent = warning;
     this.region('warning').hidden = !warning;
   }

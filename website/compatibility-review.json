@@ -1,9 +1,0 @@
-{
-  "reviewedOn": "2026-11-12",
-  "source": "README.md",
-  "sections": {
-    "## Project status": "67a0b428847a145e63b3a01ec9781e5315ffddbb6dfa0d837c53fe329d85a138",
-    "### What you need": "4c5299f68e2619bb3374970e95f72838c1a66366b84ca7bde6004b57ebb5ebdf"
-  },
-  "reviewNotes": "Reviewed minimum/recommended presentation against upstream 5eaaf7f and calculator rules: game IDs, 64-bit Windows/Linux and glibc 2.35, Linux AppImage AVX2 requirement with Windows/source exceptions, Vulkan 1.3/mesh shaders and GPU families, 16 GB RAM, recommended 8 GB VRAM and approximately 60 GB build space are unchanged. SSD remains recommended; no new CPU/GPU performance tier or minimum VRAM is claimed. GPU status is unchanged."
-}

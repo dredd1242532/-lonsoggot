@@ -1,14 +1,38 @@
 ---
 import ManualNavigation from './ManualNavigation.astro';
-import { siteConfig } from '../../site.config.mjs';
+import { issueUrl, repository } from '../site.ts';
 import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
-const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
 ---
 <DefaultFooter />
 <ManualNavigation />
-<div class="field-footer">
-  <p class="studio-footer-credit"><img src={`${base}branding/magicbean-team-logo.webp`} alt="" width="512" height="512" loading="lazy" /><span><strong>LONGSHOT</strong> by <a href="https://magicbean.dev/">team magicbean</a></span></p>
-  <nav aria-label="Footer"><a href={`${base}team/`}>Team roster</a><a href={`${base}about/`}>About Longshot</a><a href={siteConfig.issueUrl}>Longshot issue tracker ↗</a><a href={siteConfig.projectRepository}>Longshot repository ↗</a></nav>
-  <p>We do not host, store, or distribute any game files, ROMs, game dumps, or decryption keys. You must provide your own copy.</p>
-  <small>Independent community project. Not affiliated with Nintendo. Built with Astro Starlight.</small>
-</div>
+<footer class="footer">
+  <div class="row">
+    <p class="credit">
+      <img src="/branding/longshot.png" alt="" width="512" height="512" loading="lazy" />
+      <span><strong>Longshot</strong> by <a href="https://magicbean.dev/">Team MagicBean</a></span>
+    </p>
+    <nav aria-label="Footer">
+      <a href="/about/team/">Team</a>
+      <a href="/about/">About</a>
+      <a href="https://discord.gg/KX99srmQTe">Discord</a>
+      <a href={issueUrl}>Report a problem</a>
+      <a href={repository}>Source</a>
+    </nav>
+  </div>
+  <p class="fine">
+    We don't host or distribute game files, ROMs, dumps or keys: you need your own copy. An independent community project,
+    not affiliated with Nintendo.
+  </p>
+</footer>
+
+<style>
+  .footer { border-top: 1px solid var(--border); padding: 1.25rem 0 .5rem; margin-top: 1rem; font-size: var(--text-xs); color: var(--sl-color-gray-2); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem; }
+  .credit { display: flex; align-items: center; gap: .5rem; margin: 0; }
+  .credit img { display: block; width: 24px; height: 24px; object-fit: contain; }
+  .credit strong { color: var(--sl-color-white); font-family: var(--heading-font); font-weight: 600; font-size: var(--text-sm); }
+  nav { display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; }
+  a { color: var(--sl-color-gray-2); text-decoration: none; }
+  a:hover { color: var(--sl-color-white); text-decoration: underline; }
+  .fine { margin: .75rem 0 0; color: var(--sl-color-gray-3); }
+</style>

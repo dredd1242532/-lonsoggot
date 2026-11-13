@@ -1,113 +1,233 @@
-# Common issues
+# Help
 
-## What’s going wrong?
+Find what you see below and follow its steps: each fix comes from the [manual](../README.md#if-something-goes-wrong),
+with the exact message, file or setting to look for. Nothing fits, or the fix didn't work? [Still stuck?](#still-stuck)
+says where the log is and how to ask.
 
-Pick the problem that looks familiar. Start with the short checklist, then open **Still stuck?** if you need a hand.
-One step at a time. Let’s get this bean back on track.
+- [Installing and building](#installing-and-building)
+- [Starting the game](#starting-the-game)
+- [In game: graphics](#in-game-graphics)
+- [In game: performance and freezes](#in-game-performance-and-freezes)
+- [In game: controls, saves and language](#in-game-controls-saves-and-language)
+- [Downloads and antivirus](#downloads-and-antivirus)
+- [Still stuck?](#still-stuck)
 
-[Search reported issues](/Longshot/progress/#problem-search) · [Ask the beans on Discord](https://discord.gg/KX99srmQTe)
+## Installing and building
 
-## The build rejects the game version
+### The launcher says "This version isn't supported"
 
-### Try this first
+Or: "Longshot supports build e0f3ccfa". Longshot builds from one version of the game only.
 
-1. **Check the selected game.** Make sure the builder is pointed at the copy you meant to use, with its update installed.
-2. **Compare the version.** Check it against the [supported game requirements](../README.md#what-you-need). A different version will not build.
-3. **Use the setup guide for your platform.** Follow the [Windows or Linux steps](getting-started.md) with the supported copy.
+1. **Check the version.** You need program `0400486024DEC000` with update **v131072** (build `e0f3ccfa`); see
+   [what you need](../README.md#what-you-need). The game without its update, or with another one, won't build.
+2. **Check the files you chose.** Use a `.nup` file, or the `romfs` and `exefs` folders. The launcher looks for `.nup`
+   files in your Downloads, Desktop and Documents folders; if the right one isn't listed, point it at the file.
 
-### Still stuck?
+[Search version reports](https://longshot.magicbean.dev/progress/#problem-search?q=version)
 
-Keep the exact builder message and the version you selected. Include them when asking for help; do not share game files.
+### "Your antivirus removed part of the build tools"
 
-[Search installation reports](/Longshot/progress/#problem-search?q=version) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+A false alarm on unsigned programs: Longshot isn't code-signed yet.
 
-## The game closes or shows a black screen
+1. **Get the files back.** Restore them from Windows Security's **Protection history**, or add
+   `%LOCALAPPDATA%\LongshotBuilder` to its exclusions.
+2. **Press Repair** in the launcher.
 
-### Try this first
+The [antivirus guide](https://longshot.magicbean.dev/help/antivirus/) shows each step, and how to check first that the
+download is genuine.
 
-1. **Check your graphics card.** Compare it with the [graphics requirements](../README.md#what-you-need), including Vulkan 1.3 and mesh shaders.
-2. **Update the graphics driver.** Use the driver for your card; on Linux, check your Mesa or NVIDIA driver. An older unsupported card cannot gain the required hardware features from an update.
-3. **Match the symptom.** Use the [startup troubleshooting reference](../README.md#if-something-goes-wrong) for a specific error, such as “device lost”.
+[Search antivirus reports](https://longshot.magicbean.dev/progress/#problem-search?q=antivirus)
 
-### Still stuck?
+### The build is very slow, or runs out of space
 
-Keep `longshot_log.txt` from the game folder. If Linux Builder Play exits before that log appears, check
-`longshot_startup.log` after the game exits. If you started from a terminal, keep its output instead.
-Tell us your GPU, driver, OS and game version, and whether it closes before the menu or after loading a save.
+1. **Expect 10 to 45 minutes.** A hard drive works, but builds are much slower than on an SSD.
+2. **Free about 60 GB** before building. The build's own files (about 4 GB) are deleted once the game is ready.
 
-[Search crash reports](/Longshot/progress/#problem-search?q=crash) · [Search black-screen reports](/Longshot/progress/#problem-search?q=black+screen) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+[Search build reports](https://longshot.magicbean.dev/progress/#problem-search?q=build)
 
-## Graphics are missing or corrupted
+### Linux: the launcher or the build won't start
 
-### Try this first
+1. **Let the launcher run as a program.** In your file manager, open its **Properties** and turn on "Allow executing
+   file as program", or run `chmod +x LongshotLauncher-*-x86_64.AppImage`.
+2. **Check your system.** Linux needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12 or newer), and Longshot's Linux
+   AppImage needs a CPU with **AVX2**.
 
-1. **Check for damaged files.** Look for `longshot_damaged_files.txt` in the game folder. If it lists damaged files, make a fresh dump from your own game and rebuild from that copy.
-2. **Check the driver and requirements.** Missing mesh-shader support can leave parts of the picture out. Compare your setup with the [graphics requirements](../README.md#what-you-need).
-3. **Change one thing at a time.** Use the [graphics settings guide](graphics-and-controls.md) to understand an option before trying it. For AMD texture problems, read the [documented workaround and its memory cost](../README.md#amd-texture-workaround) first.
+[Search Linux reports](https://longshot.magicbean.dev/progress/#problem-search?q=linux)
 
-### Still stuck?
+## Starting the game
 
-Note the location and what looks wrong: a missing wall, a texture, lighting or another object. Keep a screenshot and
-the relevant log. Search for the same symptom before trying an unrelated workaround.
+### The game opens and closes, shows a black screen, or the log says "device lost"
 
-[Search graphics reports](/Longshot/progress/#problem-search?q=graphics) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+1. **Update your graphics driver.** On Linux, update Mesa or the NVIDIA driver.
+2. **Check your graphics card.** Longshot needs **Vulkan 1.3**; see [what you need](../README.md#what-you-need). A
+   driver update can't add it to an older card that doesn't have it.
+3. **AMD cards** have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708),
+   [#614](https://github.com/NotRexed/Hookshot/issues/614)). To try the other drawing path, add the line
+   `RX_VK_MESH_SHADERS=compute` to `longshot_env.txt` in the game folder (usually a little slower; delete the line to
+   undo it).
+4. **Read the end of the log.** `longshot_log.txt` in the game folder has the last run; its last lines usually say what
+   failed.
 
-## The controller behaves differently than expected
+[Search crash reports](https://longshot.magicbean.dev/progress/#problem-search?q=crash) · [Search black-screen reports](https://longshot.magicbean.dev/progress/#problem-search?q=black+screen)
 
-### Try this first
+### Linux: the game doesn't start, or the picture is broken
 
-1. **Check the layout.** Press **F1**, open **Controls → Controls**, and check **Layout preset**. Nintendo puts A on the right face button; Xbox / PC puts it on the bottom.
-2. **Check the button icons.** On that same Controls page, **Button prompts** chooses the icons shown in the game. Check the bindings too; the icons alone do not change what a button does.
-3. **Compare the game’s own settings.** Longshot’s bindings and the game’s controls both matter. Use the [controls reference](../README.md#controls) for remapping steps.
+1. **Check Vulkan and mesh shaders.** `vulkaninfo | grep mesh` should list `VK_EXT_mesh_shader`. The game needs a
+   Vulkan 1.3 driver, ideally with mesh shaders.
+2. **Update Mesa or the NVIDIA driver** if it doesn't.
 
-### Still stuck?
+[Search Linux reports](https://longshot.magicbean.dev/progress/#problem-search?q=linux)
 
-Include the controller model, whether you use USB or Bluetooth, the selected layout, and the button or action that
-behaves differently. Say whether it happens in gameplay, menus or both.
+### Linux: Play closed before the game's log appeared
 
-[Search controller reports](/Longshot/progress/#problem-search?q=controller) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+Wait for the game to exit, then open `longshot_startup.log` in the game folder: it has up to 64 KiB of the game's
+startup errors and its exit status. Started from a terminal, the game prints there instead.
 
-## Performance drops or stutters
+[Search startup reports](https://longshot.magicbean.dev/progress/#problem-search?q=startup)
 
-### Try this first
+## In game: graphics
 
-1. **Try the same spot twice.** After shader preparation finishes, walk through the area again. First-visit shader work can cause stutter; note whether it improves on the second pass.
-2. **Keep the comparison fair.** Use the same resolution, upscaler and frame cap. Turn off **Frame generation** while comparing so the FPS reflects frames the game renders.
-3. **Check the right guide.** Use [graphics settings](graphics-and-controls.md) for the options, or the [performance checklist](../README.md#low-fps-or-stutter) for a slowdown that keeps happening.
+### Parts of the picture are missing, or a message says your card has no mesh shader support
 
-### Still stuck?
+Without mesh shaders, Longshot draws through its compute fallback, which leaves some draws out
+([#640](https://github.com/NotRexed/Hookshot/issues/640)).
 
-Keep the log from the slow run. Note the area, settings, and whether it happens on a first visit, every visit or only
-after changing areas. If it started after an update, include both version numbers and an earlier log if you have one.
+1. **Update your graphics driver:** a card and driver with mesh shaders draw everything. NVIDIA RTX 20 series and
+   newer, AMD RX 6000 series and newer, and Intel Arc have them.
+2. **Check your card** against [what you need](../README.md#what-you-need).
 
-[Search stutter reports](/Longshot/progress/#problem-search?q=stutter) · [Search performance reports](/Longshot/progress/#problem-search?q=performance) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+[Search graphics reports](https://longshot.magicbean.dev/progress/#problem-search?q=graphics)
 
-## An update or save transfer failed
+### One place has a wrong texture, or a floor or wall is missing
 
-### Try this first
+1. **Look for `longshot_damaged_files.txt`** in the game folder. The build writes it when your dump of the game is
+   incomplete (about 23.3 GB instead of 23.8 GB), listing each damaged file and what was put in its place.
+2. **Dump the game again** and build from the new dump. The file is removed once the dump is whole.
 
-1. **Pause before copying again.** Close the game and keep a separate copy of the saves you want to protect. Do not overwrite another copy while checking what happened.
-2. **Check the source and destination.** Confirm the build, profile and save slot you meant to use. The [save-transfer guide](saves.md#easy-beans) walks through the launcher’s buttons.
-3. **Choose the right next step.** For an update problem, follow [updates and saves](updates-and-saves.md). For an unwanted transfer, use the [backup recovery steps](saves.md#need-to-undo-a-transfer).
+[Search texture reports](https://longshot.magicbean.dev/progress/#problem-search?q=texture)
 
-### Still stuck?
+### AMD: blocky textures, solid rectangles in the sky, or dark courtyard surfaces
 
-Describe the steps you took, the versions involved and any error message. Keep the original and backup copies until
-the expected save loads correctly. Keep save files private.
+1. **Turn on ASTC as RGBA8:** open the menu (<kbd>F1</kbd>), go to the **Debug** tab, and under **Developer** turn on
+   **ASTC as RGBA8**. Restart the game.
+2. **Watch the memory.** It can use much more graphics memory, and stalls when the card runs out. To undo it, turn the
+   row off and restart.
 
-[Search save reports](/Longshot/progress/#problem-search?q=save) · [Search update reports](/Longshot/progress/#problem-search?q=update) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+If the row can't be changed, `longshot_env.txt` sets it: remove its `RX_VK_ASTC_RGBA8=1` line. The
+[AMD texture workaround](../README.md#amd-texture-workaround) has the details.
 
-## A download is flagged
+[Search AMD reports](https://longshot.magicbean.dev/progress/#problem-search?q=amd)
 
-### Try this first
+## In game: performance and freezes
 
-1. **Check where it came from.** Compare the download with the [team’s listed releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases). If no release is listed, do not assume another download is official.
-2. **Keep the warning details.** Note the download URL, filename, version and detection name.
-3. **Follow the download safety guide.** [Check the warning before continuing](/Longshot/antivirus/). Do not disable protection or add broad exclusions for an unverified file.
+### It stutters the first time you see something
 
-### Still stuck?
+Normal for now: the game prepares each new shader the first time it needs it, and it is smooth the next time you pass.
+You can help remove it for everyone: [send your pipeline list](../README.md#send-your-pipeline-list) (**Debug → Save my
+pipeline list** in the menu).
 
-Ask the team about the source and detection. A warning alone does not tell you whether a file is safe or malicious.
-Share the warning details, not game files or keys.
+[Search stutter reports](https://longshot.magicbean.dev/progress/#problem-search?q=stutter)
 
-[Search download reports](/Longshot/progress/#problem-search?q=antivirus) · [Ask on Discord](https://discord.gg/KX99srmQTe)
+### Windows, NVIDIA: it stutters on every start, in places you have seen
+
+The driver's shader cache is too small to keep them all (the first start builds about 2 GB). Open the **NVIDIA Control
+Panel**, then **Manage 3D settings**, and set **Shader Cache Size** to **Unlimited** (or 10 GB). On Linux the game raises
+the driver's limit itself.
+
+[Search stutter reports](https://longshot.magicbean.dev/progress/#problem-search?q=stutter)
+
+### Low FPS, or it slows down after a while
+
+1. **Match the preset to your card.** In the menu's **Graphics** tab, pick the **Quality preset** for your graphics
+   memory: Minimum (4GB), Low (6GB), Balanced (8GB) and so on. If the log says
+   `vk: over the driver's video-memory allowance`, choose a lower one.
+2. **Walk through the same spot twice** once the shaders are prepared. Note whether the slowdown clears the second time,
+   or lasts until you restart.
+3. **Compare fairly.** Turn off **Frame generation**, so the FPS counts the game's own frames, and keep the resolution,
+   upscaler and frame rate cap the same between runs.
+4. **Keep the log from the slow run** (and from the earlier version, after an update), and say where the FPS dropped.
+   The [low FPS checklist](../README.md#low-fps-or-stutter) lists the log lines that matter, and a switch that times
+   each GPU pass.
+
+[Search performance reports](https://longshot.magicbean.dev/progress/#problem-search?q=performance)
+
+### Steam Deck: the game freezes and closes in Kokiri Forest or the Great Deku Tree
+
+`journalctl -k` shows `gfx_0.0.0 timeout`. Add the line `RX_VK_MESH_NOCULL=2c56dc1006942f74` to `longshot_env.txt` in
+the game folder: it turns off the culling pass that runs for seconds there, and every model is still drawn
+([#817](https://github.com/NotRexed/Hookshot/issues/817)).
+
+[Search Steam Deck reports](https://longshot.magicbean.dev/progress/#problem-search?q=steam+deck)
+
+## In game: controls, saves and language
+
+### The menu won't open
+
+Press <kbd>F1</kbd>: it always works. <kbd>Insert</kbd> and <kbd>Esc</kbd> do too, unless **Controls → Menu shortcut**
+was changed. On a controller, press Home, or Select and Start together; on a DualShock 4 or DualSense, click the
+touchpad.
+
+[Search menu reports](https://longshot.magicbean.dev/progress/#problem-search?q=menu)
+
+### A and B are swapped, or a button does the wrong thing
+
+1. **Check the layout.** In the menu, open **Controls → Controls** and check **Layout preset**: Nintendo has A on the
+   right face button, Xbox / PC and Swap Face put it on the bottom one.
+2. **Rebind a button** on that page: choose its row and the Gamepad or Keyboard column, press <kbd>Enter</kbd>, then the
+   new button. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd> clears it, and **Reset to defaults** puts them all back.
+3. **Wrong icons?** **Button prompts** on the same page picks the icons the game shows. It doesn't change what a button
+   does.
+
+The [controls reference](../README.md#controls) covers the keyboard, the mouse and rumble.
+
+[Search controller reports](https://longshot.magicbean.dev/progress/#problem-search?q=controller)
+
+### A save is missing, or a save transfer or update went wrong
+
+1. **Close the game** and stop copying, so nothing else is overwritten.
+2. **Copy the save folder somewhere safe:** `user` in the game folder on Windows, `~/.local/share/longshot` on Linux.
+3. **Put the backup back.** Every copy the launcher makes backs up the save it replaces first:
+   [undo a copy](saves.md#undo-a-copy) shows where. An update keeps your saves; the
+   [updates guide](updates-and-saves.md) says what else it keeps.
+
+Keep save files private: don't post them.
+
+[Search save reports](https://longshot.magicbean.dev/progress/#problem-search?q=save)
+
+### The game is in the wrong language
+
+Change the code in `language.txt` in the game folder: the file lists them all, and an update keeps the one you set.
+
+[Search language reports](https://longshot.magicbean.dev/progress/#problem-search?q=language)
+
+## Downloads and antivirus
+
+### Windows Defender or the browser flags the download
+
+Longshot isn't code-signed yet, so Defender often guesses `Trojan:Win32/Wacatac.H!ml` or `Wacatac.B!ml`: the `!ml`
+means a guess, not a known virus.
+
+1. **Check where it came from.** Only the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)
+   and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) are official;
+   [the download page](https://longshot.magicbean.dev/download) sends you there.
+2. **Let it through safely.** The [antivirus guide](https://longshot.magicbean.dev/help/antivirus/) shows how to check
+   the file, restore it, and exclude only Longshot's folders.
+
+[Search antivirus reports](https://longshot.magicbean.dev/progress/#problem-search?q=antivirus)
+
+## Still stuck?
+
+1. **Make a bug report.** Open the menu (<kbd>F1</kbd>), go to **Gameplay** and choose **Bug report**. It saves a folder
+   in `bug-reports` in the game folder with the log, a picture and `report.txt`, which ends with a link that opens the
+   report form already filled in. Your home folder and user name are taken out.
+2. **Or find the log yourself,** if the game doesn't get that far: `longshot_log.txt` in the game folder is the last
+   run, and `longshot_log.1.txt` to `.4.txt` the four before it. On Linux, `longshot_startup.log` has the startup
+   errors.
+3. **Search the reports.** [Someone may have had it already](https://longshot.magicbean.dev/progress/#problem-search),
+   with a workaround.
+4. **Ask on [Discord](https://discord.gg/KX99srmQTe).** The team and other players are there.
+5. **Report it** with the [report form](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new): your version,
+   where you were in the game, your graphics card and driver, the log and a screenshot.
+   [What to include](reporting-and-contributing.md) has the details.
+
+Never share game files, keys or saves.

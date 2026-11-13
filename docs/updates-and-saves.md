@@ -1,38 +1,54 @@
 # Updates and saves
 
-Keep your adventure safe while updating Longshot or moving to another build.
-Start with **Easy beans**; use **Advanced beans** when you want to change release channels or work with mods.
+The Longshot Launcher keeps the game up to date: it rebuilds it from the game files the first build kept, so you don't
+need your copy of the game again, and your saves and settings stay as they are.
 
-## Easy beans
+## How updates work
 
-### Update an installation
+When the launcher starts, it checks for a newer version on your channel. If there is one, press **Update**: it
+downloads the new builder (only the parts that changed) and builds the game again, usually faster than the first time.
+The launcher updates itself the same way. What changed in each version is on
+[Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
 
-1. **Save, quit and back up.** Close the game and copy your save folder somewhere safe. [Find your save folder](saves.md#where-longshot-keeps-them).
-2. **Update through the launcher.** Follow the [current update instructions](../README.md#updating); keep your backup until you have checked the new build.
-3. **Check your adventure.** Launch the game and load the slot you expected. If it is missing or wrong, stop and use the [save-transfer help](saves.md#need-to-undo-a-transfer).
+## Before you update
 
-### Transfer saves
+1. **Save and quit** the game from its own menu.
+2. **Back up your saves.** Copy the save folder somewhere safe: an update keeps it, but a copy costs nothing. See
+   [where Longshot keeps them](saves.md#where-longshot-keeps-them).
+3. **After updating, load your slot** to check your adventure. If something is wrong, stop and put your backup back
+   ([undo a copy](saves.md#undo-a-copy)).
 
-Use [Easy beans: transfer your saves](saves.md#easy-beans) for the launcher buttons to bring a save into Longshot,
-export it to an emulator, or copy between Windows builds. Standard Linux builds already share saves.
+## What an update keeps
 
-Transfers replace destination slots rather than merge them. Save and close both programs before copying.
+| An update keeps | An update replaces |
+|---|---|
+| Your saves | The game itself (`bin`) and its files |
+| Your menu choices and controls (`longshot_options.ini`) | `image.bin` and the shader list |
+| `longshot_env.txt` | `language.txt`, written again with the game's language |
+| Your `mods` folder | |
 
-## Advanced beans
+The first start after an update prepares the game's shaders again, so it's slower than the next ones.
 
-For development builds, custom file locations and mods. Keep a backup before trying changes.
+## Channels
 
-### Stable and development builds
+The launcher builds from one of three channels:
 
-The [release page](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) lists published builds when available.
-Read [the versioning guide](versioning.md) and [development-build instructions](../README.md#latest-development-build)
-before switching tracks. Record the exact version when reporting a problem.
+| Channel | What it is |
+|---|---|
+| **Stable** | The released version. Choose this to play. |
+| **Release candidate** | The next version, before it's released. |
+| **Nightly** | Built after every change. Untested: it may break your saves or settings, so back them up first. |
 
-### Custom folders and manual transfers
+To go back to a released version, build one from the **Stable** channel. When you report a problem, say the exact
+version: it's on the launcher's home page, and on the first line of `longshot_log.txt`. [The versioning
+guide](versioning.md) explains the numbers.
 
-Use [Advanced beans: save tools](saves.md#advanced-beans) for paths, portable installations, multiple profiles,
-commands and restoring a backup. The README explains [where other files go](../README.md#where-the-files-go).
+## Mods
 
-### Mods
+Mods go in a `mods` folder in the game folder, and an update keeps them. A mod made for an older version may need
+updating too. The [mods reference](../README.md#mods) covers installing them and how they're loaded.
 
-See the [mods reference](../README.md#mods) for installation and compatibility guidance.
+## Moving saves
+
+To bring a save from an emulator or Hookshot, export one, or copy saves between Windows builds, see
+[moving your saves](saves.md).

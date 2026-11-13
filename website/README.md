@@ -1,6 +1,6 @@
 # Longshot website preview
 
-Astro/Starlight front page and player documentation for Longshot by team magicbean.
+Astro/Starlight front page and player documentation for Longshot by Team MagicBean.
 The game build is independent of this directory. This branch adds source only: there
 is no automatic deployment or publishing workflow.
 
@@ -14,8 +14,8 @@ npm run build:preview
 npm run preview -- --host 127.0.0.1 --port 4321
 ```
 
-Open http://127.0.0.1:4321/Longshot/. `npm run dev` provides live editing.
-The project base is `/Longshot/`.
+Open http://127.0.0.1:4321/. `npm run dev` provides live editing.
+The project base is `/`, for its own domain (longshot.magicbean.dev).
 `DOCS_SITE_URL` sets the canonical HTTPS origin; its default is `https://magicbean.dev`,
 which is metadata, not an enabled deployment or a claim that this site is hosted there.
 
@@ -58,31 +58,25 @@ for normal website builds. Font provenance and original notices are retained in
 `src/assets/fonts/` and `public/fonts/`. No external font service or game-extracted
 fonts are used.
 
-## Team roster
+## Team page
 
-The `/Longshot/team/` page builds from one JSON file per person in `team/`.
-See [the roster contribution guide](team/README.md) to add, update or remove your
-profile through a pull request. There is no separate member list or runtime API.
+The team page (`/about/team/`) lists the people with the most commits in Longshot (Hookshot's history included),
+collected from Forgejo when the site is built (`src/lib/contributors.ts`). There is nothing to add by hand: a merged
+change puts you there at the next build.
 
 ## Content and source guards
 
-`content-sources.mjs` lists the imported pages. Edit their original files in `docs/`,
+`content-sources.ts` lists the imported pages, each site path with the file it is made from. Edit their original files in `docs/`,
 `README.md` or `CONTRIBUTING.md`, not `src/content/docs/generated/`. Content preparation
 copies only the explicitly selected pages and artwork. Other relative references
 link to the team's Forgejo source tree; website instructions link to this fork branch. New internal documents are not automatically
 published.
 
-The compatibility rules were reviewed against Longshot's requirements and project
-status on November 12, 2026. The requirements match the earlier snapshot; GPU caveats
-remain applicable. `compatibility-review.json` records hashes of those source sections.
-Builds and checks stop if they change. Review the calculator rules, labels and advice
-before updating hashes; never refresh them merely to make a build pass.
+The System requirements page (`src/content/docs/compatibility.mdx`) is a copy of the root README's "What you need":
+when one changes, change the other to match.
 
-The checked-in `public/progress-feed.json` is a dated snapshot of public reports,
-releases and changes from `MagicBeanDev/Longshot`. Refresh it deliberately with
-`npm run progress:sync`. Normal builds do not fetch the API. The front page renders
-the snapshot at build time; the progress page periodically reloads the feed file.
-No collection schedule or deployment workflow is installed. See `PROGRESS.md`.
+The progress board and the front page's release and activity panels are collected from Forgejo when the site is
+built; see `PROGRESS.md`.
 
 The reference manual, contributor guide and saves guide are generated directly from
 `README.md`, `CONTRIBUTING.md` and `docs/saves.md`. They have one maintained source;
@@ -95,10 +89,9 @@ source text and heading anchors; linked sections open automatically. Expand/coll
 controls and print handling keep the full reference accessible. The getting-started
 guide uses cards while retaining its original source in `docs/`.
 
-The manual and compatibility page share the README's minimum/recommended specs
-table. `SystemRequirements.astro` renders that source at build time. Requirements
-without a published minimum or separate recommended tier are labelled explicitly;
-the table does not establish performance targets or replace GPU-status caveats.
+The manual renders the README's minimum/recommended specs table; the System requirements page has its own copy
+(see above). Requirements without a published minimum or separate recommended tier are labelled explicitly; the table
+does not establish performance targets or replace GPU-status caveats.
 
 Save and update guides use Easy beans for everyday launcher steps and Advanced beans
 for optional reference details. Their canonical sources remain `docs/saves.md` and
@@ -127,3 +120,23 @@ runs both the build and checks. These do not build or launch the game.
 Browser access was unavailable during implementation. Rendered desktop/mobile,
 keyboard, and light/dark visual checks remain outstanding. Generated HTML and the
 compiled Easter-egg script were checked separately; those are not browser checks.
+
+## Download links
+
+`worker/index.ts` answers `/download` on longshot.magicbean.dev (everything else is the built site): permanent links to
+the newest [Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases), for READMEs, release
+notes and chat. Forgejo's `/releases/latest` covers stable only; these cover each channel.
+
+| Link | Goes to |
+|---|---|
+| `/download` | a page: the launcher for the visitor's system (by its User-Agent), from the best channel there is, and every channel |
+| `/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
+| `/download/launcher/<channel>` | the newest release page of `stable`, `rc` or `nightly` |
+| `/download/launcher/<channel>/<os>` | that file of the channel's newest release, such as `/download/launcher/stable/windows` |
+
+`<os>` is `windows` (`…-windows-x64-setup.exe`), `windows-portable` (`…-windows-x64-portable.zip`) or `linux`
+(`…-x86_64.AppImage`). A link is a `302` to the file on git.magicbean.dev; a channel or file that isn't there is a `404`
+page that says so and names the newest launcher there is. The channels follow the launcher's own rules
+(`Core/ReleaseManifest.cs`, `scripts/release.py newest`), and the release list is kept 60 seconds.
+`npx wrangler dev` (after `npm run build`) serves the site with the Worker; `tests/download.test.ts` checks the channel
+rules.

@@ -9,23 +9,15 @@ another project's releases. Previous repository curation is not reused.
 
 ## Collection and hosting
 
-`npm run progress:sync` writes the tracked `public/progress-feed.json`. Run it
-before building when a new snapshot is wanted. Normal builds do not fetch the API.
-Without a valid snapshot the page reports unavailable data, not an empty tracker.
-Collection fails as a whole if any required page fails or a pagination limit is hit.
+The site's build collects the feed (`src/lib/progress-feed.mjs`, `buildFeed()`), once per build, and publishes it as
+`/progress-feed.json` (`src/pages/progress-feed.json.ts`) and in the front page's release and activity panels. Nothing
+is committed and no server runs: the data is as fresh as the last build, and the website workflow rebuilds it every
+hour. If collection fails, the build still succeeds and the pages say the data is unavailable, not that the tracker is
+empty. Collection fails as a whole if any required page fails or a pagination limit is hit.
 
-`npm run progress:serve` optionally serves `/Longshot/progress-feed.json` at
-`127.0.0.1:4322`. It caches complete snapshots for five minutes, coalesces refreshes
-and retains the last complete snapshot on failure. A host can reverse-proxy this
-route, or set `DOCS_PROGRESS_FEED_URL` at build time and `PROGRESS_ALLOWED_ORIGIN`
-on the feed server. `PROGRESS_HOST` and `PROGRESS_PORT` configure the listener.
-HTTPS termination belongs to the host. `FORGEJO_TOKEN` is optional and server-only;
-it is never sent to browsers or written to the snapshot. The collector rejects
-private repositories and redirects. Public collection needs no account token.
-
-No deployment or refresh schedule is installed. The browser reloads the feed every
-five minutes while visible, but a static file changes only after it is replaced.
-Collection timestamps describe data freshness, not merely a successful HTTP request.
+`FORGEJO_TOKEN` is optional and build-only: it is never sent to browsers or written to the feed. The collector rejects
+private repositories and redirects. Public collection needs no account token. The progress board refetches
+`/progress-feed.json` every five minutes while visible, which picks up a newer build.
 
 ## Editorial maintenance
 
@@ -52,7 +44,7 @@ Links are constructed from the fixed public upstream repository and validated ag
 | Searchable work | `src/components/ProgressBoard.astro`, `src/lib/progress-board.ts`, `src/lib/progress.mjs` | Search, filters, progressive results, freshness and plain-language status explanations. |
 | Reviewed highlights | `progress-curation.json` | Sourced summaries, platform tags and serious reported impacts, invalidated by source changes. |
 | Help and status guide | `src/content/docs/progress.mdx` | Explain what the data means and link players to practical help. |
-| Shared feed | `scripts/progress-feed.mjs`, `scripts/serve-progress.mjs`, `scripts/sync-progress.mjs` | Collect public data, follow verified cursor links, cache and retain complete snapshots. |
+| Feed | `src/lib/progress-feed.mjs`, `src/pages/progress-feed.json.ts` | Collect public data at build time, following verified cursor links. |
 
 The overview is descriptive, not a roadmap commitment. No module treats counts as unique bugs, developer speed,
 completion percentages or affected-player totals. The current-version watch intentionally misses unstructured
