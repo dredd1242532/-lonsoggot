@@ -122,8 +122,9 @@ int main(int argc, char **argv) {
         src = tmp / "fixture.c"
         src.write_text(fixture, encoding="utf-8")
         out = tmp / "fixture"
-        subprocess.run([a.cc, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Werror", str(src), "-o", str(out)],
-                       check=True)
+        # (-I host: env_line_allowed takes its LOCAL names from host/switches.def)
+        subprocess.run([a.cc, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Werror", "-I", str(ROOT / "host"), str(src),
+                        "-o", str(out)], check=True)
         before = (game / "longshot_env.txt").read_text(encoding="utf-8")
         subprocess.run([str(out), str(tmp / "test_env.txt"), str(tmp / "missing.txt"), str(tmp / "precedence.txt")], check=True)
         if (game / "longshot_env.txt").read_text(encoding="utf-8") != before:
