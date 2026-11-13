@@ -63,6 +63,7 @@
 #include <csignal>
 #include <cerrno>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -1877,7 +1878,21 @@ void save() {
         }
         fclose(f);
     }
-    if (FILE* f = fopen(ini_path().c_str(), "w")) {
+    // (written to a part file beside it, then moved over it in one step: a write that fails, on a full disk, leaves the options as
+    // they were, where "w" on the file itself emptied it first. A link's target is written, as fopen did; a link whose target
+    // cannot be named here, one to a file not made yet or any on Windows, is written through as before, so it stays a link)
+    std::string path = ini_path();
+    bool through = false;
+#ifdef _WIN32
+    const DWORD attrs = GetFileAttributesA(path.c_str());
+    through = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
+    struct stat st;
+    if (char* real = realpath(path.c_str(), nullptr)) path = real, free(real);
+    else through = lstat(path.c_str(), &st) == 0 && S_ISLNK(st.st_mode);
+#endif
+    const std::string part = through ? path : path + ".new";
+    if (FILE* f = fopen(part.c_str(), "w")) {
         for (const Row& r : rows) {
             if (r.value == &opts.output_res) {   // (the size itself: host/nn_applet.c reads it)
                 const int v = saved_value(r.value);
@@ -1916,7 +1931,19 @@ void save() {
             }
             fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
-        fclose(f);
+        bool ok = !ferror(f);
+        ok = fclose(f) == 0 && ok;
+#ifdef _WIN32
+        ok = ok && (through || MoveFileExA(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING));
+#else
+        ok = ok && (through || rename(part.c_str(), path.c_str()) == 0);
+#endif
+        if (!ok && through) {
+            logf("menu: longshot_options.ini could not be written");
+        } else if (!ok) {
+            remove(part.c_str());
+            logf("menu: longshot_options.ini could not be written: the options are as they were");
+        }
     }
 }
 
