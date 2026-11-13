@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-13 | feat/vr-openxr 5c269eda (before the rebase onto 0c74253d) | Windows 11, Meta Quest 3 over Quest Link (Meta's OpenXR runtime) | RTX 5080 16 GB, Vulkan driver 0x93cec000 | Intel Core Ultra 9 285K, 32 GB | `vr=1`, stereo 3D and the flat screen | Played in the headset by the author | Run airdamien-vr-02. Works in the headset. With Ultrawide menus at Centred, blurred sides, the sides' pass got into the headset's pictures: 7b2120c7 keeps the menus at full width while a headset runs (run in the headset after it: the sides stay out) |

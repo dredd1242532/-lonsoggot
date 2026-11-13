@@ -478,6 +478,25 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
+| VR (Windows) | VR headset | Off, On (after a restart; needs `openxr_loader.dll` beside the game: [quest/README.md](quest/README.md)) | Off |
+| | View | Flat screen, Stereo 3D (after a restart) | Flat screen |
+| | Recentre view | Puts the view in front of you as you face now (also F8, or both sticks held in for a second) | |
+| | 3D view: First person | Off, On (a quick tap of the left stick, or F9, switches it in play) | Off |
+| | 3D view: First person eye height, eye forward | -0.20 m to 0.80 m, in steps of 0.05 | 0.25 m, 0.20 m |
+| | 3D view: World scale | 50% to 400%, in steps of 10 | 100% |
+| | 3D view: Eye separation | 0% to 200%, in steps of 10 | 100% |
+| | 3D view: Level horizon, Fill the view | Off, On | On |
+| | 3D view: Head movement | Turns only, Moves and turns | Moves and turns |
+| | 3D view: Upscaler in 3D | Game's own, As Graphics | As Graphics |
+| | 3D view: Desktop window | The game's frames, Both eyes, Left eye | Both eyes |
+| | HUD: HUD panel, Reticle at the aim | Off, On | On |
+| | HUD: HUD distance, width, height | 0.50 m to 5.00 m; 0.50 m to 4.00 m; -1.00 m to 1.00 m | 1.60 m, 1.90 m, -0.05 m |
+| | HUD: Reticle area, Reticle distance | 10% to 90%; 5 m to 100 m | 30%, 25 m |
+| | Flat screen: Screen distance, width, height | 0.50 m to 10.00 m; 0.30 m to 10.00 m; -2.00 m to 2.00 m | 2.60 m, 3.60 m, 0.00 m |
+| | Controllers: Touch controllers, Swap Touch sticks | Off, On | On, Off |
+| | Controllers: Touch motion aiming | Off, On (after a restart) | On |
+| | Advanced: Paired frames, Headset pacing | Off, On | On |
+| | Advanced: Camera smoothing | Off, On | Off |
 | Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed) | Off |
 | | Player: Damage taken | Half, Normal, Double, Quadruple (live, while Debug tools is on; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
@@ -664,6 +683,11 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   Linux's Noto CJK where a game font lacks one.
 - **Discord status** shows "Playing Longshot" and the time played in your Discord status. It is on by default and does
   nothing unless a Discord client is running on this PC; with the row Off nothing is sent to it.
+- **VR:** the game in a PC VR headset through OpenXR (played on a Meta Quest 3 over Quest Link), on Windows: on a big
+  flat screen in front of you, or in stereo 3D with the game's camera at your eyes. Off by default. The rows are kept
+  in `longshot_vr.ini` beside the game, not in the options file, and all but VR headset, View and Touch motion aiming
+  apply at once. Frame generation and Ultrawide menus' sides are left out while a headset runs.
+  [quest/README.md](quest/README.md) has the setup and the controls.
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game. As the stick uses the mouse in
