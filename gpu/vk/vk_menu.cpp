@@ -6015,7 +6015,8 @@ void menu_tick() {
         const bool confirm_selected = &r == &rows[kQuitRow] || &r == &rows[kRestartRow];
         // (Restart and Quit armed only while the window has the focus; the Co-op tab's Accept and Leave without it too: the
         // menu script's test runs have none)
-        if (pending && (pending != &r || (!mine && coop_kind(*pending) < 0))) pending = nullptr, changed = true;
+        const bool reading_terms = pending && coop_kind(*pending) == kCoopAccept && cur_tab == TAB_RULES;
+        if (pending && ((pending != &r && !reading_terms) || (!mine && coop_kind(*pending) < 0))) pending = nullptr, changed = true;
         if (press[7] && confirm_selected) {
             if (mine && !press[5]) {
                 if (pending != &r) {

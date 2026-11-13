@@ -99,6 +99,18 @@ bool row_shown(int i) { return rows[i].tab != TAB_COOP || coop_row_shown(rows[i]
 @@ROWMAP@@
 @@APPLY@@
 @@PRESS@@
+static void tick_pending(const Row& r, bool mine = false) {
+    bool changed = false;
+@@PENDING@@
+    (void)changed;
+}
+static void back_from_rules() {
+    bool press[8] = {};
+    bool changed = false;
+    press[5] = true;
+@@RULES_BACK@@
+    CHECK(cur_tab == TAB_COOP && !press[5] && changed);
+}
 /// The Co-op tab's rows as shown, by kind, ending with -1
 static void shown(int* out) {
     int n = 0;
@@ -263,6 +275,29 @@ int main() {
     const int requests_before = n_asked;
     coop_press(row(kCoopAccept));
     CHECK(pending && cur_tab == TAB_RULES && n_asked == requests_before);
+    // Real intervening menu ticks must retain Accept while reading any signed term.
+    tick_pending(coop_terms[0].row);
+    tick_pending(coop_terms[7].row);
+    CHECK(pending == &row(kCoopAccept) && n_asked == requests_before);
+    back_from_rules();
+    tick_pending(row(kCoopAccept));
+    CHECK(pending == &row(kCoopAccept));
+    coop_press(row(kCoopAccept));
+    CHECK(!pending && n_asked == requests_before + 1 && asked[n_asked - 1].number == room.offer);
+    n_asked = requests_before;
+    coop_press(row(kCoopAccept));
+    // Leaving the terms/Accept route still disarms, as does losing focus for a local action.
+    cur_tab = TAB_COOP;
+    tick_pending(row(kCoopLeave));
+    CHECK(!pending);
+    pending = &rows[0];
+    tick_pending(rows[0], true);
+    CHECK(pending == &rows[0]);
+    tick_pending(rows[0]);
+    CHECK(!pending);
+    coop_press(row(kCoopAccept));
+    tick_pending(coop_terms[0].row);
+    CHECK(pending == &row(kCoopAccept));
     room.offer++, room.rules_epoch++;   // changes between presses, before the next menu refresh
     coop_press(row(kCoopAccept));
     CHECK(!pending && coop_terms_changed && n_asked == requests_before && coop_now.offer == room.offer);
@@ -536,6 +571,8 @@ def main():
         "@@APPLY@@": between(menu, "/// (longshot) Enter on the Co-op tab's Your name", "/// Custom output size: the Output"),
         "@@PRESS@@": between(menu, "/// (longshot) Enter (or a click) on a Co-op row", "// ---- (longshot) the Controls page"),
         "@@PROMPTS@@": block(menu, "if (field && editing == field->field) {"),
+        "@@PENDING@@": between(menu, "        // (Restart and Quit armed only", "        if (press[7] && confirm_selected)"),
+        "@@RULES_BACK@@": re.search(r"^        if \(press\[5\] && cur_tab == TAB_RULES\).*$", menu, re.M).group(0),
     }
     source = MENU_FIXTURE
     for k, v in cut.items():

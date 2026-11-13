@@ -610,6 +610,10 @@ A changed offer or rules epoch disarms confirmation and displays the new terms. 
 rules after accepting; saving asks the existing engine to sign the changed draft and everyone must accept it again.
 The normal copy-before-progress rule remains in force. Joining, accepting and readiness are separate decisions.
 
+The first Accept stays armed across menu frames while you read the signed terms, including moving between their rows.
+Back returns to the same Accept row for confirmation. Selecting a different room action, closing the menu or receiving
+changed terms still disarms it; merely drawing the Rules page must not make confirmation impossible.
+
 The menu and control bridge use these named `coop_*` settings; the runtime reads the same keys from the options file.
 There is no separate numeric host-option interface for room rules, so adding unrelated menu options does not renumber
 them or require migrating a player's saved settings.
