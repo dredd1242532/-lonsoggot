@@ -675,6 +675,67 @@ deleted file mode 100644
         self.forgejo.add(5, "[wip] fix: x", FILLED)
         self.assertIn("work in progress, by alice", self.run_forge("pr", "view", "5")[1])
 
+    # --- issue attachments (metadata already in the issue GET; never fetch the files) ---
+
+    def issue(self, **extra):
+        return dict(number=12, title="Game: test", state="open", user={"login": "reporter"},
+                    html_url="https://example.invalid/issues/12", body="The log is attached.", **extra)
+
+    def test_issue_view_lists_attachments(self):
+        assets = [{"name": "log-\N{GREEK CAPITAL LETTER DELTA}.txt", "size": 13712,
+                   "browser_download_url": "https://example.invalid/attachments/log"},
+                  {"name": "empty.txt", "size": 0, "browser_download_url": "https://example.invalid/attachments/empty"}]
+        with mock.patch.object(forge, "api", return_value=self.issue(assets=assets)) as api:
+            code, out, err = self.run_forge("issue", "view", "12")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn('Attachments:\n  "log-\\u0394.txt" (13712 bytes): https://example.invalid/attachments/log\n'
+                      '  "empty.txt" (0 bytes): https://example.invalid/attachments/empty\n', out)
+        api.assert_called_once_with("GET", "/repos/MagicBeanDev/Longshot/issues/12")
+
+    def test_issue_view_keeps_output_without_attachments(self):
+        for extra in ({}, {"assets": None}, {"assets": []}):
+            with self.subTest(extra=extra), mock.patch.object(forge, "api", return_value=self.issue(**extra)) as api:
+                self.assertEqual(self.run_forge("issue", "view", "12"),
+                                 (0, "#12 Game: test\nopen, by reporter\nhttps://example.invalid/issues/12\n\n"
+                                     "The log is attached.\n", ""))
+                api.assert_called_once_with("GET", "/repos/MagicBeanDev/Longshot/issues/12")
+
+    def test_issue_view_comments_follow_attachments(self):
+        issue = self.issue(assets=[{"name": "log.txt", "size": 1,
+                                   "browser_download_url": "https://example.invalid/attachments/log"}])
+        comments = [{"user": {"login": "reviewer"}, "created_at": "2026-11-13T12:00:00Z", "body": "A comment."}]
+        with mock.patch.object(forge, "api", side_effect=[issue, comments]) as api:
+            code, out, err = self.run_forge("issue", "view", "12", "--comments")
+        self.assertEqual((code, err), (0, ""))
+        self.assertLess(out.index("Attachments:"), out.index("--- reviewer, 2026-11-13 12:00"))
+        self.assertIn("A comment.", out)
+        self.assertEqual(api.call_args_list, [mock.call("GET", "/repos/MagicBeanDev/Longshot/issues/12"),
+                                              mock.call("GET", "/repos/MagicBeanDev/Longshot/issues/12/comments")])
+
+    def test_issue_view_escapes_attachment_controls(self):
+        asset = {"name": "log\n\x1b[31m.txt", "size": 1,
+                 "browser_download_url": "https://example.invalid/attachments/log\r\nforged"}
+        with mock.patch.object(forge, "api", return_value=self.issue(assets=[asset])):
+            code, out, _ = self.run_forge("issue", "view", "12")
+        self.assertEqual(code, 0)
+        self.assertIn('"log\\n\\u001b[31m.txt" (1 bytes): https://example.invalid/attachments/log\\r\\nforged', out)
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\nforged", out)
+        self.assertEqual(len(out.split("Attachments:\n")[1].splitlines()), 1)
+
+    def test_issue_view_unicode_attachment_into_cp1252(self):
+        asset = {"name": "\N{CJK UNIFIED IDEOGRAPH-6F22}\N{CJK UNIFIED IDEOGRAPH-5B57}.txt", "size": 2,
+                 "browser_download_url": "https://example.invalid/attachments/log"}
+        pipe = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        with mock.patch.object(forge, "api", return_value=self.issue(assets=[asset])) as api, \
+             contextlib.redirect_stdout(pipe), contextlib.redirect_stderr(io.StringIO()):
+            code = forge.main(["issue", "view", "12"])
+        pipe.flush()
+        self.assertEqual(code, 0)
+        self.assertIn('"\\u6f22\\u5b57.txt" (2 bytes): https://example.invalid/attachments/log',
+                      pipe.buffer.getvalue().decode("ascii"))
+        api.assert_called_once_with("GET", "/repos/MagicBeanDev/Longshot/issues/12")
+
 
 if __name__ == "__main__":
     unittest.main()

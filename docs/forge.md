@@ -131,6 +131,9 @@ python -I scripts/forge.py issue create --title "..." --body-file issue.md
 python -I scripts/forge.py issue comment 40 "..."
 ```
 
+`issue view` lists attached files by name, size in bytes and download link. Names are JSON-quoted, so Unicode and
+control characters remain visible in piped output. It uses the issue's existing metadata; opening a link is separate.
+
 ## Pictures in a comment
 
 A test result or a review often needs screenshots: `pr comment --attach` puts them in the comment. In the text,

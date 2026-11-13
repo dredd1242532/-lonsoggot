@@ -891,6 +891,12 @@ def cmd_issue(args):
         i = api("GET", "/repos/%s/issues/%d" % (REPO, args.number))
         print("#%d %s\n%s, by %s\n%s\n\n%s" % (i["number"], i["title"], i["state"], i["user"]["login"], i["html_url"],
                                              (i.get("body") or "").strip()))
+        if i.get("assets"):
+            print("\nAttachments:")
+            for a in i["assets"]:
+                # (one line per file, including control characters and names a pipe's encoding cannot print)
+                print("  %s (%d bytes): %s" % (json.dumps(a["name"]), a["size"],
+                                               json.dumps(a["browser_download_url"])[1:-1]))
         if args.comments:
             show_comments(args.number)
     elif args.action == "create":
