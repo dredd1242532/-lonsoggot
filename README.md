@@ -13,6 +13,7 @@
 </h4>
 
 <p align="center">
+  <a href="https://longshot.magicbean.dev/"><b>Website</b></a> |
   <a href="https://longshot.magicbean.dev/download"><b>Download</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
