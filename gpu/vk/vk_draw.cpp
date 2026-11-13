@@ -2721,7 +2721,7 @@ VkSampler sampler_for(int id, bool compare) {
     static const bool on = !getenv("RX_VK_SAMPLER_CACHE") || atoi(getenv("RX_VK_SAMPLER_CACHE")) != 0;
     if (!on || id < 0 || id >= 4096) return sampler_make(id, compare);
     struct Entry { uint64_t gen; VkSampler s; };
-    // (hookshot) on the heap, a thread's own: 128 KB of zeros in the module's TLS segment made it too big for the static TLS room
+    // (longshot) on the heap, a thread's own: 128 KB of zeros in the module's TLS segment made it too big for the static TLS room
     // the game reserves (host/hos_main.c static_tls_room), and every thread_local of the back end went through __tls_get_addr
     struct Table { Entry e[2][4096]{}; };   // (gen 0: never filled; the generation starts at 1)
     static thread_local std::unique_ptr<Table> table;

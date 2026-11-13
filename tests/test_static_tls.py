@@ -1,7 +1,7 @@
 """The Linux build's static TLS for the Vulkan back end (nx2/build.py vk_tls, host/hos_main.c static_tls_room, gpu/vk/vk_draw.cpp
 sampler_for's table).
 
-hookshot_vk.so is dlopen'ed: its thread_local data is reached through TLS descriptors (-mtls-dialect=gnu2, RX_VK_TLS=gd: the default
+longshot_vk.so is dlopen'ed: its thread_local data is reached through TLS descriptors (-mtls-dialect=gnu2, RX_VK_TLS=gd: the default
 model), and the game starts itself again once with room for that data in the static TLS block (glibc.rtld.optional_static_tls), so
 the descriptors resolve to constant offsets. static_tls_room is cut from the source and run with execv stubbed: the tunable is added
 to what GLIBC_TUNABLES held, the restart is tried once (with the executable's own path, so the process keeps its name), and HOS_STATIC_TLS=0, a tunable already named or a restart already made leave
@@ -52,7 +52,7 @@ static int fake_execv(const char *path, char *const argv[]) {
 /* DEFINE */
 /* FN */
 int main(void) {
-    char *argv[] = {"hookshot", NULL};
+    char *argv[] = {"longshot", NULL};
     static_tls_room(argv);
     const char *after = getenv("GLIBC_TUNABLES");
     printf("%d %s %s\n", execs, seen[0] ? seen : "-", after ? after : "(unset)");
