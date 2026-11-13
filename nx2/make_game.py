@@ -1556,15 +1556,20 @@ def copy_writable(src, dst):
 
 def refuse_dump_links(folder):
     """An extracted dump holds only files and folders: a link in it was followed, and hard-linked or copied the file it
-    names (anywhere on this PC) into the game folder. The folder itself may be one. (Walked as a long path: #1468)"""
-    for d, dirs, files in os.walk(long_path(folder)):
-        for name in dirs + files:
-            path = os.path.join(d, name)
-            attrs = os.lstat(path)
-            if stat.S_ISLNK(attrs.st_mode) or getattr(attrs, "st_file_attributes", 0) & getattr(
-                    stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
-                fail("The game files at %s contain a link (%s): copy them without links and choose that folder."
-                     % (folder, path))
+    names (anywhere on this PC) into the game folder. The folder itself may be one. (Walked as a long path: #1468. Read from
+    the folders' listings: on Windows a listing carries each entry's attributes, where an lstat of each of a romfs's
+    ~186,000 files took 22 s)"""
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    folders = [long_path(folder)]
+    while folders:
+        with os.scandir(folders.pop()) as listing:
+            for entry in listing:
+                attrs = entry.stat(follow_symlinks=False)
+                if entry.is_symlink() or getattr(attrs, "st_file_attributes", 0) & reparse:
+                    fail("The game files at %s contain a link (%s): copy them without links and choose that folder."
+                         % (folder, entry.path))
+                if entry.is_dir(follow_symlinks=False):
+                    folders.append(entry.path)
 
 
 def long_path(p):
@@ -1579,16 +1584,30 @@ def long_path(p):
 
 
 def link_or_copy(src, dst):
-    """the romfs by hard links where the disk allows: 26 GB not written twice"""
+    """the romfs by hard links where the disk allows: 26 GB not written twice. Each folder is made once, and a file a try before
+    this one left (a retry) is passed over by the link's own FileExistsError, not looked up first: for a romfs's ~186,000
+    files each lookup and folder check cost about what the link does"""
     src, dst = long_path(src), long_path(dst)
-    files = [os.path.join(d, f) for d, _, fs in os.walk(src) for f in fs]
-    for i, s in enumerate(files):
-        t = os.path.join(dst, os.path.relpath(s, src))
-        os.makedirs(os.path.dirname(t), exist_ok=True)
-        if not os.path.exists(t):
+    walked = [(d, fs) for d, _, fs in os.walk(src)]
+    total = max(1, sum(len(fs) for _, fs in walked))
+    i = 0
+    for d, fs in walked:
+        rel = os.path.relpath(d, src)   # (the top's own files: dst itself, not dst\. which a \\?\ long path does not tidy away)
+        folder = dst if rel == os.curdir else os.path.join(dst, rel)
+        os.makedirs(folder, exist_ok=True)
+        for name in fs:
+            s, t = os.path.join(d, name), os.path.join(folder, name)
+            if i % 500 == 0:
+                say("progress", "%.3f" % (i / total))
+            i += 1
             try:
                 os.link(s, t)
+                continue
+            except FileExistsError:
+                continue
             except OSError:
+                if os.path.exists(t):
+                    continue
                 # A retry skips existing targets, so publish the copy only after it is complete.
                 fd, staged = tempfile.mkstemp(prefix=".romfs-", dir=os.path.dirname(t))
                 try:
@@ -1602,8 +1621,6 @@ def link_or_copy(src, dst):
                             os.chmod(staged, stat.S_IWRITE)
                         os.unlink(staged)
                     raise
-        if i % 500 == 0:
-            say("progress", "%.3f" % (i / max(1, len(files))))
 
 
 def shader_census_cmd(romfs, out):
