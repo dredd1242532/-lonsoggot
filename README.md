@@ -612,6 +612,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   Linux's Noto CJK where a game font lacks one.
 - **Discord status** shows "Playing Longshot" and the time played in your Discord status. It is on by default and does
   nothing unless a Discord client is running on this PC; with the row Off nothing is sent to it.
+- **Send performance statistics** (a tick on the launcher's page, off by default): the game counts how its frames,
+  hitches and movies went on each map, and the launcher sends the counts to the team at its next start, with the GPU,
+  driver, CPU, OS and renderer but no paths, user name or ID. It costs a few nanoseconds a frame; unticking it deletes
+  what hasn't been sent. What is in a summary: [performance statistics](docs/performance-statistics.md).
 - **Controller in background:** On keeps the controller working while another window has the focus. The keyboard and
   mouse still need the game's window.
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game. As the stick uses the mouse in

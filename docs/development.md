@@ -593,6 +593,11 @@ The other rows are 0 Off and 1 On. Some are read at the start, before the menu e
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
 (`gpu/vk/vk_main.cpp`) and the controls (`host/nn_hid.c`).
 
+`longshot_perf.ini`, beside it, is the launcher's Send performance statistics tick: `send=1` is on, no file is off (the
+default). The game reads it at its first frame (`gpu/vk/perf_report.cpp`) and writes its summaries into `perf_pending/`;
+see [performance statistics](performance-statistics.md). `python -I nx2/perf_report.py <game folder>` prints what the
+launcher would send.
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits for the game's state, the Insert menu's settings, quit), with
 `scripts/longshot_ctl.py` as its client. Off unless set; see [control.md](control.md).

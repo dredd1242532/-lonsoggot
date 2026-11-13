@@ -1,0 +1,175 @@
+"""The launcher's side of the performance statistics (gpu/vk/perf_report.cpp is the game's): the tick, and sending what
+the game left in the game folder's perf_pending/.
+
+  - The launcher's "Send performance statistics" tick is send=1 in the game folder's longshot_perf.ini, off by default.
+    The game reads it at its start: off, it measures nothing and writes nothing.
+  - On, the game writes a summary (JSON, the relay's version 1) every 5 minutes and at exit into perf_pending/. The
+    launcher sends them at its next start, on a thread, to perf_reports in nx2/addresses.ini (Bean-Ops' perf relay),
+    oldest first, and deletes each one the relay took or refused; one it couldn't reach stays for next time.
+  - The sender fills in version and release (the release flag as the crash report has it: a release's version, built
+    from the release's own sources), which the game can't know.
+  - Turning the tick off deletes what is waiting: the player said no.
+
+python -I nx2/perf_report.py <game folder>            what would be sent, sends nothing
+python -I nx2/perf_report.py <game folder> --send     sends it (a test: the launcher is the way players send)
+"""
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from addresses import address  # noqa: E402
+
+ENDPOINT = address("perf_reports")
+CHOICE = "longshot_perf.ini"   # (send=1: the launcher's tick; the game reads it, gpu/vk/perf_report.cpp)
+PENDING = "perf_pending"
+VERSION_FILE = "longshot_version.txt"
+LOGS = ["longshot_log.txt"] + ["longshot_log.%d.txt" % k for k in range(1, 5)]
+MAX_PENDING = 48   # (the newest kept when the launcher hasn't been back for long: older ones go unsent)
+MAX_BODY = 60 * 1024   # (the relay's limit is 64 KiB: a bigger one is refused there anyway)
+# A release's version (docs/versioning.md), as nx2/crash_report.py has it
+RELEASE_VERSION = re.compile(r"^v?\d+\.\d+\.\d+(?:-rc\.\d+)?$|^nightly-\d+-[0-9a-f]{8}$")
+FIRST_LINE = re.compile(r"\blongshot (\S+)(?: \(source ([0-9a-f]+)\))?")
+
+
+def sending(folder):
+    """The tick: on only with send=1 in the game folder"""
+    try:
+        with open(os.path.join(folder, CHOICE), encoding="utf-8") as f:
+            return any(line.strip() == "send=1" for line in f)
+    except OSError:
+        return False
+
+
+def set_sending(folder, on):
+    """The tick, saved for the game (it reads it at its start). Off deletes what is waiting"""
+    path = os.path.join(folder, CHOICE)
+    if on:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write("send=1\n")
+        os.replace(path + ".tmp", path)
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    for name in waiting(folder):
+        try:
+            os.remove(os.path.join(folder, PENDING, name))
+        except OSError:
+            pass
+
+
+def waiting(folder):
+    """The summaries waiting, oldest first (their names are <unix time>-<n>.json)"""
+    try:
+        names = [n for n in os.listdir(os.path.join(folder, PENDING)) if n.endswith(".json")]
+    except OSError:
+        return []
+
+    def key(n):
+        m = re.match(r"(\d+)-(\d+)\.json$", n)
+        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    return sorted(names, key=key)
+
+
+def build_facts(folder):
+    """(version, release) of the game in that folder: longshot_version.txt's version, and the release flag (a release's
+    version and the log's source fingerprint the same as the release's own source= line)"""
+    version, expected = "", ""
+    try:
+        with open(os.path.join(folder, VERSION_FILE), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("version="):
+                    version = line[8:].strip()
+                elif line.startswith("source="):
+                    expected = line[7:].strip()
+    except OSError:
+        pass
+    source = ""
+    for name in LOGS:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
+                m = FIRST_LINE.search(f.readline())
+        except OSError:
+            continue
+        if m:
+            version = version or m.group(1)
+            source = m.group(2) or ""
+            break
+    return version, bool(RELEASE_VERSION.match(version) and expected and source == expected)
+
+
+def post(body, url, timeout=10):
+    """'sent' (2xx), 'refused' (4xx but 429: never better next time) or 'later' (not reached, busy, the server's error)"""
+    req = urllib.request.Request(url, data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": "longshot-perf-report"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout):
+            return "sent"
+    except urllib.error.HTTPError as e:
+        return "later" if e.code == 429 or e.code >= 500 else "refused"
+    except Exception:   # (not reached, cut short: kept for next time)
+        return "later"
+
+
+def send_waiting(folder, url=None, timeout=10):
+    """Sends what is waiting, when the tick is on: {"sent": n, "refused": n, "left": n}. Stops at the first one the relay
+    couldn't take now"""
+    url = ENDPOINT if url is None else url
+    counts = {"sent": 0, "refused": 0, "left": 0}
+    if not folder or not sending(folder):
+        return counts
+    names = waiting(folder)
+    for old in names[:-MAX_PENDING]:   # (too many: the oldest go unsent)
+        try:
+            os.remove(os.path.join(folder, PENDING, old))
+        except OSError:
+            pass
+    names = names[-MAX_PENDING:]
+    if not url:
+        counts["left"] = len(names)
+        return counts
+    version, release = build_facts(folder)
+    for i, name in enumerate(names):
+        path = os.path.join(folder, PENDING, name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                summary = json.load(f)
+            if not isinstance(summary, dict):
+                raise ValueError
+        except (OSError, ValueError):
+            result = "refused"   # (unreadable: dropped)
+        else:
+            summary["version"] = version or summary.get("version", "")
+            summary["release"] = release
+            body = json.dumps(summary, separators=(",", ":")).encode()
+            result = "refused" if len(body) > MAX_BODY else post(body, url, timeout)
+        if result == "later":
+            counts["left"] = len(names) - i
+            break
+        counts[result] += 1
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return counts
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    folder = sys.argv[1]
+    if "--send" in sys.argv[2:]:
+        print(send_waiting(folder))
+        return
+    version, release = build_facts(folder)
+    print("tick: %s, waiting: %d, version %s, release %s, to %s" % (
+        "on" if sending(folder) else "off", len(waiting(folder)), version or "?", release, ENDPOINT or "nowhere"))
+
+
+if __name__ == "__main__":
+    main()
