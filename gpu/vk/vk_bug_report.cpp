@@ -551,8 +551,8 @@ std::string write(const Inputs& in) {
             (link_short ? std::string(" (the changes from the defaults in short: the switches' names did not fit in a link)") : "") +
             ":\n" + link + "\n";
     FILE* f = fopen((dir + "report.txt").c_str(), "wb");
-    const bool written = f && fwrite(text.data(), 1, text.size(), f) == text.size();
-    if (f) fclose(f);
+    bool written = f && fwrite(text.data(), 1, text.size(), f) == text.size();
+    if (f && fclose(f) != 0) written = false;   // (on a full disk the write only filled the stream's buffer: the close fails)
     if (!written) {
         std::lock_guard lk(report_mu);
         report_why = "report.txt could not be written in " + rel;
