@@ -1,0 +1,120 @@
+# Starts a pull request's test on a tester's own hardware (self-hosted runners, docs/hardware-runners.md) when a
+# maintainer puts a "hardware: <name>" label on it, and takes those labels off when new commits arrive, so a test only
+# ever runs on a commit someone looked at. The pull request's code is never checked out here, and the test itself runs
+# from the default branch's hardware-test.yml (workflow_dispatch), never from the pull request's copy of it: that is
+# what makes pull_request_target safe for pull requests from forks. Only people with write access can add labels.
+# No game data is involved.
+#
+# For now this is a fork-local pilot: the label, the pull request and the runner are all on one tester's fork (a test
+# pull request opened on the fork itself). The dispatch, the check and the report use the token of the repository the
+# workflow runs in (LONGSHOT_HW_TOKEN when it has that secret, else the job's own, as website.yml does), so a label on
+# MagicBeanDev/Longshot cannot start a run on a fork's runner. Registering runners on MagicBeanDev/Longshot is not the
+# fix (docs/hardware-runners.md says why). A repository only dispatches for the hardware names listed in its
+# LONGSHOT_HW_RUNNERS variable; without it a label only leaves a notice.
+name: Hardware test gate
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Start the hardware test for the labelled commit
+    if: github.event.action == 'labeled' && startsWith(github.event.label.name, 'hardware:')
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch hardware-test.yml from the default branch
+        env:
+          FORGEJO_TOKEN: ${{ secrets.LONGSHOT_HW_TOKEN || github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          LABEL: ${{ github.event.label.name }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUNNERS: ${{ vars.LONGSHOT_HW_RUNNERS }}
+        run: |
+          hardware="${LABEL#hardware:}"
+          hardware="${hardware# }"
+          if ! [[ "$hardware" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]]; then
+            echo "::error::label \"$LABEL\": the hardware name after \"hardware: \" must be lowercase letters, digits and dashes"
+            exit 1
+          fi
+          if [[ " $RUNNERS " != *" $hardware "* ]]; then
+            echo "::notice::$GITHUB_REPOSITORY has no \"$hardware\" runner (its LONGSHOT_HW_RUNNERS variable does not list it), so nothing was started. The pilot runs on a tester's fork, with a test pull request on that fork (docs/hardware-runners.md)."
+            exit 0
+          fi
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::the event has no 40-character head commit"; exit 1; }
+          body=$(printf '{"ref":"%s","inputs":{"pr":"%s","sha":"%s","hardware":"%s"}}' "$BRANCH" "$PR" "$SHA" "$hardware")
+          curl -fsS --max-time 30 -X POST -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' \
+            -d "$body" "$API/actions/workflows/hardware-test.yml/dispatches"
+          echo "dispatched: PR #$PR at $SHA on \"$hardware\""
+
+  unlabel:
+    name: New commits take the hardware labels off
+    if: github.event.action == 'synchronize'
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Remove the hardware labels put on before this push
+        env:
+          FORGEJO_TOKEN: ${{ secrets.LONGSHOT_HW_TOKEN || github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          PUSHED_AT: ${{ github.event.pull_request.updated_at }}
+        run: |
+          get() { curl -fsS --max-time 30 -H "Authorization: token $FORGEJO_TOKEN" "$API/$1"; }
+          # (this job can start long after its push: it must not take off a label a maintainer put on since)
+          pr_json=$(get "pulls/$PR") || { echo "::error::could not read #$PR"; exit 1; }
+          head=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["head"]["sha"])' <<< "$pr_json")
+          if [ "$head" != "$SHA" ]; then
+            echo "::notice::#$PR's head is now $head, not $SHA: the newer push's own run takes the labels off"
+            exit 0
+          fi
+          # "<id> <name>" for each hardware label on it
+          labels=$(python3 -c 'import json,sys
+          for l in json.load(sys.stdin).get("labels") or []:
+              if l["name"].startswith("hardware:"): print(l["id"], l["name"])' <<< "$pr_json")
+          [ -n "$labels" ] || exit 0
+          # When each label was last put on ("<time> <name>"; a label put on is a timeline entry of type "label" with the
+          # body "1"). If that cannot be read, every label comes off (the safe side).
+          events=""
+          for page in $(seq 1 20); do
+            # (its entries, and its length on a line "n=<length>")
+            found=$(get "issues/$PR/timeline?limit=50&page=$page" | python3 -c 'import json,sys
+          items = json.load(sys.stdin)
+          print("n=%d" % len(items))
+          for i in items:
+              if i.get("type") == "label" and i.get("body") == "1" and i.get("label"):
+                  print(i["created_at"], i["label"]["name"])') || { events=""; break; }
+            events+=$(sed '/^n=/d' <<< "$found")$'\n'
+            [ "$(sed -n 's/^n=//p' <<< "$found")" -ge 50 ] || break
+          done
+          removed=0
+          while read -r id label; do
+            latest=""
+            while IFS= read -r event; do
+              if [ "${event#* }" = "$label" ] && [[ "${event%% *}" > "$latest" ]]; then
+                latest="${event%% *}"
+              fi
+            done <<< "$events"
+            if [[ "$latest" > "$PUSHED_AT" ]]; then
+              echo "::notice::\"$label\" was put on at $latest, after the push at $PUSHED_AT: it stays"
+              continue
+            fi
+            curl -fsS --max-time 30 -X DELETE -H "Authorization: token $FORGEJO_TOKEN" "$API/issues/$PR/labels/$id"
+            removed=$((removed + 1))
+          done <<< "$labels"
+          if [ "$removed" -gt 0 ]; then
+            msg="New commits, so the hardware test labels came off. A maintainer puts them back after looking at the new commits; the test then runs on that head ($SHA or later)."
+            curl -fsS --max-time 30 -X POST -H "Authorization: token $FORGEJO_TOKEN" -H 'Content-Type: application/json' \
+              -d "$(python3 -c 'import json,sys; print(json.dumps({"body": sys.argv[1]}))' "$msg")" "$API/issues/$PR/comments" > /dev/null
+          fi
