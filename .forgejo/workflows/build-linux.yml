@@ -203,7 +203,8 @@ jobs:
           path: build-linux/vk-work/objcache
           key: ${{ steps.objkey.outputs.key }}
 
-      # (AMD FSR 4's Linux side, a build option the AppImage leaves off (gpu/vk/vk_fsr4.cpp: dlopen, the older backend
+      # (AMD FSR 4's Linux side, a build option the AppImage's prebuilt back end leaves off (a player's build with --fsr compiles
+      # its own: scripts/linux/check_player_build.sh) (gpu/vk/vk_fsr4.cpp: dlopen, the older backend
       # description, the unit exposure; the descriptor buffers in vk_main.cpp): built once more in a copy of the back end's
       # work folder, where only vk_fsr4.cpp compiles again. The AppImage above is not changed)
       - name: longshot_vk.so with AMD FSR 4 (build check)

@@ -79,7 +79,8 @@ Longshot doesn't come ready to play: it is built on your PC, from your own copy 
 1. Check that your PC and your copy of the game match [what you need](#what-you-need).
 2. Download the launcher for [Windows](#on-windows) or [Linux](#on-linux) and start it.
 3. Point it at your game and press **Build**. It downloads this version's Longshot Builder, checks it against the
-   release's signed checksums, and builds the game: about 10 to 45 minutes.
+   release's signed checksums, and builds the game: about 15 minutes on a 12-core desktop, longer on a slower PC
+   ([build times](docs/development.md#build-times)).
 4. Press **Play**. From then on the launcher keeps the game, and itself, [up to date](#updating).
 
 Longshot's first version will be **v3.0.0**; the launcher's first will be **v1.0.0** (its numbers are its own).
@@ -415,7 +416,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
 | Controls | Controller in background | Off, On | Off |
-| | Mouse camera | As the stick, Native | As the stick |
+| | Mouse camera | As the stick, Native, Off | As the stick |
 | | Disable camera centering | Off, On | Off |
 | | Mouse sensitivity | 0.10 to 5.00, in steps of 0.10 | 1.00 |
 | | Invert mouse vertical | Off, On | Off |
@@ -601,7 +602,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game. As the stick uses the mouse in
   place of the right stick. The <kbd>-</kbd> and <kbd>=</kbd> keys change the sensitivity in game too.
   When another camera takes over, Native leaves it alone; on returning, mouse look starts from the game's current
-  pitch and yaw rather than restoring the old view.
+  pitch and yaw rather than restoring the old view. Off leaves the mouse out of play: a click in the window doesn't
+  capture it, so it neither turns the camera nor presses buttons. Play with a controller or the keyboard.
 - **Disable camera centering:** On stops the game gradually turning the camera toward your movement, so it does not fight
   native mouse look. Off keeps the game's standard behavior. Changes apply immediately with either Mouse camera mode.
   Manual controls, explicit recentering and scripted camera headings still work; automatic pitch adjustment is unchanged.
@@ -925,7 +927,9 @@ in `longshot_options.ini`, `RX_VK_FSR4=1` or `2` for one run, `RX_VK_FSR4=0` to 
   beside the game's exe (`bin\longshot.exe`) or in the game folder. (`RX_VK_FSR_DIR` names another folder, for testing:
   set it in the environment or a `HOS_ENV_FILE` file; `longshot_env.txt` takes no paths.) Without them the Upscaler row
   says so and offers the rest. On Linux, a Vulkan FSR 4 library (`amd_fidelityfx_upscaler_vk.so`, such as fsr4-vk's)
-  takes their place.
+  takes their place: AMD publishes none for Linux, so you put it beside the game yourself. A Linux build with FSR 4
+  (`--fsr`) compiles its own Vulkan back end, as with DLSS, since the AppImage's prebuilt one has no FSR 4: a few
+  minutes longer.
 - **Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those two
   DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and
   puts them in the game folder (`LONGSHOT_FFX_SDK=<folder>` keeps them between builds, default `workfx-sdk`).
