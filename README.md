@@ -285,7 +285,7 @@ anywhere else may not be ours.
 | Windows, NVIDIA: stutter every start in places you have seen, after the shaders were prepared | The driver's shader cache is too small to keep them all (the first start builds about 2 GB of pipelines into it). In the NVIDIA Control Panel, Manage 3D settings, set **Shader Cache Size** to **Unlimited** (or 10 GB). On Linux the game raises the driver's limit itself |
 | The game is in the wrong language | Change the code in `language.txt` in the game folder. The file lists them all, and an update keeps the one you set there |
 
-If the problem continues, [report it](https://github.com/NotRexed/Hookshot/issues/new/choose) with the version, where
+If the problem continues, [report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with the version, where
 you were in the game, your graphics card, `longshot_log.txt` and a screenshot or video. Never send game files. The
 in-game menu's **Gameplay → Bug report** gathers all of it in one press ([In-game menu](#in-game-menu)).
 
@@ -457,7 +457,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   holds the frames to its refresh rate: V-Sync on, or the driver's FIFO mode. `HOS_FPS_MAX=<61-1000>` sets a cap for one
   run.
 - **Bug report** writes a folder `bug-reports/<date>_<time>` in the game folder with what an issue needs: `report.txt`,
-  which answers the [game problem form](https://github.com/NotRexed/Hookshot/issues/new?template=1-game-problem.yml)'s
+  which answers the [game problem form](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new)'s
   questions under its own headings (the version, the map you are in, your graphics card and driver, CPU, RAM and
   system, the menu options and the `RX_`/`HOS_` switches you changed) and ends with a link that opens the form with them
   filled in (the switches by name only); `longshot_log.txt` (this run's log so far) and `longshot_log.1.txt` (the run

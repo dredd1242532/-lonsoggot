@@ -37,6 +37,7 @@ let links = 0;
 for (const file of files) {
   const html = await readFile(file, 'utf8');
   const route = base + path.relative(dist, file).replaceAll(path.sep, '/').replace(/index\.html$/, '');
+  assert(!/\/Hookshot\//.test(html.replace(/https:\/\/github\.com\/[^\s"<>]+/g, "")), `Retired local website route: ${route}`);
   assert(html.includes(`href="${bug}"`), `Missing Report a bug link: ${route}`);
   assert(/<h1\b/.test(html), `Missing page heading: ${route}`);
   for (const [, editUrl] of html.matchAll(/href="(https:\/\/git\.magicbean\.dev\/[^\"]+\/_edit\/[^\"]+)"/g)) {
@@ -51,7 +52,7 @@ for (const file of files) {
     if (url.origin !== origin) continue;
     // Team credit intentionally links to the separate main website on the same origin.
     if (tag === 'a' && url.href === 'https://magicbean.dev/') continue;
-    // Astro emits a /404/ canonical URL but GitHub Pages serves the file as /404.html.
+    // Astro emits a /404/ canonical URL but the static build emits /404.html.
     if (tag === 'link' && file.endsWith('/404.html') && url.pathname === base + '404/') continue;
     if (!url.pathname.startsWith(base)) {
       errors.push(`${route}: URL escapes project base: ${raw}`);
@@ -75,7 +76,10 @@ assert(original.equals(await readFile(path.join(dist, 'assets/longshot.png'))), 
 for (const asset of ['longshot.png', 'teary-elf-bean.png', 'grappling-hook-bean.png', 'glowing-fairy-bean.png', 'magicbean-green.png', 'magicbean-red.png', 'magicbean-blue.png', 'magicbean-team-logo.webp', 'PROVENANCE.txt']) {
   assert((await readFile(path.join(site, '../assets/branding', asset))).equals(await readFile(path.join(dist, 'branding', asset))), `Supplied branding changed: ${asset}`);
 }
+const commonIssues = await readFile(path.join(dist, 'guides/common-issues/index.html'), 'utf8');
+assert(commonIssues.includes(`href="${base}antivirus/"`), 'Download safety link must stay on the site');
 const home = await readFile(path.join(dist, 'index.html'), 'utf8');
+assert(!/hookshot/i.test(home), 'Retired front-page branding');
 assert(home.includes('Longshot by team magicbean'), 'Longshot page identity missing');
 assert(home.includes(`${base}branding/longshot.png`), 'Longshot artwork missing');
 assert(home.includes(`${base}branding/grappling-hook-bean.png`), 'Main grappling bean artwork missing');

@@ -2,18 +2,17 @@
 
 ## Report a bug
 
-Search [Common issues](common-issues.md) and the [issue tracker](https://git.magicbean.dev/MagicBeanDev/Longshot/issues), then
-use the [issue forms](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new). Follow the
-[contribution rules](../CONTRIBUTING.md#before-you-open-an-issue-or-a-pr) for the required details and allowed files.
-If a report already covers your problem, add your details there.
+Search [common issues](common-issues.md) and the [Longshot issue tracker](https://git.magicbean.dev/MagicBeanDev/Longshot/issues),
+then use the [report form](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new).
+Include your version, OS, hardware, reproduction steps and relevant logs. Keep game files, keys and saves local.
 
-## Contribute a pipeline list
+## Help with testing
 
-Read [the pipeline collection issue](https://github.com/NotRexed/Hookshot/issues/2034) for the current file, build,
-and template requirements. The [pipeline-state notes](../assets/pipeline_states/README.md) explain the format
-and provenance. Include only the file explicitly requested by the maintainers; never attach the rest of your game folder.
+Reproduce the same steps and report what you observed, including failures and differences between machines.
+Follow the team's [testing workflow](https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/test-requests.md)
+when a maintainer requests a test. Upload only the material the contribution rules permit.
 
-## Improve the documentation or code
+## Improve documentation or code
 
-Follow [CONTRIBUTING.md](../CONTRIBUTING.md). The [development guide](development.md) covers local builds and checks;
-[the website instructions](../website/README.md) cover documentation builds and publication.
+Read the [contribution guide](../CONTRIBUTING.md) and [development instructions](development.md).
+For this site, follow the [website build instructions](../website/README.md).

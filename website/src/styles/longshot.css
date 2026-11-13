@@ -37,7 +37,7 @@
 :is(.studio-home,.studio-hero,.studio-header) :is(a,button,input,select):focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 5px; }
 .studio-header { height: 100%; display: flex; align-items: center; gap: 2.2rem; }
 .studio-brand { display: inline-flex; align-items: center; gap: .8rem; color: var(--sl-color-white); text-decoration: none; flex-shrink: 0; min-height: 44px; }
-.studio-brand > span:last-child { font-family: var(--hookshot-font-heading); font-weight: 600; font-size: 1.65rem; line-height: 1; letter-spacing: -.035em; }
+.studio-brand > span:last-child { font-family: var(--longshot-font-heading); font-weight: 600; font-size: 1.65rem; line-height: 1; letter-spacing: -.035em; }
 .studio-brand small { display: block; font: 700 .62rem/1.5 var(--sl-font); letter-spacing: .15em; color: var(--sl-color-gray-2); margin-top: .35rem; }
 .studio-brand-mark { display: block; width: 40px; height: 40px; flex-shrink: 0; object-fit: contain; }
 .studio-nav { display: flex; align-items: center; gap: 1.6rem; margin-left: auto; }
@@ -71,7 +71,7 @@
 .studio-hero-art img { width: 100%; max-width: 520px; height: auto; object-fit: contain; filter: drop-shadow(0 22px 22px #0003); }
 .studio-hero-art figcaption { display: flex; align-items: center; gap: .6rem; text-align: center; color: var(--sl-color-gray-2); font-size: .8rem; font-weight: 600; letter-spacing: .02em; margin-top: .8rem; }
 .studio-hero-art figcaption span { color: var(--sl-color-text-accent); font-size: 1rem; }
-.studio-home h2, .studio-home h3, .studio-home h4 { font-family: var(--hookshot-font-heading); font-weight: 600; color: var(--sl-color-white); letter-spacing: -.025em; line-height: 1.15; }
+.studio-home h2, .studio-home h3, .studio-home h4 { font-family: var(--longshot-font-heading); font-weight: 600; color: var(--sl-color-white); letter-spacing: -.025em; line-height: 1.15; }
 .studio-home :is(h3,h4), .sl-markdown-content :is(h3,h4) { font-family: var(--sl-font); font-weight: 600; letter-spacing: -.01em; }
 .studio-home a { text-underline-offset: .25em; }
 .studio-home [id] { scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem); }
@@ -86,7 +86,7 @@
 .studio-text-link { display: inline-flex; align-items: center; gap: 1.5rem; min-height: 44px; color: var(--sl-color-text-accent); font-size: .95rem; }
 .studio-guides { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1rem; }
 .studio-guides article { position: relative; display: flex; flex-direction: column; padding: 1.7rem; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
-.studio-card-number { font: 600 2.2rem/1 var(--hookshot-font-heading); color: var(--sl-color-gray-3); margin-bottom: 2.5rem; }
+.studio-card-number { font: 600 2.2rem/1 var(--longshot-font-heading); color: var(--sl-color-gray-3); margin-bottom: 2.5rem; }
 .studio-guides .studio-eyebrow { font-size: .65rem; }
 .studio-guides h3 { font-size: 1.6rem; margin: .65rem 0; }
 .studio-guides article > p:not(.studio-eyebrow) { color: var(--sl-color-gray-2); font-size: .98rem; margin: 0 0 1.6rem; }

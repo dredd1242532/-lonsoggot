@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { contentSources } from '../content-sources.mjs';
 import { getSiteConfig } from '../site.config.mjs';
 import { assertReviewedSources } from '../scripts/verify-compatibility-sources.mjs';
 
@@ -24,4 +25,12 @@ test('README requirements and GPU-status changes require a calculator review', a
     assert.throws(() => assertReviewedSources(readme.replace(before, after), review), /changed since compatibility review/);
   }
   assert.doesNotThrow(() => assertReviewedSources(readme + '\nUnrelated footer edit.\n', review));
+});
+
+
+test('reference and saves pages import the maintained originals', () => {
+  assert.equal(contentSources.get('README.md'), 'reference/manual');
+  assert.equal(contentSources.get('CONTRIBUTING.md'), 'reference/contributing');
+  assert.equal(contentSources.get('docs/saves.md'), 'guides/saves');
+  assert(![...contentSources.keys()].some(source => source.includes('/site-')));
 });

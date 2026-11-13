@@ -8,7 +8,7 @@ export function getSiteConfig(env = process.env) {
   const branch = env.DOCS_SOURCE_BRANCH || 'docs/longshot-website';
   const ref = branch.split('/').map(encodeURIComponent).join('/');
   const projectRepository = 'https://git.magicbean.dev/MagicBeanDev/Longshot';
-  return { origin: origin.origin, base: '/Hookshot/', projectRepository,
+  return { origin: origin.origin, base: '/Longshot/', projectRepository,
     sourceBase: `${projectRepository}/src/branch/main/`,
     issueUrl: `${projectRepository}/issues/new`,
     editBase: `https://git.magicbean.dev/${repository}/_edit/${ref}/` };

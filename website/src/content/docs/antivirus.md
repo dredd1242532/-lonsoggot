@@ -1,30 +1,23 @@
 ---
-title: Is Hookshot a virus?
-description: The maintainer's explanation of Windows Defender alerts, signing status, and links to the source code.
+title: Download safety
+description: Check the source of Longshot downloads and investigate security warnings.
 ---
 
-**The maintainer identifies the reported Windows Defender detections as false positives.**
-The evidence and discussion are collected in [issue #1003](https://github.com/NotRexed/Hookshot/issues/1003).
-This documentation has not independently audited the release binaries.
+Get Longshot source from the [team repository](https://git.magicbean.dev/MagicBeanDev/Longshot)
+and use only the packages actually listed in its [release section](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
+If no release is listed, do not assume an unrelated download is an official build.
 
-## Why does Defender flag it?
+## If security software raises a warning
 
-Windows Defender can flag or quarantine `HookshotBuilder.exe` as `Trojan:Script/Wacatac.H!ml`.
-The maintainer explains that `!ml` denotes a machine-learning detection and that new, unsigned executables can
-trigger it. The thread also contains reports of other detection names.
+Keep the download URL, filename, version and detection name. Confirm the source and check for a
+[matching report](https://git.magicbean.dev/MagicBeanDev/Longshot/issues).
+A detection alone does not establish whether a file is safe or malicious. Avoid disabling protection
+or creating broad exclusions just to proceed with an unverified file.
 
-A detection name alone does not establish whether a particular download is safe. Use the
-[official releases](https://github.com/NotRexed/Hookshot/releases) and review the
-[linked reports](https://github.com/NotRexed/Hookshot/issues/1003).
+Ask the team through the [issue tracker](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new)
+if you cannot verify the file. Do not upload game files or keys.
 
-## Is it signed?
+## Building from source
 
-As checked on **November 10, 2026**, the maintainer says they have applied for code signing through SignPath
-and the builder is not yet signed. Follow [#1003](https://github.com/NotRexed/Hookshot/issues/1003)
-for updates.
-
-## Can I inspect it or build it myself?
-
-Yes. Hookshot is open source. You can [review the code](https://github.com/NotRexed/Hookshot)
-and follow the [development guide](https://github.com/NotRexed/Hookshot/blob/main/docs/development.md) to build from source if you prefer that
-to the provided binaries. Source availability makes review possible; it is not itself a security audit.
+The [development guide](https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/development.md)
+explains the supported build workflow. Building from source still requires checking your tools and dependencies.

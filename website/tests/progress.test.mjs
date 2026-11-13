@@ -6,12 +6,12 @@ import path from 'node:path';
 import { ROOT, REPOSITORY, REFRESH_MS, normalizeItem, validateCuration, validateFeed, filterItems, feedEndpoint } from '../src/lib/progress.mjs';
 import { exactVersion, reportEvidence, currentVersionWatch } from '../src/lib/progress-watch.mjs';
 import { progressOverview } from '../src/lib/progress-overview.mjs';
-import { collectFeed, createFeedCache, GitHubError, saveSnapshot, readSnapshot } from '../scripts/progress-feed.mjs';
+import { collectFeed, createFeedCache, ForgejoError, saveSnapshot, readSnapshot } from '../scripts/progress-feed.mjs';
 
 const time = '2026-11-11T12:00:00Z';
 const raw = (n = 1, extra = {}) => ({ number: n, title: 'Controller stops responding', state: 'open', updated_at: time, labels: [], ...extra });
 const release = { id: 100, name: 'Version 2.1.0', tag_name: 'v2.1.0', updated_at: time, published_at: time, draft: false, prerelease: false };
-const body = (version, area = 'Low fps or stutter') => `### Hookshot version\n\n${version}\n\n### What kind of problem\n\n${area}\n\n### Description\n\nprivate log excerpts are not published`;
+const body = (version, area = 'Low fps or stutter') => `### Longshot version\n\n${version}\n\n### What kind of problem\n\n${area}\n\n### Description\n\nprivate log excerpts are not published`;
 function feed(items = [normalizeItem(raw(), 'issue')]) {
   return { version: 1, repository: REPOSITORY, generatedAt: time, collectionStartedAt: time, closedSince: '2026-08-13T12:00:00Z', warning: '',
     stableRelease: { tag: 'v2.1.0', url: `${ROOT}/releases/tag/v2.1.0`, publishedAt: time }, items };
@@ -25,6 +25,8 @@ test('statuses distinguish proposals, accepted work, releases and closure reason
   assert.equal(normalizeItem(raw(1, { labels: [{ name: 'in progress' }] }), 'issue').status, 'working');
   assert.equal(normalizeItem(raw(), 'pull').status, 'proposed');
   assert.equal(normalizeItem(raw(1, { draft: true }), 'pull').status, 'draft');
+  assert.equal(normalizeItem(raw(1, { title: 'WIP: renderer change' }), 'pull').status, 'draft');
+  assert.equal(normalizeItem(raw(1), 'pull').url, `${ROOT}/pulls/1`);
   assert.equal(normalizeItem(raw(1, { state: 'closed', merged_at: time }), 'pull').status, 'merged');
   assert.equal(normalizeItem(raw(1, { state: 'closed' }), 'pull').status, 'withdrawn');
   assert.equal(normalizeItem(raw(1, { state: 'closed', state_reason: 'completed' }), 'issue').status, 'closed');
@@ -52,14 +54,18 @@ test('curation expires when source changes and rejects unsafe evidence', () => {
 
 test('version matching uses only exact report fields, not text guesses', () => {
   assert.equal(exactVersion('`v2.1.0`'), '2.1.0');
-  for (const text of ['latest', '2.1.0 or 2.0.9', 'hookshot abc123', '02.1.0', 'v2.1.0 Windows', '']) assert.equal(exactVersion(text), null);
+  for (const text of ['latest', '2.1.0 or 2.0.9', 'longshot abc123', '02.1.0', 'v2.1.0 Windows', '']) assert.equal(exactVersion(text), null);
   assert.equal(reportEvidence(body('v2.1.0')).version, '2.1.0');
+  assert.equal(reportEvidence(body('v2.1.0', 'Sound')).reportedArea, 'Audio');
+  assert.equal(reportEvidence(body('v2.1.0', 'Controls')).reportedArea, 'Controls');
   assert.equal(reportEvidence(body('v2.1.0-rc.1')).version, '2.1.0-rc.1');
   assert.equal(reportEvidence('Mentioned v2.1.0 in a comment').version, null);
   assert.equal(reportEvidence(body('latest')).version, null);
-  assert.equal(reportEvidence(body('v2.1.0') + '\n### Hookshot version\n\nv2.0.9').version, null);
+  assert.equal(reportEvidence(body('v2.1.0') + '\n### Longshot version\n\nv2.0.9').version, null);
   assert.equal(reportEvidence(body('v2.1.0') + '\n### Builder version\n\nv2.0.9').version, null);
   assert.equal(reportEvidence('### Builder version\n\nv2.1.0').reportedArea, 'Setup');
+  assert.equal(reportEvidence('### Version\n\nv2.1.0').versionSource, 'Installation version field');
+  assert.equal(reportEvidence('### Version\n\nLauncher v1.0.0, game v2.1.0').version, null);
 });
 
 test('current watch excludes older, preview, closed and duplicate reports and all PRs', () => {
@@ -91,14 +97,14 @@ test('search combines query terms and every filter, including source numbers and
 
 test('feed validation rejects unsafe URLs, duplicate IDs and malformed records', () => {
   validateFeed(feed());
-  for (const url of ['javascript:alert(1)', 'https://github.com.evil/NotRexed/Hookshot/issues/1', `${ROOT}/issues/2`, 'https://github.com/NotRexed/Hookshot/pull/1']) {
+  for (const url of ['javascript:alert(1)', 'https://git.magicbean.dev.evil/MagicBeanDev/Longshot/issues/1', `${ROOT}/issues/2`, 'https://git.magicbean.dev/MagicBeanDev/Longshot/pull/1']) {
     const data = feed(); data.items[0].url = url;
     assert.throws(() => validateFeed(data));
   }
   assert.throws(() => validateFeed(feed([normalizeItem(raw(), 'issue'), normalizeItem(raw(), 'issue')])));
   assert.throws(() => validateFeed({ ...feed(), items: [{}] }));
-  assert.equal(feedEndpoint('', '/Hookshot/'), '/Hookshot/progress-feed.json');
-  assert.equal(feedEndpoint('http://127.0.0.1:4322/Hookshot/progress-feed.json', ''), 'http://127.0.0.1:4322/Hookshot/progress-feed.json');
+  assert.equal(feedEndpoint('', '/Longshot/'), '/Longshot/progress-feed.json');
+  assert.equal(feedEndpoint('http://127.0.0.1:4322/Longshot/progress-feed.json', ''), 'http://127.0.0.1:4322/Longshot/progress-feed.json');
   for (const url of ['http://example.com/feed', 'https://secret@example.com/feed', 'https://example.com/feed?token=secret']) assert.throws(() => feedEndpoint(url, ''));
 });
 
@@ -108,14 +114,14 @@ test('collector paginates open items, stops old closed history and keeps PRs sep
     assert.equal(options.redirect, 'error');
     assert.equal(options.headers.Authorization, 'Bearer test-only');
     const u = new URL(url); calls.push(u);
-    if (u.pathname === `/repos/${REPOSITORY}`) return response(repository);
+    if (u.pathname === `/api/v1/repos/${REPOSITORY}`) return response(repository);
     if (u.pathname.endsWith('/releases/latest')) return response(release);
     if (u.pathname.endsWith('/releases')) return response([{ ...release, id: 101, draft: true }, release]);
-    const page = u.searchParams.has('after') ? 2 : 1;
+    const page = Number(u.searchParams.get('page') || 1);
     if (u.searchParams.get('state') === 'closed') return response([raw(999, { state: 'closed', updated_at: '2020-01-01T00:00:00Z' })]);
     if (u.pathname.endsWith('/pulls')) return response([raw(500, { merged_at: null })]);
     if (page === 1) return response(Array.from({ length: 100 }, (_, i) => raw(i + 1, { body: body('v2.1.0'), ...(i === 0 ? { pull_request: {} } : {}) })), 200,
-      { link: '<https://api.github.com/repositories/1446962520/issues?state=open&after=cursor>; rel="next"' });
+      { link: '<https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/issues?state=open&page=2>; rel="next"' });
     return response([raw(123, { html_url: 'https://evil.invalid', user: { login: 'not-published' }, body: 'not-published' })]);
   };
   const data = await collectFeed({ fetcher, token: 'test-only', now: Date.parse(time) });
@@ -124,13 +130,13 @@ test('collector paginates open items, stops old closed history and keeps PRs sep
   assert.equal(data.stableRelease.tag, 'v2.1.0');
   assert(!JSON.stringify(data).includes('not-published'));
   assert(!JSON.stringify(data).includes('test-only'));
-  assert(calls.some(u => u.searchParams.get('after') === 'cursor'));
+  assert(calls.some(u => u.searchParams.get('page') === '2'));
 });
 
 test('failed or truncated collection never returns a partial feed', async () => {
   await assert.rejects(collectFeed({ fetcher: async url => url.endsWith('/latest') ? response(release) : response({}, 503) }));
   await assert.rejects(collectFeed({ maxPages: 1, now: Date.parse(time), fetcher: async url => url.endsWith(REPOSITORY) ? response(repository) : url.endsWith('/latest') ? response(release) : response(Array.from({ length: 100 }, (_, i) => raw(i + 1)), 200,
-    { link: '<https://api.github.com/repos/NotRexed/Hookshot/issues?state=closed&after=cursor>; rel="next"' }) }), /pagination limit/);
+    { link: '<https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/issues?state=closed&after=cursor>; rel="next"' }) }), /pagination limit/);
 });
 
 test('pagination never forwards the token to another host or endpoint', async () => {
@@ -140,7 +146,7 @@ test('pagination never forwards the token to another host or endpoint', async ()
     if (url.endsWith(REPOSITORY)) return response(repository);
     if (url.endsWith('/latest')) return response(release);
     return response([raw()], 200, { link: '<https://evil.invalid/steal>; rel="next"' });
-  } }), /Unsafe GitHub/);
+  } }), /Unsafe Forgejo/);
   assert.equal(calls, 3);
 });
 
@@ -170,7 +176,7 @@ test('cache coalesces requests, persists only complete data and keeps stale data
 
 test('rate-limit headers back off cache refresh beyond five minutes', async () => {
   let now = Date.parse(time); let calls = 0;
-  const error = new GitHubError(response({}, 429, { 'retry-after': '3600', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((now + 7200000) / 1000) }), now);
+  const error = new ForgejoError(response({}, 429, { 'retry-after': '3600', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String((now + 7200000) / 1000) }), now);
   const get = createFeedCache({ initial: feed(), now: () => now, collect: async () => { calls++; throw error; } });
   now += REFRESH_MS + 1; await get();
   now += REFRESH_MS + 1; await get(); assert.equal(calls, 1);
@@ -183,7 +189,7 @@ test('HTTP cache mode returns immediately while a slow refresh runs', async () =
   const get = createFeedCache({ initial: feed(), now: () => Date.parse(time) + REFRESH_MS + 1, collect: () => collecting });
   const cached = await get({ wait: false });
   assert.equal(cached.generatedAt, time);
-  assert.match(cached.warning, /Checking GitHub/);
+  assert.match(cached.warning, /Checking Forgejo/);
   resolve(feed());
   assert.equal((await get()).warning, '');
 });
@@ -193,7 +199,7 @@ test('a private repository cannot be exposed through the public feed', async () 
 });
 
 test('atomic snapshots survive a rejected write and can seed a restarted server', async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'hookshot-progress-test-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'longshot-progress-test-'));
   const filename = path.join(dir, 'progress.json');
   await saveSnapshot(feed(), filename);
   const original = await readFile(filename, 'utf8');
@@ -201,4 +207,29 @@ test('atomic snapshots survive a rejected write and can seed a restarted server'
   assert.equal(await readFile(filename, 'utf8'), original);
   assert.equal((await readSnapshot(filename)).items.length, 1);
   assert.equal(await readSnapshot(path.join(dir, 'missing')), null);
+});
+
+
+test('Forgejo collection uses its query contract and supports no published releases', async () => {
+  const data = await collectFeed({ fetcher: async (url, options) => {
+    assert.equal(options.headers.Accept, 'application/json');
+    const u = new URL(url);
+    if (u.pathname === `/api/v1/repos/${REPOSITORY}`) return response(repository);
+    if (u.pathname.endsWith('/latest')) return response({}, 404);
+    assert.equal(u.searchParams.get('limit'), '100');
+    assert.equal(u.searchParams.has('per_page'), false);
+    if (!u.pathname.endsWith('/releases')) assert.equal(u.searchParams.get('sort'), 'recentupdate');
+    if (u.pathname.endsWith('/issues')) assert.equal(u.searchParams.get('type'), 'issues');
+    return response([]);
+  } });
+  assert.equal(data.stableRelease, null);
+  assert.deepEqual(data.items, []);
+});
+
+test('pagination rejects another endpoint even on the trusted Forgejo host', async () => {
+  await assert.rejects(collectFeed({ fetcher: async url => {
+    if (url.endsWith(REPOSITORY)) return response(repository);
+    if (url.endsWith('/latest')) return response({}, 404);
+    return response([raw()], 200, { link: '<https://git.magicbean.dev/api/v1/user>; rel="next"' });
+  }, now: Date.parse(time) }), /Unsafe Forgejo/);
 });

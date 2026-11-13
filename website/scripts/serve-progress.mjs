@@ -6,7 +6,7 @@ import { collectFeed, createFeedCache, readSnapshot, saveSnapshot, curationPath 
 const origin = process.env.PROGRESS_ALLOWED_ORIGIN || siteConfig.origin;
 if (new URL(origin).origin !== origin) throw new Error('PROGRESS_ALLOWED_ORIGIN must be an exact origin.');
 const getFeed = createFeedCache({ initial: await readSnapshot(), save: saveSnapshot,
-  collect: async () => collectFeed({ token: process.env.GITHUB_TOKEN || '', curation: JSON.parse(await readFile(curationPath, 'utf8')) }) });
+  collect: async () => collectFeed({ token: process.env.FORGEJO_TOKEN || '', curation: JSON.parse(await readFile(curationPath, 'utf8')) }) });
 const server = createServer(async (request, response) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Vary', 'Origin');

@@ -14,8 +14,8 @@ npm run build:preview
 npm run preview -- --host 127.0.0.1 --port 4321
 ```
 
-Open http://127.0.0.1:4321/Hookshot/. `npm run dev` provides live editing.
-The `/Hookshot/` base is retained so existing preview links keep working.
+Open http://127.0.0.1:4321/Longshot/. `npm run dev` provides live editing.
+The project base is `/Longshot/`.
 `DOCS_SITE_URL` sets the canonical HTTPS origin; its default is `https://magicbean.dev`,
 which is metadata, not an enabled deployment or a claim that this site is hosted there.
 
@@ -54,13 +54,16 @@ remain applicable. `compatibility-review.json` records hashes of those source se
 Builds and checks stop if they change. Review the calculator rules, labels and advice
 before updating hashes; never refresh them merely to make a build pass.
 
-The checked-in `public/progress-feed.json` is a dated snapshot of public Hookshot
-reports, releases and merged changes. Historical links and attribution stay intact.
-It does not represent current Longshot activity. The front page renders it at build
-time; the progress page periodically reloads the same file. Its existing GitHub
-collector can be run deliberately with `npm run progress:sync`, but no collection
-schedule or GitHub Pages workflow is installed by this branch. See `PROGRESS.md` for
-the inherited feed's schema and editorial rules.
+The checked-in `public/progress-feed.json` is a dated snapshot of public reports,
+releases and changes from `MagicBeanDev/Longshot`. Refresh it deliberately with
+`npm run progress:sync`. Normal builds do not fetch the API. The front page renders
+the snapshot at build time; the progress page periodically reloads the feed file.
+No collection schedule or deployment workflow is installed. See `PROGRESS.md`.
+
+The reference manual, contributor guide and saves guide are generated directly from
+`README.md`, `CONTRIBUTING.md` and `docs/saves.md`. They have one maintained source;
+the generated copies are ignored by Git and rebuilt automatically. Historical
+acknowledgements and literal migration commands are preserved, not rebranded.
 
 ## Validation and limits
 

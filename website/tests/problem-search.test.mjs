@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { problemSearchHash, readProblemSearchHash } from '../src/lib/problem-search.mjs';
 test('front-page search round trips special characters inside the fragment', () => {
   const query = 'black screen & controller #123 / café?';
-  const url = new URL('https://example.com/Hookshot/progress/');
+  const url = new URL('https://example.com/Longshot/progress/');
   url.hash = problemSearchHash(query);
   assert.equal(url.search, '');
   assert.equal(readProblemSearchHash(url.hash).query, query);

@@ -1,6 +1,6 @@
 import { reportEvidence } from './progress-watch.mjs';
-export const REPOSITORY = 'NotRexed/Hookshot';
-export const ROOT = `https://github.com/${REPOSITORY}`;
+export const REPOSITORY = 'MagicBeanDev/Longshot';
+export const ROOT = `https://git.magicbean.dev/${REPOSITORY}`;
 export const REFRESH_MS = 5 * 60 * 1000;
 export const AREAS = ['Graphics', 'Performance', 'Crashes or startup', 'Sound, controls or saves', 'Controls', 'Audio', 'Setup', 'Documentation'];
 export const PLATFORMS = ['Windows', 'Linux', 'Steam Deck', 'Other'];
@@ -8,12 +8,12 @@ export const IMPACTS = ['Crashes', 'Save integrity', 'Cannot start', 'Blocked pr
 export const STATUSES = {
   reported: ['Reported', 'Someone has reported a problem or asked a question. This does not yet confirm a bug or active work.'],
   suggested: ['Suggested', 'A feature has been requested. It has not necessarily been accepted or scheduled.'],
-  working: ['Work underway', 'This item has an explicit “in progress” label on GitHub. Check its discussion for the latest details.'],
+  working: ['Work underway', 'This item has an explicit “in progress” label on Forgejo. Check its discussion for the latest details.'],
   proposed: ['Change proposed', 'A contributor has submitted a change for review. It may still change or be declined.'],
   draft: ['Draft change', 'This proposal is marked as a draft and is not ready for final review.'],
   merged: ['Merged', 'The change was accepted into its target branch. Release availability has not been verified here.'],
   closed: ['Closed report', 'This report was closed. Read the discussion to see why; closure alone does not establish a released fix.'],
-  declined: ['Closed without completion', 'GitHub records this report as not planned. Read the discussion for the reason.'],
+  declined: ['Closed without completion', 'Forgejo records this report as not planned. Read the discussion for the reason.'],
   duplicate: ['Duplicate report', 'This closed report is labelled as a duplicate. Follow the linked discussion to the original report.'],
   withdrawn: ['Closed proposal', 'This proposed change was closed without being merged.'],
   released: ['Stable release', 'A published stable version is available. Open the release notes to see what it includes.'],
@@ -24,7 +24,7 @@ const clean = (value, limit = 400) => typeof value === 'string' ? value.trim().s
 const validDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const validId = (value) => Number.isSafeInteger(value) && value > 0;
 const isSource = (value) => {
-  try { const u = new URL(value); return u.origin === 'https://github.com' && u.pathname.startsWith(`/${REPOSITORY}/`) && !u.username && !u.password; }
+  try { const u = new URL(value); return u.origin === 'https://git.magicbean.dev' && u.pathname.startsWith(`/${REPOSITORY}/`) && !u.username && !u.password; }
   catch { return false; }
 };
 
@@ -46,7 +46,7 @@ export function normalizeItem(raw, kind, curation = {}) {
   const number = release ? raw.id : raw.number;
   const updatedAt = raw.updated_at || raw.published_at;
   if (!validId(number) || !validDate(updatedAt) || (!release && !['open', 'closed'].includes(raw.state))) {
-    throw new Error('Invalid GitHub progress item.');
+    throw new Error('Invalid Forgejo progress item.');
   }
   if (release && (raw.draft !== false || !validDate(raw.published_at) || !clean(raw.tag_name))) return null;
   const labels = (raw.labels || []).map(l => clean(typeof l === 'string' ? l : l.name, 80)).filter(Boolean);
@@ -54,14 +54,14 @@ export function normalizeItem(raw, kind, curation = {}) {
   const feature = kind === 'issue' && lower.some(l => ['enhancement', 'feature', 'feature request'].includes(l));
   let status;
   if (release) status = raw.prerelease ? 'preview' : 'released';
-  else if (kind === 'pull') status = raw.merged_at ? 'merged' : raw.state === 'closed' ? 'withdrawn' : raw.draft ? 'draft' : 'proposed';
+  else if (kind === 'pull') status = raw.merged_at ? 'merged' : raw.state === 'closed' ? 'withdrawn' : (raw.draft || /^(?:WIP:|\[WIP\]|Draft:)/i.test(raw.title || '')) ? 'draft' : 'proposed';
   else if (raw.state === 'closed') status = lower.includes('duplicate') ? 'duplicate' : raw.state_reason === 'not_planned' ? 'declined' : 'closed';
   else status = lower.includes('in progress') ? 'working' : feature ? 'suggested' : 'reported';
   const id = `${kind}:${number}`;
   const review = curation[id];
   const curated = review?.sourceUpdatedAt === updatedAt ? review : null;
   const originalTitle = clean(release ? raw.name || raw.tag_name : raw.title);
-  if (!originalTitle) throw new Error('Missing GitHub title.');
+  if (!originalTitle) throw new Error('Missing Forgejo title.');
   const platforms = curated?.platforms || PLATFORMS.filter(p => lower.includes(`os:${p.toLowerCase().replace(' ', '')}`));
   const report = kind === 'issue' ? reportEvidence(raw.body) : { version: null, versionSource: null, reportedArea: 'Unspecified' };
   const area = curated?.area || (lower.includes('documentation') ? 'Documentation' : report.reportedArea);
@@ -70,7 +70,7 @@ export function normalizeItem(raw, kind, curation = {}) {
     summary: clean(curated?.summary, 1200) || STATUSES[status][1], status, updatedAt,
     publishedAt: release ? raw.published_at : null,
     mergedAt: kind === 'pull' ? raw.merged_at || null : null,
-    url: release ? `${ROOT}/releases/tag/${encodeURIComponent(raw.tag_name)}` : `${ROOT}/${kind === 'pull' ? 'pull' : 'issues'}/${number}`,
+    url: release ? `${ROOT}/releases/tag/${encodeURIComponent(raw.tag_name)}` : `${ROOT}/${kind === 'pull' ? 'pulls' : 'issues'}/${number}`,
     labels, platforms, area, reviewedAt: curated?.reviewedAt || null,
     sources: curated?.sources || [], workaround: clean(curated?.workaround, 1200),
     impact: curated?.impact || null,
@@ -98,9 +98,9 @@ export function validateFeed(feed) {
         (i.mergedAt !== null && !validDate(i.mergedAt)) ||
         (i.impact !== null && !IMPACTS.includes(i.impact)) || !i.report ||
         (i.report.version !== null && typeof i.report.version !== 'string') ||
-        (i.report.versionSource !== null && !['Hookshot version field', 'Builder version field'].includes(i.report.versionSource)) ||
+        (i.report.versionSource !== null && !['Longshot version field', 'Builder version field', 'Installation version field'].includes(i.report.versionSource)) ||
         typeof i.report.reportedArea !== 'string') throw new Error('Invalid progress feed item.');
-    const prefix = i.kind === 'release' ? `${ROOT}/releases/tag/` : `${ROOT}/${i.kind === 'pull' ? 'pull' : 'issues'}/`;
+    const prefix = i.kind === 'release' ? `${ROOT}/releases/tag/` : `${ROOT}/${i.kind === 'pull' ? 'pulls' : 'issues'}/`;
     if (typeof i.url !== 'string' || !isSource(i.url) || !i.url.startsWith(prefix) ||
         (i.kind !== 'release' && i.url !== prefix + i.number)) throw new Error('Invalid progress link.');
     ids.add(i.id);

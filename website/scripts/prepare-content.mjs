@@ -22,7 +22,7 @@ const branding = ['longshot.png', 'teary-elf-bean.png', 'grappling-hook-bean.png
 await mkdir(path.join(site, 'public/branding'), { recursive: true });
 for (const asset of branding) await copyFile(path.join(root, 'assets/branding', asset), path.join(site, 'public/branding', asset));
 function urlFor(value, source) {
-  if (!value || /^(?:[a-z]+:|\/\/|#)/i.test(value)) return value;
+  if (!value || value.startsWith(base) || /^(?:[a-z]+:|\/\/|#)/i.test(value)) return value;
   const hashAt = value.indexOf('#');
   const fragment = hashAt < 0 ? '' : value.slice(hashAt);
   const pathname = hashAt < 0 ? value : value.slice(0, hashAt);

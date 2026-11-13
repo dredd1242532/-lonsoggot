@@ -8,7 +8,7 @@ the README explains [where other files go](../README.md#where-the-files-go).
 
 ## Stable and development builds
 
-The [release page](https://github.com/NotRexed/Hookshot/releases) identifies stable and prerelease builds.
+The [release page](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) lists published builds when available.
 Read [the versioning guide](versioning.md) and [development-build instructions](../README.md#latest-development-build)
 before switching tracks. Record the exact version when reporting a problem.
 

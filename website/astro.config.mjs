@@ -21,7 +21,7 @@ export default defineConfig({
     sidebar: [
       { label: 'Overview', slug: '' },
       { label: 'Progress & updates', slug: 'progress' },
-      { label: 'Antivirus guidance (Hookshot)', slug: 'antivirus' },
+      { label: 'Download safety', slug: 'antivirus' },
       { label: 'Setup and settings', items: [
         { label: 'Check compatibility', slug: 'compatibility' },
         { label: 'Getting started', slug: 'guides/getting-started' },
@@ -30,7 +30,7 @@ export default defineConfig({
         { label: 'Transfer a save', slug: 'guides/saves' },
       ] },
       { label: 'Help and support', items: [
-        { label: 'Common issues', slug: 'guides/common-issues', badge: { text: '11 answers', variant: 'note' } },
+        { label: 'Common issues', slug: 'guides/common-issues', badge: { text: 'Start here', variant: 'note' } },
         { label: 'Report & contribute', slug: 'guides/reporting-and-contributing' },
         { label: 'Longshot issue tracker ↗', link: siteConfig.issueUrl },
       ] },

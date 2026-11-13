@@ -18,8 +18,8 @@ const guides = [
 ---
 <div class="studio-home not-content">
   <aside class="studio-release-bar" aria-label="Source release information">
-    <div><span class="studio-tag">SOURCE RELEASE</span><strong>Hookshot {stable?.tag || 'releases'}</strong><span class="studio-release-date">{stable ? date(stable.publishedAt) : 'Visit the release page'}</span></div>
-    <a href={stable?.url || 'https://github.com/NotRexed/Hookshot/releases/latest'}>Release notes & downloads <span aria-hidden="true">↗</span></a>
+    <div><span class="studio-tag">LONGSHOT RELEASES</span><strong>{stable ? `Longshot ${stable.tag}` : feed ? 'No stable release in this snapshot' : 'Release information unavailable'}</strong><span class="studio-release-date">{stable ? date(stable.publishedAt) : 'Follow development for updates'}</span></div>
+    <a href={stable?.url || 'https://git.magicbean.dev/MagicBeanDev/Longshot/releases'}>View releases <span aria-hidden="true">↗</span></a>
   </aside>
   <section id="guides" class="studio-section">
     <div class="studio-section-heading"><div><p class="studio-eyebrow">01 / THE ESSENTIALS</p><h2>Less wandering.<br />More adventure.</h2></div><a class="studio-text-link" href={`${base}reference/manual/`}>Full documentation <span aria-hidden="true">↗</span></a></div>
@@ -34,11 +34,11 @@ const guides = [
       <figure class="studio-development-icon"><img src={`${base}branding/longshot.png`} width="512" height="512" alt="The Longshot grappling hook." loading="lazy" /><figcaption>LONGSHOT / TEAM MAGICBEAN</figcaption></figure>
     </div>
     <div class="studio-development-feed">
-      <div class="studio-feed-heading"><h3>Upstream activity</h3><span class="studio-tag">HOOKSHOT ACTIVITY</span></div>
-      <p class="studio-feed-note">Merged in Hookshot. Release availability is not implied.</p>
+      <div class="studio-feed-heading"><h3>Project activity</h3><span class="studio-tag">LONGSHOT ACTIVITY</span></div>
+      <p class="studio-feed-note">Recent merges in Longshot. A merge does not imply a released build.</p>
       <ol class="studio-activity">{activity.map(item => <li><div><span class="studio-merge-state">Merged</span><time datetime={item.mergedAt}>{date(item.mergedAt)}</time><span>#{item.number}</span></div><h4><a href={item.url}>{item.title} <span aria-hidden="true">↗</span></a></h4></li>)}</ol>
-      {!activity.length && <p>Activity is unavailable. <a href="https://github.com/NotRexed/Hookshot/pulls">Browse proposed changes on GitHub</a>.</p>}
-      <p class="studio-snapshot">{feed ? `Snapshot collected ${new Date(feed.generatedAt).toISOString().replace('T', ' ').slice(0, 16)} UTC.` : 'No activity snapshot available.'} <a href="https://github.com/NotRexed/Hookshot">View Hookshot source ↗</a></p>
+      {!activity.length && <p>Activity is unavailable. <a href="https://git.magicbean.dev/MagicBeanDev/Longshot/pulls">Browse proposed changes on Forgejo</a>.</p>}
+      <p class="studio-snapshot">{feed ? `Snapshot collected ${new Date(feed.generatedAt).toISOString().replace('T', ' ').slice(0, 16)} UTC.` : 'No activity snapshot available.'} <a href="https://git.magicbean.dev/MagicBeanDev/Longshot">View project source ↗</a></p>
     </div>
   </section>
   <section id="help" class="studio-section studio-help">
@@ -46,7 +46,7 @@ const guides = [
     <div class="studio-help-tools">
       <form data-frontpage-search role="search" aria-label="Find a reported problem" action={`${base}progress/#problem-search`}><label for="frontpage-query">What’s going wrong?</label><div class="studio-search-row"><input id="frontpage-query" type="search" placeholder="Black screen, controller, stutter…" maxlength="300" aria-describedby="studio-search-note" /><button type="submit">Find help <span aria-hidden="true">→</span></button></div></form>
       <div class="studio-topics"><span>Try:</span>{['Black screen', 'Controller', 'Stutter'].map(q => <a href={`${base}progress/#problem-search?q=${encodeURIComponent(q)}`}>{q}</a>)}</div>
-      <p id="studio-search-note">Searches the Hookshot report snapshot. Reports are not confirmed diagnoses.</p>
+      <p id="studio-search-note">Searches the Longshot report snapshot. Reports are not confirmed diagnoses.</p>
       <a class="studio-help-guide" href={`${base}guides/common-issues/`}><span><strong>Common issues</strong><small>Start with the troubleshooting guide</small></span><span aria-hidden="true">↗</span></a>
       <noscript><p>Enable JavaScript to carry your search to the report board, or use the guide above.</p></noscript>
     </div>

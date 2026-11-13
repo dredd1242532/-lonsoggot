@@ -90,7 +90,7 @@ export class ProgressBoard extends HTMLElement {
     } catch {
       this.failed = true;
       if (!this.feed) {
-        this.region('overview').replaceChildren(element('p', 'Development totals are unavailable. Use the linked GitHub pages for current activity.'));
+        this.region('overview').replaceChildren(element('p', 'Development totals are unavailable. Use the linked Forgejo pages for current activity.'));
         this.region('watch').replaceChildren(element('p', 'Current-version reports are unavailable. Open the issue tracker below for the latest information.'));
         this.region('count').textContent = 'Progress data is unavailable. This does not mean there are no reported issues.';
       }
@@ -104,11 +104,11 @@ export class ProgressBoard extends HTMLElement {
     const feed = this.feed;
     this.region('freshness').textContent = feed ? `Data checked ${date(feed.generatedAt)}. Checks automatically every 5 minutes while this page is open.` : 'No progress snapshot available.';
     const old = feed && Date.now() - Date.parse(feed.generatedAt) > 15 * 60 * 1000;
-    const warning = this.failed ? feed ? 'Update unavailable. Your previous results are still shown.' : 'Could not load progress data. Use the GitHub links below or try again.' :
-      feed?.warning || (old ? 'This snapshot is over 15 minutes old. Check the linked GitHub pages for newer activity.' : '');
+    const warning = this.failed ? feed ? 'Update unavailable. Your previous results are still shown.' : 'Could not load progress data. Use the Forgejo links below or try again.' :
+      feed?.warning || (old ? 'This snapshot is over 15 minutes old. Check the linked Forgejo pages for newer activity.' : '');
     this.region('warning').textContent = warning;
     this.region('warning').hidden = !warning;
-    if (feed) this.region('coverage').textContent = `Coverage: all open items; closed items updated since ${new Date(feed.closedSince).toLocaleDateString()}; up to 20 recent published releases plus the latest stable release. GitHub can change during collection. Filters use report categories, labels or reviewed summaries; unspecified does not mean unaffected.`;
+    if (feed) this.region('coverage').textContent = `Coverage: all open items; closed items updated since ${new Date(feed.closedSince).toLocaleDateString()}; up to 20 recent published releases plus the latest stable release. Forgejo can change during collection. Filters use report categories, labels or reviewed summaries; unspecified does not mean unaffected.`;
   }
   populateVersions() {
     const select = this.form.elements.namedItem('version') as HTMLSelectElement;
@@ -137,7 +137,7 @@ export class ProgressBoard extends HTMLElement {
     const expanded = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map(d => d.dataset.group));
     root.replaceChildren();
     if (!watch.stable || !watch.version) {
-      root.append(element('p', 'A stable version with an exact version number could not be established. Browse reports below.'));
+      root.append(element('p', watch.stable ? 'The stable release has no exact version number to match. Browse reports below.' : 'No stable Longshot release is published in this snapshot. Browse reports and proposed changes below.'));
       return;
     }
     const heading = element('p');
@@ -167,7 +167,7 @@ export class ProgressBoard extends HTMLElement {
       }
       root.append(list);
     }
-    root.append(element('p', 'Evidence: exact Hookshot/Builder version fields in open reports. “Latest”, ranges and commit hashes are not matched. Comments and older unresolved reports are not proof of a current-version problem.', 'progress-note'));
+    root.append(element('p', 'Evidence: exact game or installation version fields in open reports. “Latest”, ranges and commit hashes are not matched. Comments and older unresolved reports are not proof of a current-version problem.', 'progress-note'));
     if (activeHref) [...root.querySelectorAll<HTMLAnchorElement>('a')].find(a => a.getAttribute('href') === activeHref)?.focus();
     else if (activeGroup) [...root.querySelectorAll<HTMLDetailsElement>('details')].find(d => d.dataset.group === activeGroup)?.querySelector<HTMLElement>('summary')?.focus();
   }
@@ -193,15 +193,15 @@ export class ProgressBoard extends HTMLElement {
       const details = element('details') as HTMLDetailsElement;
       details.open = expanded.has(item.id);
       details.append(element('summary', 'Evidence and developer details'));
-      details.append(element('p', STATUSES[item.status][1]), element('p', `Original GitHub title: ${item.originalTitle}`));
-      if (item.labels.length) details.append(element('p', `GitHub labels: ${item.labels.join(', ')}`));
+      details.append(element('p', STATUSES[item.status][1]), element('p', `Original Forgejo title: ${item.originalTitle}`));
+      if (item.labels.length) details.append(element('p', `Forgejo labels: ${item.labels.join(', ')}`));
       details.append(element('p', `Platform: ${item.platforms.join(', ') || 'Unspecified'} · Area: ${item.area}`));
       if (item.reviewedAt) details.append(element('p', `Plain-language summary reviewed ${date(item.reviewedAt)}.`));
       else details.append(element('p', 'Original title with an automatic status explanation; no reviewed workaround is available here.'));
-      for (const url of item.sources) { const p = element('p'); p.append(link('Reviewed source on GitHub', url)); details.append(p); }
+      for (const url of item.sources) { const p = element('p'); p.append(link('Reviewed source on Forgejo', url)); details.append(p); }
       row.append(details); results.append(row);
     }
-    this.region('count').textContent = items.length ? `Showing ${Math.min(this.limit, items.length)} of ${items.length} matching items, most recently updated first.` : 'No matching items. Try fewer filters or search the complete GitHub tracker below.';
+    this.region('count').textContent = items.length ? `Showing ${Math.min(this.limit, items.length)} of ${items.length} matching items, most recently updated first.` : 'No matching items. Try fewer filters or search the complete Forgejo tracker below.';
     this.region('more').hidden = this.limit >= items.length;
     if (focusedId) {
       const target = [...results.querySelectorAll<HTMLElement>('[data-item]')].find(row => row.dataset.item === focusedId);
