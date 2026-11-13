@@ -15,7 +15,10 @@ inline bool small_card(uint64_t vram) { return vram && vram <= (4ull << 30) + (5
 /// on a 6 GB RTX 3060 Laptop at an eighth (768 MB) or the Low preset's 512 MB, 30-32 GB of bound ranges went over PCIe every 600
 /// submits in Hyrule Field, the GPU's frame 27 ms against 19 at a quarter. 6 GB cards had an eighth because, with a quarter, the
 /// mirrors and the textures went past what the card has; the image blocks made at the start were then 896 MB of it held empty,
-/// and now they are made in the textures' pool, where the textures take them (vram_compact.h blocks_at_start)
+/// and now they are made in the textures' pool, where the textures take them (vram_compact.h blocks_at_start). The mirrors are
+/// not squeezed when VRAM runs short (RX_VK_MIRROR_TIGHT is opt-in): the texture cache is. On that laptop at the Low preset's
+/// own render size the process then used 95% of what the driver allows (82% at 512 MB, 89% at 1024), the textures it holds
+/// about the same (1.56 GB against 1.62), 39 fps against 18, and 31 at 1024, where the pools are filled first come, first served
 inline uint64_t auto_bytes(uint64_t vram) {
     if (!vram) return 3072ull << 20;
     if (small_card(vram)) return vram / 8;
