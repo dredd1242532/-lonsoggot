@@ -1226,6 +1226,9 @@ Row rows[] = {
      "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour.",
      nullptr, false, true},
     {TAB_GRAPHICS, "Detail", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_GRAPHICS, "Field of view", &opts.fov, 50, 300, 5, tx_fov,
+     "How much of the world you see: 100% is the original view. Higher is wider, lower is closer. Changes apply at once "
+     "during gameplay. Cutscenes keep their own view.", nullptr, false, true},
     {TAB_GRAPHICS, "Anisotropic filtering", &opts.anisotropy, 0, 4, 1, tx_anisotropy,
      "Keeps textures sharp on surfaces seen at a slant, such as the ground ahead: higher is sharper in the distance, for a "
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},
@@ -1257,9 +1260,6 @@ Row rows[] = {
      "How large this menu, the FPS counter and the start-up screen are drawn.", hn_menu_size, false, true},
     {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx_speed, "How the game keeps time when it runs below 60 fps.",
      hn_speed},
-    {TAB_GAMEPLAY, "Field of view", &opts.fov, 50, 150, 5, tx_fov,
-     "How much of the world you see: 100% is the original view. Higher is wider, lower is closer. Changes apply at once "
-     "during gameplay. Cutscenes keep their own view.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
     {TAB_GAMEPLAY, "Text size", &opts.text_size, 0, 4, 1, tx_text_size,
