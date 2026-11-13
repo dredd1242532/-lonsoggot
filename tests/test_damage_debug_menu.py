@@ -47,6 +47,7 @@ def main():
     source += 'constexpr int kRows = sizeof rows / sizeof rows[0];\n'
     source += '''
 bool cheats_env = false;
+bool vr_row_shown(const Row&) { return true; }   // (the VR tab's rows are not this fixture's)
 bool reflex_available() { return false; }
 bool antilag_available() { return false; }
 bool intel_compiler_row() { return false; }   // (not Intel graphics on Windows: the Developer section's rows as before)
