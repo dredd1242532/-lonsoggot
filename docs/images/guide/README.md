@@ -136,3 +136,60 @@ The helper derives repository input hashes from the compiler's dependency list a
 capture inputs. It records the source revision, fixture hashes, compiler/library versions and explicit display
 state. Preserve those records in the manifest when replacing an image. Recheck the dependency set when menu code
 changes: a successful old dependency hash check cannot detect an entirely new, unlisted dependency by itself.
+
+## Launcher decision screens
+
+The additional `launcher-manage-saves.png`, `launcher-game-files.png` and `launcher-import-confirm.png` images
+render the release's maintained Avalonia views and view models with synthetic state. They are labelled UI-only
+examples, separate from the earlier official-AppImage window captures. `scripts/screenshots/LauncherCapture.cs`
+uses Avalonia Headless with the real Skia renderer and bundled Inter fonts. It sends no desktop input, invokes no
+build or Import command, and verifies that confirmation's dry-run preview changes neither files nor directories.
+
+From a Longshot checkout with Python 3 and the .NET 10 SDK:
+
+```sh
+python -I scripts/screenshots/capture_launcher.py \
+  --source /path/to/clean/LongshotLauncher-rc.3 \
+  --output /tmp/longshot-launcher-guide
+```
+
+Use `--dotnet /path/to/dotnet` when needed. The first run restores packages from NuGet; subsequent runs reuse the
+cache under `/tmp/longshot-guide-nuget`. Both the Launcher and fixture package locks are enforced. No game, save,
+window server or installed Launcher is required. The temporary application build is deleted after capture.
+
+The helper builds a temporary copy of clean tracked Launcher sources. Two explicit adapters in that copy prevent
+private game-file discovery and replace the host hardware probe with illustrative inputs to the real requirements
+evaluator (16 GB RAM, 12 CPU threads, AVX2, 100 GB free, Vulkan 1.3, 8 GB VRAM and mesh shaders). They do not change
+view markup, labels, layout or transfer logic. Tools-ready state uses the Launcher's existing screenshot helper.
+The synthetic build is a non-executable text marker. The confirmation's source/target slots contain only fixture
+text files, following the Launcher's own test convention. No fixture file is a usable game save.
+
+`launcher-capture.json` records the original source revision/hashes, the adapters, SDK, helper/lock hashes and image
+hashes. Review the adapters whenever source structure changes. The manifest conservatively tracks all compiled
+Launcher App/Core source and resource inputs for these images, so unrelated changes can also request review.
+Keep original capture provenance separate from a later decision to retain an image.
+
+## Screenshot placement
+
+Each image should answer the question at the point where the reader needs it. Keep the action names and warnings
+in selectable text, the platform/version or synthetic-state explanation beside the image, and a full-size link for
+small screens. These placements implement the independent UI and documentation review in PR #264:
+
+| Guide | Image | Place it beside | Reader question |
+|---|---|---|---|
+| Install | Welcome | Press **Build**, before later build/Play instructions | Where do I start? |
+| Install | Game files | **Browse…**, drag/drop or **romfs and exefs folders** | What should I select next? |
+| Settings | Graphics layout | Navigation table and shortcut note, before persistence/restart details | Where are the tabs, values and help? |
+| Transfer a save | Home with Manage saves | Opening navigation instruction | How do I reach the Saves page? |
+| Transfer a save | Empty Saves page | After preparation, before the import/export procedures | Which action brings saves in or sends them out? |
+| Transfer a save | Import chooser | Inside emulator-import step 3, before confirmation | What if my emulator is not listed? |
+| Transfer a save | Import confirmation | Inside step 4, before pressing **Import** | What will be replaced, and where is the backup? |
+
+The two import images and their captions must stay inside their numbered list items. The site test checks that they
+remain with the relevant action. The updates overview links to the transfer guide; do not duplicate this sequence
+there. Additional Audio/Controls galleries are unnecessary without a specific task to teach. A Windows-only
+between-build transfer image remains conditional on a validated Windows capture.
+
+Source/image review and automated HTML/link checks do not establish mobile usability. Before marking the PR ready,
+inspect desktop and 360–390px layouts, both themes, keyboard image links and browser zoom; check image/caption
+adjacency, list numbering and horizontal overflow. Keep visual-review status explicit in the PR.

@@ -14,14 +14,17 @@ below, then look up any single setting in the list at the bottom.
 <kbd>F1</kbd> always works. **Controls → Menu shortcut** can take <kbd>Esc</kbd> or <kbd>Insert</kbd> off the list, for
 example to leave <kbd>Insert</kbd> to another overlay.
 
+![Graphics tab with Quality preset selected, setting rows on the left, help on the right, and keyboard navigation along the bottom.](images/guide/settings-graphics.png)
+
+*Menu layout: tabs at the top, settings on the left and help on the right. This UI-only v3.0.0-rc.3 example uses a
+plain background and bundled fonts. The displayed Custom values are illustrative; use the starting points below.
+Available options vary with your graphics card and build.*
+
+[Open full-size menu screenshot](images/guide/settings-graphics.png).
+
 Your choices are saved as you go, in `longshot_options.ini` in the game folder. A setting marked **After a restart**
 applies the next time the game starts: when you close the menu it asks whether to restart. **Later** keeps the change
 for next time; **Restart now** starts the game again, and you lose any progress since your last save.
-
-![Graphics tab with Quality preset selected, setting rows on the left, help on the right, and keyboard navigation along the bottom.](images/guide/settings-graphics.png)
-
-*UI-only example of the v3.0.0-rc.3 menu, rendered with a plain background and bundled fonts. Values are illustrative;
-available options vary with your graphics card and build. Use the starting points below for your settings.*
 
 ## Good starting points
 

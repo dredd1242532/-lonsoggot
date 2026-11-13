@@ -113,7 +113,19 @@ class Screenshots(unittest.TestCase):
     def test_menu_fixture_requires_both_capture_sources(self):
         self.entry['kind'] = 'menu-fixture'
         errors, _ = self.check(review=False)
-        self.assertTrue(any('must fingerprint menu.cpp and capture_menu.py' in e for e in errors))
+        self.assertTrue(any('menu-fixture must fingerprint' in e for e in errors))
+
+    def test_launcher_fixture_requires_source_and_package_lock(self):
+        self.entry['kind'] = 'launcher-fixture'
+        names = ['scripts/screenshots/LauncherCapture.cs', 'scripts/screenshots/capture_launcher.py',
+                 'scripts/screenshots/launcher-packages.lock.json']
+        self.entry['fixture_files'] = {name: 'a' * 64 for name in names}
+        self.assertEqual(self.check(review=False)[0], [])
+        for name in names:
+            with self.subTest(missing=name):
+                del self.entry['fixture_files'][name]
+                self.assertTrue(any('launcher-fixture must fingerprint' in e for e in self.check(review=False)[0]))
+                self.entry['fixture_files'][name] = 'a' * 64
 
     def test_review_never_rewrites_capture_or_review_records(self):
         self.entry['captured_source'] = {'revision': 'original-release'}

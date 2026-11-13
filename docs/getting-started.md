@@ -20,12 +20,26 @@ SteamOS, the AppImage has to be made runnable first). Every channel, and the fil
 
 ## 3. Build and play
 
-Press **Build** on the launcher’s welcome screen, then point it at your game. Building takes about 15 minutes
-on a 12-core desktop, and longer on a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
+Press **Build** on the launcher’s welcome screen.
 
 ![Longshot Launcher welcome screen with the Build button and selected build version.](images/guide/launcher-home.png)
 
 *Longshot Launcher v1.0.0-rc.3 on Linux. The build version shown may change as new releases arrive.*
+
+[Open full-size welcome screenshot](images/guide/launcher-home.png).
+
+On **Game files**, choose your game from the list. If it is not listed, use **Browse…**, drop the file on the window,
+or choose **romfs and exefs folders** for an extracted copy. Choose **Next** once the launcher has checked your selection.
+
+![Launcher Game files step with an empty file list, Browse and romfs and exefs folders choices, and Next disabled.](images/guide/launcher-game-files.png)
+
+*UI-only example from Launcher v1.0.0-rc.3 on Linux. The file list is deliberately empty; the hardware check and
+tools-ready status are illustrative. No game files were searched or loaded for this image.*
+
+[Open full-size game-file selection screenshot](images/guide/launcher-game-files.png).
+
+Follow the remaining launcher steps to build. Building takes about 15 minutes on a 12-core desktop, and longer on
+a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
 
 See [the in-game menu](../README.md#in-game-menu) for settings and controls. If something goes wrong, start with
 [Common problems](common-issues.md) and [the README's troubleshooting](../README.md#if-something-goes-wrong).

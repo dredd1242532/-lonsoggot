@@ -6,6 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { repoAssets, repositoryAssets } from '../src/repo-docs/assets.ts';
 import { renderPage } from '../src/repo-docs/pages.ts';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
 
 // A filesystem URL must be decoded: otherwise a checkout under "New Volume"
 // writes into a literal New%20Volume directory and serves broken image URLs.
@@ -21,16 +22,30 @@ test('guide images copy unchanged into a public directory containing spaces', as
 
 test('canonical guide images resolve to this site, with descriptive alt text', async () => {
   for (const [page, files] of Object.entries({
-    install: ['launcher-home.png'],
-    'saves/transfer': ['launcher-saves.png', 'launcher-import.png'],
+    install: ['launcher-home.png', 'launcher-game-files.png'],
+    'saves/transfer': ['launcher-manage-saves.png', 'launcher-saves.png', 'launcher-import.png', 'launcher-import-confirm.png'],
     settings: ['settings-graphics.png'],
   })) {
     const { markdown } = await renderPage(page);
     for (const file of files) {
       assert.ok(markdown.includes(`/docs/images/guide/${file}`), `${page}: ${file}`);
       const image = markdown.split('\n').find(line => line.includes(file));
-      assert.match(image ?? '', /^!\[[^\]]{20,}\]\(\/docs\/images\/guide\//);
+      assert.match(image ?? '', /^\s*!\[[^\]]{20,}\]\(\/docs\/images\/guide\//);
       assert.ok(!image?.includes('git.magicbean.dev'));
+      assert.ok(markdown.split('\n').some(line => line.includes('[Open full-size') && line.includes(file)), `${file}: full-size link`);
     }
   }
+});
+
+test('transfer illustrations remain within the action they explain', async () => {
+  const { markdown } = await renderPage('saves/transfer');
+  const { code } = await (await createMarkdownProcessor()).render(markdown);
+  const items = [...code.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(match => match[1]);
+  const chooser = items.find(item => item.includes('launcher-import.png'));
+  const confirmation = items.find(item => item.includes('launcher-import-confirm.png'));
+  assert.ok(chooser?.includes('Another folder') && chooser?.includes('Continue'));
+  assert.ok(confirmation?.includes('FROM') && confirmation?.includes('TO'));
+  assert.ok(confirmation?.includes('When the source and destination are correct'));
+  assert.ok(!chooser?.includes('launcher-import-confirm.png'));
+  assert.ok(!confirmation?.includes('Start Longshot and load your slot'));
 });
