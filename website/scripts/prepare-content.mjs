@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { formatManual, formatInstallHub } from './format-manual.mjs';
+import { formatManual, formatInstallHub, formatSaveGuide } from './format-manual.mjs';
 import { siteConfig } from '../site.config.mjs';
 import { contentSources } from '../content-sources.mjs';
 import { verifyCompatibilitySources } from './verify-compatibility-sources.mjs';
@@ -53,6 +53,7 @@ for (const [source, slug] of pages) {
   }).join('');
   if (source === 'README.md') text = formatManual(text);
   if (source === 'docs/getting-started.md') text = formatInstallHub(text);
+  if (['docs/saves.md', 'docs/updates-and-saves.md'].includes(source)) text = formatSaveGuide(text);
   const front = [
     '---', `title: ${JSON.stringify(title)}`, `slug: ${JSON.stringify(slug)}`,
     `editUrl: ${JSON.stringify(siteConfig.editBase + source)}`,

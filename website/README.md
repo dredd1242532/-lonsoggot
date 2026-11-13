@@ -82,6 +82,10 @@ table. `SystemRequirements.astro` renders that source at build time. Requirement
 without a published minimum or separate recommended tier are labelled explicitly;
 the table does not establish performance targets or replace GPU-status caveats.
 
+Save and update guides use Easy beans for everyday launcher steps and Advanced beans
+for optional reference details. Their canonical sources remain `docs/saves.md` and
+`docs/updates-and-saves.md`; generated cards and disclosures preserve existing anchors.
+
 ## Validation and limits
 
 `npm run check` verifies generated routes, links, anchors, edit destinations, artwork

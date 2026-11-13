@@ -76,3 +76,19 @@ export function formatInstallHub(source) {
   return wrap('install-hub', sectionsAt(source, 2).map(section => section.title
     ? wrap('install-hub-card', section.heading + '\n' + section.body) : section.body).join('\n'));
 }
+
+export function formatSaveGuide(source) {
+  const groups = sectionsAt(source, 2);
+  const jumps = `<nav class="manual-jumps saves-jumps" aria-label="Save guide shortcuts"><a href="#easy-beans"><span>START HERE</span><strong>Easy beans</strong><small>Launcher buttons and everyday steps</small></a><a href="#advanced-beans"><span>WHEN YOU NEED MORE CONTROL</span><strong>Advanced beans</strong><small>Reference details and extra options</small></a></nav>`;
+  return wrap('manual-guide saves-guide', groups.map(group => {
+    if (!group.title) return wrap('manual-intro', group.body) + jumps;
+    const advanced = group.title === 'Advanced beans';
+    const sections = sectionsAt(group.body, 3).map(section => {
+      if (!section.title) return section.body;
+      return wrap(advanced ? 'manual-chapter' : 'save-step-card', section.heading + '\n' +
+        (advanced ? fold(`Open: ${section.title}`, section.body) : section.body));
+    }).join('\n');
+    const controls = advanced ? '<div class="manual-toolbar" data-manual-controls hidden><button type="button" data-manual-expand>Expand advanced details</button><button type="button" data-manual-collapse>Collapse details</button></div>\n' : '';
+    return group.heading + '\n' + controls + sections;
+  }).join('\n\n'));
+}

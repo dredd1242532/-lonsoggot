@@ -45,6 +45,13 @@
 .sl-markdown-content .install-hub-card h2 { margin-top: 0; font-size: 1.5rem; }
 .sl-markdown-content .install-hub-card p { color: var(--soft-text); font-size: .98rem; }
 .sl-markdown-content .install-hub-card a { color: var(--sl-color-text-accent); }
+.sl-markdown-content .saves-jumps { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.sl-markdown-content .save-step-card { margin-block: 1.2rem; padding: 1.4rem 1.6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.sl-markdown-content .save-step-card > :first-child { margin-top: 0; }
+.sl-markdown-content .save-step-card > :last-child { margin-bottom: 0; }
+.sl-markdown-content .save-step-card h3 { font-size: 1.3rem; }
+.sl-markdown-content .save-step-card li { padding-left: .3rem; margin-block: .8rem; }
+.sl-markdown-content .save-step-card li::marker { font-weight: 700; color: var(--sl-color-text-accent); }
 @media (max-width: 60rem) { .sl-markdown-content .manual-jumps { grid-template-columns: 1fr; } }
 @media (max-width: 38rem) {
   .sl-markdown-content .install-hub { grid-template-columns: 1fr; }

@@ -1,17 +1,67 @@
-# Saves
+# Transfer and protect your saves
 
-Where Longshot keeps your saves, how to bring a save over from Hookshot or an emulator, how to take yours to one, and
-what to do when a copy goes wrong.
+Bring your adventure into Longshot, take it to another supported program, or keep a backup before an update.
+Start with **Easy beans** for the launcher buttons. **Advanced beans** has folder locations, terminal commands and manual recovery.
 
-Longshot, Hookshot and the emulators and ports that run the Switch 2 Ocarina of Time on a PC all write the game's saves
-as the **same files**. A save carries on at the same spot in any of them: nothing is converted, the files are copied
-across. `scripts/oot_saves.py` finds the folders and does the copy safely, and
-[Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher) does the same from its **Saves** page
-([its saves guide](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/src/branch/main/docs/saves.md)).
+**Before you copy:** save your game and close every game or emulator involved. A transfer replaces the destination's save slots;
+it does not merge two adventures. The launcher and script back up existing destination saves before replacing them.
+Keep your own backup too, and keep save files private.
 
-Nothing here comes with game files, and a save is yours: don't post it in an issue or the chat.
+## Easy beans
 
-## The files
+Use the [Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher) for these steps.
+Open **Saves** from the launcher's home page, below the default version. On Windows, check that you are working with the build you want.
+
+### Before you start
+
+1. **Save and quit.** Close Longshot and the other game or emulator using its own menu, so it finishes saving.
+2. **Keep a spare copy.** Copy your existing save folder somewhere safe before replacing it. The [save locations](#where-longshot-keeps-them) below show where to find it.
+3. **Check which adventure you want.** Note the save slot and when you last played; compare them with the saves the launcher finds.
+
+### Bring a save into Longshot
+
+1. **Choose where it comes from.** On the Saves page, select **Import from Hookshot…** or **Import from emulator**.
+2. **Pick your save.** Check the listed slots and save times. If it is on another drive or in a portable installation, use **Choose a folder**.
+3. **Check the destination before copying.** For an emulator import, start Longshot and save once first so its save folder exists, then close the game again. Hookshot import can create a new save folder.
+4. **Complete the import.** Hookshot import asks before replacing an existing Longshot save. Keep the backup location the launcher reports.
+5. **Check your adventure.** Start Longshot and load the expected slot. Keep the original and backup until you are happy the transfer worked.
+
+The transfer copies files; it does not move or convert them. Importing from Hookshot leaves its original saves untouched.
+
+### Take a save out of Longshot
+
+1. **Prepare the destination.** Start the target emulator, make a save once so its folders exist, then quit it. Close Longshot too.
+2. **Open Saves → Export to emulator.** Choose the target emulator, or **Choose a folder** for another location.
+3. **Check the result.** The destination's existing save is backed up first. After copying, open the destination program and check the expected slot.
+
+The launcher does not export to Hookshot. Use [the script's Hookshot transfer](#from-hookshot) for that direction.
+
+### Moving between Longshot builds
+
+- **Windows:** open the destination build's Saves page and use **Copy saves from another build**. Pick the build with the adventure you want to keep.
+- **Linux and Steam Deck:** standard builds already share the same saves; you usually do not need to copy anything. A custom `--user` folder is an exception; see [save locations](#where-longshot-keeps-them).
+
+### Need to undo a transfer?
+
+Close the game first. Keep a copy of the current save folder, then restore the backup from before the transfer using
+[Copy by hand](#copy-by-hand). Restore the whole set of slots rather than mixing old and new ones.
+
+Automatic backups are in `%LOCALAPPDATA%\Longshot\oot-save-backups` on Windows, or
+`~/.local/share/oot-save-backups` on Linux (`$XDG_DATA_HOME/oot-save-backups` if set).
+Choose the backup for the transfer you want to undo; keep it until the restored save loads correctly.
+
+If something looks wrong, stop before copying again. Check [Troubleshooting](#troubleshooting) or
+[ask the beans on Discord](https://discord.gg/KX99srmQTe). Describe what happened without posting your save files.
+
+## Advanced beans
+
+For custom folders, portable installs, multiple profiles and command-line transfers. You can preview a script transfer
+with `--dry-run` before making changes. The launcher steps above follow its [maintained saves guide](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/src/branch/main/docs/saves.md).
+
+Longshot, Hookshot and the supported emulators use the same save-file layout. `scripts/oot_saves.py` copies the files without conversion.
+See [What was tested](#what-was-tested) for the limits of the transfer checks.
+
+### The files
 
 Every program keeps one folder per user profile, holding:
 
@@ -25,7 +75,7 @@ slot_00/ ... slot_NN/ (one per save slot)
 
 Only the folder they are in differs.
 
-## Where Longshot keeps them
+### Where Longshot keeps them
 
 | | Where |
 |---|---|
@@ -36,7 +86,7 @@ Only the folder they are in differs.
 `--user <folder>` ([command line arguments](../README.md#running-the-game-from-the-command-line)), Longshot keeps its
 saves in `<folder>/save/<user id>/` instead.
 
-## The script
+### The script
 
 `scripts/oot_saves.py` needs Python 3 and nothing else. Run it from the Longshot folder (or a clone):
 
@@ -83,7 +133,7 @@ When Longshot (or, for `export hookshot`, Hookshot) has no save yet, the copy ma
 folder, on Windows in the game folder, which has to exist. An emulator has to have been started and saved in once, so
 that its own folder exists.
 
-## From Hookshot
+### From Hookshot
 
 [Hookshot](https://github.com/NotRexed/Hookshot) is the project Longshot was forked from. Its game writes the same files
 in the same layout, with the same user id, so a Hookshot save carries on in Longshot as it is: the files are copied byte
@@ -108,7 +158,7 @@ none over 4 MB, at least one slot and a `progress.sav` in each. If it fails, the
 
 `export hookshot` takes your Longshot save back to Hookshot the same way.
 
-## From and to the emulators
+### From and to the emulators
 
 | Program | Linux | Windows |
 |---|---|---|
@@ -141,7 +191,7 @@ The emulator paths come from each one's source (`src/common/fs/fs_paths.h`, `pat
 `docs/README-BuildKit.md`). Official Eden does not run Switch 2 games; its name is accepted because the forks above use
 its folder.
 
-## Copy by hand
+### Copy by hand
 
 1. Close both programs.
 2. Copy the target save folder somewhere safe.
@@ -149,7 +199,7 @@ its folder.
 4. Copy the **contents** of the save folder you are leaving (`account.sav`, `option.sav`, the `slot_*` folders) into the
    one you are going to. Skip `option.sav` to keep the target's settings.
 
-## Troubleshooting
+### Troubleshooting
 
 | What you see | What to do |
 |---|---|
@@ -165,7 +215,7 @@ its folder.
 
 Backups pile up, one per copy: delete old ones from `oot-save-backups` when you no longer need them.
 
-## What was tested
+### What was tested
 
 - Linux (Arch-based), Hookshot v2.0.5 and Lichii built from source on the same day.
 - A Hookshot save copied to Lichii loads in Lichii at the same spot (Kokiri Forest, the spawn by the flower patch).

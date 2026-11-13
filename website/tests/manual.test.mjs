@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { sectionsAt, formatManual, formatInstallHub } from '../scripts/format-manual.mjs';
+import { sectionsAt, formatManual, formatInstallHub, formatSaveGuide } from '../scripts/format-manual.mjs';
 
 test('manual sections do not split headings inside backtick or tilde code fences', () => {
   const source = 'Introduction\n## First\n```sh\n## A shell comment\n```\n~~~text\n## Another example\n~~~\n## Second\nDone\n';
@@ -32,4 +32,17 @@ test('installation hub retains source sections and links', () => {
   const formatted = formatInstallHub(source);
   for (const line of source.split('\n').filter(Boolean)) assert(formatted.includes(line));
   assert.equal((formatted.match(/class="install-hub-card"/g) || []).length, 2);
+});
+
+test('save guide presentation retains commands, backup guidance and heading anchors', async () => {
+  for (const source of ['saves', 'updates-and-saves']) {
+    const markdown = await readFile(new URL(`../../docs/${source}.md`, import.meta.url), 'utf8');
+    const formatted = formatSaveGuide(markdown);
+    for (const line of markdown.split('\n').filter(line => line.trim())) {
+      assert(formatted.includes(line), `${source}: source line lost: ${line}`);
+    }
+    assert(formatted.includes('href="#easy-beans"'));
+    assert(formatted.includes('href="#advanced-beans"'));
+    assert(formatted.includes('data-manual-expand'));
+  }
 });
