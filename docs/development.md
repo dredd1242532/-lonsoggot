@@ -189,6 +189,8 @@ Windows heap-corruption/fail-fast codes already reported by the host, `hos_fatal
 or a fatal renderer exit (device loss has its own reason). A same-second collision
 adds the process id and a counter; an older record is never overwritten.
 The existing `CRASH:` log lines remain unchanged. Nothing is uploaded or opened.
+Fatal-message collection runs in the shared host logger before its thread and level tags are
+added. Both ordinary and levelled host logging keep their existing formatting.
 Each start gets a random `run_id`, logged immediately after the version line and
 copied into its records. Match that id, not a rotated log's current filename, to
 find the right run. An unclean-end record keeps the previous marker's id.

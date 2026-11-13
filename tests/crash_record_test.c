@@ -252,6 +252,13 @@ int main(int argc, char **argv) {
     if (!strcmp(mode, "restart")) { hos_window_closed_exit(); return 90; }
     if (!strcmp(mode, "game-return")) { game_thread(NULL); return 90; }
     if (!strcmp(mode, "fatal")) { hos_fatal(NULL, "private-user /home/private-user secret"); return 90; }
+    if (!strcmp(mode, "device-lost-tagged") || !strcmp(mode, "device-early-tagged")) {
+        if (!strcmp(mode, "device-early-tagged"))
+            hos_log_at(HOS_LOG_WARN, "%s", "vk: device lost: reading the checkpoints");
+        hos_log_at(HOS_LOG_ERROR, "%s", "vk: FATAL: the GPU device was lost (VK_ERROR_DEVICE_LOST)");
+        hos_log_at(HOS_LOG_ERROR, "%s", "vk: FATAL: a second fatal line must not replace the first record");
+        ExitProcess(3);
+    }
     if (!strcmp(mode, "device-lost") || !strcmp(mode, "device-early")) {
         if (!strcmp(mode, "device-early")) hos_log("%s", "vk: device lost: reading the checkpoints");
         hos_log("%s", "vk: FATAL: the GPU device was lost (VK_ERROR_DEVICE_LOST)");

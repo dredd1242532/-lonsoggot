@@ -51,6 +51,11 @@ def source_contract():
     replay = block(renderer, "[[noreturn]] void replay_fatal(")
     assert replay.index('logf("vk: FATAL:') < replay.index("std::_Exit(3)")
     assert 'strstr(buf, "VK_ERROR_DEVICE_LOST") ? "device lost"' in threads
+    logger = block(threads, "static void hos_vlog(")
+    assert logger.index("hos_crash_record_fatal(") < logger.index("snprintf(line,")
+    for marker in ("void hos_log(", "void hos_log_at("):
+        wrapper = block(threads, marker)
+        assert "hos_vlog(" in wrapper and "hos_crash_record_fatal(" not in wrapper
     main = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
     assert main.index("hos_crash_record_prepare();") < main.index("MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);")
     assert "hos_crash_clean_end();" in block(main, "static DWORD WINAPI game_thread(")
@@ -91,11 +96,16 @@ def source_contract():
 
 def build(cc, temp, glue, threads, main):
     template = (ROOT / "tests/crash_record_test.c").read_text(encoding="utf-8")
+    header = (ROOT / "host/hos.h").read_text(encoding="utf-8")
+    start = header.index("enum { HOS_LOG_ERROR")
+    levels = header[start:header.index(";", start) + 1]
     replacements = {
         "RECORD_EXCEPTION": block(glue, "static void record_exception("),
         "FATAL_ADAPTER": block(glue, "void hos_crash_record_fatal("),
         "REPORT_FATAL": block(glue, "static LONG CALLBACK report_fatal("),
-        "HOS_LOG": block(threads, "void hos_log("),
+        "HOS_LOG": "\n".join((levels, block(threads, "static const char *log_level_tag("),
+                               block(threads, "static void hos_vlog("), block(threads, "void hos_log("),
+                               block(threads, "void hos_log_at("))),
         "HOS_FATAL": block(threads, "void hos_fatal("),
         "CONTROL_QUIT": block((ROOT / "host/control.c").read_text(encoding="utf-8"), "static void game_quit("),
         "WINDOW_EXIT": block((ROOT / "host/hos_relaunch.c").read_text(encoding="utf-8"), "void hos_window_closed_exit("),
@@ -180,9 +190,10 @@ def main():
             run(folder, "module-offsets")
             print("PASS: module offsets equal dladdr load-base offsets; gapped segments, same basenames and repeated mappings covered")
 
-        for mode in ("fake", "partial", "privacy", "namespace", "bounds", "fatal", "device-lost", "device-early", "crash", "signal", "abort", "heap"):
+        device_modes = ("device-lost", "device-early", "device-lost-tagged", "device-early-tagged")
+        for mode in ("fake", "partial", "privacy", "namespace", "bounds", "fatal", *device_modes, "crash", "signal", "abort", "heap"):
             folder = temp / mode; folder.mkdir()
-            result = run(folder, mode, 3 if mode in ("fatal", "device-lost", "device-early") else None if mode in ("crash", "signal", "abort", "heap") else 0)
+            result = run(folder, mode, 3 if mode == "fatal" or mode in device_modes else None if mode in ("crash", "signal", "abort", "heap") else 0)
             paths = records(folder); assert len(paths) == 1, (mode, paths)
             text, values = checked_record(paths[0])
             assert "[hos host] run_id: " + values["run_id"] + "\n" in result.stderr
@@ -192,15 +203,19 @@ def main():
                 assert "guest_register:" not in text
             else:
                 assert "+0x" in text and "host_backtrace:" in text
-                if mode not in ("device-lost", "device-early"):
+                if mode not in device_modes:
                     assert "guest_register: x0=0x1000" in text and "guest_backtrace: 0x80005678" in text, (mode, text)
             if mode == "privacy":
                 assert values["thread"] == "redacted"
             if mode == "namespace":
                 assert values["thread"] == "sead::MainThread"
-            if mode in ("device-lost", "device-early"):
+            if mode in device_modes:
                 assert values["reason"] == "device lost"
                 assert result.stderr.count("vk: FATAL:") == 2  # no writer recursion or duplicate record
+                if mode.endswith("-tagged"):
+                    assert result.stderr.count("[error] vk: FATAL:") == 2
+                if mode == "device-early-tagged":
+                    assert "[warn] vk: device lost: reading the checkpoints" in result.stderr
             if mode == "signal" and os.name != "nt":
                 assert values["signal"] == str(signal.SIGSEGV)
                 assert int(values["signal_code"]) <= 0
