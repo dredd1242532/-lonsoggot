@@ -6,6 +6,8 @@
 #include <cstring>
 #include <string>
 
+#include "../../host/hos_fopen_write.h"   // (the markers: not through a link)
+
 namespace load_default {
 
 struct Choice {
@@ -60,13 +62,13 @@ inline bool caches_lacked(long long listed_not_in_a_cache) { return listed_not_i
 
 /// The marker a session that was too slow leaves for the next start (a preparation removes the file)
 inline bool marker_there(const std::string& path) {
-    FILE* f = std::fopen(path.c_str(), "rb");
+    FILE* f = hos_fopen_read_binary(path.c_str());   // (a regular file: a FIFO there is not waited on)
     if (!f) return false;
     std::fclose(f);
     return true;
 }
 inline bool marker_write(const std::string& path, double worst_ms, double total_ms) {
-    FILE* f = std::fopen(path.c_str(), "wb");
+    FILE* f = hos_fopen_write(path.c_str(), "wb");
     if (!f) return false;
     const bool ok = std::fprintf(f, "First uses of shader programs waited for their loads for %.0f ms in one session (the longest "
                                     "%.0f ms), or in two sessions running, so programs are loaded before the title again. Delete this file, or prepare the "
@@ -76,7 +78,7 @@ inline bool marker_write(const std::string& path, double worst_ms, double total_
 /// The strike: a session whose long waits were over kStrikeMs leaves it; the next start takes it away and remembers it was there
 inline std::string strike_path(const std::string& marker_path) { return marker_path + ".waited"; }
 inline bool strike_write(const std::string& marker_path, double long_waits_ms) {
-    FILE* f = std::fopen(strike_path(marker_path).c_str(), "wb");
+    FILE* f = hos_fopen_write(strike_path(marker_path).c_str(), "wb");
     if (!f) return false;
     const bool ok = std::fprintf(f, "First uses of shader programs waited %.0f ms for their loads in the last session. Once is "
                                     "let pass; if the next session does the same, programs are loaded before the title from "
@@ -89,7 +91,7 @@ inline bool strike_take(const std::string& marker_path) {
     return there;
 }
 inline bool marker_write_lacked(const std::string& path, long long listed_not_in_a_cache) {
-    FILE* f = std::fopen(path.c_str(), "wb");
+    FILE* f = hos_fopen_write(path.c_str(), "wb");
     if (!f) return false;
     const bool ok = std::fprintf(f, "In one session %lld listed pipelines were in no cache when their programs were loaded, and "
                                     "had to be compiled in play, so programs are loaded before the title again. Delete this "

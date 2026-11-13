@@ -15,6 +15,8 @@
 #include <string>
 #include <system_error>
 
+#include "../../host/hos_fopen_write.h"   // (the stamp and its .tmp: not through a link)
+
 namespace pcache_stamp {
 
 inline const char* kStampFile = "mkw_vk_pipelines.stamp";
@@ -23,7 +25,7 @@ inline const char* kPlayPrefix = "mkw_vk_pipelines_play_";
 
 /// The stamp kept in dir's stamp file; false: none (no file, or not 8 bytes)
 inline bool read(const std::string& dir, uint64_t* stamp) {
-    FILE* f = fopen((dir + kStampFile).c_str(), "rb");
+    FILE* f = hos_fopen_read_binary((dir + kStampFile).c_str());
     if (!f) return false;
     uint64_t v = 0;
     const bool ok = fread(&v, sizeof v, 1, f) == 1 && fgetc(f) == EOF;
@@ -35,7 +37,7 @@ inline bool read(const std::string& dir, uint64_t* stamp) {
 /// stamp into dir's stamp file, through a .tmp renamed over it; whether it is in place
 inline bool write(const std::string& dir, uint64_t stamp) {
     const std::string path = dir + kStampFile, tmp = path + ".tmp";
-    FILE* f = fopen(tmp.c_str(), "wb");
+    FILE* f = hos_fopen_write(tmp.c_str(), "wb");
     if (!f) return false;
     bool ok = fwrite(&stamp, sizeof stamp, 1, f) == 1;
     ok = fclose(f) == 0 && ok;

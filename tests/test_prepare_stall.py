@@ -223,6 +223,7 @@ static bool left;
 int driver_faults() { return faults; }
 bool prepare_left_workers() { return left; }
 std::string skipped_path() { return std::getenv("FIXTURE_SKIPPED"); }
+#include "HOS_FOPEN_WRITE_H"   // (the skipped marker: written by hos_fopen_write, as vk_main.cpp does)
 '''
 
 WATCH_MAIN = r'''
@@ -311,7 +312,8 @@ def check_watchdog(cxx, tmp):
     pieces = [block(main, "int64_t steady_ms() {"), "std::atomic<int64_t> last_log_ms{0};\n",
               internal[internal.index("enum LogLevel"):internal.index(";", internal.index("enum LogLevel")) + 1],
               block(main, "static void vlogf("), block(main, "void logf(const char* fmt, ...) {"), watch]
-    exe = compile_run(cxx, "watchdog", WATCH_HEAD + "\n".join(pieces) + WATCH_MAIN, tmp)
+    exe = compile_run(cxx, "watchdog", WATCH_HEAD.replace("HOS_FOPEN_WRITE_H", (ROOT / "host" / "hos_fopen_write.h").as_posix()) +
+                      "\n".join(pieces) + WATCH_MAIN, tmp)
     for case, code, need, never in (
             ("stuck", 4, ["waiting on the GPU driver or the disk", "the predicted pipelines (5 of 10)", "STOPPED"], ["faulted"]),
             ("fault", 4, ["faulted 1 time so far", "waiting on the GPU driver, which faulted (above)", "after it faulted (above)", "STOPPED"],

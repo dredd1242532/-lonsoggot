@@ -5472,7 +5472,7 @@ void probe_dump_all(const char* why) {
     snprintf(path, sizeof path, "probe_all_%d.txt", n++);
     logf("vk: %s: %s, frame %llu", why, path, (unsigned long long)texture_frame_no());
     std::lock_guard lk(probe_mu);
-    if (FILE* o = fopen(path, "w")) {
+    if (FILE* o = hos_fopen_write(path, "w")) {
         const uint64_t now = texture_frame_no();
         for (uint64_t f = now >= 15 ? now - 15 : 0; f <= now; f++) {
             const uint32_t slot = (uint32_t)(f % kProbeFrames);
@@ -5508,7 +5508,7 @@ void probe_log(uint64_t f) {
     };
     char path[64];
     snprintf(path, sizeof path, "probe_%llu.txt", (unsigned long long)f);
-    if (FILE* o = fopen(path, "w")) {   // (scripts/probe.py aligns the frames by program and target)
+    if (FILE* o = hos_fopen_write(path, "w")) {   // (scripts/probe.py aligns the frames by program and target)
         for (const uint32_t slot : {a, b, c})
             for (uint32_t i = 0; i < probe_n[slot]; i++) {
                 const ProbeEntry& e = probe_meta[slot][i];
@@ -5984,7 +5984,7 @@ void stats_tick() {
     };
     std::stable_sort(rows.begin(), rows.end(), [&](const auto& a, const auto& b) { return rank(a.second) < rank(b.second); });
     const std::string path = std::string(dir) + "/draw_stats_" + std::to_string(at) + ".txt";
-    if (FILE* f = fopen(path.c_str(), "wb")) {
+    if (FILE* f = hos_fopen_write(path.c_str(), "wb")) {
         fprintf(f, "# frame %lld: %u draws, %zu programs (query result %d). kind prog draws | vs task mesh | clip_in clip_out | fs | note\n",
                 (long long)at, n, rows.size(), (int)res);
         for (const auto& [prog, x] : rows) {

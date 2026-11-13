@@ -3,7 +3,7 @@
 // swapchain, and the rx_* table (vk_api.h). The NVN replay itself is vk_replay.cpp.
 #include "vk_paths.h"
 #include "vk_loader.h"
-#include "../../host/hos_fopen_read.h"   // (longshot_options.ini and the skip marker: regular files only)
+#include "../../host/hos_fopen_write.h"   // (longshot_options.ini and the skip marker: regular files only, not written through a link)
 
 #include <atomic>
 #include <chrono>
@@ -1095,7 +1095,7 @@ void prepare_watchdog() {
                     logf("vk: preparation: STOPPED: %s waited %d s on the GPU driver, %s. The pipelines are made; only this "
                          "file is left out. Updating the GPU driver may help", what, save_stall_s,
                          faults ? "which faulted (above)" : "which still has pipelines it did not finish");
-                if (FILE* f = fopen(skipped_path().c_str(), "wb")) fclose(f);
+                if (FILE* f = hos_fopen_write(skipped_path().c_str(), "wb")) fclose(f);
                 prepare_end(4);
             }
             // (its own lines, at most one every quiet_s: while nothing has moved, what it waits on, whatever else the log says (the

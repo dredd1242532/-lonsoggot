@@ -1,6 +1,7 @@
 // The Insert menu's Bug report: what is read and how it is written (vk_bug_report.h). No Vulkan and no menu here:
 // tests/test_bug_report.py compiles this file alone.
 #include "vk_bug_report.h"
+#include "../../host/hos_fopen_write.h"   // (the report's files: not through a link)
 
 #include <algorithm>
 #include <atomic>
@@ -186,7 +187,7 @@ LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& 
     if (!src) return f;
     exists(from, &f.written);
     f.size = file_size(src);
-    FILE* dst = fopen(to.c_str(), "wb");
+    FILE* dst = hos_fopen_write(to.c_str(), "wb");
     if (!dst) {
         fclose(src);
         return f;
@@ -561,7 +562,7 @@ std::string write(const Inputs& in) {
             (link_short ? std::string(in.pc_options.empty() ? " (the changes from the defaults in short: the switches' names did not fit in a link)"
                                                               : " (the changes from the defaults in short: not all of them fit in a link)") : "") +
             ":\n" + link + "\n";
-    FILE* f = fopen((dir + "report.txt").c_str(), "wb");
+    FILE* f = hos_fopen_write((dir + "report.txt").c_str(), "wb");
     const bool written = f && fwrite(text.data(), 1, text.size(), f) == text.size();
     if (f) fclose(f);
     if (!written) {

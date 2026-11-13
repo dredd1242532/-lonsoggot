@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../../host/hos_fopen_write.h"   // (longshot_module_ids.bin: not through a link)
+
 namespace module_ids {
 
 constexpr uint32_t kMost = 32;   // (VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT)
@@ -80,7 +82,7 @@ public:
     bool flush() {
         std::lock_guard lk(mu_);
         if (pending_.empty() || path_.empty()) return true;
-        FILE* f = fopen(path_.c_str(), fresh_ ? "wb" : "ab");
+        FILE* f = hos_fopen_write(path_.c_str(), fresh_ ? "wb" : "ab");
         if (!f) return false;
         bool ok = true;
         if (fresh_) {

@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "zstd.h"
+#include "../../host/hos_fopen_write.h"   // (longshot_programs.bin and .idx: not through a link)
 
 #include "shader_recompiler/shader_info.h"
 #include "longshot_env.h"
@@ -117,11 +118,11 @@ void idx_write(const std::string& path, uint64_t stamp, const std::vector<std::p
     o.insert(o.end(), (const uint8_t*)h, (const uint8_t*)h + 8);
     o.insert(o.end(), (const uint8_t*)&stamp, (const uint8_t*)&stamp + 8);
     for (const auto& [key, d] : order) idx_put(o, key, d.size, d.kind);
-    FILE* f = fopen(path.c_str(), "wb");
+    FILE* f = hos_fopen_write(path.c_str(), "wb");
     if (!f) return;
     const bool ok = fwrite(o.data(), 1, o.size(), f) == o.size() && fflush(f) == 0;
     fclose(f);
-    if (ok) disk_idx = fopen(path.c_str(), "ab");
+    if (ok) disk_idx = hos_fopen_write(path.c_str(), "ab");
     else remove(path.c_str());   // (a short one would only be read as far as it goes, but the next start makes it again anyway)
 }
 
@@ -149,7 +150,7 @@ void disk_init() {
             const HANDLE held = CreateMutexA(nullptr, FALSE, name);
             const bool taken = !held || GetLastError() == ERROR_ALREADY_EXISTS;
 #else   // (linux: a lock on a file beside the cache, let go when the process ends)
-            const int fd = open((path + ".lock").c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+            const int fd = open((path + ".lock").c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0644);   // (not made through a link)
             const bool taken = fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) != 0;
 #endif
             if (taken) {
@@ -170,7 +171,7 @@ void disk_init() {
         std::vector<std::pair<uint64_t, DiskRecord>> order;   // (every record, in the file's order: for the index)
         bool idx_whole = false;   // (the index named every record, and nothing more)
         int64_t good = 0, whole = 0;
-        if (FILE* f = fopen(path.c_str(), "rb")) {
+        if (FILE* f = hos_fopen_read_binary(path.c_str())) {
             _fseeki64(f, 0, SEEK_END);
             whole = _ftelli64(f);
             _fseeki64(f, 0, SEEK_SET);
@@ -180,7 +181,7 @@ void disk_init() {
                 good = 16;
                 size_t idx_n = 0;
                 bool idx_short = false;   // (it named records the file does not have whole)
-                if (FILE* x = fopen(idx_path.c_str(), "rb")) {
+                if (FILE* x = hos_fopen_read_binary(idx_path.c_str())) {
                     std::vector<uint8_t> idx;
                     _fseeki64(x, 0, SEEK_END);
                     const int64_t n = _ftelli64(x);
@@ -248,11 +249,11 @@ void disk_init() {
         }
         if (good) {
             if (good != whole) {   // (a record cut short: without it)
-                if (FILE* f = fopen(path.c_str(), "r+b")) _chsize_s(_fileno(f), good), fclose(f);
+                if (FILE* f = hos_fopen_write(path.c_str(), "r+b")) _chsize_s(_fileno(f), good), fclose(f);
             }
-            disk_out = fopen(path.c_str(), "ab");
+            disk_out = hos_fopen_write(path.c_str(), "ab");
         } else {
-            disk_out = fopen(path.c_str(), "wb");
+            disk_out = hos_fopen_write(path.c_str(), "wb");
             if (disk_out) {
                 const uint32_t h[2] = {magic, 0};
                 fwrite(h, 4, 2, disk_out);
@@ -262,7 +263,7 @@ void disk_init() {
             order.clear();
         }
         if (disk_out) {
-            if (idx_whole) disk_idx = fopen(idx_path.c_str(), "ab");
+            if (idx_whole) disk_idx = hos_fopen_write(idx_path.c_str(), "ab");
             else idx_write(idx_path, stamp, order);
         }
         disk_in = disk_out ? fopen(path.c_str(), "rb") : nullptr;

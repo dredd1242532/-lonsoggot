@@ -22,6 +22,7 @@
 #include "menu_i18n.h"
 #include "vk_menu.h"
 #include "vk_paths.h"
+#include "../../host/hos_fopen_write.h"   // (language.txt: not through a link)
 
 namespace mkwvk::i18n {
 
@@ -165,7 +166,7 @@ std::string language_txt() {
 /// game has (a stray line is passed over); "" when none does
 std::string read_language_txt() {
     std::string found;
-    if (FILE* f = fopen(language_txt().c_str(), "r")) {
+    if (FILE* f = hos_fopen_read(language_txt().c_str())) {
         char line[128];
         while (found.empty() && fgets(line, sizeof line, f)) {
             std::string l(line);
@@ -210,7 +211,7 @@ int game_lang_index() {
 bool set_game_language(int index) {
     const char* code = game_lang_code(index);
     std::vector<std::string> lines;
-    if (FILE* f = fopen(language_txt().c_str(), "r")) {
+    if (FILE* f = hos_fopen_read(language_txt().c_str())) {
         char line[512];
         while (fgets(line, sizeof line, f)) lines.emplace_back(line);
         fclose(f);
@@ -223,7 +224,7 @@ bool set_game_language(int index) {
     }
     if (!set) lines.push_back(std::string(code) + "\n");
     // (written whole or not at all: a folder that cannot be written keeps language.txt, and the row goes back to it)
-    FILE* f = fopen(language_txt().c_str(), "w");
+    FILE* f = hos_fopen_write(language_txt().c_str(), "w");
     if (!f) return false;
     bool ok = true;
     for (const auto& l : lines) ok = fputs(l.c_str(), f) >= 0 && ok;

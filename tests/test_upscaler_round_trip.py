@@ -39,6 +39,7 @@ FIXTURE = r'''
 #define _CRT_SECURE_NO_WARNINGS
 #include "upscaler_rows.h"
 #include "auto_settings.h"
+#include "../../host/hos_fopen_write.h"   // (the options file: read as a regular file, not written through a link)
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -359,7 +360,7 @@ def fixture(source):
     menu = (source / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     header = (source / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
     init = definition(menu, "void menu_init")
-    load_at = init.index('    if (FILE* f = fopen(ini_path().c_str(), "r")) {')
+    load_at = init.index('    if (FILE* f = hos_fopen_read(ini_path().c_str())) {')
     walk_at = menu.index("template <class State, class At, class Step>")
     auto_at = header.index("constexpr int kAutoPreset")
     replacements = {
