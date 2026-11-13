@@ -592,7 +592,18 @@ number is not the obvious one:
 
 ANR is loaded only for `frame_generation_by=2` with a fixed multiplier (`frame_generation>=2`) and current temporal
 upscaler inputs. The optional package lives in `<game>/anr/`: `nvngx_dlssg.dll`, `nr_fg.ini`, `path_table.json`,
-`size_table.json` and the complete model/kernel tree from the official addon. Nothing is downloaded or bundled.
+`size_table.json` and the complete `.nrx` tree from the official addon. The build's `--fetch-anr-runtime` switch is off
+by default and Windows x64 only: `scripts/anr_sdk.py` uses the builder's checked ZIP downloader/extractor, pins the
+official FG-V.B15 addon (3,231,158 bytes, SHA-256 `717e93b3e63cb08dbaf6240cd585bae94d498c2749d8603d800d17ad97ef9e41`),
+caches it under `<work>/anr-sdk`, and stages only the 19 regular files under `Apex Neural Rendering FG/dlssg/` before
+installing the complete subtree. No installer is run and no graphics option is changed. Modified packages are kept;
+a reinstall or repair of the pinned package preserves `nr_fg.ini`. `@@anr-runtime ready` reports only a verified
+installation or already verified package, so a launcher need not infer installation from the download request.
+The standalone helper also requires `--fetch-anr-runtime`, with optional `--game <folder>` and cache folder arguments.
+ANR binaries and models are neither bundled nor mirrored; binary/model redistribution terms have not been established.
+The [official release](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15) requires the Microsoft Visual C++
+2015–2022 Redistributable x64 runtime. A complete pinned package may keep its generated `nr_fg-*.log` files without
+losing verified status. An incomplete package with these logs is left unchanged rather than deleting its logs during repair.
 The original loader in `gpu/vk/vk_anr.cpp` binds the provider's Vulkan exports directly, without NVIDIA's NGX core or
 its RTX gates; `anr_parameters.h` implements the published parameter ABI with an MSVC-layout table verified against
 an original MSVC-ABI mock provider from a MinGW host. NVIDIA's SDK and ANR's implementation are not vendored.

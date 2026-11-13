@@ -474,11 +474,16 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   show artifacts. The renderer's own interpolation makes the frames; at 2x, AMD FSR 3.1's frame interpolation can make
   it instead with `RX_VK_FSR_FG=1` (below: it moves the HUD with the scene, so it is not the default). **Frame pacing** shows frames at an even interval: less stutter, up to one frame of delay. It paces
   the frames that frame generation shows, so it has no effect while Frame generation is Off.
-- **ANR (experimental)** is an optional choice in **Frame generation by** on Windows x64. Install the contents of the
-  `dlssg` folder from the official [ANR FG addon](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15) into an `anr`
-  folder beside `image.bin`: keep its DLL, configuration, tables and all model/kernel subfolders together. The addon
-  is supplied separately; Longshot includes no ANR binaries or models and does not run its installer or replace the
-  normal frame generator. Choose a fixed multiplier, starting with **2x**, and a temporal Upscaler (FSR 3.1, DLSS or
+- **ANR (experimental)** is an optional choice in **Frame generation by** on Windows x64. The Launcher's optional
+  ANR download is off by default. With `make_game.py`, `--fetch-anr-runtime` downloads the official
+  [FG-V.B15 addon](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15), checks its pinned size and SHA-256, caches
+  it in `<work>/anr-sdk`, and installs only its complete `dlssg` subtree into `<game>/anr`. Or install that subtree
+  manually beside `image.bin`: keep its DLL, configuration, tables and all `.nrx` subfolders together. Existing modified
+  packages are left unchanged, and reinstalling the pinned package preserves `nr_fg.ini`. Longshot includes no ANR
+  binaries or models, runs no installer, and does not select ANR or change graphics options when downloading it.
+  The [ANR release](https://github.com/apex-compute/ANR/releases/tag/FG-V.B15) requires the Microsoft Visual C++ 2015–2022
+  Redistributable x64 runtime.
+  Choose a fixed multiplier, starting with **2x**, and a temporal Upscaler (FSR 3.1, DLSS or
   FSR 4) to provide the scene's depth and motion. The provider's reported limit controls which multipliers it can make.
   Native HDR and the Frame generation row's Auto use the built-in GPU generator. A missing package, unavailable inputs
   or a refused frame also uses the built-in generator; the row and its help show that fallback and its reason.

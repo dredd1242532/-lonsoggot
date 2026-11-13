@@ -19,6 +19,7 @@ data ever comes with the tools. Lines the app reads, each on its own line of std
     @@times <total> <compile> <previous|-1>      finished: this build's times beside the last one's
     @@check <ok|bad> <text>  (--check) the answer
     @@done <folder>          finished
+    @@anr-runtime ready     the optional ANR package was verified and installed (or already present)
     @@error <text>           stopped
 
 and one plain line the builders also read (older ones only show it): "the shaders were not prepared now (<why>): ..." when the
@@ -43,6 +44,7 @@ import threading
 import time
 import sys
 import tempfile
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1937,6 +1939,43 @@ def place_fsr_runtime(out):
     return dst
 
 
+def anr_script():
+    """The optional official addon downloader/installer, shared with the launcher; no renderer build switch."""
+    spec = importlib.util.spec_from_file_location("anr_sdk", os.path.join(ROOT, "scripts", "anr_sdk.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def fetch_anr_runtime(a):
+    """Opt-in only: cache the official Windows x64 addon before reading the game, using the build's own work folder."""
+    if not getattr(a, "fetch_anr_runtime", False):
+        return None
+    anr = anr_script()
+    if LINUX or not anr.supported():
+        fail("ANR's optional provider is supported on Windows x64 only; nothing downloaded.")
+    print(anr.NOTICE, flush=True)
+    try:
+        return anr.fetch(os.path.join(a.work, "anr-sdk"), say=lambda line: print(line, flush=True))
+    except (OSError, ValueError, zipfile.BadZipFile) as e:
+        fail("ANR's addon could not be downloaded (%s). Retry, or turn off the optional ANR download." % e)
+
+
+def place_anr_runtime(a, out):
+    """Install only the verified cached subtree; never select ANR or change the player's graphics options."""
+    if not getattr(a, "fetch_anr_runtime", False):
+        return None
+    anr = anr_script()
+    try:
+        archive = os.path.join(a.work, "anr-sdk", anr.TOOL.sha256 + ".zip")
+        placed = anr.install(archive, out, say=lambda line: print(line, flush=True))
+        if placed:
+            print("@@anr-runtime ready", flush=True)
+        return placed
+    except (OSError, ValueError, zipfile.BadZipFile) as e:
+        fail("ANR's addon could not be installed (%s). Close any game using the package and retry." % e)
+
+
 def place_ngx_runtime(out):
     """(NVIDIA DLSS) a game built with NVIDIA's SDK (LONGSHOT_NGX_SDK, as nx2/build.py takes it) gets DLSS's runtime in its ngx
     folder, where gpu/vk/vk_dlss.cpp looks first: nvngx_dlss.dll on Windows, libnvidia-ngx-dlss.so.<version> on Linux; and
@@ -2002,6 +2041,8 @@ def parse_args():
     p.add_argument("--fetch-fsr-runtime", action="store_true",
                    help="with --fsr (Windows): download AMD's FSR runtime (scripts/ffx_sdk.py) and put it in the game folder")
     p.add_argument("--accept-amd-license", action="store_true", help="AMD's FSR SDK license, accepted (with --fetch-fsr-runtime)")
+    p.add_argument("--fetch-anr-runtime", action="store_true",
+                   help="Windows x64: download the optional official ANR addon into --work/anr-sdk and install it in the game's anr folder")
     a = p.parse_args()
     if a.prepare:   # (first: a bad --game below is said as RecompLauncher's "error" line)
         global PREPARE
@@ -2140,6 +2181,7 @@ def main(a=None):
     check_cpu(fsr)   # (no game read yet: the AppImage on a CPU without AVX2 stops here)
     if getattr(a, "fetch_ngx_sdk", False):
         fetch_ngx_sdk(a)   # (the SDK selects a source renderer instead of LONGSHOT_VK_PREBUILT)
+    fetch_anr_runtime(a)
     check_windows_sdk(work)
     stop_stray_compilers(work, a.default_work)
     drop_stale_objects(work)
@@ -2449,6 +2491,7 @@ def main(a=None):
     place_ngx_runtime(out)
     if fsr_wanted(a, out) and getattr(a, "fetch_fsr_runtime", False):
         place_fsr_runtime(out)
+    place_anr_runtime(a, out)
     # every shader of the game, for its first start to translate (gpu/vk/vk_shader.cpp seed_open). Without it the game still runs, compiling them
     # as it meets them: not worth stopping a finished build for
     # (made again only when the game's shader files, the census or the list itself changed: 4 s and 514 MB written at every update)
