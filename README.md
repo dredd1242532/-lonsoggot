@@ -669,8 +669,8 @@ anything SDL reports as a Switch Pro Controller or Joy-Con, and that includes th
 `HOS_HD_RUMBLE=0` to give them the plain motor rumble.
 
 To change which gamepad button or key presses a Switch button, or which keys move and turn the camera, open the
-Controls tab's Controls page. Choose a row and a column (Gamepad or Keyboard), press <kbd>Enter</kbd> (or the bottom
-face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd> clears it, and Reset to defaults
+Controls tab's Controls page. Choose a row and a column (Input 1 or 2 for the gamepad, Key 1 or 2 for the keyboard: each
+control takes two of each), press <kbd>Enter</kbd> (or the bottom face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</kbd> clears it, and Reset to defaults
 puts them all back. A gamepad button taken from another Switch button swaps with it. The page saves them in
 `longshot_options.ini`.
 
