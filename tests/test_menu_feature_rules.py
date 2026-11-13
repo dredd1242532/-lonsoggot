@@ -40,13 +40,14 @@ static void seed_file() {
     if (!f) std::abort();
     // Row-less and unknown lines deliberately have formatting/value text a menu must not normalize.
     std::fputs("options_version=3\nmenu_shortcut=0\nultrawide=0\n"
-               "coop_amount_fixture=19\ncoop_switch_fixture=0\ncoop_added_fixture=-5\n"
+               "coop_labels=2\ncoop_amount_fixture=19\ncoop_switch_fixture=0\ncoop_added_fixture=-5\n"
                "coop_legacy_fixture=  +009  \ncoop_future_fixture=009 keep me\n", f);
     std::fclose(f);
 }
 int main(int argc, char** argv) {
     CHECK(argc == 2);
     ini_file = argv[1];
+    CHECK(opts.coop_labels == 1);
     coop_feature_init();
     CHECK(coop_feature_count == (NAMED_REGISTRY ? 3 : 0));
     CHECK(menu_row_count() == kRows + coop_feature_count);
@@ -84,12 +85,15 @@ int main(int argc, char** argv) {
     opts.menu_shortcut = 0, opts.ultrawide = 0;
     startup_read();
     CHECK(opts.menu_shortcut == 2 && opts.ultrawide == 1);   // the real version-3 startup migrations ran
+    CHECK(opts.coop_labels == 2); // local tab value loads by its named key, not the row's display name
+    opts.coop_labels = 0;
     if (NAMED_REGISTRY) {
         CHECK(coop_feature_rows[0].value == 19 && coop_feature_rows[1].value == 0 && coop_feature_rows[2].value == -5);
         coop_feature_rows[0].value = 23;
     }
     save();
     CHECK(has("coop_legacy_fixture=  +009  \n") && has("coop_future_fixture=009 keep me\n"));
+    CHECK(has("coop_labels=0\n") && occurrences("coop_labels") == 1);
     CHECK(has(NAMED_REGISTRY ? "coop_amount_fixture=23\n" : "coop_amount_fixture=19\n"));
     CHECK(occurrences("coop_amount_fixture") == 1 && occurrences("coop_switch_fixture") == 1 &&
           occurrences("coop_added_fixture") == 1 && occurrences("coop_legacy_fixture") == 1 && occurrences("coop_future_fixture") == 1);
@@ -104,6 +108,7 @@ int main(int argc, char** argv) {
     startup_read();
     save();
     CHECK(opts.menu_shortcut == 2 && opts.ultrawide == 1);
+    CHECK(opts.coop_labels == 2 && has("coop_labels=2\n") && occurrences("coop_labels") == 1);
     CHECK(has("coop_amount_fixture=19\n") && has("coop_switch_fixture=0\n") && has("coop_added_fixture=-5\n"));
     CHECK(has("coop_legacy_fixture=  +009  \n") && has("coop_future_fixture=009 keep me\n"));
     CHECK(occurrences("coop_amount_fixture") == 1 && occurrences("coop_switch_fixture") == 1 &&
@@ -150,7 +155,8 @@ struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char
                        host.replace("@@TYPES@@", max_features + "\n" + feature_type + "\n" + setting_type))
     cpp = replace_once(cpp, '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},',
                        '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},\n'
-                       '    {TAB_RULES, "Co-op at start", &opts.coop, 0, 1, 1, tx, "", nullptr, false, true},')
+                       '    {TAB_RULES, "Co-op at start", &opts.coop, 0, 1, 1, tx, "", nullptr, false, true},\n'
+                       '    {TAB_COOP, "Friend labels", &opts.coop_labels, 0, 2, 1, tx, "", nullptr, false, true},')
     cpp = replace_once(cpp, "std::string ini_file;", "constexpr int kRows = sizeof rows / sizeof rows[0];\nint restart_slot[kRows]{};\nstd::string ini_file;")
     text_field = block(menu, menu.index("struct TextField {")) + ";"
     cpp = replace_once(cpp, 'struct { int len; const char* text; } coop_name_field{0, ""}, coop_relay_field{0, ""};',

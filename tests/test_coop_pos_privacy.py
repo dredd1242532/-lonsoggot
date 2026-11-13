@@ -87,7 +87,7 @@ def main():
             text=text.replace('slot->pos_epoch == s->accepted_epoch[slot->dst]','1')
         (d/'coop.c').write_text(text); (d/'check.c').write_text(C)
         libs=['-lws2_32','-lbcrypt','-liphlpapi'] if os.name=='nt' else ['-pthread','-lm']
-        cmd=[a.cc,'-std=gnu11','-D_GNU_SOURCE','-Wall','-Wextra','-Werror','-I'+str(d),'-I'+str(ROOT/'host'),str(d/'check.c'),str(ROOT/'host/coop_net.c'),str(ROOT/'host/coop_proto.c'),str(ROOT/'host/coop_relay.c'),str(ROOT/'third_party/monocypher/monocypher.c'),'-o',str(d/'check')]+libs
+        cmd=[a.cc,'-std=gnu11','-D_GNU_SOURCE','-D_CRT_SECURE_NO_WARNINGS','-Wall','-Wextra','-Werror','-I'+str(d),'-I'+str(ROOT/'host'),str(d/'check.c'),str(ROOT/'host/coop_net.c'),str(ROOT/'host/coop_proto.c'),str(ROOT/'host/coop_relay.c'),str(ROOT/'third_party/monocypher/monocypher.c'),'-o',str(d/'check')]+libs
         subprocess.run(cmd,check=True); subprocess.run([str(d/'check')],check=True)
 
 if __name__=='__main__': main()

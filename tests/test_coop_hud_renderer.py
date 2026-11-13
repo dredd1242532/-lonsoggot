@@ -9,11 +9,11 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS=['--cxx','{cxx}']
 FIXTURE=r'''
+#define _CRT_SECURE_NO_WARNINGS
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #define _Static_assert static_assert
-#define _CRT_SECURE_NO_WARNINGS
 #include <cmath>
 #include <cstdint>
 #include <cstring>

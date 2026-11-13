@@ -10,6 +10,7 @@ import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS=['--cc','gcc']
 C=r'''
+#define _CRT_SECURE_NO_WARNINGS
 #include "coop_proto.c"
 #include <assert.h>
 #include <stdio.h>
