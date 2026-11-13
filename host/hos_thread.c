@@ -40,7 +40,7 @@ struct HosThread {
     /* virtual cores (HOS_VCORES): the core held + 1 (0: none), the last one, a better waiter's request, queued, and
        whether it has run without one since an escape (vc_acquire; until its next block, hos_vcore_away, or the next
        hos_vcore_back) */
-    int vc_held, vc_last, vc_queued, vc_escaped;
+    int vc_held, vc_last, vc_queued, vc_escaped, vc_remask;
     volatile int vc_kick;
     int64_t vc_since;
     CONDITION_VARIABLE vc_cv;
@@ -97,12 +97,31 @@ static void pin_by_core(HosThread *t) {
     (void)t;
 #endif
 }
+#if !defined(__EMSCRIPTEN__)
+static void vc_note_mask_change(HosThread *t);
+static int vc_mask_changed(uint64_t old_mask, uint64_t new_mask);
+#endif
 void hos_thread_affinity(HosThread *t, int ideal, uint64_t mask) {
     if (ideal >= 0) t->ideal_core = ideal;
-    if (mask) t->core_mask = mask;
+    const uint64_t old_mask = t->core_mask;
+    t->core_mask = mask;   /* (0 is a real mask: no affinity, and the game still caches the core) */
     pin_by_core(t);
+#if !defined(__EMSCRIPTEN__)
+    if (vc_mask_changed(old_mask, mask)) vc_note_mask_change(t);
+#else
+    (void)old_mask;
+#endif
 }
 uint64_t hos_thread_mask(HosThread *t) { return t->core_mask; }
+static int hos_thread_wrapper_mask(HosThread *t, uint32_t *out) {
+    if (!t || t->entry != 0x834a2e50ULL || !t->arg) return 0;
+    uint64_t *tt = (uint64_t *)hos_guest_range(t->arg + 0xb8, 8);
+    if (!tt || *tt != t->guest_tt) return 0;
+    uint32_t *m = (uint32_t *)hos_guest_range(t->arg + 0xb0, 4);
+    if (!m) return 0;
+    *out = *m;
+    return 1;
+}
 void hos_thread_boost(int level) {
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     static int off = -1;
@@ -1403,12 +1422,25 @@ HLE(_ZN2nn2os11SleepThreadENS_8TimeSpanE) {
 
 /* ---- TLS slots --------------------------------------------------------------------------------------------- */
 static volatile LONG slot_used[HOS_TLS_SLOTS];
+/* the guest's core-cache key: f_834aa7e0 allocates 0x84e9f7ac; its slot is where the trampoline writes core+1 */
+static volatile int core_tls_slot = -1;
+static int core_tls_alias_now(void) {
+    if (core_tls_slot < 0) return 1;
+    void *dp = hos_guest_range(0x84e9f668ULL, 8);
+    if (!dp) return 0;
+    const uint64_t d = *(const uint64_t *)dp;
+    if (!d) return 0;
+    void *p = hos_guest_range(d + 0x48, 4);
+    if (!p) return 0;
+    return (int)*(const uint32_t *)p == core_tls_slot;
+}
 
 /* nn::os::AllocateTlsSlot(TlsSlot*, void (*)(unsigned long)) -> Result */
 HLE(_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE) {
     for (int i = 0; i < HOS_TLS_SLOTS; i++) {
         if (!InterlockedCompareExchange(&slot_used[i], 1, 0)) {
             G32(ARG(0)) = (uint32_t)i;
+            if (ARG(0) == 0x84e9f7acULL) core_tls_slot = i;
             RET(0);
             return;
         }
@@ -1636,11 +1668,30 @@ int hos_vcores_on(void) {
     return on;
 }
 static int vc_cores(void) { return hos_cores() > 8 ? 8 : hos_cores(); }
+/* (a raw mask change outside the cores the host has is not a remask: 0x40 -> 0x80 on a 6-core host) */
+static int vc_mask_changed(uint64_t old_mask, uint64_t new_mask) {
+    const uint64_t all = (1u << vc_cores()) - 1;
+    return (old_mask & all) != (new_mask & all);
+}
+/* the core a mask-0 thread should take: the guest's cached core (seam threads), then its last one, then ideal/lowest */
+static int vc_pref_core(HosThread *t) {
+    int c = -1;
+    const int slot = core_tls_slot;
+    uint32_t wm = 0;
+    const int seam = hos_thread_wrapper_mask(t, &wm);
+    if (seam && slot >= 0 && slot < HOS_TLS_SLOTS && !core_tls_alias_now()) {
+        const uint64_t cached = t->tls_slots[slot];
+        if (cached > 0 && cached <= (uint64_t)vc_cores()) c = (int)cached - 1;
+    }
+    if (c < 0 && t->vc_last > 0) c = t->vc_last - 1;
+    if (c < 0) c = hos_thread_core(t);
+    if (c < 0 || c >= vc_cores()) c = 0;
+    return c;
+}
 static unsigned vc_allowed(HosThread *t) {
     const unsigned all = (1u << vc_cores()) - 1;
-    unsigned m = (unsigned)(t->core_mask & all);
-    if (!m) m = 1u << hos_thread_core(t);
-    return m;
+    const unsigned m = (unsigned)(t->core_mask & all);
+    return m ? m : all;   /* (mask 0 is no affinity; vc_free_for prefers the cached/last core) */
 }
 /* a runs before b */
 static int vc_better(HosThread *a, HosThread *b) {
@@ -1649,6 +1700,16 @@ static int vc_better(HosThread *a, HosThread *b) {
 /* a free core t may run on (its last one, its ideal one, then the lowest), or -1; holding vc_lock */
 static int vc_free_for(HosThread *t) {
     const unsigned m = vc_allowed(t);
+    if (t->core_mask == 0) {
+        const int pref = vc_pref_core(t);
+        if (pref >= 0 && !vc_owner[pref]) return pref;
+        for (int c = 0; c < vc_cores(); c++)
+            if (!vc_owner[c]) {
+                t->vc_remask = 1;
+                return c;
+            }
+        return -1;
+    }
     if (t->vc_last > 0 && (m >> (t->vc_last - 1) & 1) && !vc_owner[t->vc_last - 1]) return t->vc_last - 1;
     const int ideal = hos_thread_core(t);
     if ((m >> ideal & 1) && !vc_owner[ideal]) return ideal;
@@ -1656,11 +1717,26 @@ static int vc_free_for(HosThread *t) {
         if ((m >> c & 1) && !vc_owner[c]) return c;
     return -1;
 }
+/* A post-start mask change can leave the holder on a core the new mask excludes. Ask it to yield at its next
+   checkpoint; the reacquisition uses the new mask. */
+static void vc_note_mask_change(HosThread *t) {
+    if (!hos_vcores_on() || !t) return;
+    AcquireSRWLockExclusive(&vc_lock);
+    t->vc_remask = 1;
+    const uint32_t mask = (uint32_t)(t->core_mask & ((1u << vc_cores()) - 1));
+    if (t->vc_held) {
+        const int c = t->vc_held - 1;
+        const int move = mask == 0 ? (c != vc_pref_core(t)) : !((mask >> c) & 1);
+        if (move) t->vc_kick = 2;
+    }
+    ReleaseSRWLockExclusive(&vc_lock);
+}
 static void vc_take(HosThread *t, int c) {
     vc_owner[c] = t;
     t->vc_held = c + 1;
     t->vc_last = c + 1;
     t->vc_kick = 0;
+    t->vc_remask = 0;
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
@@ -1678,6 +1754,7 @@ static void vc_grant(int c) {
     for (int i = 0; i < vc_nq; i++)
         if ((vc_allowed(vc_queue[i]) >> c & 1) && (!best || vc_better(vc_queue[i], best))) best = vc_queue[i];
     if (!best) return;
+    if (best->core_mask == 0 && c != vc_pref_core(best)) best->vc_remask = 1;
     vc_dequeue(best);
     vc_take(best, c);
     HOS_CHAIN(HOS_CHAIN_SIGNAL, vc_chain_key(best));
@@ -1787,7 +1864,8 @@ static void vc_yield(HosThread *t, int strict) {
     if (!t->vc_held) return;
     AcquireSRWLockExclusive(&vc_lock);
     const int c = t->vc_held - 1;
-    int any = 0;
+    /* a mask change that excludes the held core must move even when nobody waits */
+    int any = t->core_mask == 0 ? (c != vc_pref_core(t)) : !((t->core_mask >> c) & 1);
     for (int i = 0; i < vc_nq && !any; i++) {
         HosThread *w = vc_queue[i];
         any = (vc_allowed(w) >> c & 1) && (strict ? w->priority < t->priority : w->priority <= t->priority);
