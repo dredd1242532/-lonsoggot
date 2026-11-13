@@ -223,7 +223,7 @@ def build_outputs(game):
         dirs[:] = sorted(x for x in dirs if not (top == game and x == "romfs"))
         for f in sorted(fs):
             rel = os.path.relpath(os.path.join(top, f), game).replace(os.sep, "/")
-            if rel not in skip and not rel.endswith(".log"):
+            if rel not in skip and not is_cache(rel) and not rel.endswith(".log"):   # (play caches too: a seed brings them)
                 out.append(rel)
     return out
 
@@ -240,7 +240,7 @@ def generated_changes(base_game, game, base_outputs=None):
         for f in sorted(fs):
             p = os.path.join(top, f)
             rel = os.path.relpath(p, game).replace(os.sep, "/")
-            if rel in skip:
+            if rel in skip or is_cache(rel):
                 continue
             q = os.path.join(base_game, rel)
             if not (os.path.isfile(q) and same_file(p, q)):
