@@ -24,7 +24,7 @@ export const SITE_HOST = "longshot.magicbean.dev";
 export const FORGE = "https://git.magicbean.dev";
 export const KINDS = ["Unknown", "Antivirus", "WrongGameVersion", "IncompleteDump", "DiskFull", "BuildMemory",
                       "NoMeshShaders", "GpuLost", "GameCrashed"];
-export const MAX_TEXT = 256 * 1024;        // (the launcher's log tail is 192 KB, ProblemReports.LogTailBytes)
+export const MAX_TEXT = 256 * 1024;        // (the launcher's log tail is 192 KB, CrashCheck.LogTailBytes)
 export const MAX_PICTURE = 4 * 1024 * 1024; // (ReportSender.PictureMaxBytes)
 export const MAX_BODY = 6 * 1024 * 1024;   // (the picture in base64, the text and the rest)
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
