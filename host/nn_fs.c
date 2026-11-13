@@ -428,6 +428,9 @@ static uint64_t read_at(Ctx *c, uint64_t id, int64_t off, uint64_t buf, uint64_t
         hos_sleep_ns(delay_ns);
     }
     const int away = hos_vcore_away();   /* (as OpenFile: no core held through the read) */
+    /* (the kernel's ReadFile does not fault pages in: a heap page nothing touched yet (hos_mem.c, committed on touch) is
+       committed for it first, or the read fails with ERROR_NOACCESS) */
+    if (size && hos_guest_range(buf, size)) hos_commit(buf, size);
     while (done < size) {
         OVERLAPPED ov = {0};
         int64_t o = off + (int64_t)done;
@@ -479,6 +482,7 @@ HLE(_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE) {
     ov.OffsetHigh = (DWORD)(ARG(1) >> 32);
     DWORD put = 0;
     /* (longshot) from guest memory only, and the whole size: a DWORD cut wrote less than asked and said so */
+    if (ARG(3) && ARG(3) <= 0xFFFFFFFFu && hos_guest_range(ARG(2), ARG(3))) hos_commit(ARG(2), ARG(3));   /* (as the read) */
     if (ARG(3) <= 0xFFFFFFFFu && hos_guest_range(ARG(2), ARG(3))) WriteFile(fh->h, GP(ARG(2)), (DWORD)ARG(3), &put, &ov);
     RET(put == ARG(3) ? 0 : 0x2EE202);
 }

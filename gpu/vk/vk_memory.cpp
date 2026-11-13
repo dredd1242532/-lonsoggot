@@ -2982,6 +2982,7 @@ void memory_pool_created(uint64_t gpu, uint64_t size) {
     bg_cv.notify_one();
 }
 
+extern std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;   // (imports_give_back's, below)
 int memory_guest_imported(uint64_t lo, uint64_t hi) {
     std::lock_guard lk(pools_mu);
     auto it = imported.upper_bound(hi);   // (pools by lo: those starting below hi, the last ones checked first)
@@ -2991,6 +2992,11 @@ int memory_guest_imported(uint64_t lo, uint64_t hi) {
         if (it->second.hi + (1ull << 30) < lo) break;   // (imports are at most 1 GB: none further down reaches lo)
     }
     for (const auto& nh : retired_pools)
+        if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
+    // (longshot, 11-13) and the idle pools given back (imports_give_back) whose memory is not freed yet: waiting for the GPU, or
+    // for their wait on AMD and Intel. Not counted, the game's freed pages under them were decommitted while the driver still
+    // had them imported, which faulted the device (hos_mem.c FreeMemoryPages)
+    for (const auto& nh : evicted_pools)
         if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
     return 0;
 }
@@ -3433,12 +3439,25 @@ void imports_give_back() {   // (pools_mu held)
     static const char* env_high = getenv("RX_VK_IMPORT_HIGH");
     static const char* env_low = getenv("RX_VK_IMPORT_LOW");
     static const int cap_mb = env_int("RX_VK_IMPORT_CAP_MB", -1);
-#ifdef _WIN32
-    static const int high = std::clamp(env_int("RX_VK_IMPORT_HIGH", 0), 0, 100);
-#else
+    // (longshot, 11-13) On on Windows too now. Off there, the live pools only grew: 8 to 150 imports, 0.1 to 2.3 GB, over four
+    // areas on an RTX card (none given back), the process's working set with them. The device losses it was turned off for came,
+    // as the retired pools' did, right after the memory went back on AMD's and Intel's Windows drivers; those pools are given back
+    // after a wait there (retired_mode GRACE) without them, so the pools this valve takes wait the same way: held, the table
+    // already off them, until RX_VK_RETIRE_SECS (30) have passed since, and only then queued for the GPU (retired_value). What
+    // waits is counted as given back, so the valve does not take more for the same bytes. RX_VK_IMPORT_HIGH=0: off, as before
     static const int high = std::clamp(env_int("RX_VK_IMPORT_HIGH", 85), 0, 100);
-#endif
     static const int low = std::clamp(env_int("RX_VK_IMPORT_LOW", 75), 10, 95);
+    const bool grace = retired_mode() == retired_give_back::Mode::GRACE;
+    uint64_t evicted_waiting = 0;
+    if (grace) {
+        static const int64_t wait_ms = (int64_t)std::max(1, env_int("RX_VK_RETIRE_SECS", 30)) * 1000;
+        const int64_t now = import_now_ms();
+        for (auto& nh : evicted_pools) {
+            Pool& p = nh.mapped();
+            if (p.retired_value == ~0ull && now - p.retired_ms >= wait_ms) p.retired_value = mem_rec_value;   // (its wait is over)
+            if (p.retired_value == ~0ull) evicted_waiting += p.hi - p.lo;
+        }
+    }
     static uint64_t calls = 0;
     if (high <= 0 || ++calls % 16) return;   // (the driver asked every 16 submissions)
     uint64_t used = 0, budget = 0;
@@ -3460,6 +3479,7 @@ void imports_give_back() {   // (pools_mu held)
     // still in the driver's figure until the GPU is past it, and live pools would go for the same bytes. Only where
     // retired imports wait; elsewhere they go back at every submission and this valve reads what it always read)
     if (retired_mode() == retired_give_back::Mode::GRACE) used = retired_give_back::settled(used, dead_import_bytes);
+    if (grace) used = retired_give_back::settled(used, evicted_waiting);   // (held for their wait: given back already)
     const uint64_t want = retired_give_back::want(used, cap, high, low);
     if (!want) return;
     std::vector<std::map<uint64_t, Pool>::iterator> idle;
@@ -3477,6 +3497,7 @@ void imports_give_back() {   // (pools_mu held)
         Pool& p = it->second;
         guest_pages_set(p.lo, p.hi, 0);
         p.retired_value = mem_rec_value;   // (this submission's recording is being made: freed once it is done)
+        if (grace) p.retired_value = ~0ull, p.retired_ms = import_now_ms();   // (AMD, Intel on Windows: after the wait, above)
         freed += p.hi - p.lo;
         n++;
         evicted_pools.push_back(imported.extract(it));
