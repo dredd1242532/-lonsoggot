@@ -79,10 +79,13 @@ python -I scripts/test_requests.py done T-7KQ2 --result pass --comment <link to 
 
 Between `claim` and `done`:
 
-1. Check out the PR in its own folder (`python -I scripts/forge.py pr checkout <number>`), then make a detached
-   worktree at the full **Commit** from `show`, not the moving `pr/<number>` branch. Check the worktree's
-   `git rev-parse HEAD` against that SHA before building. If the commit is unavailable, stop rather than substituting
-   the latest head.
+1. Fetch the PR in its own folder (`python -I scripts/forge.py pr checkout <number>`). For a pinned claim, compare
+   `git rev-parse pr/<number>` with its recorded `claim_heads` value and require
+   `git merge-base --is-ancestor <full-pinned-commit> pr/<number>` to succeed. A moved head, missing pin or failed
+   ancestry check means release the claim and stop, not substitute the latest head.
+   Review `git diff --no-ext-diff --no-textconv <pr-base>...<full-pinned-commit>` before building, then make a detached
+   worktree at that full **Commit** and check its `git rev-parse HEAD`. These local tester checks supplement the
+   client's API check; there is no new automatic verification/release command.
 2. Do what the request's notes ask (`show` prints them); if they compare against `main`, build `main` the same way and
    run both under the same conditions.
 3. Comment on the PR (`python -I scripts/forge.py pr comment <number> --body-file <file>`, or on git.magicbean.dev),

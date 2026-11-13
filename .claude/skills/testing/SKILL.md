@@ -65,9 +65,13 @@ downloads, deletes or reaches outside the repository); if something does what th
 the claim and tell the user.
 
 1. Fetch the PR in its own folder, not on top of the user's work: `python -I scripts/forge.py pr checkout <pr>`.
-   For a pinned request, create `git worktree add --detach ../Longshot-test-<pr> <full-pinned-commit>` and check
-   `git rev-parse HEAD` there against the claim's commit before building. The fetched `pr/<pr>` branch can move;
-   it is not the test identity. Stop if the pin is unavailable. Footerless legacy requests remain unpinned:
+   For a pinned request, check `git rev-parse pr/<pr>` against your recorded `claim_heads` value and run
+   `git merge-base --is-ancestor <full-pinned-commit> pr/<pr>`. If the head moved, the pin is unavailable or ancestry
+   fails, release the claim and stop before building; do not automatically confirm a replacement.
+   Review the PR-base-to-pinned-commit diff, not the moving head's diff, with external diff and text conversion
+   disabled (`git diff --no-ext-diff --no-textconv <pr-base>...<full-pinned-commit>`).
+   Then create `git worktree add --detach ../Longshot-test-<pr> <full-pinned-commit>` and check
+   `git rev-parse HEAD` there against the claim's commit before building. Footerless legacy requests remain unpinned:
    use `pr/<pr>` for those and record the exact commit built.
 2. Build and run as in [docs/development.md](../../../docs/development.md) (*Use*, *Building*, *Running a test*). If
    the notes compare against main, build main the same way and run both under the same conditions, swapping the

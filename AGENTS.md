@@ -145,8 +145,8 @@ request. The guide for people is [docs/test-requests.md](docs/test-requests.md).
   commit, and refuses a different `--commit`. Without an active claim, a pinned result needs an explicit full SHA.
   Results completed for an old pin remain historical after an update, not current successes for the new code.
   Footerless legacy requests keep their previous behavior without the new flag; `claim --commit` and
-  `done --commit` on those cards refuse until the requester introduces a pin with `update`. Pin checks use public
-  Forgejo GETs, not git fetch or another sign-in.
+  `done --commit` on those cards refuse until the requester introduces a pin with `update`. Client pin checks use public
+  Forgejo GETs, not git fetch or another sign-in; the testing guide also checks the fetched head, ancestry and exact pinned diff before building.
 
 Every message starts with the ID and the action (`🧪 T-7KQ2 claim: until 2026-11-12 16:40Z`); pinned request,
 claim, done and update messages end with `Commit: <full-sha>` then `Head: <full-sha>`. The room's messages are the
