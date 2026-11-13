@@ -44,8 +44,13 @@ def need(cond, why):
 def main():
     internal = (ROOT / "gpu/vk/vk_internal.h").read_text(encoding="utf-8")
     gate = block(internal, "struct IntelDriverGate {")
-    need("#ifdef _WIN32" in gate, "the lock is not limited to Windows")
-    need("static const bool off = intel_compiles_side_by_side();" in gate, "the Intel shader compiles row does not turn the lock off")
+    on = block(internal, "inline bool intel_gate_on() {")
+    need("#ifdef _WIN32" in on, "the lock is not limited to Windows")
+    need("!intel_compiles_side_by_side()" in on, "the Intel shader compiles row does not turn the lock off")
+    need("dev.props.vendorID == 0x8086" in on, "a vendor other than Intel takes the lock")
+    need("if (!intel_gate_on()) return;" in gate, "the lock is taken where it is off")
+    # (an ask that compiles nothing never waits behind a worker's compile: it is answered cold, HumanBean's review of #252)
+    need("std::try_to_lock" in gate and "busy = !hold.owns_lock();" in gate, "an ask waits for the lock")
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     need("bool intel_compiles_side_by_side() { return opts.intel_compiles != 0; }" in menu,
          "the lock does not read the Intel shader compiles row")
@@ -59,8 +64,7 @@ def main():
          "the row is not limited to Intel graphics on Windows")
     need('(value == &opts.intel_compiles && getenv("RX_VK_NO_INTEL_SERIAL"))' in block(menu, "bool row_fixed(const int* value) {"),
          "the row can be changed while RX_VK_NO_INTEL_SERIAL holds it")
-    need("dev.props.vendorID != 0x8086" in gate, "a vendor other than Intel takes the lock")
-    need("std::unique_lock<std::mutex>" in gate, "the compiler is not entered by one thread")
+    need("std::unique_lock<std::mutex>(mu)" in gate, "the compiler is not entered by one thread")
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     win = block(draw, "__declspec(noinline) VkResult guarded_shader_module(")
     need("__try" in win and "vkCreateShaderModule" in win and "return (VkResult)-77;" in win,
@@ -72,11 +76,28 @@ def main():
     for fn in ("VkResult cached_graphics(", "VkResult cached_compute("):
         body = block(draw, fn)
         need(body.index("IntelDriverGate") < body.index("create_cached"), fn + " compiles before it takes the lock")
+        need("IntelDriverGate gate(compiles_nothing(ci->flags));" in body and
+             "if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;" in body, fn + " makes an ask wait for a compile")
     graphics = block(draw, "VkResult graphics_with(")
     need("return cached_graphics" in graphics, "the play-cache path takes the lock twice")
+    need("if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;" in graphics, "graphics_with makes an ask wait for a compile")
+    dispatch = draw[draw.index("const bool on_worker = p.code_words && intel_gate_on();"):]
+    dispatch = dispatch[:dispatch.index("jobs_push_serial")]
+    need("(on_worker || program_cache_complete(p)" in dispatch and "if (!program_cache_complete(q))" in dispatch,
+         "on Intel a dispatch makes its module on the replay thread, behind the lock")
     link = block(draw, "VkPipeline gpl_link(")
     need(link.index("IntelDriverGate") < link.index("guarded_graphics"), "gpl_link's pipeline is not guarded")
     need("vkCreateGraphicsPipelines" not in link, "gpl_link still calls the driver with no guard")
+    # (a pipeline cache's data fetched while another thread builds: the same crash in igvk64. main's fetch lock covers it,
+    # PcacheFetch, MagicBeanDev/Longshot#190 (tests/test_pcache_fetch_lock.py). The gate stays outside that lock: a builder
+    # takes the gate, then PcacheUse's shared side, so a fetch taking the gate inside PcacheFetch would wait for a builder
+    # that waits for it)
+    for fn in ("size_t play_file_write(", "void pcache_init()", "bool pcache_saved_now()", "void pipeline_cache_save(bool force)"):
+        body = block(draw, fn)
+        need("PcacheFetch" in body, fn + " fetches a cache's data outside the fetch lock")
+        need("IntelDriverGate" not in body, fn + " takes Intel's gate around a fetch (the builders take it outside the fetch lock)")
+    for fn in ("VkResult guarded_graphics_held(", "VkResult guarded_compute_held("):
+        need("IntelDriverGate" not in block(draw, fn), fn + " takes Intel's gate inside the fetch lock")
     clear = block(draw, "VkPipeline clear_pipeline(")
     gate_at = clear.index("IntelDriverGate gate;")
     held = brace_block(clear, clear.rindex("{", 0, gate_at))
@@ -85,6 +106,10 @@ def main():
     module = block((ROOT / "gpu/vk/vk_shader.cpp").read_text(encoding="utf-8"),
                    "VkShaderModule make_module(")
     need("IntelDriverGate" in module and "guarded_shader_module" in module, "translation still creates a module unguarded")
+    need(module.index("driver_faulted_program(program)") < module.index("IntelDriverGate"),
+         "a program the driver faulted on is handed to it again")
+    need("if (r == (VkResult)-77) driver_faulted_module(program);" in module,
+         "a fault making a module is not kept in longshot_driver_faults.txt")
     temporal = (ROOT / "gpu/vk/vk_temporal.cpp").read_text(encoding="utf-8")
     pipe = block(temporal, "bool make_pipeline(")
     actor = block(temporal, "bool make_actor_pipeline()")

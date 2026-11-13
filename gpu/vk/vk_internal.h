@@ -125,20 +125,34 @@ extern Device dev;
 /// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
 /// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, or
 /// RX_VK_NO_INTEL_SERIAL=1 over it: side by side, as before.
+/// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
+/// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
+/// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
 bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
+inline bool intel_gate_on() {
+#ifdef _WIN32
+    static const bool on = !intel_compiles_side_by_side() && dev.props.vendorID == 0x8086;
+    return on;
+#else
+    return false;
+#endif
+}
 struct IntelDriverGate {
     std::unique_lock<std::mutex> hold;
-    IntelDriverGate() {
-#ifdef _WIN32
-        static const bool off = intel_compiles_side_by_side();
-        if (off || dev.props.vendorID != 0x8086) return;
+    bool busy = false;
+    explicit IntelDriverGate(bool ask = false) {
+        if (!intel_gate_on()) return;
         static std::mutex mu;
         static std::once_flag once;
         std::call_once(once, [] {
             logf("vk: Intel's compiler is entered by one thread (Intel shader compiles row, RX_VK_NO_INTEL_SERIAL: side by side)");
         });
-        hold = std::unique_lock<std::mutex>(mu);
-#endif
+        if (ask) {
+            hold = std::unique_lock<std::mutex>(mu, std::try_to_lock);
+            busy = !hold.owns_lock();
+        } else {
+            hold = std::unique_lock<std::mutex>(mu);
+        }
     }
 };
 

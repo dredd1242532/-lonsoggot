@@ -3,11 +3,13 @@
 dec_acquire used to decode the next packet whenever the picture in hand was late and the queue held only that one, so it
 could skip it. The clock is the wall clock: a decode slower than the gap between pictures makes the next acquire later,
 and the picture just decoded is thrown away. On a Windows PC (Intel UHD, four logical processors) the opening movie
-decoded in 19.5 ms a picture, 16.7 ms apart, and 1933 of 2221 pictures were skipped; the first decode took 426 ms and
-the 100 ms wait handed the buffer out black. A decoder faster than the pictures still decodes ahead and skips, which
-is what keeps the picture with the sound under 60 fps (issues 146 and 179). HOS_VIDEO_NO_CATCHUP still skips nothing.
+decoded in 19.5 ms a picture, 16.7 ms apart, and 1933 of 2221 pictures were skipped. A decoder faster than the pictures
+still decodes ahead and skips, which is what keeps the picture with the sound under 60 fps (issues 146 and 179).
+HOS_VIDEO_NO_CATCHUP still skips nothing.
 
-The first acquire waits ~500 ms for a picture. An acquire after that waits ~100 ms, as before.
+The decode time is the recent pictures' (recent_ns), not the movie's mean: a slow first decode (426 ms there) no longer
+turns the catch-up off for a decoder that keeps up now. Every acquire waits ~100 ms for a picture, the first too: a
+longer first wait did not show the first picture (HumanBean's review of #252).
 
 python -I -B tests/test_video_catchup.py [--cxx clang++] [--source host/nn_video.c]
 """
@@ -121,17 +123,17 @@ int main(void) {
     reset();
     clock_ns = 1000000000;
     uint64_t r = acquire();
-    check(r == 0 && sleeps == 250, "the first acquire waits ~500 ms for a picture");
+    check(r == 0 && sleeps == 50, "the first acquire waits ~100 ms for a picture, as every other");
     dec.busy[0] = 0;
     r = acquire();
-    check(r == 0 && sleeps == 300, "an acquire after the first waits ~100 ms");
+    check(r == 0 && sleeps == 100, "an acquire after the first waits ~100 ms");
 
     reset();
     clock_ns = 200000000;
     dec.clock_set = 1, dec.clock_ns = 0, dec.clock_pts = 0;
     dec.queue[0].w = dec.queue[0].h = 4, dec.queue[0].pts = 16666667, dec.queue[0].last = 0;
     dec.queue[0].nv12 = (uint8_t *)calloc(1, 4 * 4 * 3 / 2);
-    dec.qn = 1, dec.decoded = 8, dec.first_pts = 0, dec.end_pts = 7 * 16666667, dec.decode_ns = 8 * 20000000;
+    dec.qn = 1, dec.decoded = 8, dec.first_pts = 0, dec.end_pts = 7 * 16666667, dec.recent_ns = 20000000;
     pending.pkt = &packet, dec.phead = &pending;
     r = acquire();
     check(r == 0 && decode_calls == 0 && dec.last_pts == 16666667 && dec.skipped == 0,
@@ -142,7 +144,19 @@ int main(void) {
     dec.clock_set = 1, dec.clock_ns = 0, dec.clock_pts = 0;
     dec.queue[0].w = dec.queue[0].h = 4, dec.queue[0].pts = 16666667, dec.queue[0].last = 0;
     dec.queue[0].nv12 = (uint8_t *)calloc(1, 4 * 4 * 3 / 2);
-    dec.qn = 1, dec.decoded = 8, dec.first_pts = 0, dec.end_pts = 7 * 16666667, dec.decode_ns = 8 * 5000000;
+    dec.qn = 1, dec.decoded = 8, dec.first_pts = 0, dec.end_pts = 7 * 16666667;
+    dec.decode_ns = 426000000 + 7 * 5000000, dec.recent_ns = 5000000;   /* (a slow first decode, fast ones since) */
+    pending.pkt = &packet, pending.next = NULL, dec.phead = &pending;
+    r = acquire();
+    check(r == 0 && decode_calls == 1 && dec.skipped >= 1 && dec.last_pts == 1000000000,
+          "a slow first decode does not turn the catch-up off once the decoder keeps up");
+
+    reset();
+    clock_ns = 200000000;
+    dec.clock_set = 1, dec.clock_ns = 0, dec.clock_pts = 0;
+    dec.queue[0].w = dec.queue[0].h = 4, dec.queue[0].pts = 16666667, dec.queue[0].last = 0;
+    dec.queue[0].nv12 = (uint8_t *)calloc(1, 4 * 4 * 3 / 2);
+    dec.qn = 1, dec.decoded = 8, dec.first_pts = 0, dec.end_pts = 7 * 16666667, dec.recent_ns = 5000000;
     pending.pkt = &packet, pending.next = NULL, dec.phead = &pending;
     r = acquire();
     check(r == 0 && decode_calls == 1 && dec.skipped >= 1 && dec.last_pts == 1000000000,
@@ -187,7 +201,7 @@ def main():
         if result.stderr:
             print(result.stderr, end="")
         if result.returncode or "ok" not in result.stdout:
-            raise SystemExit("a slow movie is still skipped, or the first picture is not waited for")
+            raise SystemExit("a slow movie is still skipped, or a decoder that keeps up does not catch up")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,14 @@ def main():
     d = draw[draw.index("void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t z, uint64_t indirect) {"):]
     d = d[:d.index("\n}\n")]
     first = "const bool fresh = p.compute_state.compare_exchange_strong(none, 1) &&\n" \
-            "                           (program_cache_complete(p) || (p.compute_state.store(2, std::memory_order_release), false));"
+            "                           (on_worker || program_cache_complete(p) || (p.compute_state.store(2, std::memory_order_release), false));"
+    # (on Windows Intel the module is made on the worker, before the worker reads it: IntelDriverGate)
+    if "const VkPipeline cached = on_worker ? VK_NULL_HANDLE : compute_pipeline_cached(p, true);" not in d:
+        raise SystemExit("dispatch() asks for a program's pipeline before its module is made on the worker")
+    worker = d[d.index("if (on_worker) {"):]
+    if not (worker.index("program_cache_complete(q)") < worker.index("compute_pipeline_cached(q, true)")
+            < worker.index("compute_pipeline_info(q, true)")):
+        raise SystemExit("the worker uses a compute program's module before program_cache_complete made it")
     # (the module is read where the pipeline's create info is made: compute_pipeline_info, and compute_pipeline_cached through it)
     uses = sorted(i for m in ("compute_pipeline_cached(p, true)", "compute_pipeline_info(p, true)")
                   for i in range(len(d)) if d.startswith(m, i))

@@ -1038,10 +1038,12 @@ not change the gameplay upscaler, and movies can look softer. `RX_VK_NETWORK_KEE
 movie networks.
 
 A movie whose pictures take longer to decode than the time between them is shown, rather than skipped until the sound
-has moved on. On a slow CPU the opening used to drop most of its pictures and start on a black frame: the first picture
-is waited for for about half a second, and each picture after that for about a tenth of a second. The picture can fall
-behind the sound. `HOS_VIDEO_NO_CATCHUP=1` skips nothing. `HOS_VIDEO_ACQUIRE_TRIES=1` waits by a count of sleeps instead
-of the clock. After a movie stops or is flushed, and nothing new has been submitted, there is no wait.
+has moved on: on a slow CPU the opening used to drop most of its pictures. How fast the decoder is counts from its recent
+pictures, so a slow first picture does not stop a decoder that keeps up from catching up later, and catching up takes at
+most one picture's time in a frame. With a decoder slower than the movie, the picture can fall behind the sound.
+`HOS_VIDEO_NO_CATCHUP=1` skips nothing. Each picture is waited for for about a tenth of a second
+(`HOS_VIDEO_ACQUIRE_TRIES=1`: a count of sleeps instead of the clock). After a movie stops or is flushed, and nothing new
+has been submitted, there is no wait. The first picture can still be black on some PCs; why is not known yet.
 
 On Windows, a PC with 4 logical processors or fewer decodes the movies on 2 threads rather than one per processor, so
 the decoder leaves the game's own threads their time. Unity's laptop (Intel UHD Graphics, 4 threads, 16 GB) showed the
@@ -1049,8 +1051,14 @@ title and the opening movie at about 35 fps of 60, with the game's thread waitin
 was not run again with this change. `HOS_DAV1D_THREADS=<n>` sets the count on any PC.
 
 On Windows, Intel's compiler (UHD and Arc) is entered by one thread. A fault inside it leaves that shader out instead
-of closing the game. This covers the game's shaders and the renderer's own (texture decoding, upscaling, frame
-generation). The first scene can still pause while shaders compile, especially when they were not prepared at the build.
+of closing the game, and the program is written to `longshot_driver_faults.txt` so that later starts on the same driver
+leave it out too (delete the file to try again). This covers the game's shaders and the renderer's own (texture
+decoding, upscaling, frame generation). A draw that only asks whether its pipeline is ready never waits behind another
+thread's compile: while one is compiling, the answer is "not yet". Whether the driver keeps working after a caught fault
+has not been tested. The first scene can still pause while shaders compile, especially when they were not prepared at
+the build. If a build's preparation stopped ("the GPU driver stopped responding"), the game leaves a
+`longshot_prepare_skipped` file and every start after that builds shaders only when first drawn, as on Unity's laptop.
+Build again with **Prepare shaders now** ticked, or delete that file, to prepare them with this fix.
 The Debug tab's **Intel shader compiles** row (Developer section, shown on Intel graphics on Windows) chooses: **One at
 a time**, the default and the safe choice on a CPU with 4 cores or fewer, or **Side by side**, faster builds on a CPU
 with many cores, but Intel's driver can crash the game while building them. It applies after a restart.

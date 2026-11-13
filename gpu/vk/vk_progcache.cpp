@@ -500,7 +500,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                 ok = false;
                 break;
             }
-            st.module = make_module(spirv);
+            st.module = make_module(spirv, key);
             st.phis = fallback_size::spirv_phis(spirv.data(), spirv.size());
             ok = ok && st.module;
         }
@@ -609,7 +609,7 @@ bool complete_from(Program& p, FILE* in, std::mutex* mu) {
         ok = fread(spirv.data(), 4, spirv.size(), in) == spirv.size();
     }
     Stage& st = p.stages[0];
-    if (ok) st.module = make_module(spirv);
+    if (ok) st.module = make_module(spirv, p.key);
     if (!ok || !st.module) {
         static std::atomic<int> logged{0};
         if (logged++ < 20)

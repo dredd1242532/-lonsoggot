@@ -106,7 +106,7 @@ static void picture_free(Picture *p) { free(p->rgba), free(p->nv12); memset(p, 0
 static Pending one;
 static int late, end_after;
 static int stopped_now;   /* (the decoder was stopped or flushed and nothing was submitted since) */
-static int prior_acquires;   /* (an acquire after the first waits ~100 ms; the first waits ~500 ms) */
+static int prior_acquires;   /* (every acquire waits ~100 ms, the first too) */
 static void decode_next(Dec *d) {
     decodes++;
     decodes_with_core += held;
@@ -171,10 +171,10 @@ int main(void) {
     check(r == 0 && held == 0 && takes == 0, "a thread that held no core takes none");
 
     /* the wait for a picture another thread's submission may bring, by the clock, and none after a Stop or a Flush
-       (a movie's end: the thread its teardown joins sat here for 245-257 ms). The first acquire waits ~500 ms: a first
-       decode of 426 ms was handed out black. One after that waits ~100 ms, including when a sleep takes 5 ms */
+       (a movie's end: the thread its teardown joins sat here for 245-257 ms). ~100 ms, the first acquire too, including
+       when a sleep takes 5 ms */
     r = acquire(1, 0, 1);
-    check(r == 0 && sleeps == 250 && sleeps_with_core == 0, "the first acquire waits ~500 ms of 2-ms sleeps, then the buffer again");
+    check(r == 0 && sleeps == 50 && sleeps_with_core == 0, "the first acquire waits ~100 ms of 2-ms sleeps, then the buffer again");
     prior_acquires = 1;
     r = acquire(1, 0, 1);
     check(r == 0 && sleeps == 50 && sleeps_with_core == 0, "an acquire after the first waits ~100 ms");

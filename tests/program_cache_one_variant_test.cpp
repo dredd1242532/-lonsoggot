@@ -74,6 +74,9 @@ int vkCreateShaderModule(uintptr_t device, const VkShaderModuleCreateInfo* info,
 using VkResult = int;
 constexpr VkResult VK_SUCCESS = 0;
 struct IntelDriverGate { IntelDriverGate() {} };
+thread_local uint64_t module_program = 0;
+bool driver_faulted_program(uint64_t) { return false; }
+void driver_faulted_module(uint64_t) {}
 VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* module) {
     return vkCreateShaderModule(dev.device, ci, nullptr, module);
 }
