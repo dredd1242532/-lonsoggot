@@ -138,6 +138,7 @@ static bool is_share_row(const Row&) { return false; }
 static bool has_prompt(const Row& selr, int action, const char* text) {
     const FieldRow* field = nullptr;
     const TextField* editing = nullptr;
+    const struct { bool pad; } c{false};
 @@PROMPTS@@
     for (int i = 0; i < prompts_n; i++)
         if (prompt_list[i].action == action && !std::strcmp(prompt_list[i].text, text)) return true;

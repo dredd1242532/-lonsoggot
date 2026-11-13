@@ -66,7 +66,8 @@ static uint64_t recomp_load64(Ctx *c,uint64_t a) { (void)c;uint64_t x=0;void*p=h
 static uint64_t recomp_load32(Ctx *c,uint64_t a) { (void)c;uint32_t x=0;void*p=hos_guest_range(a,4);CHECK(p);if(p)memcpy(&x,p,4);return x; }
 static void store64(uint64_t a,uint64_t v) {memcpy(hos_guest_range(a,8),&v,8);}
 static void store32(uint64_t a,uint32_t v) {memcpy(hos_guest_range(a,4),&v,4);}
-static int trace_on, protect, playing=1, classify_player=1;
+static int trace_on, protect, playing=1, classify_player=1, damage_setting=1;
+int rx_option(int id, int otherwise) { (void)id; (void)otherwise; return damage_setting; }
 static uint32_t accepted=1u<<2;
 static uint64_t now=1000;
 static char hos_main_build_id[48]="e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348";
@@ -122,6 +123,7 @@ static int veto,race;
 static uint32_t policy_before(const OotCoopLifeChange *ch,void*user) {
     CHECK(user==(void*)1 && ch->owner==OWNER && ch->component==LIFE && ch->cell==CELL);
     before_calls++;
+    CHECK(ch->requested == hos_oot_damage(ch->before, (uint32_t)((int64_t)ch->before + ch->delta)));
     if(!first_token)first_token=ch->invocation;else CHECK(first_token==ch->invocation);
     if(race){race=0;__atomic_store_n((uint32_t*)GP(CELL),ch->before-1,__ATOMIC_SEQ_CST);}
     return veto ? ch->before : ch->requested;
@@ -140,6 +142,7 @@ static void fresh(void) {
     memset(&H,0,sizeof H);memset(&T,0,sizeof T);memset(memory,0,sizeof memory);
     hit_policy=NULL;hit_invocation=0;hos_oot_hits_active=hos_oot_attack_observe=0;
     trace_on=protect=veto=race=0;playing=classify_player=1;accepted=1u<<2;now=1000;
+    damage_setting=1;
     local_logs=remote_logs=attack_logs=activation_logs=drop_logs=registrations=sends=before_calls=commit_calls=marks=0;first_token=0;message_fn=NULL;view_fn=NULL;
     capture_records=0;memset(seen_loss,0,sizeof seen_loss);memset(seen_activation,0,sizeof seen_activation);
     loss_report[0]=activation_report[0]=setup_report[0]=player_report[0]=last_loss[0]=0;
@@ -188,6 +191,20 @@ static void native(void) {
         OotCoopHit h={0};CHECK(oot_coop_hit_parse(sent[0],112,&h));
         CHECK(h.before==10 && h.after==8 && h.target_id==101 && (h.event_id&1)==path);
         now+=80;frame();now+=170;frame();CHECK(sends==1); /* EVENT owns retries, not this layer */
+    }
+    /* Native observation keeps the original request; the optional life policy sees
+       Damage taken's scaled value, and only the committed result is sent. */
+    const uint32_t scaled[] = {9, 8, 6, 2};
+    for (unsigned path=0;path<2;path++) for (int setting=0;setting<4;setting++) {
+        fresh();trace_on=1;joined();damage_setting=setting;
+        CHECK(hos_oot_hits_bind(&policy));hos_oot_hits_policy_on(1);
+        Ctx scaled_context=context(path);f_804bd8c0(&scaled_context);
+        CHECK(recomp_load32(&scaled_context,CELL)==scaled[setting] && before_calls==1 && commit_calls==1);
+        CHECK(T.loss.write==1 && T.losses[0].sample.delta==-2 && T.losses[0].sample.requested==8 &&
+              T.losses[0].sample.after==scaled[setting]);
+        frame();CHECK(sends==1);
+        OotCoopHit scaled_hit={0};CHECK(oot_coop_hit_parse(sent[0],112,&scaled_hit));
+        CHECK(scaled_hit.before==10 && scaled_hit.after==scaled[setting]);
     }
     fresh();trace_on=1;joined();Ctx c=context(0);c.x[9]=10;c.x[10]=3;store32(CELL,3);f_804bd8c0(&c);
     CHECK(T.loss.write==1 && T.losses[0].sample.delta==-10 && T.losses[0].sample.before==3 && T.losses[0].sample.after==0);
@@ -624,7 +641,7 @@ def main():
         exe = temp / "hits-test.exe"
         cmd = [args.cc, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
                "-I" + str(temp), "-I" + str(ROOT / "host"), str(temp / "test.c"), str(ROOT / "host/coop_proto.c"),
-               str(ROOT / "third_party/monocypher/monocypher.c"), "-lm", "-o", str(exe)]
+               str(ROOT / "host/oot_damage.c"), str(ROOT / "third_party/monocypher/monocypher.c"), "-lm", "-o", str(exe)]
         if os.name != "nt":
             cmd += ["-pthread", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined"]
         print("COMPILE:", " ".join(cmd), flush=True)

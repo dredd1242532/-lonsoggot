@@ -809,6 +809,9 @@ Life records distinguish the signed **pre-clamp aggregate delta**, the native re
 health. A lethal request can exceed the remaining life. Protect hearts can preserve life while the trace still
 reports the request. The native aggregate can include several sources: it is not a weapon-versus-Link damage table.
 The actual committed loss remains the only amount sent in a version-1 HIT observation; pre-clamp samples stay local.
+The life-write hook captures the native request first, then applies the local Damage taken scaler (including
+Protect hearts), then offers that scaled value to the optional receiver life policy. The successful compare/exchange
+is observed last: its trace retains the original request and its network observation carries only the committed loss.
 
 The local **trace-v2** has independent loss, activation and optional-detail lanes. A loss record includes every
 validated successful native life update with a negative pre-clamp delta, a requested reduction or a committed
