@@ -39,6 +39,92 @@
         "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
         "notes": "Application-owned branding and UI only. The selected build version is a release-list value, not a running game version."
       }
+    },
+    {
+      "file": "launcher-saves.png",
+      "sha256": "b30e3dec363e90df93d9eee4687d76fb937370ceccd111fc674833877d10151c",
+      "width": 960,
+      "height": 600,
+      "captured_at": "2026-11-13",
+      "kind": "launcher",
+      "launcher_version": "v1.0.0-rc.3",
+      "release_url": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/tag/v1.0.0-rc.3",
+      "release_target_commit": "028ad66d343db0502acdcc005609a31ea890ef79",
+      "binary_sha256": "c1bafe1b625caac43f223ec3de13fb5af2ea1f052312f7a93ba95c2a6a6c994b",
+      "reviewed_source": {
+        "repository": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher",
+        "revision": "028ad66d343db0502acdcc005609a31ea890ef79",
+        "files": {
+          "App/MainWindow.axaml": "cba0b3c2f52e4d3644fe72d72037f4e6aaaed24f02ff254943322e54c22e87d0",
+          "App/App.axaml": "2a5d0a1956c9351158f60f4465787b44389ed6977e03e83c83f410b682b4ffc0",
+          "App/Views/HomeView.axaml": "44275c0cf1543ca02cecd36e2906c2ce101688278b123fce759d3a611cad1010",
+          "App/ViewModels/HomeViewModel.cs": "fc5da43439a9afe3ca089e9398da26835130ae02a46bb9e65fd47613215de094",
+          "App/Views/SavesView.axaml": "16b4771129652668ecf2d83498ca1ae8718f5737353b4e20eda01eebf555dfbd",
+          "App/Views/SavePickView.axaml": "2e8df885f98e723fb589f22ed86aa52eb36102af33655077db67653e3f9b9178",
+          "App/ViewModels/SavesViewModel.cs": "1a59d62ed6d1af476f829586acf9681f547fd82a1d18b7838894850832bd588a",
+          "App/Views/HookshotImportView.axaml": "c8e91e2cd13859ce5b4607329f0115e0eebb589f0bdeff76752b2720c868c502",
+          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7"
+        }
+      },
+      "capture": {
+        "platform": "Linux x86_64 AppImage, X11 virtual display",
+        "display": "1280x800, native scale; 960x600 application window",
+        "theme": "default dark",
+        "state": "Isolated temporary launcher/config/data profile with an example-build registry entry and a plain-text bin/longshot marker, never executed. Empty save data. No game assets or binaries loaded, and no save transfer initiated.",
+        "method": "Unmodified application-window PNG capture; no compositing or text replacement.",
+        "screen": "Empty Saves page; Export saves is disabled until saves exist."
+      },
+      "review": {
+        "contains_game_assets": false,
+        "contains_game_fonts": false,
+        "contains_save_data": false,
+        "contains_private_paths": false,
+        "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
+        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build."
+      }
+    },
+    {
+      "file": "launcher-import.png",
+      "sha256": "74e04aa1bf05df2de307e00316e7d7c24035bb75379dc56c54772bb7e8f0dcd1",
+      "width": 960,
+      "height": 600,
+      "captured_at": "2026-11-13",
+      "kind": "launcher",
+      "launcher_version": "v1.0.0-rc.3",
+      "release_url": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases/tag/v1.0.0-rc.3",
+      "release_target_commit": "028ad66d343db0502acdcc005609a31ea890ef79",
+      "binary_sha256": "c1bafe1b625caac43f223ec3de13fb5af2ea1f052312f7a93ba95c2a6a6c994b",
+      "reviewed_source": {
+        "repository": "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher",
+        "revision": "028ad66d343db0502acdcc005609a31ea890ef79",
+        "files": {
+          "App/MainWindow.axaml": "cba0b3c2f52e4d3644fe72d72037f4e6aaaed24f02ff254943322e54c22e87d0",
+          "App/App.axaml": "2a5d0a1956c9351158f60f4465787b44389ed6977e03e83c83f410b682b4ffc0",
+          "App/Views/HomeView.axaml": "44275c0cf1543ca02cecd36e2906c2ce101688278b123fce759d3a611cad1010",
+          "App/ViewModels/HomeViewModel.cs": "fc5da43439a9afe3ca089e9398da26835130ae02a46bb9e65fd47613215de094",
+          "App/Views/SavesView.axaml": "16b4771129652668ecf2d83498ca1ae8718f5737353b4e20eda01eebf555dfbd",
+          "App/Views/SavePickView.axaml": "2e8df885f98e723fb589f22ed86aa52eb36102af33655077db67653e3f9b9178",
+          "App/ViewModels/SavesViewModel.cs": "1a59d62ed6d1af476f829586acf9681f547fd82a1d18b7838894850832bd588a",
+          "App/Views/HookshotImportView.axaml": "c8e91e2cd13859ce5b4607329f0115e0eebb589f0bdeff76752b2720c868c502",
+          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7"
+        }
+      },
+      "capture": {
+        "platform": "Linux x86_64 AppImage, X11 virtual display",
+        "display": "1280x800, native scale; 960x600 application window",
+        "theme": "default dark",
+        "state": "Isolated temporary launcher/config/data profile with an example-build registry entry and a plain-text bin/longshot marker, never executed. Empty save data. No game assets or binaries loaded, and no save transfer initiated.",
+        "method": "Unmodified application-window PNG capture; no compositing or text replacement.",
+        "screen": "From an emulator\u2026 import chooser, with Another folder\u2026 selected and no detected saves. Continue was not used to copy any save."
+      },
+      "review": {
+        "contains_game_assets": false,
+        "contains_game_fonts": false,
+        "contains_save_data": false,
+        "contains_private_paths": false,
+        "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
+        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build."
+      }
     }
   ]
 }
