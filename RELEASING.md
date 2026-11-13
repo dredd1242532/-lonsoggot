@@ -174,7 +174,7 @@ release candidate, before its stable, a tester on Windows 10 or 11:
   RecompLauncher does): the setup installs the builder and downloads the tools, then builds. Started by a double-click,
   the setup and `LongshotBuilder\LongshotBuilder.exe` each show only the message that sends players to the launcher; the
   setup shows its icon.
-- **Notes what Windows says.** Nothing is signed: what SmartScreen and the antivirus do with the zip and the setup.
+- **Notes what Windows says.** With Authenticode unconfigured the files are unsigned; record SmartScreen/antivirus results for the zip and setup. If signing is configured, also verify the intended publisher and timestamp. An on-demand scan and a browser download are different checks; neither promises future reputation.
 - **Runs the checks only Windows can** (they were `ci.yml`'s `windows-2022` jobs, which nothing could run): the suite on
   Windows' Python, `python -I -B tests/run_all.py --strict` (the 15 checks Linux skips, their `RUN_ALL_SKIP` naming why: the setup's Win32
   file and path handling, the portable homes, structured exceptions; and the `os.name == "nt"` paths of the others, among

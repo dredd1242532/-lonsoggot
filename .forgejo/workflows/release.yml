@@ -91,6 +91,7 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "$tag, from $ref"
       - name: Windows Authenticode configuration
+        if: steps.name.outputs.tag != ''
         id: authenticode
         env:
           AUTHENTICODE_BUILD_REF: ${{ steps.name.outputs.ref }}

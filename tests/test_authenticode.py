@@ -254,6 +254,16 @@ class Authenticode(unittest.TestCase):
         self.assertIn("authenticode: ${{ needs.version.outputs.authenticode == 'true' }}", release)
         self.assertIn("needs: [version, linux, windows]", release)
         self.assertNotIn("secrets: inherit", release)
+        plan = release.split("- name: Windows Authenticode configuration\n", 1)[1].split("\n  linux:", 1)[0]
+        self.assertIn("if: steps.name.outputs.tag != ''", plan)  # a superseded nightly does not inspect signing configuration
+        self.assertEqual(release.count("checked: ${{ needs.version.outputs.checked }}"), 2)
+        self.assertEqual(release.count("if: needs.version.outputs.tag != ''"), 3)
+        package = windows.split("\n  package:", 1)[1].split("\n  vulkan:", 1)[0]
+        self.assertNotIn("RELEASE_CHECKED", package)  # release files are rebuilt and signed even if the old build check passed
+        self.assertIn("tools.lock's dav1d", package)
+        self.assertLess(package.index("Check packaged Authenticode"), package.index("- id: upload_1"))
+        self.assertIn("if: steps.upload_1.outcome == 'failure'", package)
+        self.assertIn("linux-signing", (ROOT / ".forgejo/actionlint.yaml").read_text(encoding="utf-8"))
 
     def test_checked_tool_archive_is_freshly_extracted(self):
         self.assertEqual(auth.OSSLSIGNCODE[:4], ("2.15", "osslsigncode-2.15-linux-amd64",

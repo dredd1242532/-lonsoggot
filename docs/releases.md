@@ -116,9 +116,11 @@ Authenticode can replace an **unknown publisher** with a verified publisher name
 by SmartScreen, Smart App Control, Defender or another antivirus. Microsoft distinguishes file-hash reputation from
 publisher reputation; new signed programs can still warn, and EV certificates no longer bypass SmartScreen. See
 [Microsoft's reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
-Signing the builder or launcher does not sign the player's locally compiled `longshot.exe` or `longshot_vk.dll`.
-Smart App Control can also block locally built unsigned programs: this is a separate limit, not advice to turn
-security features off.
+Signing these distributed tools does not sign the locally compiled game or renderer in `bin\longshot.exe` and
+`bin\longshot_vk.dll`. The packaged builder also copies the already-signed setup unchanged to a game folder's top-level
+`longshot.exe` as its small launch wrapper; that is not the compiled game. A development build without that wrapper
+can keep its compiled executable at the top level. Smart App Control can block locally built unsigned programs too:
+this is a separate limit, not advice to turn security features off.
 
 #### Coverage and order
 
@@ -128,15 +130,17 @@ step uses a pinned `osslsigncode` and a PKCS#11 token/service key. It signs two 
 | Distributed Windows file | Where it comes from | This step |
 |---|---|---|
 | `LongshotBuilder.exe` at the zip's top | the `LongshotBuilder-Setup.exe` step compiles `builder/setup/setup.c` with the pinned llvm-mingw; `builder_package.py zip` copies it under this name | signs the setup before the copy |
-| `LongshotBuilder/LongshotBuilder-Setup.exe` | `builder_package.py package` copies the same setup for the builder's Repair | the same signed bytes |
-| `LongshotBuilder/LongshotBuilder.exe` | the **Longshot Builder** step's `dotnet publish` of the WPF project | signs its final apphost |
+| `LongshotBuilder/LongshotBuilder-Setup.exe` | `builder_package.py package` copies the same setup; `make_game.py` later copies it unchanged as the game folder's launch wrapper | the same signed bytes |
+| `LongshotBuilder/LongshotBuilder.exe` | the **Longshot Builder** step's `dotnet publish` of the command-line .NET project | signs its final apphost |
 | .NET runtime executables/libraries in the publish folder; executables in downloaded `tools.lock` archives | Microsoft and the listed upstream tools | untouched; not represented as Longshot's code |
 | `LongshotLauncher-<v>-windows-x64-setup.exe` and `LongshotLauncher.exe` in the portable zip | the **other repository's** `release.yml` runs `scripts/package.sh`: `dotnet publish` for `win-x64`, then two copies of that single-file program | not changed by Longshot's step; needs its own integration |
 
 Signing happens **after** compilation and `dotnet publish`, **before** the package folder and zip are made.
-`release.yml` then hashes that zip and signs `SHA256SUMS` as before. Do not change an executable after signing,
-or sign a release file after making its checksums. No parts list or in-game updater is involved any more;
-`Updater.cs` only rebuilds a game folder with the installed builder's own tools or opens the launcher download page.
+The package, signatures and zip checks always run for each release, including a tag whose `checked` input skips
+only the separate non-shipping build checks. A superseded nightly with an empty release tag skips signing configuration
+and all build/publish jobs. `release.yml` hashes the finished zip and signs `SHA256SUMS` as before, after the artifact
+transfer. Do not change an executable after signing or sign a release file after making its checksums.
+The builders are command-line workers; updates and player-facing installation belong to the separate launcher.
 
 #### Optional configuration, not a signing-required release policy
 

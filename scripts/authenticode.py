@@ -3,7 +3,7 @@
     python -I scripts/authenticode.py plan
         writes enabled=true/false to GITHUB_OUTPUT
     python -I scripts/authenticode.py sign --setup <exe> --publish <folder> --cache <folder>
-        signs only the setup and WPF apphost with the configured PKCS#11 key, then verifies
+        signs only the setup and command-line builder apphost with the configured PKCS#11 key, then verifies
 
 The public certificate chain is AUTHENTICODE_CERTIFICATE_PEM (leaf first). The private
 key stays in a token/service selected by AUTHENTICODE_KEY_URI; the optional token PIN
