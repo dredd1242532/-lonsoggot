@@ -14,9 +14,8 @@ extension asked for only when wanted, only that feature on, the profile and the 
 global-address fallback are checked in the source. Whether it is wanted (native_fadd_wanted, vk_main.cpp) is compiled
 alone against a table: unset, NVIDIA's driver, and Intel's Windows driver on the Meteor Lake and Arrow Lake iGPUs (PCI
 device 0x7Dxx) from driver 101.9175 on, the family and driver it was run on (not Intel's other GPUs, older drivers, RADV,
-AMD's, Mesa's Intel driver or NVK); set,
-RX_VK_NATIVE_FADD by #2042's rule on any driver, so =on is on and =off, =false, =no and empty are off. Nothing runs on a
-GPU.
+AMD's, Mesa's Intel driver or NVK); set, RX_VK_NATIVE_FADD by #2042's rule on any driver, so =on is on and =off, =false,
+=no and empty are off. Nothing runs on a GPU.
 
     python -I -B tests/test_native_float_atomic_add.py --headers <SPIRV-Headers/include> [--cxx g++] [--spirv-val spirv-val]
 """
