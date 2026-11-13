@@ -36,7 +36,9 @@ def module_bytes(supported=True, payload=b"new authored module"):
     return bytes(header) + payload
 
 
-class NupCacheTests(unittest.TestCase):
+class NupCacheHarness(unittest.TestCase):
+    """An output folder unpacked from old.nup, and make_game run up to the lift with an authored extraction"""
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="longshot-cache-test-")
         self.addCleanup(self.temporary.cleanup)
@@ -77,7 +79,7 @@ class NupCacheTests(unittest.TestCase):
                 for path in self.out.rglob("*") if path.is_file() and ".game" not in path.parts}
 
     def run_to_lift(self, nup, failure=None, supported=True, include_romfs=True, update=False, folders=None,
-                    romfs_files=None):
+                    romfs_files=None, romfs_from=None):
         self.assert_owned_fixture()
 
         def run(cmd, env=None, on_line=None):
@@ -111,6 +113,8 @@ class NupCacheTests(unittest.TestCase):
             argv += ["--romfs", str(folders[0]), "--exefs", str(folders[1]), "--out", str(self.out)]
         else:
             argv += ["--nup", str(nup), "--out", str(self.out)]
+        if romfs_from:
+            argv += ["--romfs-from", str(romfs_from)]
         # The only external operation exercised is authored extraction above; no compiler, SDK,
         # translation, power-state update or real game is involved.
         with contextlib.ExitStack() as stack:
@@ -141,6 +145,8 @@ class NupCacheTests(unittest.TestCase):
                 for launch in blocked:
                     launch.assert_not_called()
 
+
+class NupCacheTests(NupCacheHarness):
     def test_failed_scratch_exefs_cleanup_stops_before_copy_or_extraction(self):
         scratch = self.work / "exefs"
         scratch.mkdir()
@@ -370,6 +376,76 @@ class NupCacheTests(unittest.TestCase):
                 self.assertFalse((self.work / "exefs").exists())
                 self.assertEqual(self.extractions, [])
                 self.assertEqual(self.cache(), before)
+
+
+class RomfsFromTests(NupCacheHarness):
+    """--romfs-from (LONGSHOT_ROMFS_FROM): another game folder unpacked from the same .nup gives this build its game files by
+    hard links, its kept exefs and its damaged-texture check, and the .nup is not read again"""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.root / "other version"
+        romfs = self.other / "romfs" / "Data"
+        romfs.mkdir(parents=True)
+        (romfs / "a.zs").write_bytes(b"authored asset a")
+        (self.other / "romfs" / "b.txt").write_bytes(b"authored asset b")
+        (self.other / ".longshot_exefs").mkdir()
+        (self.other / ".longshot_exefs" / "main").write_bytes(module_bytes(payload=b"other authored module"))
+        stamp = self.stamp(self.new_nup)
+        (self.other / ".longshot_romfs").write_text(stamp + "\n", encoding="utf-8", newline="")
+        (self.other / ".longshot_romfs_checked").write_text("resolved-v2\n" + stamp + "\n", encoding="utf-8", newline="")
+        (self.other / make_game.HEADS).write_text(stamp + "\nData/a.zs\n", encoding="utf-8", newline="")
+
+    def test_the_game_files_are_linked_not_read_again(self):
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, romfs_from=self.other)
+        self.assertEqual(self.extractions, [])
+        self.assertIn("linked, not read again", self.output)
+        for rel in ("Data/a.zs", "b.txt"):
+            mine, theirs = self.out / "romfs" / rel, self.other / "romfs" / rel
+            self.assertEqual(mine.read_bytes(), theirs.read_bytes())
+            self.assertTrue(os.path.samefile(mine, theirs), rel + " is a hard link, not a copy")
+        self.assertFalse((self.out / "romfs" / "asset.txt").exists())   # (the old unpack's files are gone with it)
+        self.assertEqual((self.out / ".longshot_exefs" / "main").read_bytes(), (self.other / ".longshot_exefs" / "main").read_bytes())
+        self.assertEqual((self.work / "exefs" / "main").read_bytes(), (self.other / ".longshot_exefs" / "main").read_bytes())
+        for name in (".longshot_romfs", ".longshot_romfs_checked", make_game.HEADS):
+            self.assertEqual((self.out / name).read_bytes(), (self.other / name).read_bytes(), name)
+        self.assertFalse((self.out / make_game.DAMAGED_NOTE).exists())
+        self.assertEqual((self.out / "user" / "save" / "sentinel.txt").read_bytes(), b"authored save sentinel")
+
+    def test_the_variable_a_launcher_sets_does_the_same(self):
+        with mock.patch.dict(os.environ, {"LONGSHOT_ROMFS_FROM": str(self.other)}), self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup)
+        self.assertEqual(self.extractions, [])
+        self.assertTrue(os.path.samefile(self.out / "romfs" / "b.txt", self.other / "romfs" / "b.txt"))
+
+    def test_a_folder_from_another_nup_is_not_used(self):
+        third = self.root / "third.nup"
+        third.write_bytes(b"a third authored input, of its own size")
+        with self.assertRaises(Prepared):
+            self.run_to_lift(third, romfs_from=self.other)
+        self.assertEqual(self.extractions, [third])
+        self.assertIn("unpacked from another .nup", self.output)
+        self.assertFalse((self.out / "romfs" / "b.txt").exists())
+
+    def test_a_folder_with_no_game_files_is_passed_over(self):
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, romfs_from=self.root / "nowhere")
+        self.assertEqual(self.extractions, [self.new_nup])
+
+    def test_the_folder_itself_is_not_its_own_source(self):
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, romfs_from=self.out)
+        self.assertEqual(self.extractions, [self.new_nup])
+        self.assertNotIn("linked, not read again", self.output)
+
+    def test_the_same_nup_in_the_folder_itself_still_wins(self):
+        (self.out / ".longshot_romfs").write_text(self.stamp(self.new_nup) + "\n", encoding="utf-8", newline="")
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, romfs_from=self.other)
+        self.assertEqual(self.extractions, [])
+        self.assertIn("reading it again is skipped", self.output)
+        self.assertEqual((self.out / "romfs" / "asset.txt").read_bytes(), b"old authored assets")
 
 
 class RomfsCopyTests(unittest.TestCase):

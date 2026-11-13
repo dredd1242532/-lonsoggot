@@ -4,6 +4,8 @@
     python -I nx2/make_game.py --romfs <dir> --exefs <dir> --out <folder> [--work <folder>] [--jobs <n>]
     python -I nx2/make_game.py --check --nup <file.nup>       (or --exefs <dir>: is this the right game and version?)
     python -I nx2/make_game.py --update <folder>             (a folder built before, again with these tools: the game files it keeps)
+    python -I nx2/make_game.py --nup <file.nup> --out <folder> --romfs-from <folder>
+                                  (another game folder unpacked from this .nup: its game files hard-linked, not read again)
     python -I nx2/make_game.py --game <.nup or folder> --prepare   (RecompLauncher: --out defaults to ~/Games/Longshot; no window,
                                                                     "progress <0..1> <text>" lines and an "error <text>" line on stdout,
                                                                     exit 0 when the game is built; with --check, its "check ok|bad" line)
@@ -501,6 +503,47 @@ def keep_heads(out, game, stamp):
 
 
 DAMAGED_NOTE = "longshot_damaged_files.txt"   # (in the game folder: the damaged game files the last unpack replaced)
+
+
+ROMFS_MARKS = (".longshot_romfs_checked", HEADS, DAMAGED_NOTE)   # (what stand_in_damaged_files left in a folder, about its romfs)
+
+
+def romfs_from_build(other, out, stamp, romfs, kept, exefs):
+    """--romfs-from: the game files of another game folder this builder unpacked from the same .nup (its .longshot_romfs stamp
+    is this one's), hard-linked into this one where the disk allows (link_or_copy), its kept exefs copied, and what its
+    damaged-texture check found carried over with them: the .nup's ~25 GB is not read and written again for each version
+    (about 3 minutes, and the disk space, on a PC's own drive). False, and nothing changed, when it is not such a folder: the
+    .nup is read as usual. The files are shared with that folder: neither the build nor the game writes into its romfs"""
+    if not other or not os.path.isdir(other):
+        return False
+    if os.path.normcase(os.path.realpath(other)) == os.path.normcase(os.path.realpath(out)):
+        return False
+    src_romfs, src_kept, src_stamp = (os.path.join(other, n) for n in ("romfs", ".longshot_exefs", ".longshot_romfs"))
+    if not (os.path.isdir(src_romfs) and os.path.isdir(src_kept) and os.path.isfile(src_stamp)):
+        return False
+    if read_stamp(src_stamp).strip() != stamp:
+        print("the game folder %s was unpacked from another .nup: this one is read" % other, flush=True)
+        return False
+    refuse_dump_links(src_romfs)
+    print("the game files come from %s, unpacked from this .nup before: linked, not read again" % other, flush=True)
+    with contextlib.suppress(FileNotFoundError):   # (a new romfs: what was said about the old one goes until it is copied)
+        os.remove(os.path.join(out, ".longshot_romfs"))
+    if os.path.exists(romfs):
+        shutil.rmtree(romfs)
+    link_or_copy(src_romfs, romfs)
+    shutil.rmtree(kept, ignore_errors=True)
+    shutil.copytree(src_kept, kept)
+    shutil.copytree(kept, exefs)
+    check_supported_build(exefs)
+    for name in ROMFS_MARKS:
+        target = os.path.join(out, name)
+        if os.path.isfile(os.path.join(other, name)):
+            shutil.copyfile(os.path.join(other, name), target)
+        else:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(target)
+    write_stamp(os.path.join(out, ".longshot_romfs"), stamp + chr(10))
+    return True
 
 
 def stand_in_damaged_files(out, romfs):
@@ -1995,6 +2038,9 @@ def parse_args():
     p.add_argument("--game", help="your copy: a .nup file, or a folder with romfs and exefs in it (the same as --nup, or --romfs and --exefs)")
     p.add_argument("--prepare", action="store_true", help="for RecompLauncher: no window, progress lines, --out ~/Games/Longshot unless given")
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
+    p.add_argument("--romfs-from", default=os.environ.get("LONGSHOT_ROMFS_FROM") or None, metavar="FOLDER",
+                   help="with --nup: another game folder unpacked from the same .nup, whose game files this build hard-links instead of "
+                        "reading the .nup again (LONGSHOT_ROMFS_FROM: a launcher sets it; a builder that does not know it unpacks)")
     p.add_argument("--no-prepare-shaders", action="store_true",
                    help="leave the shaders' preparation to the game's first start (the builder's \"Prepare shaders now\" unticked)")
     p.add_argument("--compile-shaders", choices=tuple(COMPILE_LEVELS),
@@ -2199,6 +2245,8 @@ def main(a=None):
         if same:
             print("the game was read from this .nup before: reading it again is skipped", flush=True)
             shutil.copytree(kept, exefs)
+        elif romfs_from_build(a.romfs_from, out, stamp, romfs, kept, exefs):
+            shutil.rmtree(game, ignore_errors=True)
         else:
             shutil.rmtree(game, ignore_errors=True)
             with contextlib.suppress(FileNotFoundError):   # (a new unpack is checked again)
