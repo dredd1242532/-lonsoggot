@@ -122,8 +122,8 @@ security features off.
 
 #### Coverage and order
 
-Longshot's `.forgejo/workflows/build-windows.yml` has an optional **Authenticode** step. It signs two project
-executables, not every `.exe` in a folder:
+Longshot's `.forgejo/workflows/build-windows.yml` builds and optionally signs on **Linux**. Its Authenticode
+step uses a pinned `osslsigncode` and a PKCS#11 token/service key. It signs two project executables, not every `.exe`:
 
 | Distributed Windows file | Where it comes from | This step |
 |---|---|---|
@@ -140,54 +140,64 @@ or sign a release file after making its checksums. No parts list or in-game upda
 
 #### Optional configuration, not a signing-required release policy
 
-Leave `AUTHENTICODE_CERTIFICATE_SHA1` unset until maintainers choose a publisher and signing arrangement.
+Leave `AUTHENTICODE_CERTIFICATE_PEM` unset until maintainers choose a publisher and signing arrangement.
 A release without it logs exactly **`not signed: no certificate configured`**, succeeds as before, and ships
-unsigned Windows executables. This is not a claim that Authenticode is already configured or that releases must
-be signed. Once a channel is promised to be code-signed, maintainers must make missing configuration fatal too;
-this optional preparation deliberately does not make that policy decision.
+unsigned Windows executables. No signing tool is downloaded in that path. Once a channel is promised to be
+code-signed, maintainers must make missing configuration fatal too; this optional preparation does not choose that policy.
 
-To enable this certificate-store route:
+The runner builds the Windows files on Linux, so there is no Windows certificate store or PowerShell step.
+To enable the **PKCS#11 token/service route**:
 
-1. Provision the chosen code-signing certificate in the signing account's `CurrentUser\My` Windows store, with
-   its private key kept by its hardware token/HSM or compatible provider. Test noninteractive signing with that
-   provider first. This route does not export or import a PFX, install a trusted root, or implement Azure/SignPath's
-   service APIs. Those services need their own integration if selected.
-2. Supply a **release-only** Windows runner labelled `windows-signing`, otherwise equipped like `windows-2022`.
-   Do not give its account or key to PR runners. **A label is not an access control:** runner admission and the
-   provider's authorization/approval policy must prevent untrusted workflows from using the identity, even if a
-   PR asks for this label. Do not configure the secret until that isolation is in place.
-3. Set the repository Actions secret `AUTHENTICODE_CERTIFICATE_SHA1` to the certificate's exact 40-hex
-   thumbprint, without spaces. This is only a certificate selector, not a private key or a substitute for provider
-   authorization. No signing credentials belong in the repository or in workflow command arguments.
-4. Release from the repository's main/tag push as usual. `release.yml` passes the secret explicitly (not
-   `secrets: inherit`) and selects the signing runner only when configured. The checked-out commit must match
-   the triggering push. Pull requests, including fork and same-repository PRs, and manual build dispatches do
-   not sign or receive this secret in a signing step.
+1. Obtain a Linux-compatible OpenSSL 3 PKCS#11 provider and the chosen token/service's PKCS#11 module.
+   Provision reviewed, version-pinned libraries and access to the non-exportable private key on a **release-only
+   Linux** runner labelled `linux-signing`, otherwise equipped like `ubuntu-24.04`. The package is built and signed
+   on that same runner. No provider SDK is downloaded or licensed by this workflow.
+2. Set repository Actions variables `AUTHENTICODE_PKCS11_PROVIDER` and `AUTHENTICODE_PKCS11_MODULE` to those
+   libraries' absolute paths inside the signing job. Confirm their compatibility with the signer's OpenSSL before
+   deployment. A cloud service needs a compatible PKCS#11 module; this is not an Azure Artifact Signing or SignPath
+   API integration. Choose a different integration if the service does not offer this interface.
+3. Set repository secrets `AUTHENTICODE_CERTIFICATE_PEM` (public code-signing leaf certificate first, followed by
+   intermediate certificates), `AUTHENTICODE_KEY_URI` (a `pkcs11:` key selector without credentials) and, if needed,
+   `AUTHENTICODE_TOKEN_PIN`. The PIN goes to the signer on stdin, never in command arguments or logs. Private PEM/PFX
+   keys are not accepted by the CI configuration. The public certificate's SHA-256 fingerprint pins the expected leaf.
+4. Do not give the identity or provider authorization to PR jobs. **A runner label is not an access control:** runner
+   admission and the service/token's authorization or approval policy must independently deny untrusted workloads,
+   even if a PR asks for that label. Use a harmless canary to prove this before provisioning any real identity.
+5. Release from this repository's main/tag push as usual. `release.yml` passes only the named secrets, not
+   `secrets: inherit`. Workflow guards and the Python decision require the build ref to equal the triggering commit.
+   PRs, `pull_request_target`, fork pushes, other branches and manual build dispatches never sign.
 
-`scripts/authenticode.py` uses **Windows' built-in Windows PowerShell**, addressed under `SystemRoot`, not a
-downloaded tool or a command from the checkout's `PATH`. No new download, action or dependency pin is needed:
-`tools.lock` and `scripts/tools.py` remain unchanged, and the signing tool is not installed on players' PCs.
-Existing compiler downloads still use `tools.py`'s size/SHA-256 checks.
+`scripts/authenticode.py` pins **osslsigncode 2.15**, its Linux x86-64 archive's size and SHA-256, using the same
+tuple and `scripts/tools.py` `Tool`/`fetch` convention as `builder_package.py`'s `LINUX_LLVM_MINGW`.
+It extracts anew from the checked archive, not an old unpacked executable. This release-only tool is not added to
+players' `tools.lock`. Its upstream [release](https://github.com/mtrojnar/osslsigncode/releases/tag/2.15) and
+[PKCS#11 usage](https://github.com/mtrojnar/osslsigncode/blob/2.15/README.md#using-the-pkcs11-provider-with-osslsigncode-openssl-3x-only)
+describe the tool and provider interface.
 
-It requests SHA-256 Authenticode and a timestamp from `http://timestamp.digicert.com`, then checks the file again:
-Windows must report `Valid`, an embedded `Authenticode` signature, the configured certificate, and a timestamp
-certificate. Failure, a missing executable, or an invalid configured thumbprint fails the job before packaging.
-Child output and provider errors are not echoed, since they can contain secrets. The private key stays with the
-provider. The two setup copies are byte-for-byte copies of the signed setup.
+The sign command requests SHA-256 and an **RFC 3161** timestamp from `https://timestamp.digicert.com`.
+The verify command checks the embedded digest, the selected leaf fingerprint, and the signer and timestamp
+certificate chains against the Linux runner's `/etc/ssl/certs/ca-certificates.crt`; a verified timestamp result is
+required, not merely an exit of zero (an untimestamped signature can otherwise verify). Neither trust nor revocation
+checks are disabled. Child output is captured and errors are fixed messages, since provider diagnostics can contain
+credentials. Both EXEs must verify before either original is replaced or packaging starts.
 
-This uses the Windows cmdlet's Authenticode timestamp protocol, not a newly added RFC 3161 client.
-[Microsoft documents that its underlying API requires an HTTP URL](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-authenticodesignature#-timestampserver);
-HTTPS can leave a signed file without a timestamp. The timestamp is cryptographically signed; the step rejects a
-missing timestamp. The selected CA/provider and timestamp service still need a real Windows test before enabling
-this in releases. An offline self-signed **stand-in** can prove embedding and tamper detection, not public publisher
-trust, Windows prompts, this PowerShell/provider path, or the timestamp service.
+**Check the package too.** Main's existing PE/resource/runtime checks and Wine starts remain unchanged.
+For a configured signing release, `scripts/check_windows_files.py --authenticode --signer-cache <folder> <zip>`
+also verifies all three project EXE paths from the finished zip, before artifact upload and release checksums.
+That step receives only the public certificate, never the token PIN or key selector. Missing/duplicate EXE paths,
+wrong signer, changed code, invalid trust or timestamp failures stop publication.
 
-The game-free decision and command checks are `python -I -B tests/test_authenticode.py`.
-The optional Linux mechanics stand-in is
-`python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode`
-(also needs `openssl`, `clang` and `lld-link`). It downloads nothing, uses temporary keys without changing a trust
-store, verifies the signed PE in all three package paths, and rejects a modified code section. It is not a test of
-the Windows PowerShell signing step or a timestamp service.
+Linux/OpenSSL trust is **not** Windows trust or SmartScreen reputation: a CA accepted on one platform need not be
+accepted on the other. Check the chosen certificate and timestamp on a clean Windows PC before enabling signed
+releases. Removing a configured certificate secret intentionally restores unsigned output; do not use that as an
+unannounced workaround once players have been promised signed releases.
+
+The game-free decision/command checks are `python -I -B tests/test_authenticode.py`. The explicit Linux
+`python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode` test also needs openssl, clang and
+lld-link. It downloads nothing and exercises the **production sign/verify/archive-check command path** with temporary
+software keys, explicitly trusted self-signed certificates and a loopback RFC 3161 timestamp server. It rejects altered
+code, a wrong leaf, an absent timestamp and a tampered zip. It is a **stand-in**, not proof of PKCS#11 credentials,
+hardware/cloud custody, public publisher trust, Windows acceptance or the live timestamp service.
 
 #### Certificate and ownership decisions
 
@@ -228,11 +238,11 @@ and least-privilege signing access with MFA and an audit trail; do not nominate 
 The setup's fixed `1.0.0` resources and missing `ProductVersion`/copyright strings still need release-versioned
 metadata and an agreed legal identity. This step does not invent that identity or change those resources.
 
-**Rotation:** before expiry, obtain the replacement through the chosen CA/service, provision it without exporting
-its protected key, and try a release candidate on a clean Windows PC. Confirm the expected subject, chain,
-timestamp and both setup copies. Change the certificate selector secret, publish the new expected publisher
-details, then retire the old signing access after the transition. Do not rewrite already published files or
-checksums. A valid timestamp can preserve validation after ordinary certificate expiry; revocation and policy
+**Rotation:** before expiry, obtain the replacement through the chosen CA/service, provision its protected key,
+and try a release candidate on a clean Windows PC. Confirm the expected subject, chain, timestamp and both setup
+copies. Replace the public certificate chain and PKCS#11 selector secrets (and provider authorization if needed),
+publish the new expected publisher details, then retire the old signing access after the transition. Do not rewrite
+already published files or checksums. A valid timestamp can preserve validation after ordinary certificate expiry; revocation and policy
 changes are different, and reputation continuity is not guaranteed. For suspected compromise, stop signing and
 publication, revoke with the CA, replace credentials and tell players which releases are affected. Rotating this
 certificate does **not** rotate `RELEASE_SIGNING_KEY`; that separate procedure is in RELEASING.md.

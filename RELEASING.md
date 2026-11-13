@@ -289,18 +289,20 @@ This is separate from `RELEASE_SIGNING_KEY` and its `SHA256SUMS.sig`. The publis
 or service application, key custodians and signing-required channels are decisions for maintainers. No certificate
 is needed to keep making unsigned Windows builders.
 
-[docs/releases.md, Windows Authenticode](docs/releases.md#windows-authenticode-longshot) lists the exact executable
-coverage, current limits, sourced cost estimates, setup and rotation procedure. In Longshot only, setting the
-repository secret `AUTHENTICODE_CERTIFICATE_SHA1` selects the pre-provisioned hardware-backed certificate on an
-isolated `windows-signing` runner. Do not set it before the runner's admission and key authorization exclude PR
-workloads; a label alone does not protect the key.
+[docs/releases.md, Windows Authenticode](docs/releases.md#windows-authenticode-longshot) lists coverage, sourced cost
+estimates, setup and rotation. Windows files are now built and signed on Linux: the certificate-store/PowerShell
+approach is not used. Choose a token/service with a compatible Linux PKCS#11 interface, not an exportable private-key
+PFX. The repository secrets are `AUTHENTICODE_CERTIFICATE_PEM` (public leaf and intermediates),
+`AUTHENTICODE_KEY_URI` and optional `AUTHENTICODE_TOKEN_PIN`; provider/module paths are repository variables.
+Provision the isolated `linux-signing` runner and independent key-access denial before setting those secrets.
 
-The Windows packaging job signs and timestamps the setup and WPF apphost before packaging, then checks both.
-An absent secret logs `not signed: no certificate configured` and succeeds unsigned. An invalid configured
-certificate or failed signing/verification fails the job. Check all three project EXE paths in the zip on Windows
-before offering the first signed release; a self-signed stand-in proves mechanics, not publisher trust. The launcher
-repository's own packaging needs separate integration. Removing the secret returns to unsigned output, so do not
-use that as an unnoticed workaround once players have been promised signed releases.
+The pinned Linux `osslsigncode` signs and RFC 3161-timestamps the setup and apphost before packaging, verifies both,
+then `check_windows_files.py --authenticode` verifies the three EXE paths in the completed zip before checksums.
+An absent certificate logs `not signed: no certificate configured` and succeeds unsigned. A configured failure stops
+the job. The software-key/loopback-TSA stand-in exercises the real command path, not hardware custody or publisher
+trust. Windows trust, the real provider and timestamp service still need a tester; Linux trust is not Windows trust.
+The launcher repository needs separate integration. Removing the certificate secret returns to unsigned output:
+never use that as a silent workaround once players are promised signed releases.
 
 
 ## Troubleshooting

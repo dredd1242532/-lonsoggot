@@ -39,8 +39,14 @@ on:
         type: boolean
         default: false
     secrets:
-      AUTHENTICODE_CERTIFICATE_SHA1:
-        description: the signing account's hardware-backed certificate thumbprint (never its private key)
+      AUTHENTICODE_CERTIFICATE_PEM:
+        description: public code-signing certificate chain, leaf first (never a private key)
+        required: false
+      AUTHENTICODE_KEY_URI:
+        description: PKCS11 key selector, without credentials
+        required: false
+      AUTHENTICODE_TOKEN_PIN:
+        description: optional token PIN, sent to the signer on stdin
         required: false
 
 permissions:
@@ -64,7 +70,9 @@ defaults:
 jobs:
   package:
     name: Longshot Builder zip
-    runs-on: ubuntu-24.04
+    # Both paths build on Linux. Runner admission/provider authorization must deny PR access to the signing identity;
+    # a label alone is not an access control (docs/releases.md, Windows Authenticode).
+    runs-on: ${{ inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'linux-signing' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -139,14 +147,21 @@ jobs:
       - name: Authenticode (optional)
         if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         env:
-          AUTHENTICODE_CERTIFICATE_SHA1: ${{ secrets.AUTHENTICODE_CERTIFICATE_SHA1 }}
+          AUTHENTICODE_BUILD_REF: ${{ inputs.ref }}
+          AUTHENTICODE_CERTIFICATE_PEM: ${{ secrets.AUTHENTICODE_CERTIFICATE_PEM }}
+          AUTHENTICODE_KEY_URI: ${{ secrets.AUTHENTICODE_KEY_URI }}
+          AUTHENTICODE_TOKEN_PIN: ${{ secrets.AUTHENTICODE_TOKEN_PIN }}
+          AUTHENTICODE_PKCS11_PROVIDER: ${{ vars.AUTHENTICODE_PKCS11_PROVIDER }}
+          AUTHENTICODE_PKCS11_MODULE: ${{ vars.AUTHENTICODE_PKCS11_MODULE }}
         run: >-
-          python -I scripts/authenticode.py sign
+          python -I scripts/authenticode.py sign --cache "$RUNNER_TEMP/authenticode"
           --setup "$RUNNER_TEMP/LongshotBuilder-Setup.exe" --publish "$RUNNER_TEMP/publish"
       - name: Authenticode not configured
         if: ${{ !inputs.authenticode }}
+        env:
+          AUTHENTICODE_BUILD_REF: ${{ inputs.ref }}
         run: >-
-          python -I scripts/authenticode.py sign
+          python -I scripts/authenticode.py sign --cache "$RUNNER_TEMP/authenticode"
           --setup "$RUNNER_TEMP/LongshotBuilder-Setup.exe" --publish "$RUNNER_TEMP/publish"
 
       # (it stops when assets/pipeline_states/, the sources of the pipeline state list every release ships, hold none or one does not read)
@@ -169,6 +184,14 @@ jobs:
         run: >-
           python -I scripts/check_windows_files.py --objdump "$LLVM_MINGW/bin/llvm-objdump"
           --readobj "$LLVM_MINGW/bin/llvm-readobj" "dist/LongshotBuilder-$TAG-windows-x64.zip"
+      # Verify the exact packaged bytes too. This step gets only the public certificate, never key access or a PIN.
+      - name: Check packaged Authenticode
+        if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          AUTHENTICODE_CERTIFICATE_PEM: ${{ secrets.AUTHENTICODE_CERTIFICATE_PEM }}
+        run: >-
+          python -I scripts/check_windows_files.py --authenticode --signer-cache "$RUNNER_TEMP/authenticode"
+          "dist/LongshotBuilder-$TAG-windows-x64.zip"
       # (the setup's --play of an empty folder and the builder's --cli with no Python: each says why it stops, with no
       # window and nothing downloaded. A sign that they load and their imports and .NET resolve, not a test of what
       # they do. Wine's mscoree must stay on: its loader maps .NET's IL assemblies through it. Gecko is not wanted)

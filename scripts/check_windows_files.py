@@ -11,10 +11,14 @@ involved. Python's standard library, and llvm-mingw's llvm-objdump and llvm-read
         each started under Wine, nothing downloaded: the setup's --play of an empty folder ("error No built game to start"),
         the builder's --cli with no Python ("error The build tools could not start"). A sign that they load and their
         imports and .NET resolve, not a test of what they do (RELEASING.md, "Needs a Windows tester")
+    python -I scripts/check_windows_files.py --authenticode --signer-cache <folder> <zip>
+        optional signed-release check of all three project EXEs with the pinned Linux signer; requires only the public
+        AUTHENTICODE_CERTIFICATE_PEM, not key access. Each embedded signature must match that leaf and have a valid timestamp
 
 Prints what is wrong, and exits 1, when anything is.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -162,19 +166,37 @@ def wine(a):
                 bad("%s under Wine did not say %r:\n%s" % (name, want, out[-2000:]))
 
 
-def main():
+def authenticode(a):
+    spec = importlib.util.spec_from_file_location("authenticode", os.path.join(os.path.dirname(__file__), "authenticode.py"))
+    auth = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(auth)
+    try:
+        leaf = auth.fingerprint(os.environ.get(auth.CERTIFICATE, ""))
+        with auth.pinned_tool(a.signer_cache) as tool:
+            auth.verify_archive(a.zip, tool, leaf)
+    except (auth.SigningError, OSError, ValueError, zipfile.BadZipFile):
+        bad("packaged Authenticode verification failed")
+
+
+def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("zip")
     p.add_argument("--objdump")
     p.add_argument("--readobj")
     p.add_argument("--wine")
-    a = p.parse_args()
-    if a.wine:
+    p.add_argument("--authenticode", action="store_true")
+    p.add_argument("--signer-cache")
+    a = p.parse_args(argv)
+    if a.authenticode:
+        if not a.signer_cache or a.wine or a.objdump or a.readobj:
+            p.error("--authenticode needs --signer-cache and is separate from PE/Wine checks")
+        authenticode(a)
+    elif a.wine:
         wine(a)
     elif a.objdump and a.readobj:
         files(a)
     else:
-        p.error("--objdump and --readobj, or --wine")
+        p.error("--objdump and --readobj, --wine, or --authenticode --signer-cache")
     if problems:
         print("%d problem(s)" % len(problems), file=sys.stderr)
         return 1
