@@ -1,0 +1,52 @@
+/* Imported guides retain their Markdown source; these styles only organize the reading experience. */
+.sl-markdown-content .manual-guide > div:first-child { margin-top: 0; }
+.sl-markdown-content .manual-intro { padding: 1.25rem 1.5rem; border: 1px solid var(--border); border-left: 4px solid var(--sl-color-text-accent); border-radius: 8px; background: var(--panel); }
+.sl-markdown-content .manual-intro > :first-child { margin-top: 0; }
+.sl-markdown-content .manual-jumps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .75rem; margin: 1.4rem 0 .75rem; }
+.sl-markdown-content .manual-jumps a { display: flex; flex-direction: column; gap: .7rem; margin: 0; padding: 1.2rem; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); text-decoration: none; color: var(--sl-color-white); }
+.sl-markdown-content .manual-jumps a:hover { background: var(--panel-hover); border-color: var(--sl-color-text-accent); }
+.sl-markdown-content .manual-jumps span { font-size: .65rem; font-weight: 700; letter-spacing: .07em; color: var(--sl-color-text-accent); }
+.sl-markdown-content .manual-jumps strong { font-size: 1.2rem; line-height: 1.3; }
+.sl-markdown-content .manual-jumps small { font-size: .85rem; color: var(--soft-text); line-height: 1.5; }
+.sl-markdown-content .manual-shortcuts { display: flex; gap: .3rem 1.2rem; flex-wrap: wrap; margin: 0 0 2.5rem; }
+.sl-markdown-content .manual-shortcuts a { display: inline-flex; align-items: center; min-height: 44px; font-size: .9rem; margin: 0; }
+.sl-markdown-content .manual-requirements { margin: 2.5rem 0; }
+.sl-markdown-content .manual-requirements > ul { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .65rem; list-style: none; padding: 0; }
+.sl-markdown-content .manual-requirements > ul > li { margin: 0; padding: 1rem 1.2rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: .95rem; line-height: 1.65; }
+.sl-markdown-content .manual-requirements > ul > li:first-child { grid-column: 1/-1; border-left: 3px solid var(--sl-color-text-accent); }
+.sl-markdown-content .manual-platform { margin: 3rem 0; padding-top: 1rem; border-top: 1px solid var(--border); }
+.sl-markdown-content .manual-platform h3 { font-family: var(--longshot-font-heading); font-size: 2rem; }
+.sl-markdown-content .manual-platform > ol { list-style: none; counter-reset: install-step; padding: 0; margin: 1.5rem 0; display: grid; gap: .75rem; }
+.sl-markdown-content .manual-platform > ol > li { position: relative; counter-increment: install-step; padding: 1.2rem 1.3rem 1.2rem 4.1rem; margin: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.sl-markdown-content .manual-platform > ol > li::before { content: counter(install-step,decimal-leading-zero); position: absolute; left: 1.1rem; top: 1.2rem; font-size: 1rem; font-weight: 700; color: var(--sl-color-text-accent); }
+.sl-markdown-content .manual-platform > ol > li > :first-child { margin-top: 0; }
+.sl-markdown-content .manual-chapter { margin-top: 2.5rem; }
+.sl-markdown-content .manual-chapter h2 { padding-top: 1.4rem; border-top: 1px solid var(--border); }
+.sl-markdown-content .manual-guide details { margin-block: 1.2rem; padding: 0 1.25rem 1.25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.sl-markdown-content .manual-guide details:not([open]) { padding-bottom: 0; }
+.sl-markdown-content .manual-guide summary { padding: 1rem 0; font-weight: 600; cursor: pointer; color: var(--sl-color-white); }
+.sl-markdown-content .manual-guide summary::marker { color: var(--sl-color-text-accent); }
+.sl-markdown-content .manual-guide table { display: block; max-width: 100%; overflow-x: auto; font-size: .95rem; }
+.sl-markdown-content .manual-guide :is(pre,code) { overflow-wrap: anywhere; }
+.sl-markdown-content .manual-toolbar { display: flex; gap: .75rem; flex-wrap: wrap; padding-block: 1rem; border-block: 1px solid var(--border); margin-top: 3rem; }
+.sl-markdown-content .manual-toolbar[hidden] { display: none; }
+.sl-markdown-content .manual-toolbar button { min-height: 44px; padding: .6rem 1rem; margin: 0; color: var(--sl-color-text-accent); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; font: inherit; cursor: pointer; }
+.sl-markdown-content .manual-toolbar button:hover { border-color: var(--sl-color-text-accent); }
+.sl-markdown-content .install-hub { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; }
+.sl-markdown-content .install-hub > p { grid-column: 1/-1; margin: 0; }
+.sl-markdown-content .install-hub-card { padding: 1.4rem; margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.sl-markdown-content .install-hub-card h2 { margin-top: 0; font-size: 1.5rem; }
+.sl-markdown-content .install-hub-card p { color: var(--soft-text); font-size: .98rem; }
+.sl-markdown-content .install-hub-card a { color: var(--sl-color-text-accent); }
+@media (max-width: 60rem) { .sl-markdown-content .manual-jumps { grid-template-columns: 1fr; } }
+@media (max-width: 38rem) {
+  .sl-markdown-content :is(.manual-requirements > ul,.install-hub) { grid-template-columns: 1fr; }
+  .sl-markdown-content .manual-platform > ol > li { padding-right: 1rem; padding-left: 3.4rem; }
+  .sl-markdown-content .manual-platform > ol > li::before { left: .8rem; }
+}
+@media print {
+  .manual-guide .manual-toolbar { display: none !important; }
+  .manual-guide details::details-content { display: block; content-visibility: visible; }
+  .manual-guide details > :not(summary) { display: block; }
+  .sl-markdown-content .manual-guide table { display: table; overflow: visible; font-size: .8rem; }
+}

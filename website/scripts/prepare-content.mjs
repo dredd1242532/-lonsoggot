@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rm, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { formatManual, formatInstallHub } from './format-manual.mjs';
 import { siteConfig } from '../site.config.mjs';
 import { contentSources } from '../content-sources.mjs';
 import { verifyCompatibilitySources } from './verify-compatibility-sources.mjs';
@@ -50,6 +51,8 @@ for (const [source, slug] of pages) {
     return chunk.replace(/(!?\[[^\]]*\]\()([^\s)]+)(\))/g, (_, before, url, after) => before + urlFor(url, source) + after)
       .replace(/(\b(?:src|href)=")(?!https?:|#)([^"]+)(")/g, (_, before, url, after) => before + urlFor(url, source) + after);
   }).join('');
+  if (source === 'README.md') text = formatManual(text);
+  if (source === 'docs/getting-started.md') text = formatInstallHub(text);
   const front = [
     '---', `title: ${JSON.stringify(title)}`, `slug: ${JSON.stringify(slug)}`,
     `editUrl: ${JSON.stringify(siteConfig.editBase + source)}`,

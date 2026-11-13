@@ -26,7 +26,7 @@ Project and issue links use https://git.magicbean.dev/MagicBeanDev/Longshot.
 
 ## Design and interaction
 
-The front page has Guides, Development and Help navigation, site search, light/dark
+The front page has Guides, Help, Development and Team navigation, site search, light/dark
 controls, and team credits. The main Grappling Hook Bean becomes the Glowing Fairy
 Bean after three clicks, taps or keyboard button activations. Reload resets it.
 A failed image load keeps the original artwork and allows a retry.
@@ -70,6 +70,12 @@ The reference manual, contributor guide and saves guide are generated directly f
 `README.md`, `CONTRIBUTING.md` and `docs/saves.md`. They have one maintained source;
 the generated copies are ignored by Git and rebuilt automatically. Historical
 acknowledgements and literal migration commands are preserved, not rebranded.
+
+The manual's presentation transform puts installation first, adds platform shortcuts
+and folds advanced reference sections into native disclosures. It preserves the
+source text and heading anchors; linked sections open automatically. Expand/collapse
+controls and print handling keep the full reference accessible. The getting-started
+guide uses cards while retaining its original source in `docs/`.
 
 ## Validation and limits
 

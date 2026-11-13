@@ -3,6 +3,8 @@
 Use these checks to gather useful information, then search [Longshot reports](https://git.magicbean.dev/MagicBeanDev/Longshot/issues).
 A similar report may help, but it does not establish the cause on your machine.
 
+Need a hand? [Meet us on Discord](https://discord.gg/KX99srmQTe) to ask a question and compare notes with other players.
+
 ## The build rejects the game version
 
 Compare your copy with the [supported requirements](../README.md#what-you-need).

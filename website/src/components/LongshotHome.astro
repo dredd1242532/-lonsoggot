@@ -36,9 +36,19 @@ const guides = [
     <div class="studio-guides">{guides.map(g => <article><span class="studio-card-number" aria-hidden="true">{g.n}</span><p class="studio-eyebrow">{g.note}</p><h3>{g.title}</h3><p>{g.text}</p><a href={`${base}${g.link}`}>{g.label}<span aria-hidden="true">↗</span></a></article>)}</div>
     <div class="studio-compatibility"><span>Not sure your setup is ready?</span><a href={`${base}compatibility/`}>Check compatibility <span aria-hidden="true">→</span></a></div>
   </section>
+  <section id="help" class="studio-section studio-help">
+    <div class="studio-help-copy"><p class="studio-eyebrow">02 / PLAYER SUPPORT</p><h2>It’s okay.<br />The bean cried too.</h2><p>Check to see if other people have the same bug as you. No heroic guesswork required.</p><div class="studio-support-bean" aria-hidden="true"><img src={`${base}branding/magicbean-green.png`} alt="" width="1024" height="1024" loading="lazy" /></div></div>
+    <div class="studio-help-tools">
+      <form data-frontpage-search role="search" aria-label="Find a reported problem" action={`${base}progress/#problem-search`}><label for="frontpage-query">What’s going wrong?</label><div class="studio-search-row"><input id="frontpage-query" type="search" placeholder="Black screen, controller, stutter…" maxlength="300" aria-describedby="studio-search-note" /><button type="submit">Find help <span aria-hidden="true">→</span></button></div></form>
+      <div class="studio-topics"><span>Try:</span>{['Black screen', 'Controller', 'Stutter'].map(q => <a href={`${base}progress/#problem-search?q=${encodeURIComponent(q)}`}>{q}</a>)}</div>
+      <p id="studio-search-note">Searches the Longshot report snapshot. Reports are not confirmed diagnoses.</p>
+      <a class="studio-help-guide" href={`${base}guides/common-issues/`}><span><strong>Common issues</strong><small>Start with the troubleshooting guide</small></span><span aria-hidden="true">↗</span></a>
+      <noscript><p>Enable JavaScript to carry your search to the report board, or use the guide above.</p></noscript>
+    </div>
+  </section>
   <section id="development" class="studio-section studio-development">
     <div class="studio-development-intro">
-      <p class="studio-eyebrow">02 / DEVELOPMENT</p><h2>Long reach.<br />Small details.</h2>
+      <p class="studio-eyebrow">03 / DEVELOPMENT</p><h2>Long reach.<br />Small details.</h2>
       <p>Follow the work behind the adventure. Changes, discussions and the evidence that goes with them.</p>
       <a class="studio-text-link" href={siteConfig.projectRepository}>Explore Longshot on magicbean <span aria-hidden="true">↗</span></a>
       <figure class="studio-development-icon"><img src={`${base}branding/longshot.png`} width="512" height="512" alt="The Longshot grappling hook." loading="lazy" /><figcaption>LONGSHOT / TEAM MAGICBEAN</figcaption></figure>
@@ -49,16 +59,6 @@ const guides = [
       <ol class="studio-activity">{activity.map(item => <li><div><span class="studio-merge-state">Merged</span><time datetime={item.mergedAt}>{date(item.mergedAt)}</time><span>#{item.number}</span></div><h4><a href={item.url}>{item.title} <span aria-hidden="true">↗</span></a></h4></li>)}</ol>
       {!activity.length && <p>Activity is unavailable. <a href="https://git.magicbean.dev/MagicBeanDev/Longshot/pulls">Browse proposed changes on Forgejo</a>.</p>}
       <p class="studio-snapshot">{feed ? `Snapshot collected ${new Date(feed.generatedAt).toISOString().replace('T', ' ').slice(0, 16)} UTC.` : 'No activity snapshot available.'} <a href="https://git.magicbean.dev/MagicBeanDev/Longshot">View project source ↗</a></p>
-    </div>
-  </section>
-  <section id="help" class="studio-section studio-help">
-    <div class="studio-help-copy"><p class="studio-eyebrow">03 / PLAYER SUPPORT</p><h2>It’s okay.<br />The bean cried too.</h2><p>Check to see if other people have the same bug as you. No heroic guesswork required.</p><div class="studio-support-bean" aria-hidden="true"><img src={`${base}branding/magicbean-green.png`} alt="" width="1024" height="1024" loading="lazy" /></div></div>
-    <div class="studio-help-tools">
-      <form data-frontpage-search role="search" aria-label="Find a reported problem" action={`${base}progress/#problem-search`}><label for="frontpage-query">What’s going wrong?</label><div class="studio-search-row"><input id="frontpage-query" type="search" placeholder="Black screen, controller, stutter…" maxlength="300" aria-describedby="studio-search-note" /><button type="submit">Find help <span aria-hidden="true">→</span></button></div></form>
-      <div class="studio-topics"><span>Try:</span>{['Black screen', 'Controller', 'Stutter'].map(q => <a href={`${base}progress/#problem-search?q=${encodeURIComponent(q)}`}>{q}</a>)}</div>
-      <p id="studio-search-note">Searches the Longshot report snapshot. Reports are not confirmed diagnoses.</p>
-      <a class="studio-help-guide" href={`${base}guides/common-issues/`}><span><strong>Common issues</strong><small>Start with the troubleshooting guide</small></span><span aria-hidden="true">↗</span></a>
-      <noscript><p>Enable JavaScript to carry your search to the report board, or use the guide above.</p></noscript>
     </div>
   </section>
   <section class="studio-team" aria-labelledby="team-title">
