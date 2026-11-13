@@ -40,7 +40,7 @@ FIXTURE = r"""
 #include <string.h>
 #include <unistd.h>
 static int execs = 0;
-static char seen[4096];
+static char seen[16384];   /* (room for three strings of up to 4 KB each: GCC checks snprintf's bound) */
 static int fake_execv(const char *path, char *const argv[]) {
     (void)argv;
     execs++;
