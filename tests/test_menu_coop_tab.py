@@ -111,6 +111,20 @@ static void back_from_rules() {
 @@RULES_BACK@@
     CHECK(cur_tab == TAB_COOP && !press[5] && changed);
 }
+static void tab_away_from_rules() {
+    const bool tab_left = true, tab_right = false;
+    bool changed = false;
+@@TAB_AWAY@@
+    CHECK(cur_tab != TAB_RULES && cur_tab != TAB_COOP && changed);
+}
+static void tick_closed() {
+    const bool now_open = false;
+    bool tune_mode = true, mouse_read = true;
+    int drag_row = -1, hover_tab = 2;
+    const auto edit_end = [](bool done) { CHECK(!done); };
+@@CLOSED@@
+    CHECK(!pending && !tune_mode && !mouse_read && drag_row == -1 && hover_tab == -1);
+}
 /// The Co-op tab's rows as shown, by kind, ending with -1
 static void shown(int* out) {
     int n = 0;
@@ -295,6 +309,18 @@ int main() {
     CHECK(pending == &rows[0]);
     tick_pending(rows[0]);
     CHECK(!pending);
+    coop_press(row(kCoopAccept));
+    tab_away_from_rules();
+    tick_pending(rows[0]);
+    CHECK(!pending && n_asked == requests_before);
+    cur_tab = TAB_COOP;
+    coop_press(row(kCoopAccept));
+    CHECK(pending == &row(kCoopAccept) && n_asked == requests_before);   // returning needs a new first press
+    tick_closed();
+    cur_tab = TAB_COOP;
+    coop_press(row(kCoopAccept));
+    CHECK(pending == &row(kCoopAccept) && n_asked == requests_before);   // reopening cannot finish the cancelled press
+    tick_closed();
     coop_press(row(kCoopAccept));
     tick_pending(coop_terms[0].row);
     CHECK(pending == &row(kCoopAccept));
@@ -573,6 +599,8 @@ def main():
         "@@PROMPTS@@": block(menu, "if (field && editing == field->field) {"),
         "@@PENDING@@": between(menu, "        // (Restart and Quit armed only", "        if (press[7] && confirm_selected)"),
         "@@RULES_BACK@@": re.search(r"^        if \(press\[5\] && cur_tab == TAB_RULES\).*$", menu, re.M).group(0),
+        "@@TAB_AWAY@@": between(menu, "        // (the tabs: LB and RB", "        const int tab_count ="),
+        "@@CLOSED@@": block(block(menu, "void menu_tick() {"), "if (!now_open) {"),
     }
     source = MENU_FIXTURE
     for k, v in cut.items():
