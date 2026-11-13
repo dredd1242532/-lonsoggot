@@ -3318,6 +3318,10 @@ void draw_options(ui::Ctx& c) {
 /// The tuning bar: a compact TV-style picture settings bar docked at the bottom of the screen,
 /// leaving 90% of the game scene visible so visual settings can be judged live.
 void draw_tune_bar(ui::Ctx& c) {
+    if (cur_tab == TAB_MODS) {   // (the Mods tab has no rows of the bar's kind, its lines are the host's: its full page)
+        draw_options(c);
+        return;
+    }
     const float s = c.s;
     const int count = tab_row_count(cur_tab);
     int& sel = tab_selected[cur_tab];
