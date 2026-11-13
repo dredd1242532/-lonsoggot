@@ -10,6 +10,11 @@ checked in the source: every draw takes its query before it is recorded, a repor
 leave the case, the limit is set before a parallel replay copies its start state, and the query is begun inside the pass
 and ended before the pass can end.
 
+The draw's guard (vk_draw.cpp, OccGuard) is cut out and run too: it begins the query only at the draw command, so a draw
+left out after it took its query (descriptors that could not be bound, a buffer not found) never begins it and its
+report stays "visible"; begun where the guard is made, such a draw ended a query that counted nothing and the report
+read 0. In the source every draw command of draw() has its begin, with no way out between the two.
+
     python -I -B tests/test_vk_occlusion_queries.py [--cxx clang++]
 """
 import argparse
@@ -42,6 +47,12 @@ def ring_code(text):
     end = text.index("/// The next recording slot, begun")
     code = text[start:end]
     return code.replace(block(code, "bool occ_queries_on()"), "")
+
+
+def guard_code(text):
+    """vk_draw.cpp's OccGuard, the struct draw() makes its occ_guard of"""
+    fn = block(text, "void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {")
+    return block(fn, "struct OccGuard {") + ";"
 
 
 FIXTURE = r'''
@@ -96,7 +107,13 @@ VkResult vkGetQueryPoolResults(VkDevice, VkQueryPool, uint32_t first, uint32_t n
     }
     return r;
 }
-''' + "%RING%" + r'''
+// the draw's commands: a query begun and ended in a command buffer is done once the GPU ran it, here at once
+typedef struct VkCommandBuffer_T* VkCommandBuffer;
+typedef uint32_t VkQueryControlFlags;
+int begins = 0, ends = 0;
+void vkCmdBeginQuery(VkCommandBuffer, VkQueryPool, uint32_t, VkQueryControlFlags) { begins++; }
+void vkCmdEndQuery(VkCommandBuffer, VkQueryPool, uint32_t q) { ends++; gpu[q].avail = true; }
+''' + "%GUARD%" + "%RING%" + r'''
 // the replay's side of a run, as vk_replay.cpp's reset and report cases do it
 NvnState S;
 void reset() {
@@ -201,6 +218,33 @@ int main() {
     occ_collect();
     CHECK(guest[0x800] == 9 && guest[0x810] == 0 && occ_pending.empty());
     done_value = 15;
+    // a draw left out after it took its query (its guard made, its draw command never reached): the query is never begun,
+    // and the report stays "visible"; the draw that reached its command begins its query once, however often it asks
+    occ_value = 19;
+    reset();
+    auto e = draws(2);
+    report(0x500, 30);
+    {
+        OccGuard drawn;
+        drawn.pool = occ_pool, drawn.q = e[0];
+        drawn.begin();
+        drawn.begin();
+        gpu[e[0]].count = 3;
+    }
+    CHECK(begins == 1 && ends == 1 && gpu[e[0]].avail);
+    {
+        OccGuard left_out;
+        left_out.pool = occ_pool, left_out.q = e[1];
+    }
+    CHECK(begins == 1 && ends == 1 && !gpu[e[1]].avail);
+    {
+        OccGuard no_query;
+        no_query.begin();
+    }
+    CHECK(begins == 1 && ends == 1);
+    done_value = 19;
+    occ_collect();
+    CHECK(guest[0x500] == 4096 && occ_pending.empty());
     // more draws than one report counts: it stays "visible", and its queries are still freed
     occ_value = 16;
     reset();
@@ -271,7 +315,7 @@ int main() {
     full.occ_next = 1000 + kOccPool - kOccBuffer;
     CHECK(occ_room(full));
     occ_pending.clear();
-    std::puts("PASS: occlusion counts: summed once their draws are done, visible when unknown, overflowed, with a colour "
+    std::puts("PASS: occlusion counts: summed once their draws are done, visible when unknown (a draw left out never begins its query), overflowed, with a colour "
               "draw or reported again, in order, read and reset in one batch (two across the ring's end), the dry pass numbering as the "
               "workers do");
 }
@@ -300,8 +344,20 @@ def check_wiring(replay, draw):
     # the query: begun after the pass is, and its guard made after each_guard (so it ends before the pass can)
     fn = block(draw, "void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {")
     assert fn.index("} each_guard;") < fn.index("begin_pass(cmd, at);") < fn.index("} occ_guard;")
-    assert fn.index("} occ_guard;") < fn.index("vkCmdBeginQuery(cmd, d.occ_pool, d.occ_query")
-    assert re.search(r"~OccGuard\(\) \{ if \(pool\) vkCmdEndQuery\(cmd, pool, q\); \}", fn)
+    guard = block(fn, "struct OccGuard {")
+    assert "if (pool && !begun) vkCmdBeginQuery(cmd, pool, q, flags), begun = true;" in guard
+    assert re.search(r"~OccGuard\(\) \{ if \(begun\) vkCmdEndQuery\(cmd, pool, q\); \}", guard)
+    # begun at the draw command and nowhere before: each draw command of draw() has occ_guard.begin() ahead of it with no
+    # way out of draw() between the two, so a draw left out on the way never begins its query
+    body = fn[fn.index("} occ_guard;"):]
+    assert body.count("vkCmdBeginQuery") == 0
+    commands = [m.start() for m in re.finditer(r"\bvkCmdDraw\w*\(cmd,", body)]
+    assert len(commands) >= 12, len(commands)
+    for at in commands:
+        begin = body.rfind("occ_guard.begin();", 0, at)
+        assert begin >= 0, body[at:at + 60]
+        between = body[begin:at]
+        assert "SKIP_HERE" not in between and "return" not in between, between
     # on unless RX_VK_OCC_QUERIES=0, or a fixed value is asked for (RX_VK_OCC_FIXED)
     on = block(replay, "bool occ_queries_on()")
     assert 'getenv("RX_VK_OCC_QUERIES")' in on and 'getenv("RX_VK_OCC_FIXED")' in on and "hostQueryReset" in on
@@ -317,7 +373,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="occ-queries-") as tmp:
         cpp = Path(tmp) / "fixture.cpp"
         exe = Path(tmp) / "fixture.exe"
-        cpp.write_text(FIXTURE.replace("%RING%", ring_code(replay)), encoding="utf-8")
+        cpp.write_text(FIXTURE.replace("%GUARD%", guard_code(draw)).replace("%RING%", ring_code(replay)), encoding="utf-8")
         r = subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Wno-unused-parameter", "-Werror", str(cpp), "-o",
                             str(exe)], capture_output=True, text=True)
         if r.returncode:

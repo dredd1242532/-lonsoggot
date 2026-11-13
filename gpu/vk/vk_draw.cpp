@@ -7159,18 +7159,25 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_SCOPE(FT_HAZARD);
         begin_pass(cmd, at);
     }
-    // (longshot) the draw's occlusion query (vk_replay.cpp, RX_VK_OCC_QUERIES): begun in its pass and ended as draw() returns,
-    // before each_guard can end the pass. A draw that returns before this point leaves its query unused: its report stays
-    // "visible"
+    // (longshot) the draw's occlusion query (vk_replay.cpp, RX_VK_OCC_QUERIES): begun in its pass at the draw command itself
+    // (occ_guard.begin(), before each vkCmdDraw* below) and ended as draw() returns, before each_guard can end the pass. A
+    // draw that returns before its draw command leaves its query unused: its report stays "visible". Begun here, a draw
+    // left out further down (descriptors that could not be bound, an index buffer or its records not found) ended a query
+    // that had counted nothing, and its report read 0: the game left out an object nothing had tested
     struct OccGuard {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkQueryPool pool = VK_NULL_HANDLE;
         uint32_t q = 0;
-        ~OccGuard() { if (pool) vkCmdEndQuery(cmd, pool, q); }
+        VkQueryControlFlags flags = 0;
+        bool begun = false;
+        void begin() {
+            if (pool && !begun) vkCmdBeginQuery(cmd, pool, q, flags), begun = true;
+        }
+        ~OccGuard() { if (begun) vkCmdEndQuery(cmd, pool, q); }
     } occ_guard;
     if (d.occ_pool) {
-        vkCmdBeginQuery(cmd, d.occ_pool, d.occ_query, dev.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
         occ_guard.cmd = cmd, occ_guard.pool = d.occ_pool, occ_guard.q = d.occ_query;
+        occ_guard.flags = dev.occlusion_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0;
     }
     probe_draw(s, p, ps.draws);   // (longshot: RX_VK_PROBE)
     gprof_run(cmd, p.key);   // (RX_VK_PASS_TIMING=2)
@@ -7287,6 +7294,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     if (d.mesh) {
         if (p.fallback) {   // (longshot: the generated vertex stage reads the records; one vertex a corner)
+            occ_guard.begin();
             vkCmdDrawIndirect(cmd, fallback_draw_records, 0, 1, sizeof(VkDrawIndirectCommand));   // (its count: the records taken)
             st_mesh++;
             st_draws++, ps.draws++;
@@ -7348,6 +7356,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             if (mesh_conv_buf) {   // (EvilOOT: the records as {count, 1, 1}, mesh_indirect_convert)
                 // (longshot: as many records as mesh_indirect_convert wrote, not the game's maximum)
                 const uint32_t conv_n = (uint32_t)std::clamp(d.max, 1, 4096);
+                occ_guard.begin();
                 if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                     vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_conv_buf, mesh_conv_off, cnt.buffer, cnt.offset, conv_n, 12);
                 else
@@ -7367,6 +7376,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 const uint64_t firsts = mesh_args_address + mesh_args.offset + 12;
                 vkCmdPushConstants(cmd, p.layout, p.push_stages, Shader::Backend::SPIRV::MESH_FIRST_PUSH_OFFSET, 8, &firsts);
             }
+            occ_guard.begin();
             if (cnt && vkCmdDrawMeshTasksIndirectCountEXT)
                 vkCmdDrawMeshTasksIndirectCountEXT(cmd, mesh_args.buffer, mesh_args.offset, cnt.buffer, cnt.offset, d.max, step);
             else
@@ -7381,6 +7391,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
                 const uint64_t firsts = mesh_args_address + (uint64_t)at * 16 + 12;
                 vkCmdPushConstants(cmd, p.layout, p.push_stages, Shader::Backend::SPIRV::MESH_FIRST_PUSH_OFFSET, 8, &firsts);
             }
+            occ_guard.begin();
             vkCmdDrawMeshTasksEXT(cmd, (uint32_t)std::max(d.groups[0], 0), (uint32_t)std::max(d.groups[1], 1),
                                   (uint32_t)std::max(d.groups[2], 1));
         }
@@ -7473,6 +7484,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             std::memcpy(out + q * 6, tri, sizeof tri);
         }
         bind_index(cmd, cur->stream, at6, VK_INDEX_TYPE_UINT32);
+        occ_guard.begin();
         vkCmdDrawIndexed(cmd, quads * 6, (uint32_t)std::max(1, d.instances), 0, d.indexed ? d.base_vertex : 0,
                          (uint32_t)d.base_instance);
         st_draws++, ps.draws++;
@@ -7490,9 +7502,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             BufferRef ib = gpu_buffer_bind(d.ibuf, 4, false);
             if (!ib) SKIP_HERE();
             bind_index(cmd, ib.buffer, ib.offset, itype);
+            occ_guard.begin();
             if (cnt) vkCmdDrawIndexedIndirectCount(cmd, args.buffer, args.offset, cnt.buffer, cnt.offset, std::max(d.max, 1), ind_stride);
             else vkCmdDrawIndexedIndirect(cmd, args.buffer, args.offset, std::max(d.max, 1), ind_stride);
         } else {
+            occ_guard.begin();
             if (cnt) vkCmdDrawIndirectCount(cmd, args.buffer, args.offset, cnt.buffer, cnt.offset, std::max(d.max, 1), ind_stride);
             else vkCmdDrawIndirect(cmd, args.buffer, args.offset, std::max(d.max, 1), ind_stride);
         }
@@ -7507,9 +7521,11 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
             bind_index(cmd, ib.buffer, ib.offset, itype);
         }
         FINE_SCOPE(FT_DRAWCALL);
+        occ_guard.begin();
         vkCmdDrawIndexed(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), 0, d.base_vertex, (uint32_t)d.base_instance);
     } else {
         FINE_SCOPE(FT_DRAWCALL);
+        occ_guard.begin();
         vkCmdDraw(cmd, (uint32_t)d.count, (uint32_t)std::max(1, d.instances), (uint32_t)d.first, (uint32_t)d.base_instance);
     }
     st_draws++, ps.draws++;
