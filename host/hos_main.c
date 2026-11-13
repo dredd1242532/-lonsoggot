@@ -13,7 +13,7 @@
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
 #include "hos_paths.h"
-#include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
+#include "hos_wide_size.h"
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include <math.h>
@@ -1640,11 +1640,8 @@ void hos_oot_free_view(Ctx *c, uint64_t view) {
 #endif
 }
 
-float hos_aspect_ratio = 0;   /* (the window's default shape: host/display.c) */
+float hos_aspect_ratio = 0;
 /* (nx2/oot_wide.py) read by the widescreen patches in the game's code; 0: the game's own 16:9 */
-volatile uint64_t hos_wide_out, hos_wide_scene;
-volatile float hos_wide_ratio, hos_wide_squeeze, hos_wide_margin;
-volatile uint32_t hos_wide_keep_mask = 0xf;   /* (nx2/oot_wide.py KEEP_VTABLES: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
 /* (nx2/oot_occlusion.py) read by the game's code where it decides to make occlusion queries: 1, none (LONGSHOT_OCCLUSION_OFF=1) */
 volatile int hos_occlusion_off;
 static void occlusion_switch(void) {
@@ -1892,6 +1889,8 @@ static int game_main(int argc, char **argv) {
            than 16:9 the HUD, menus and movies keep the middle 16:9; narrower they fill the picture's width. Until now the one 16:9
            constant in the game's data was changed and the 16:9 picture stretched to the window. */
         const char *e = getenv("HOS_ASPECT");
+        extern int hos_wide_window;
+        hos_wide_window = 0;   /* HOS_ASPECT keeps upstream override semantics. */
         float want = e ? (float)atof(e) : 0.0f;
         if (!e) {
             int saved = -1, version = 0;   /* (the Aspect ratio's ultrawide= and options_version=, -1 / 0 without them) */
@@ -1904,12 +1903,14 @@ static int game_main(int argc, char **argv) {
                 if (o) {
                     char line[80];
                     while (fgets(line, sizeof line, o)) {
-                        if (!strncmp(line, "ultrawide=", 10)) saved = atoi(line + 10) != 0;
+                        if (!strncmp(line, "ultrawide=", 10)) saved = atoi(line + 10);
                         if (!strncmp(line, "options_version=", 16)) version = atoi(line + 16);
                     }
                     fclose(o);
                 }
             }
+            extern int hos_wide_window;
+            hos_wide_window = saved == 2;
             const int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
             /* (no line: the monitor's shape; an older file's 16:9 on a screen narrower than 16:9 too: hos_aspect_on) */
             const int on = hos_aspect_on(saved, version, sw, sh);

@@ -41,7 +41,7 @@
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
 #include "vk_bug_report.h"   // (the Gameplay tab's Bug report: what it writes, and how)
-#include "../../host/hos_wide_size.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
+#include "../../host/hos_wide.h"   // (the widescreen picture's size, as host/hos_main.c works it out)
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
 #include "vk_fsr3fi.h"    // (the Frame generation row: whether FSR 3.1 makes the frame)
 #include "vk_fsr4.h"
@@ -484,12 +484,14 @@ std::string monitor_shape() {
 }
 /// The Aspect ratio row's values: output_shapes' places, the monitor's own marked; where monitor_shape is not known, one more
 /// after them, Monitor's shape (ultrawide=1 with a 16:9 size, as host/hos_main.c takes the screen's shape), as on main
-int aspect_monitor_value() { return monitor_shape().empty() ? (int)output_shapes().size() : -1; }
+int aspect_monitor_value() { return monitor_shape().empty() ? (int)output_shapes().size() : -2; }
+// Window is not a display-mode index: the screen can become known after menu_init.
+int aspect_window_value() { return -1; }
 int aspect_last() { return std::max(0, (int)output_shapes().size() - 1 + (aspect_monitor_value() >= 0 ? 1 : 0)); }
 /// The shape the Aspect ratio row's value v names (Monitor's shape where the monitor's is not known: 16:9 sizes)
 std::string aspect_shape(int v) {
     const std::vector<dm::Shape>& shapes = output_shapes();
-    if (shapes.empty() || v == aspect_monitor_value()) return std::string("16:9");
+    if (shapes.empty() || v == aspect_monitor_value() || v == aspect_window_value()) return std::string("16:9");
     return shapes[std::clamp(v, 0, (int)shapes.size() - 1)].name;
 }
 /// The row's value for shape name (16:9's when it is not one of them)
@@ -503,6 +505,7 @@ int aspect_index(const std::string& name) {
 }
 /// Whether the row's value v is the monitor's shape: the window's screen's, marked "(monitor's)"
 bool aspect_is_monitors(int v) {
+    if (v == aspect_window_value()) return false;
     const std::string m = monitor_shape();
     return m.empty() ? v == aspect_monitor_value() : aspect_shape(v) == m;
 }
@@ -518,6 +521,7 @@ std::string host_shape() {
 /// Whether the row's value v is saved as ultrawide=1: the host's shape (a 16:9 size then takes it at the next start, as it
 /// shows), or Monitor's shape where the monitor's is not known. The same as the mark where the window is on the host's screen
 bool aspect_follows_host(int v) {
+    if (v == aspect_window_value()) return false;
     if (v == aspect_monitor_value()) return true;
     const std::string h = host_shape();
     return h.empty() ? aspect_is_monitors(v) : aspect_shape(v) == h;
@@ -525,6 +529,7 @@ bool aspect_follows_host(int v) {
 /// The Aspect ratio row's value for Output resolution choice v: a size of a shape of its own is that shape; a 16:9 one is the
 /// monitor's shape when ultrawide (0 or 1, as host/hos_main.c started with it) follows the monitor, else 16:9
 int aspect_of_choice(int v, int ultrawide) {
+    if (ultrawide == 2) return aspect_window_value();
     const Out o = output_at(v);
     if (hos_output_own_shape(o.w, o.h)) return aspect_index(dm::ratio_name(size_of(o)));
     if (ultrawide != 1) return aspect_index("16:9");
@@ -565,9 +570,11 @@ int step_output_choice(int id, int dir) {
 /// The Output resolution the Aspect ratio row's value v takes: the one the game started with at its shape; the one chosen when
 /// it has that shape; else the screen's own size when it has it; else the one whose height is nearest the screen's
 /// (display_modes.h pick)
+float window_start_aspect = 0;   // Allocated targets keep their startup shape across a live resize.
 int aspect_started = -1;   // (the Aspect ratio row's value at the start, from the size the run started with: outputs_sync)
 int output_started = 0;    // (the Output resolution the run started with)
 int output_for_aspect(int v) {
+    if (v == aspect_window_value()) return opts.output_res;
     // (back at the shape the game started with: the size it started with, so nothing is left to restart for. A first start on a
     // 21:9 screen is 21:9 with the game's own size, which ultrawide=1 widens: stepping away and back took 5120x2160 (native))
     if (v == aspect_started && output_choice(output_started) == output_started) return output_started;
@@ -587,6 +594,13 @@ Out picture_for(int v, bool* native = nullptr) {
     Out o = output_at(v);
     uint32_t sw = 0, sh = 0;
     if (native) *native = false;
+    if (opts.ultrawide == aspect_window_value() && !opts.handheld && dev.swap_extent.width && dev.swap_extent.height) {
+        const double shape = window_start_aspect > 0 ? window_start_aspect : (double)dev.swap_extent.width / dev.swap_extent.height;
+        const HosWideSize size = hos_wide_picture_size(shape, o.h);
+        o = Out{(unsigned)size.picture, (unsigned)(size.picture >> 32)};
+        if (native) *native = o.w == dev.swap_extent.width && o.h == dev.swap_extent.height;
+        return o;
+    }
     const bool own = hos_output_own_shape(o.w, o.h);
     screen_size(&sw, &sh);
     uint32_t hw = 0, hh = 0;
@@ -695,6 +709,7 @@ const char* tx_output_res(int v) {
 }
 /// The Aspect ratio row (ultrawide=): the shapes of the sizes offered, narrowest first, the monitor's own named so
 const char* tx_ultrawide(int v) {
+    if (v == aspect_window_value()) return "Window";
     static char b[48];
     if (v == aspect_monitor_value()) return "Monitor's shape";   // (the monitor's own not known: as on main)
     // (printed from a format, so menu_i18n.h's "%s (monitor's)" translates it: vk_menu_i18n.cpp match_format)
@@ -704,6 +719,7 @@ const char* tx_ultrawide(int v) {
 }
 /// The Aspect ratio: the monitor's own shape, the game's 16:9, or another shape, wider or narrower than 16:9
 const char* hn_ultrawide(int v, int variant) {
+    if (v == aspect_window_value()) return variant <= 0 ? "Fill the actual window: wider shows more at the sides, taller shows more above and below. Follows window resizes. Requires a restart." : nullptr;
     static const char* const t[] = {
         "Your monitor's own shape: the picture fills it. The HUD keeps its 16:9 shape in the middle.",
         "The game's own shape.",
@@ -1175,7 +1191,7 @@ Row rows[] = {
     // the frames, and the window it is shown in)
     {TAB_GRAPHICS, "Resolution and upscaling", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     // (the shape, then its sizes: the screen's display modes, display_modes.h; outputs_sync sets both rows' ends at the start)
-    {TAB_GRAPHICS, "Aspect ratio", &opts.ultrawide, 0, 1, 1, tx_ultrawide,
+    {TAB_GRAPHICS, "Aspect ratio", &opts.ultrawide, 0, 2, 1, tx_ultrawide,
      "The picture's shape: your monitor's own (the default: wider on an ultrawide, narrower on 4:3 or 16:10), the game's "
      "16:9, or another your screen has. The Output resolution lists that shape's sizes. Applies after a restart.", hn_ultrawide,
      true, true},
@@ -1595,9 +1611,10 @@ void outputs_sync() {
     const std::vector<dm::Shape> shapes = output_shapes();
     for (Row& r : rows) {
         if (r.value == &opts.output_res) r.hi = last_choice();
-        if (r.value == &opts.ultrawide) r.hi = aspect_last();
+        if (r.value == &opts.ultrawide) r.lo = aspect_window_value(), r.hi = aspect_last();
     }
-    ultrawide_read = std::clamp(opts.ultrawide, 0, 1);
+    ultrawide_read = std::clamp(opts.ultrawide, 0, 2);
+    window_start_aspect = ultrawide_read == 2 && host && host->aspect_ratio ? host->aspect_ratio() : 0;
     opts.ultrawide = aspect_started = aspect_of_choice(opts.output_res, ultrawide_read);
     output_started = opts.output_res;
     std::string list;
@@ -1896,7 +1913,7 @@ void save() {
                 // (a run whose Output resolution HOS_OUTPUT_RES holds took the row from the environment's size: the player's own
                 // ultrawide= is kept, unless the row was changed in the menu)
                 const int v = saved_value(r.value);
-                fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
+                fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : v == aspect_window_value() ? 2 : aspect_follows_host(v) ? 1 : 0);
             } else if (r.value && r.value != &opts.game_lang) {   // (game_lang: language.txt's)
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
@@ -4011,6 +4028,8 @@ void draw_startup(ui::Ctx& c) {
 
 } // namespace
 
+bool window_fit_active() { return ultrawide_read == 2 && !getenv("HOS_ASPECT"); }
+
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 
 // (longshot, #1886) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
@@ -4649,6 +4668,8 @@ void outputs_follow_screen() {
         return -1;
     }();
     // (the shapes the row's values name now: the same shapes after the list grows)
+    const bool at_window = opts.ultrawide == aspect_window_value(), started_window = aspect_started == aspect_window_value();
+    const bool restart_window = slot >= 0 && restart_state.start[slot] == aspect_window_value();
     const bool at_monitor = opts.ultrawide == aspect_monitor_value();
     const std::string now = aspect_shape(opts.ultrawide), started = aspect_shape(aspect_started),
                       restart_from = slot >= 0 ? aspect_shape(restart_state.start[slot]) : std::string();
@@ -4667,11 +4688,11 @@ void outputs_follow_screen() {
     if (added) {
         for (Row& r : rows) {
             if (r.value == &opts.output_res) r.hi = last_choice();
-            if (r.value == &opts.ultrawide) r.hi = aspect_last();
+            if (r.value == &opts.ultrawide) r.lo = aspect_window_value(), r.hi = aspect_last();
         }
-        opts.ultrawide = at_monitor && !monitor_shape().empty() ? aspect_index(monitor_shape()) : aspect_index(now);
-        aspect_started = aspect_index(started);
-        if (slot >= 0) restart_state.restart_value(slot, aspect_index(restart_from));
+        opts.ultrawide = at_window ? aspect_window_value() : at_monitor && !monitor_shape().empty() ? aspect_index(monitor_shape()) : aspect_index(now);
+        aspect_started = started_window ? aspect_window_value() : aspect_index(started);
+        if (slot >= 0) restart_state.restart_value(slot, restart_window ? aspect_window_value() : aspect_index(restart_from));
         menu_refresh = true;
     }
     logf("vk: the window's screen is %ux%u (%s): %d sizes added to the Output resolution's", sw, sh,

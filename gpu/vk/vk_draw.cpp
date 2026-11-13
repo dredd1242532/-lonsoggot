@@ -6,6 +6,7 @@
 // and the draws themselves.
 //
 // Pipelines persist in a VkPipelineCache next to the executable (mkw_vk_pipelines.bin).
+#include "oot_ui_squeeze.h"
 #include <algorithm>
 #include <filesystem>
 #include <iterator>
@@ -2929,6 +2930,11 @@ thread_local uint64_t grid_patch_at = UINT64_MAX;
 thread_local VkBuffer grid_patch_buf = VK_NULL_HANDLE;   // (the stream c0 went to: PR 585's streams can move on)
 
 int desc_reuse_level();   // (below: RX_VK_DESC_REUSE and the Descriptor reuse row)
+// Refit submitted canvas copies, never live guest memory: layouts can outlive a window resize.
+bool ui_squeeze(uint8_t* bytes, uint64_t n) {
+    return window_fit_active() && oot_ui_squeeze(bytes, n, dev.window_aspect.load(std::memory_order_relaxed));
+}
+
 VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_t index) {
     VkDescriptorBufferInfo bi{VK_NULL_HANDLE, 0, VK_WHOLE_SIZE};
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minUniformBufferOffsetAlignment, 16);
@@ -3014,6 +3020,21 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         const uint64_t want = used ? std::max<uint64_t>(used, 16) : std::max<uint64_t>(u.size, 16);
         const uint64_t n = std::min<uint64_t>(std::min<uint64_t>(want, u.size ? std::max<uint64_t>(u.size, 16) : want),
                                               dev.props.limits.maxUniformBufferRange);
+        // (longshot) a 2D canvas's block: its projection for the window's shape now, in a copy (oot_ui_squeeze.h). The block is
+        // read whole to be recognized, though a program may read only its first matrix
+        if (window_fit_active() && st.nvn_stage == 0 && u.size == OOT_UI_BLOCK_BYTES && n <= OOT_UI_BLOCK_BYTES) {
+            uint8_t block[OOT_UI_BLOCK_BYTES];
+            static thread_local uint8_t overlay_scratch[OOT_UI_BLOCK_BYTES];
+            const bool updated = ub_overlay(u.addr, sizeof block, overlay_scratch, [](uint64_t) { return (uint64_t)0; }) != UINT64_MAX;
+            if (updated) std::memcpy(block, overlay_scratch, sizeof block);
+            if ((updated || memory_read_as_submitted(u.addr, block, sizeof block)) && ui_squeeze(block, sizeof block)) {
+                if (stream_reserve(n, align))
+                    if (const uint64_t at = stream_alloc(n, align); at != UINT64_MAX) {
+                        std::memcpy(cur->mapped + at, block, n);
+                        return {cur->stream, at, n};
+                    }
+            }
+        }
         // (updates the stream made to this range in this submission or ones still in flight: a copy with them in)
         // (room first: the overlay copies into the stream's mapping, which a move to a bigger stream in the middle would change)
         if (stream_reserve(n, align))
@@ -4155,6 +4176,7 @@ TLS_OBJECT(pass, Pass)
 thread_local bool work_since_barrier = false;   // (GPU work recorded since the last full barrier: a dispatch orders after it)
 // what the command buffer has bound (draws skip what is already there)
 thread_local bool last_desc_valid = false;
+thread_local float last_desc_aspect = 0;
 thread_local const Program* last_desc_prog = nullptr;
 thread_local uint64_t last_desc_bind = 0, last_desc_reg = 0, last_desc_ub = 0, last_desc_dgen = 0;
 // (Descriptor reuse: the versions of the slots the last build resolved, the samplers' generation it saw, and whether it
@@ -6977,7 +6999,8 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // with the fallback's layout, its task and mesh stages read another program's buffers, and descriptors the push left
     // as they were: stale addresses, like the one RADV faulted on in Hyrule Field (#792))
     const bool slotgen = desc_slotgen_on();
-    const bool same_desc = !no_reuse && last_desc_valid && last_desc_prog == &p && last_desc_bind == s.bind_gen &&
+    const float ui_aspect = window_fit_active() ? dev.window_aspect.load(std::memory_order_relaxed) : 0;
+    const bool same_desc = last_desc_aspect == ui_aspect && !no_reuse && last_desc_valid && last_desc_prog == &p && last_desc_bind == s.bind_gen &&
                            last_desc_ub == ub_gen && last_desc_dgen == dgen &&
                            (slotgen ? last_desc_fp_on && desc_slots_kept(reg_gen) : last_desc_reg == reg_gen) &&
                            (!p.fallback || dw().prog == &p);
@@ -7123,6 +7146,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         FINE_SCOPE(FT_BINDDESC);
         if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p)) SKIP_HERE();
         last_desc_valid = true, last_desc_prog = &p, last_desc_bind = s.bind_gen, last_desc_reg = reg_gen;
+        last_desc_aspect = ui_aspect;
         last_desc_ub = ub_gen, last_desc_dgen = dgen;
         last_desc_fp_on = desc_fp_on;
         if (desc_fp_on)   // (Descriptor reuse: what its handles resolved; the next such draw may keep it through other slots' churn)

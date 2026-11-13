@@ -963,6 +963,7 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     dev.swap_rendered = std::move(rendered);
     dev.swap_format = fmt.format;
     dev.swap_extent = {width, height};
+    dev.window_aspect.store((float)width / height, std::memory_order_relaxed);
     dev.swap_images = std::move(images);
     dev.swap_spare = n > caps.minImageCount ? n - caps.minImageCount : 0;
     logf("vk: swapchain %ux%u, %u images, %s (V-Sync %s)", width, height, n,
