@@ -8856,6 +8856,49 @@ bool predict_pending() {
     fclose(f);
     return true;
 }
+// (longshot) Compile shaders, the Builder's, make_game.py's and the launcher's choice (compile_shaders= in longshot_options.ini:
+// 0 Most, the default; 1 All; any other number is Most). All builds the predicted pipelines too: about 50,000 for the driver's own cache, over 40 % more time (a full preparation on an RTX
+// 3090 with 24 threads: 415 and 413 s against 292 s without them), for pipelines play almost never draws ("vk: predicted
+// pipelines met in play"). RX_VK_COMPILE_SHADERS=all or most over the file (the game's --compile-shaders sets it, host/hos_main.c).
+// Asked only where a prediction would run: on Most it says so in the log, and takes away what an earlier preparation on All left
+// (the marker of one not finished, its sample and its keys), which would otherwise speak of pipelines this preparation did not
+// build
+bool compile_all() {
+    static const bool all = [] {
+        const char* why = "the default";
+        int v = 0;
+        if (const char* e = getenv("RX_VK_COMPILE_SHADERS")) {
+            v = !strcmp(e, "all") || !strcmp(e, "1") ? 1 : 0;
+            why = "RX_VK_COMPILE_SHADERS";
+        } else {
+            char exe[MAX_PATH];
+            const DWORD n = game_module_path(exe, MAX_PATH);
+            std::string ini(exe, n);
+            ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "longshot_options.ini";
+            if (FILE* f = fopen(ini.c_str(), "r")) {
+                char line[80];
+                while (fgets(line, sizeof line, f))
+                    if (!strncmp(line, "compile_shaders=", 16)) {
+                        v = atoi(line + 16) == 1 ? 1 : 0;
+                        why = "compile_shaders in longshot_options.ini";
+                        break;
+                    }
+                fclose(f);
+            }
+        }
+        if (v) {
+            logf("vk: Compile shaders: All (%s): the predicted pipelines are built too", why);
+        } else {
+            logf("vk: Compile shaders: Most (%s): the predicted pipelines are left out; a pipeline no list names is made when it "
+                 "is first drawn", why);
+            remove(predict_pending_path().c_str());
+            remove((pipe_notes_path() + ".predicted").c_str());
+            remove((pipe_notes_path() + ".predicted_keys").c_str());
+        }
+        return v != 0;
+    }();
+    return all;
+}
 void predict_run(void (*progress)(size_t done, size_t total)) {
     const auto t0 = std::chrono::steady_clock::now();
     std::vector<std::unique_ptr<PipeNote>> notes = pipe_notes_read();
