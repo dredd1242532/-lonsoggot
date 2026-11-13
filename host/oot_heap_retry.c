@@ -11,7 +11,7 @@
      1697: "CRASH: exception 0xc0000005 (write ..., guest 0x8)", thread OptimizeChangeBanc, lr 0x80456d48, every time a few
      frames after loading that player's save, since 2.0.12);
    - the GPU memory, f_80522050 called at 0x80456f18 and 0x80457094, leaves the material block with no memory pool
-     (0x80457248), and the block is written to guest address 0 two calls later (TomShafford/Longshot's crash at
+     (0x80457248), and the block is written to guest address 0 two calls later (TomShafford/Hookshot's crash at
      backflip + attack).
    Each is tried again in the heap's parents up to the root, the first with room (the GPU memory then in the game's
    default heap). Only these call sites are changed: f_80522050's other callers (some 30) are as shipped.
@@ -22,7 +22,7 @@
    neither). Every block moved to a parent is counted per call site, and the totals are logged every 16 moves after the
    first 60 log lines (a growing total over a session would be a leak).
 
-   The GPU part is ported from TomShafford/Longshot 55d68e8cd6 and 65c1998222 (GPL-3.0, a Longshot fork), by TomShafford;
+   The GPU part is ported from TomShafford/Hookshot 55d68e8cd6 and 65c1998222 (GPL-3.0, a Hookshot fork), by TomShafford;
    its waits before the parents are left out (its own log showed they did not help).
 
    A sead heap here (vtable 0x84c172c8, the heap class of these): +0x20 its name, +0x28 its memory, +0x30 its size, +0x38 its

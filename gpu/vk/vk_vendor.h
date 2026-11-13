@@ -33,7 +33,7 @@ struct VendorFixes {
     // RX_VK_NAN_BITS
     bool nan_bits = false;
     // Gathers nudged by 1/512 of a texel, so that the four texels a gather picks match Maxwell's at texel edges
-    // (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which Longshot had never turned on). Eden and Lichii turn it on
+    // (emit_spirv_image.cpp ImageGatherSubpixelOffset, Eden's, which Hookshot had never turned on). Eden and Lichii turn it on
     // for these drivers (the AMD and Intel ones, and the mobile ones Eden runs on): shadow edges drawn as dashed lines without it.
     // RX_VK_GATHER_OFFSET
     bool gather_offset = false;

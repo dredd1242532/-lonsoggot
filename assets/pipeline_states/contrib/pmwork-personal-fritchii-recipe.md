@@ -11,7 +11,7 @@ Hashes, formats and draw state only: no game code or data (assets/pipeline_state
 
 ## How it was made
 
-Not recorded by Longshot: converted from the records another emulator keeps. Fritchii (a Lichii fork) ships a "recipe" for
+Not recorded by Hookshot: converted from the records another emulator keeps. Fritchii (a Lichii fork) ships a "recipe" for
 OoT: the pipelines its testers' sessions drew, and states it predicts, with each shader named by a fingerprint and no code
 (`nx2_recipe.h`, `nx2_shader_extract.h` on its `oot-gather-fix` branch). The fingerprint (SHA-256 of the stage's control
 section with four bytes masked, then its code area) and Longshot's code key (`vk_shader.cpp` `code_key`) hash the same bytes,
