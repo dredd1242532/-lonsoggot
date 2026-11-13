@@ -25,6 +25,7 @@ static int unsetenv(const char *name) { return _putenv_s(name, ""); }
 #include "coop_players.h"
 #include "coop_gameplay.h"
 #include "coop_state.h"
+#include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* the runtime's shared environment parser */
 
 static int failures;
@@ -388,6 +389,17 @@ static CoopView view;
 static CoopGameplay gameplay;
 static int presence = 1;
 static int hos_oot_coop_presence(void) { return presence; }
+static int names_permission = 1;
+int hos_oot_coop_offer(CoopOffer *out) {
+    memset(out, 0, sizeof *out);
+    out->accepted = accepted != 0, out->n = 1;
+    out->member[0].id = 2;
+    snprintf(out->member[0].name, sizeof out->member[0].name, "Friend");
+    out->rules.epoch = 1;
+    coop_feature_set(&out->rules, COOP_RULE_PRESENCE, presence);
+    coop_feature_set(&out->rules, COOP_RULE_NAMES, names_permission);
+    return out->accepted;
+}
 static void owner_context(void) {
     CoopGameplayContext c = {0};
     c.version = COOP_GAMEPLAY_VERSION, c.size = sizeof c;
@@ -1298,13 +1310,80 @@ static void gear_codec(void) {
     size_t n = coop_pos_pack(bytes, sizeof bytes, &p);
     CHECK(n && coop_pos_parse(bytes, n, &got) && got.sword == p.sword && got.shield == p.shield && got.hands == 3 && got.nslots == 4);
     CHECK(!coop_pos_parse(bytes, n - 1, &got) && !coop_pos_parse(bytes, n + 1, &got));
-    bytes[n - 1] = 4; CHECK(!coop_pos_parse(bytes, n, &got));
+    bytes[n - 5] = 4; CHECK(!coop_pos_parse(bytes, n, &got));
     p.hands = 4; CHECK(!coop_pos_pack(bytes, sizeof bytes, &p));
     p.hands = 0, p.nslots = 5; CHECK(!coop_pos_pack(bytes, sizeof bytes, &p));
     p.nslots = 4, p.sword = 255, p.shield = 255;
     n = coop_pos_pack(bytes, sizeof bytes, &p);
     CHECK(n && coop_pos_parse(bytes, n, &got) && got.sword == 255 && !gear_id(0, got.sword, 1) && !gear_id(1, got.shield, 1));
     bytes[0] = 2; CHECK(!coop_pos_parse(bytes, n, &got));
+}
+
+static void hud_privacy(void) {
+    fresh(); room(1); accepted = 1u << 2;
+    setenv("HOS_COOP_PLAYERS", "1", 1);
+    hos_oot_coop_players_start();
+    presence = COOP_PRESENCE_SUPPORTED;
+    link_at("Forest", 0, 0, 0, 0);
+    they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    frame(16); game_makes(); frame(16);
+    MkwVkCoopOverlay overlay;
+    CHECK(hos_coop_overlay_snapshot(&overlay, 1) && overlay.nmarks == 1 && overlay.mark[0].flags == HOS_COOP_MARK_NAME);
+    CHECK(hos_coop_overlay_snapshot(&overlay, 2) && (overlay.mark[0].flags & HOS_COOP_MARK_ARROW));
+    reads = 0; CHECK(!hos_coop_overlay_snapshot(&overlay, 0) && !reads);
+    names_permission = 0;
+    CHECK(!hos_coop_overlay_snapshot(&overlay, 1));
+    CHECK(hos_coop_overlay_snapshot(&overlay, 2) && overlay.mark[0].flags == HOS_COOP_MARK_ARROW);
+    presence &= ~COOP_PRESENCE_ARROWS;
+    CHECK(!hos_coop_overlay_snapshot(&overlay, 2));
+    names_permission = 1;
+    CHECK(hos_coop_overlay_snapshot(&overlay, 2) && overlay.mark[0].flags == HOS_COOP_MARK_NAME);
+    CoopPos pose; uint64_t age;
+    CHECK(hos_oot_coop_players_snapshot(2, &pose, &age) && age < 3000);
+    accepted = 0;
+    CHECK(!hos_oot_coop_players_snapshot(2, &pose, &age) && !hos_coop_overlay_snapshot(&overlay, 2));
+    const unsigned taken = P.store.taken;
+    they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    CHECK(P.store.taken == taken);
+    accepted = 1u << 2;
+    CHECK(!hos_oot_coop_players_snapshot(2, &pose, &age));
+    they_are_at("Elsewhere", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    CHECK(!hos_coop_overlay_snapshot(&overlay, 2));
+    they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    now_ms += COOP_PLAYERS_SILENT_MS;
+    CHECK(!hos_coop_overlay_snapshot(&overlay, 2));
+
+    const uint64_t gd = ld(ld(GAMEDATA_HOLDER, 8), 8), cn = gd + 0xc8;
+    const uint64_t entries = galloc(0x50), table = galloc(8 * 16);
+    st(cn + CN_COUNT, 2, 4); st(cn + CN_CAP, 16, 4);
+    st(cn + CN_ENTRIES, entries, 8); st(cn + CN_TABLE, table, 8);
+    st(table + 8 * (0x31ab5580u % 16), 0x31ab5580u, 4);
+    st(table + 8 * (0xfbe01da1u % 16), 0xfbe01da1u, 4);
+    st(table + 8 * (0xfbe01da1u % 16) + 4, 1, 4);
+    st(entries + 0x1c, 9, 4); st(entries + 0x28 + 0x1c, 12, 4);
+    presence = COOP_PRESENCE_HEALTH; pose = (CoopPos){0}; health_read(&ctx, &pose);
+    CHECK(pose.health_q == 9 && pose.max_health_q == 12);
+    st(entries + 0x1c, 0, 4); pose = (CoopPos){0}; health_read(&ctx, &pose);
+    CHECK(pose.health_q == 0 && pose.max_health_q == 12);
+    st(entries + 0x28 + 0x1c, 161, 4); pose = (CoopPos){0}; health_read(&ctx, &pose);
+    CHECK(!pose.max_health_q);
+    st(cn + CN_TABLE, 0, 8); pose = (CoopPos){0}; health_read(&ctx, &pose);
+    CHECK(!pose.max_health_q);
+    presence = 0; reads = 0; health_read(&ctx, &pose); CHECK(!reads);
+    for (int mask = 0; mask <= COOP_PRESENCE_SUPPORTED; mask++) {
+        if (mask & ~COOP_PRESENCE_SUPPORTED) continue;
+        presence = mask; P.show = 0;
+        pose = (CoopPos){.flags=COOP_POS_IN_WORLD,.pos={1,2,3},.health_q=9,.max_health_q=12,.nslots=1,.area="Forest"};
+        place_hidden(&pose);
+        CHECK((pose.max_health_q != 0) == !!(mask & COOP_PRESENCE_HEALTH));
+        CHECK((pose.pos[0] != 0) == !!(mask & COOP_PRESENCE_ARROWS));
+        CHECK(!pose.nslots);
+        CHECK((pose.area[0] != 0) == !!(mask & (COOP_PRESENCE_PLACE | COOP_PRESENCE_ARROWS | COOP_PRESENCE_BODIES)));
+    }
+    presence = 0; playing = 0; P.was_playing = 0;
+    reads = locks_taken = 0; frame(16);
+    CHECK(!reads && !locks_taken && !hos_coop_overlay_snapshot(&overlay, 2));
+    puts("PASS HUD: native health unknown/zero/bounds, each privacy bit, names/off/arrows, stale/map/acceptance/ticket/off paths");
 }
 
 int main(int argc, char **argv) {
@@ -1316,6 +1395,7 @@ int main(int argc, char **argv) {
     game_side(argv[1]);
     body_gear();
     gear_codec();
+    hud_privacy();
     if (failures) { fprintf(stderr, "%d checks failed\n", failures); return 1; }
     printf("coop players: all checks passed\n");
     return 0;

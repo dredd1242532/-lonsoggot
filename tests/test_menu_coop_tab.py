@@ -71,7 +71,7 @@ static_assert(HOS_COOP_CMD_RULES_CHANGED == 9 && HOS_COOP_CMD_TEMP_SAVE == 10);
 @@TABS@@
 @@ROW@@
 @@TEXT@@
-static struct { int coop_progress = 1, compact_menu_key = 0; } opts;
+static struct { int coop_progress = 1, compact_menu_key = 0, coop_labels = 1; } opts;
 @@RULES@@
 Row rows[] = {
     {TAB_GAMEPLAY, "Restart", nullptr, 0, 0, 0, nullptr, nullptr},
@@ -612,7 +612,10 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number);
 const CoopFeatureRule *coop_feature_at(int index) { (void)index; return NULL; }   /* no registry rows in this fixture */
 #else
 static CoopSync *view_engine;
+int coop_feature_present(const CoopRules *r, int id, int *value) { (void)r; (void)id; (void)value; return 0; }
 #endif
+int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age) { (void)id; (void)out; (void)age; return 0; }
+int hos_oot_destination(int index, const char **child, const char **adult) { (void)index; (void)child; (void)adult; return 0; }
 static int64_t clock_ms;
 int64_t hos_now_ns(void) { return clock_ms * 1000000; }
 void hos_log(const char *fmt, ...) { (void)fmt; }
@@ -990,10 +993,10 @@ def main():
         # ---- the Room rules page against the engine: the rows as the source has them ----
         header = (root / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
         order = re.findall(r'\{&opts\.(\w+), "(\w+)"\}', between(menu, "} coop_options[] = {", "};"))
-        if len(order) != 8 or order[0] != ("coop", "coop"):
-            raise SystemExit("FAIL: vk_menu.cpp: coop_options is not co-op at the start and the seven rules")
+        if len(order) != 9 or order[0] != ("coop", "coop") or order[-1] != ("coop_labels", "coop_labels"):
+            raise SystemExit("FAIL: named co-op options must include seven rules and the independent local label setting")
         table = []
-        for field, key in order[1:]:
+        for field, key in order[1:-1]:
             r = re.search(r'\{TAB_RULES, "[^"]+", &opts\.%s, (\d+), (\d+), (\d+), tx_rule_(?:shared|pool),' % field, menu)
             default = re.search(r"\b%s = (\d+)[,;]" % field, header)
             if not (r and default):
@@ -1009,14 +1012,15 @@ def main():
     version = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
     host_struct = between(api, "typedef struct MkwVkHost {", "} MkwVkHost;")
     members = [l.strip() for l in host_struct.splitlines() if l.strip().endswith(");") and "(*" in l]
-    if members[-4:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
+    if members[-5:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
                         "int (*coop_command)(int cmd, const char *text, uint32_t number);",
-                        "int (*coop_feature)(int index, MkwVkCoopFeature *out);"]:
+                        "int (*coop_feature)(int index, MkwVkCoopFeature *out);",
+                        "int (*coop_overlay)(MkwVkCoopOverlay *out, int labels);"]:
         raise SystemExit("FAIL: vk_api.h: the Co-op calls are not after take_text in MkwVkHost's appended order "
                          "(host/rx_backend.c fills it by position)")
-    if version < 28:
-        raise SystemExit("FAIL: vk_api.h: membership/pool and temporary-save view need API 28")
-    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*\};",
+    if version < 29:
+        raise SystemExit("FAIL: vk_api.h: the combined co-op interface needs API 29")
+    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*hos_coop_overlay_snapshot,\s*\};",
          "rx_backend.c: vk_host does not end with the Co-op tab's calls")
     need(menu, r"TAB_DEBUG = 4,[^\n]*\n\s*TAB_COOP = 5,[^\n]*\n\s*TAB_COUNT = 6,", "vk_menu.cpp: the Co-op tab is not the strip's last")
     need(menu, r'tab_titles\[TAB_COUNT\] = \{"Graphics", "Audio", "Gameplay", "Controls", "Debug", "Co-op"\}', "vk_menu.cpp: no Co-op title")

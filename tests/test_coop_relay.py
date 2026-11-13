@@ -52,18 +52,19 @@ def unhex(s):
 # f32 x/y/z/yaw, u8 slot count (<=4), per slot u8 name length, printable name, finite f32 frame.
 # The tail is u8 sword/shield/hands (only hand bits0..1 supported). Unknown item bytes draw nothing.
 # Version1 had u16 pseq; version2 had no equipment tail.
+# Gear is followed by u16 health and maximum in quarter hearts; health <= maximum <=160; max0 means unknown.
 POS_VERSION = 3
 POS_ADULT, POS_IN_WORLD = 1, 2
 POS_TEXT_MAX, POS_SLOTS = 47, 4
 POS_HEAD = 11
 
 
-def pack_pos(pseq, t_ms, flags, area, xyz, yaw, slots, gear=(0, 0, 0)):
+def pack_pos(pseq, t_ms, flags, area, xyz, yaw, slots, gear=(0, 0, 0), health=0, maximum=0):
     out = struct.pack('<BIIBB', POS_VERSION, pseq, t_ms, flags, len(area)) + area + struct.pack('<4f', *xyz, yaw)
     out += bytes([len(slots)])
     for node, frame in slots:
         out += bytes([len(node)]) + node + struct.pack('<f', frame)
-    return out + bytes(gear)
+    return out + bytes(gear) + struct.pack('<HH', health, maximum)
 
 
 def _printable(b):
@@ -71,7 +72,7 @@ def _printable(b):
 
 
 def parse_pos(b):
-    """(pseq, t_ms, flags, area, xyz, yaw, slots, gear), or None unless exactly one bounded version3 POS."""
+    """Version3 pose, gear, health and maximum; malformed or older versions refuse."""
     if len(b) < POS_HEAD or b[0] != POS_VERSION or b[10] > POS_TEXT_MAX or len(b) < POS_HEAD + b[10] + 17:
         return None
     pseq, t_ms, flags, alen = struct.unpack_from('<IIBB', b, 1)
@@ -90,16 +91,19 @@ def parse_pos(b):
             return None
         slots.append((node, frame))
         at += 1 + len(node) + 4
-    if at + 3 != len(b) or b[at + 2] & ~3:
+    if at + 7 != len(b) or b[at + 2] & ~3:
         return None
-    return (pseq, t_ms, flags, area, (x, y, z), yaw, tuple(slots), tuple(b[at:]))
+    health, maximum = struct.unpack_from('<HH', b, at + 3)
+    if health > maximum or maximum > 160:
+        return None
+    return (pseq, t_ms, flags, area, (x, y, z), yaw, tuple(slots), tuple(b[at:at + 3]), health, maximum)
 
 
 def pos_tokens(name, p):
     """A pos vector line's tokens: name, the payload, then the fields (floats exact in f32, so repr reads back)."""
-    pseq, t_ms, flags, area, xyz, yaw, slots, gear = parse_pos(p)
+    pseq, t_ms, flags, area, xyz, yaw, slots, gear, health, maximum = parse_pos(p)
     return ('pos', name, hx(p), pseq, t_ms, flags, hx(area), *[repr(v) for v in xyz], repr(yaw),
-            *gear, *[f'{hx(node)}:{frame!r}' for node, frame in slots])
+            *gear, health, maximum, *[f'{hx(node)}:{frame!r}' for node, frame in slots])
 
 
 # ---- the byte vectors
@@ -199,6 +203,8 @@ def build_vectors():
                                            (1.0, 2.0, 3.0), 0.0, [], (2, 2, 3))))
     line(*pos_tokens('unknown-gear', pack_pos(11, 11, POS_IN_WORLD, b'Fixture',
                                              (1.0, 2.0, 3.0), 0.0, [], (255, 255, 0))))
+    line(*pos_tokens('health', pack_pos(1, 2, POS_IN_WORLD, b'Fixture', (0.0, 0.0, 0.0), 0.0, [], health=9, maximum=12)))
+    line(*pos_tokens('zero-health', pack_pos(1, 2, POS_IN_WORLD, b'Fixture', (0.0, 0.0, 0.0), 0.0, [], health=0, maximum=12)))
 
     zeros = bytes(16)
     ping = cr.pack(cr.T_PING, 0, 0, 0, 1, b'abcd')
@@ -222,19 +228,22 @@ def build_vectors():
         ('sealed', 'short', bytes([1]) + bytes(28)),
         ('sealed', 'version', bytes([2]) + bytes(40)),
         ('pos', 'version-1', bytes([1]) + walk[1:]),
-        ('pos', 'version-2', bytes([2]) + walk[1:-3]),
-        ('pos', 'unsupported-hands', walk[:-1] + bytes([4])),
+        ('pos', 'version-2', bytes([2]) + walk[1:-7]),
+        ('pos', 'unsupported-hands', walk[:-5] + bytes([4]) + walk[-4:]),
         ('pos', 'cut', walk[:-1]),
         ('pos', 'trailing', walk + b'x'),
-        ('pos', 'area-48', struct.pack('<BIIBB', POS_VERSION, 0, 0, 0, 48) + bytes(48) + bytes(17)),
-        ('pos', 'slots-5', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-4] + bytes([5]) + bytes(28)),
-        ('pos', 'node-48', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-4] + bytes([1, 48]) + bytes(55)),
+        ('pos', 'area-48', struct.pack('<BIIBB', POS_VERSION, 0, 0, 0, 48) + bytes(48) + bytes(24)),
+        ('pos', 'slots-5', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-8] + bytes([5]) + bytes(32)),
+        ('pos', 'node-48', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-8] + bytes([1, 48]) + bytes(59)),
         ('pos', 'area-newline', pack_pos(1, 2, POS_IN_WORLD, b'Hyrule\nField', (0.0, 0.0, 0.0), 0.0, [])),
         ('pos', 'area-utf8', pack_pos(1, 2, POS_IN_WORLD, 'Zoë'.encode(), (0.0, 0.0, 0.0), 0.0, [])),
         ('pos', 'node-nul', pack_pos(1, 2, POS_IN_WORLD, b'HyruleField', (0.0, 0.0, 0.0), 0.0, [(b'Wa\0k', 1.0)])),
         ('pos', 'x-nan', pack_pos(1, 2, POS_IN_WORLD, b'HyruleField', (float('nan'), 0.0, 0.0), 0.0, [])),
         ('pos', 'yaw-inf', pack_pos(1, 2, POS_IN_WORLD, b'HyruleField', (0.0, 0.0, 0.0), float('inf'), [])),
         ('pos', 'frame-inf', pack_pos(1, 2, POS_IN_WORLD, b'HyruleField', (0.0, 0.0, 0.0), 0.0, [(b'Walk', float('-inf'))])),
+        ('pos', 'health-over-max', pack_pos(1, 2, 0, b'', (0.0, 0.0, 0.0), 0.0, [], health=13, maximum=12)),
+        ('pos', 'health-unknown-nonzero', pack_pos(1, 2, 0, b'', (0.0, 0.0, 0.0), 0.0, [], health=1, maximum=0)),
+        ('pos', 'health-cap', pack_pos(1, 2, 0, b'', (0.0, 0.0, 0.0), 0.0, [], health=161, maximum=161)),
         ('pos', 'empty', b''),
     ]
     for kind, name, data in bad:
@@ -381,7 +390,8 @@ class CodecTest(unittest.TestCase):
                 name, payload = t[0], unhex(t[1])
                 pseq, t_ms, flags, area, x, y, z, yaw = t[2:10]
                 want = (int(pseq), int(t_ms), int(flags), unhex(area), (float(x), float(y), float(z)), float(yaw),
-                        tuple((unhex(s.split(':')[0]), float(s.split(':')[1])) for s in t[13:]), tuple(map(int, t[10:13])))
+                        tuple((unhex(s.split(':')[0]), float(s.split(':')[1])) for s in t[15:]),
+                        tuple(map(int, t[10:13])), int(t[13]), int(t[14]))
                 self.assertEqual(parse_pos(payload), want, name)
                 self.assertEqual(pack_pos(*want), payload, name)
             elif kind == 'reject':

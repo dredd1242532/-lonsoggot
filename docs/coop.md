@@ -579,8 +579,8 @@ game's flags is in the source.
   empty for the others); with progress `own`, keys are `own` too. A maker whose settings break this gets the nearest
   valid set, and the log says which.
 
-Never shared: where Link is, his health and the magic in the meter, the time of day, bottle contents and the equipment
-worn; heart containers and pieces and gold skulltula tokens (their pickups are flags of single objects this layer does
+Never merged into your save by progress sync: where Link is, his health and the magic in the meter, the time of day,
+bottle contents and the equipment worn; heart containers and pieces and gold skulltula tokens (their pickups are flags of single objects this layer does
 not write, so a shared count would pay twice); items the game takes away again (the trade sequence, rented masks, the
 knife that breaks, amiibo items); flags the game resets itself at a scene change, a new day or a load.
 
@@ -887,13 +887,14 @@ absent is off, and unsupported bits refuse the charter. Equipment alone does not
 With the appropriate age permitted, POS sends map, position, facing and up to four animation slots about15 times
 a second. Child and adult bodies use their own locally generated actors; an age change drops old interpolation and
 retires the previous body rather than applying its pose to the other age. Same-map accepted players are shown100ms
-behind the latest sample. Local display off shares only low-rate map/state under the same signed age permission,
-never precise position, animation or gear. Co-op off performs no new per-frame guest work.
+behind the latest sample. Local display off removes animation and gear; the independent signed arrow permission
+can still disclose precise positions. Place and health require their own signed bits. Co-op off does no guest work.
 Animation phase comes from each native slot's current frame, not its clip duration; the receiver interpolates
 that phase and applies it through the native animation setter. A successful node request alone does not prove
 visible skeletal motion or full-pose parity.
 
-The version3 POS payload adds three bytes after the animation slots: sword, shield and drawn-state bits.
+The version3 POS payload adds seven bytes after the animation slots: sword, shield and drawn-state bytes,
+then little-endian u16 health and maximum health in quarter hearts (both0 means unknown).
 Sword IDs are0 none,1 Kokiri,2 Master,3 Biggoron's and4 Giant's Knife; shield IDs are0 none,1 Deku,2 Hylian and3 Mirror.
 Drawn-state bit0 is the sword, bit1 the shield; higher bits refuse the packet. Unknown or age-incompatible equipment
 draws nothing and removes the previous piece; a peer never chooses an actor name, pointer or file.
@@ -952,7 +953,7 @@ starts no game. These checks cover the asset boundary, not animation quality in 
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `coop_presence_permissions` |0|Maker-signed mask: 1 child, 2 adult, 16 sword/shield. 3 both ages; 19 both with gear. Other bits refuse.|
+| `coop_presence_permissions` |0|Maker-signed mask: 1 child, 2 adult, 4 health, 8 arrows, 16 sword/shield, 64 place. Add wanted bits; other bits refuse.|
 | `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display, animation when assets exist, and precise pose sending; environment overrides the saved setting.|
 | `HOS_COOP_PLAYERS_ANIM` |automatic|Diagnostic override: 0/off/false disables animation; 1 requests it but still requires generated assets. Only four bounded slots are replayed.|
 | `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic `child[,adult]` actor names, never a packet value. Custom actors animate only with explicit `HOS_COOP_PLAYERS_ANIM=1`.|
@@ -967,4 +968,39 @@ separate required proof before readiness.
 
 Interpolation clamps its weight, normalizes received rotations and keeps finite animation frames finite even at
 the floating-point limits. A refused request-storage allocation is retained for this start, not retried every frame.
+
+## Finding your friends
+
+The Co-op tab's **Friend labels** is your own display choice: **Off**, **Names** (the default), or **Names and arrows**.
+It is saved as `coop_labels=0`, `1`, or `2` in `longshot_options.ini` and changes immediately; there is no environment
+override or restart. Names also require the maker's signed `coop_names=1` (rule72, default1; absent is off), a fresh
+accepted same-map pose, and a body actually shown locally. Turning labels off stops the overlay and its camera
+observations; it does not change the room's disclosure permissions or another player's choice.
+
+Rule99's independent bits are **4 health**, **8 direction arrows**, and **64 place in the friend list**.
+For child bodies and all three together the maker sets `coop_presence_permissions=77`, then everyone accepts the new
+terms. No bit is inferred from another one. Arrows point to a same-map friend outside the picture or behind the camera;
+a friend directly behind gets a bottom-edge arrow. Friends elsewhere have no arrow. Labels and arrows use the
+submitted scene camera and the actual cropped destination rectangle, not a guessed camera or live replay memory.
+They are navigation aids, not line-of-sight or wall-occlusion checks.
+
+Accepted friends have a second list line with their map and health in hearts, including quarter hearts. Known map
+names reuse the existing game destination vocabulary; a map without a matching label is **Other area**.
+Missing, stale (three seconds), away, private or unreadable values say **Place unknown** or **Hearts: unknown**,
+never zero. A freshly reported zero really is zero; a zero maximum means unknown. The list scrolls with the menu's
+wheel when it does not fit. The original membership names and key fingerprints remain available for deciding whom
+to accept; unaccepted members get none of this new gameplay information.
+
+POS payload version3 appends two little-endian u16 values, health and maximum, in quarter-heart units, bounded to
+160. Unknown is the canonical pair0/0. Older version2 payloads are refused, not guessed; a version2 client likewise
+refuses version3 and shows no remote body from it. Matching updated builds are required for presence.
+The relay still forwards encrypted bytes without parsing them. POS now snapshots only locally accepted recipient
+sessions as unicasts and rechecks each before sending; revoke/reaccept cancels already queued poses.
+The receiver independently checks its own current acceptance and presentation generation as before.
+This is not recipient-private encryption: everyone who holds the room secret can decrypt traffic they obtain.
+
+`tests/test_coop_hud.py`, `test_coop_hud_renderer.py`, `test_coop_overlay_camera.py`, `test_coop_players.py` and
+`test_coop_pos_privacy.py` exercise the bounded codecs, privacy masks, stale/unknown health, accepted snapshots,
+front/behind-camera projection, all four edges at16:9 and21:9, text bounds and the off path without a game.
+Current-build two-game pictures, physical controls, Windows and multi-player readability still need playtest evidence.
 

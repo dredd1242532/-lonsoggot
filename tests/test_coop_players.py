@@ -92,7 +92,8 @@ def main():
         exe = temp / "oot_coop_players_test.exe"
         base = [a.cc, "-std=gnu11", "-D_CRT_SECURE_NO_WARNINGS", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I" + str(host),
                 '-DOOT_COOP_PLAYERS_BODY="%s"' % body.as_posix(), str(ROOT / "tests" / "oot_coop_players_test.c"),
-                str(host / "coop_players.c"), str(host / "coop_proto.c"), str(ROOT / "third_party" / "monocypher" / "monocypher.c"),
+                str(host / "coop_players.c"), str(host / "coop_proto.c"), str(host / "coop_state.c"),
+                str(ROOT / "third_party" / "monocypher" / "monocypher.c"),
                 "-lm", "-o", str(exe)]
         tries = [["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined"], []] if os.name != "nt" else [[]]
         for i, extra in enumerate(tries):

@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 28
+#define MKWVK_API_VERSION 29
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -135,6 +135,8 @@ typedef struct MkwVkCoopMember {
     int32_t id;   /* 1 to 8 */
     uint8_t self, maker, away, accepted;
     char name[32], key[24];
+    int32_t place; /* 0 unknown/stale/private, -1 other area, positive: existing destination index + 1 */
+    uint16_t health_q, max_health_q; /* max=0 unknown/stale/private, never interpreted as zero health */
 } MkwVkCoopMember;
 typedef struct MkwVkCoopView {
     uint32_t version;
@@ -173,6 +175,18 @@ typedef struct MkwVkCoopFeature {
     int32_t id, lo, hi, def;
     const char *key, *name, *help;
 } MkwVkCoopFeature;
+
+/* (version 27) accepted same-map presentation; copied host values, no guest pointers. */
+enum { HOS_COOP_MARK_NAME = 1, HOS_COOP_MARK_ARROW = 2 };
+typedef struct MkwVkCoopMark {
+    float position[3];
+    uint8_t flags;
+    char name[32];
+} MkwVkCoopMark;
+typedef struct MkwVkCoopOverlay {
+    int32_t nmarks;
+    MkwVkCoopMark mark[HOS_COOP_MEMBERS];
+} MkwVkCoopOverlay;
 
 /* what the executable gives the back end */
 typedef struct MkwVkHost {
@@ -281,6 +295,8 @@ typedef struct MkwVkHost {
     int (*coop_command)(int cmd, const char *text, uint32_t number);
     /* (version 24) one registered rule, including rules without a menu label; 0 past the end. No session is started. */
     int (*coop_feature)(int index, MkwVkCoopFeature *out);
+    /* labels: 0 off, 1 names, 2 names and arrows; receiver-local display choice only. */
+    int (*coop_overlay)(MkwVkCoopOverlay *out, int labels);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

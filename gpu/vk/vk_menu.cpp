@@ -38,6 +38,7 @@
 #include "oot_cheat_items.h"
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
 #include "vk_ui.h"
+#include "vk_coop_overlay.h"
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
 #include "vk_dlss.h"
 #include "vk_framegen.h"   // (Frame generation by: who makes the frames now, framegen_maker)
@@ -131,6 +132,7 @@ const char* tx_framegen(int v) {
 // keys are per player)
 const char* tx_rule_shared(int v) { return v == 1 ? "Shared" : "Per player"; }
 const char* tx_rule_pool(int v) { return v == 2 ? "One pool" : "Per player"; }
+const char* tx_coop_labels(int v) { return v == 2 ? "Names and arrows" : v == 1 ? "Names" : "Off"; }
 const char* hn_rule_follows(int v, int variant) {
     return variant == 0 || (variant < 0 && v == 0 && opts.coop_progress == 1)
                ? "With Progress shared, a room you make shares this too: in a shared world a chest one player opened is "
@@ -1576,6 +1578,9 @@ Row rows[] = {
     {TAB_COOP, "Temporary save", nullptr, 0, 0, 0, nullptr,
      "Outside a room: copy your saved checkpoints and restart into that copy. In a temporary copy: leave and restart with "
      "your normal saves. Nothing is copied back. Save first; press twice. Temporary copies are kept separately."},
+    {TAB_COOP, "Friend labels", &opts.coop_labels, 0, 2, 1, tx_coop_labels,
+     "Names above friends, with optional arrows to friends outside the picture. Only accepted friends in your map; room privacy rules still apply.",
+     nullptr, false, true},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -2249,7 +2254,7 @@ int detect_pad_layout() {
 const struct { int* value; const char* key; } coop_options[] = {
     {&opts.coop, "coop"},           {&opts.coop_progress, "coop_progress"}, {&opts.coop_items, "coop_items"},
     {&opts.coop_songs, "coop_songs"}, {&opts.coop_quest, "coop_quest"},       {&opts.coop_keys, "coop_keys"},
-    {&opts.coop_rupees, "coop_rupees"}, {&opts.coop_ammo, "coop_ammo"}};
+    {&opts.coop_rupees, "coop_rupees"}, {&opts.coop_ammo, "coop_ammo"}, {&opts.coop_labels, "coop_labels"}};
 /// A row's key in longshot_options.ini: a Room rules row's from coop_options, any other row's the one ini_key named
 const char* row_key(const Row& r, const char* named) {
     for (const auto& o : coop_options)
@@ -2262,7 +2267,7 @@ const char* row_key(const Row& r, const char* named) {
 bool coop_option_line(const char* key, const char* text) {
     if (coop_feature_option_line(key, text)) return true;
     for (Row& r : rows) {
-        if (r.tab != TAB_RULES || !r.value) continue;
+        if ((r.tab != TAB_RULES && r.value != &opts.coop_labels) || !r.value) continue;
         if (!strcmp(key, row_key(r, ""))) *r.value = std::min(std::max(atoi(text), r.lo), r.hi);
         if (!strcmp(key, row_key(r, "")) || !strcmp(key, ini_key(r))) return true;
     }
@@ -3806,7 +3811,12 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 74 * s, ui::kSoft,
                      fit(c, c.f.body, 16 * s, right - left - 40 * s, v.save_note, false).c_str());
     const int count = tab_row_count(TAB_COOP);
-    float y = top + box_h + 16 * s;
+    const int list_rows = count + (v.n ? std::min(v.n, (int)HOS_COOP_MEMBERS) + 2 : 0);
+    int shown = 0;
+    const float first = scroll_rows(TAB_COOP, list_rows, sel, top + box_h + 16 * s, bottom, pitch, &shown);
+    scroll_bar(c, cx0 + 20 * s, top + box_h + 16 * s, bottom, list_rows, shown, first);
+    float y = top + box_h + 16 * s - first * pitch;
+    c.d->PushClipRect(ImVec2(cx0, top + box_h + 8 * s), ImVec2(cx1, bottom + 8 * s), true);
     for (int i = 0; i < count; i++, y += pitch) {
         const Row& r = menu_row(tab_row_to_global(TAB_COOP, i));
         const bool selected = i == sel;
@@ -3826,27 +3836,40 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
         } else if (k == kCoopRules) {   // (opens its page, as the tabs' page rows)
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, y + rh * 0.5f), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
+        } else if (r.value) {
+            choice_cell(c, va, vb, r.text(*r.value), selected, *r.value > r.lo, *r.value < r.hi);
         } else {
             const char* says = k == kCoopTemp ? (v.temporary_save ? "Return to normal saves" : "Copy and restart") :
                               k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : says, selected, false, false);
         }
-        hits.add(left, y, right, std::min(y + rh, bottom + 8 * s), menu_hit::kRow, i, va.x, vb.x);
+        if (y + rh >= top + box_h + 8 * s && y <= bottom + 8 * s)
+            hits.add(left, std::max(y, top + box_h + 8 * s), right, std::min(y + rh, bottom + 8 * s), menu_hit::kRow, i, va.x, vb.x);
     }
     if (v.n > 0) {
         const float ty = y + 20 * s, tw = ui::size_of(c.f.heading, 19 * s, "In the room").x;
         ui::text_mid(c, c.f.heading, 19 * s, left + 2 * s, ty, ui::kGoldHi, "In the room");
         c.d->AddLine(ImVec2(left + tw + 16 * s, ty), ImVec2(right, ty), ui::alpha(ui::kEdge, 0.9f), std::max(1.0f, s));
         y = ty + 34 * s;
-        // (a line a member, closer together when the room is full, so that every key shows above the prompts where it can)
+        // Two lines keep the place and health readable without displacing the consent fingerprint.
         const int lines = std::min(v.n, (int)HOS_COOP_MEMBERS);
-        const float step = std::min(32 * s, std::max(22 * s, (bottom - y) / lines));
+        const float step = pitch;
         for (int m = 0; m < lines; m++, y += step) {
             const MkwVkCoopMember& p = v.member[m];
             std::string tags = p.self ? "you" : "";
             if (p.maker) tags += (tags.empty() ? "" : ", ") + std::string("maker");
             if (p.away) tags += (tags.empty() ? "" : ", ") + std::string("away");
             const std::string who = std::to_string(p.id) + "   " + p.name + (tags.empty() ? "" : "  (" + tags + ")");
+            if (p.accepted && !p.self) {
+                const char* place = p.place > 0 && p.place <= kTeleports ? teleport_names[p.place - 1] :
+                                    p.place < 0 ? "Other area" : "Place unknown";
+                char hearts[48];
+                if (p.max_health_q) snprintf(hearts, sizeof hearts, "Hearts: %.2f/%.2f", p.health_q / 4.0, p.max_health_q / 4.0);
+                else snprintf(hearts, sizeof hearts, "%s", "Hearts: unknown");
+                const std::string details = std::string(i18n::tr(place)) + " | " + i18n::tr(hearts);
+                ui::text_mid(c, c.f.body, 15 * s, left + 8 * s, y + 18 * s, ui::kSoft,
+                             fit(c, c.f.body, 15 * s, right - left - 16 * s, details, false).c_str());
+            }
             const char* key = p.key[0] ? p.key : v.unidentified && !p.self ? "not identified yet" : "";
             const float key_w = ui::size_of(c.f.body, 16 * s, key).x;
             ui::text_mid_right(c, c.f.body, 16 * s, right - 4 * s, y, p.accepted ? ui::kGoldHi : p.key[0] ? ui::kInk : ui::kDim, key);
@@ -3854,6 +3877,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             ui::text_mid(c, f, 17 * s, left + 8 * s, y, p.away ? ui::kDim : ui::kInk, fit(c, f, 17 * s, right - left - key_w - 32 * s, who, false).c_str());
         }
     }
+    c.d->PopClipRect();
     c.d->PopClipRect();
 }
 
@@ -6153,7 +6177,9 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
     const bool open = open_now.load(std::memory_order_relaxed);
-    if (!start && !fps && !open) {   // (nothing shows: no ImGui frame, no render pass)
+    MkwVkCoopOverlay co{};
+    const bool coop = coop_overlay_read(co, start || open ? 0 : opts.coop_labels);
+    if (!start && !fps && !open && !coop) {   // (nothing shows: no ImGui frame, no render pass)
         // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
         // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
         if (prebake_needed(w, h) && ui::begin(w, h)) {
@@ -6176,6 +6202,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     ui::Ctx c = ui_ctx(w, h);
     prebake(c);   // (the menu's glyphs at this size, before it opens: no hitch then)
     if (start) draw_startup(c);   // (under the menu)
+    if (coop) coop_overlay_draw(c, co);
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
@@ -6185,9 +6212,12 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
 void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uint32_t w, uint32_t h) {
     const bool open = open_now.load(std::memory_order_relaxed);
     const bool fps = opts.show_fps && !startup_on.load(std::memory_order_acquire);
-    if (!open && !fps) return;
+    MkwVkCoopOverlay co{};
+    const bool coop = coop_overlay_read(co, open || startup_on.load(std::memory_order_acquire) ? 0 : opts.coop_labels);
+    if (!open && !fps && !coop) return;
     if (!ui::begin(w, h)) return;
     ui::Ctx c = ui_ctx(w, h);
+    if (coop) coop_overlay_draw(c, co);
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)

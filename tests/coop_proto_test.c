@@ -293,20 +293,22 @@ static void check_vector(const char *kind, char *rest, int line) {
         size_t k = coop_seal(c, sizeof c, mk, src, dst, hex64(t[3]), (uint32_t)strtoul(t[4], NULL, 0), kd, b, (size_t)mn);
         CHECK(k == (size_t)pn && !memcmp(c, a, k), "vector sealed %s: seals to the same bytes (line %d)", name, line);
     } else if (!strcmp(kind, "pos")) {
-        // pos ... <yaw> <sword> <shield> <hands> <node hex:frame>...
+        // pos ... <yaw> <sword> <shield> <hands> <health> <maximum> <node hex:frame>...
         char *payload = next_token(&rest), *pseq = next_token(&rest), *t_ms = next_token(&rest), *flags = next_token(&rest);
         char *area = next_token(&rest), *f[4];
         for (int i = 0; i < 4; i++) f[i] = next_token(&rest);
         char *gear[3];
         for (int i = 0; i < 3; i++) gear[i] = next_token(&rest);
+        char *health = next_token(&rest), *maximum = next_token(&rest);
         int pn = unhex(payload, a, sizeof a), an = area ? unhex(area, b, COOP_POS_TEXT) : -1;
         CoopPos p;
-        if (pn < 0 || an < 0 || !f[3] || !gear[2]) FAIL_RET("vector pos %s does not parse (line %d)", name, line);
+        if (pn < 0 || an < 0 || !f[3] || !gear[2] || !health || !maximum) FAIL_RET("vector pos %s does not parse (line %d)", name, line);
         if (!coop_pos_parse(a, (size_t)pn, &p)) FAIL_RET("vector pos %s: does not parse (line %d)", name, line);
         int ok = p.pseq == (uint32_t)strtoul(pseq, NULL, 10) && p.t_ms == (uint32_t)strtoul(t_ms, NULL, 10) && p.flags == atoi(flags) &&
                  strlen(p.area) == (size_t)an && !memcmp(p.area, b, (size_t)an) && p.pos[0] == strtof(f[0], NULL) &&
                  p.pos[1] == strtof(f[1], NULL) && p.pos[2] == strtof(f[2], NULL) && p.yaw == strtof(f[3], NULL);
         ok &= p.sword == atoi(gear[0]) && p.shield == atoi(gear[1]) && p.hands == atoi(gear[2]);
+        ok &= p.health_q == atoi(health) && p.max_health_q == atoi(maximum);
         int ns = 0;
         for (char *s; (s = next_token(&rest)); ns++) {
             char *colon = strchr(s, ':');

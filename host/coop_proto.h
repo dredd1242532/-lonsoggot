@@ -194,9 +194,11 @@ void coop_blake2b(uint8_t *out, size_t outlen, const void *key, size_t klen, con
 // node's name, f32 frame; then u8 sword, u8 shield, u8 hands (bit0 sword drawn, bit1 shield drawn).
 // A parser takes exactly its version (v1 had a u16 pseq; v2 had no equipment). Names must be printable ASCII;
 // numbers must be finite. Unknown equipment IDs remain bounded bytes and resolve to nothing locally, never a path.
+// Then u16 health_q, u16 max_health_q in quarter hearts; max0 is unknown and requires health0.
 #define COOP_POS_VERSION 3
 #define COOP_POS_TEXT 47
 #define COOP_POS_SLOTS 4
+#define COOP_POS_HEALTH_MAX 160 // quarter hearts; protocol bound, not a native capacity claim
 // flags: ADULT, Link is the adult; IN_WORLD, he stands in the map named, at the place given (a game shows him only
 // then); LOADED, a save is in play (since the title screen), also while it loads, changes map or pauses, when IN_WORLD
 // is clear and the area is the last map; neither, no save in play (the title screen; area ""); SLOW, the sender shows
@@ -214,6 +216,7 @@ typedef struct {
     char area[COOP_POS_TEXT + 1];
     float pos[3], yaw;
     struct { char node[COOP_POS_TEXT + 1]; float frame; } slot[COOP_POS_SLOTS];
+    uint16_t health_q, max_health_q; // quarter hearts; max=0 means unknown and requires health=0
 } CoopPos;
 size_t coop_pos_pack(uint8_t *out, size_t cap, const CoopPos *p);   // 0 when it does not fit cap
 int coop_pos_parse(const uint8_t *p, size_t n, CoopPos *out);

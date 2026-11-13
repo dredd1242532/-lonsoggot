@@ -164,7 +164,7 @@ def main():
     if "bool temporal_off() { return opts.dlss == ur::OFF && temporal_mode() == ur::GAME; }" not in temporal:
         raise SystemExit("temporal_off: Off is not the row's Off with no engine over it (RX_VK_DLSS, RX_VK_FSR4, FSR 3.1)")
     upscale = function(temporal, "bool temporal_upscale(")
-    if "temporal_off() && stretch(" not in upscale:
+    if "if (temporal_off()) return stretch(" not in upscale:
         raise SystemExit("temporal_upscale: the Upscaler's Off does not stretch in place of the game's network")
     stretch = function(temporal, "bool stretch(")
     for need in ("s.linear, in_view", "s.out_layout", "c.valid", "in->width != c.width", "VK_FORMAT_B10G11R11_UFLOAT_PACK32"):
@@ -173,8 +173,9 @@ def main():
     if "!temporal_wanted() && !temporal_off()" not in function(temporal, "void temporal_note_scene_draw("):
         raise SystemExit("temporal_note_scene_draw: no scene camera with Off, so the fixed shares' networks are never stretched")
     draw = (ROOT / "gpu" / "vk" / "vk_draw.cpp").read_text(encoding="utf-8")
-    if "(!temporal_wanted() && !temporal_off())" not in function(draw, "bool temporal_stand_in("):
-        raise SystemExit("temporal_stand_in: the game's network runs with Off")
+    gate = function(draw, "bool temporal_stand_in(")
+    if "const bool replacing = temporal_wanted() || temporal_off();" not in gate or "if (replacing)" not in gate:
+        raise SystemExit("temporal_stand_in: Off must still replace the network and invalidate touched state")
     if "(temporal_wanted() || temporal_off() || fsr3_inputs::wanted()) && temporal_rejected_network(" not in function(draw, "bool upscale_stub("):
         raise SystemExit("upscale_stub: a network that did not translate is not stretched with Off, or not offered to FSR 3.1")
     rejected = function(draw[draw.rindex("static bool temporal_rejected_network("):], "static bool")   # (the definition)

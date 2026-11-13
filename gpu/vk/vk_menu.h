@@ -115,6 +115,7 @@ struct Options {
     int coop = 0;
     int coop_progress = 1, coop_items = 1, coop_songs = 1, coop_quest = 1;   // (shared or per player)
     int coop_keys = 2, coop_rupees = 0, coop_ammo = 0;                       // (one pool or per player)
+    int coop_labels = 1; // local 0 off, 1 names, 2 names and arrows; signed privacy rules still apply
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)

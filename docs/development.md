@@ -284,6 +284,7 @@ even the dedicated worker can fail or stall after heap/loader corruption.
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a controller or the keys, whatever was used last (screenshots) |
 | `HOS_COOP_DEMO=1` | The Insert menu's Co-op tab on a made-up room (`host/coop_menu.c`), for screenshots and trying the tab without a relay: Make a room connects in a second; two other players come in, one not identified for three seconds; the room is offered for acceptance and one player is away for a while; Join a room (any valid secret) puts you third in another room; Accept and Leave work. The co-op session never starts and nothing is sent |
 | `HOS_COOP_HITS_TRACE=1` | Local native combat diagnostics, off by default: attack setup/instance renewal/sensor-off and committed life with its pre-clamp aggregate. No damage is applied; dropped records are reported. See [co-op](coop.md#native-combat-observations-not-playable-pvp) |
+| `coop_labels=0/1/2` in `longshot_options.ini` | Co-op tab's local Friend labels: Off / Names (default) / Names and arrows. Live; no environment override. Signed presence/privacy rules still apply. See [finding friends](coop.md#finding-your-friends) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |
 
 The presses are `<seconds>:<button>[+<button>...][/<ms>]`, separated by commas, for example `2:A,5.5:LUP/1500,9:ZL+R`.

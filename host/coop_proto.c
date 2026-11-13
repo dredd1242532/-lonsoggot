@@ -477,7 +477,8 @@ enum { POS_HEAD = 11 };   // version, pseq, t_ms, flags, area length
 
 size_t coop_pos_pack(uint8_t *out, size_t cap, const CoopPos *p) {
     if (p->nslots > COOP_POS_SLOTS || (p->hands & ~COOP_HAND_MASK)) return 0;
-    size_t alen = bounded_len(p->area, COOP_POS_TEXT), n = POS_HEAD + alen + 17 + 3;
+    if (p->health_q > p->max_health_q || p->max_health_q > COOP_POS_HEALTH_MAX) return 0;
+    size_t alen = bounded_len(p->area, COOP_POS_TEXT), n = POS_HEAD + alen + 17 + 7;
     int slots = p->nslots;
     for (int i = 0; i < slots; i++) n += 1 + bounded_len(p->slot[i].node, COOP_POS_TEXT) + 4;
     if (cap < n) return 0;
@@ -498,6 +499,7 @@ size_t coop_pos_pack(uint8_t *out, size_t cap, const CoopPos *p) {
         q += 1 + len + 4;
     }
     q[0] = p->sword, q[1] = p->shield, q[2] = p->hands;
+    put16(q + 3, p->health_q), put16(q + 5, p->max_health_q);
     return n;
 }
 
@@ -522,8 +524,10 @@ int coop_pos_parse(const uint8_t *p, size_t n, CoopPos *out) {
         memcpy(r.slot[i].node, p + at + 1, p[at]);
         at += 1u + p[at] + 4;
     }
-    if (at + 3 != n || (p[at + 2] & ~COOP_HAND_MASK)) return 0;
+    if (at + 7 != n || (p[at + 2] & ~COOP_HAND_MASK)) return 0;
     r.sword = p[at], r.shield = p[at + 1], r.hands = p[at + 2];
+    r.health_q = get16(p + at + 3), r.max_health_q = get16(p + at + 5);
+    if (r.health_q > r.max_health_q || r.max_health_q > COOP_POS_HEALTH_MAX) return 0;
     *out = r;
     return 1;
 }

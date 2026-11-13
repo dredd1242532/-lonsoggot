@@ -66,6 +66,7 @@
 #include "vk_fsr4.h"
 #include "vk_menu.h"
 #include "vk_texture.h"
+#include "vk_coop_overlay.h"
 
 #include "shaders/dlss_actor_frag_spv.h"
 #include "shaders/dlss_actor_vert_spv.h"
@@ -826,7 +827,7 @@ void temporal_note_scene_draw(const Texture* color0, uint32_t width, uint32_t he
     // below: the format, the camera's own size and perspective, the largest in the frame, and the upscale's input)
     if (!color0 || !depth || !camera || camera_size < 0x230 || !temporal_scene_size(width, height)) return;
     // (with the Upscaler Off too: its stretch takes the fixed shares' networks only with the frame's scene as their input)
-    if (!temporal_scene_format(color0->format) || (!temporal_wanted() && !temporal_off())) return;
+    if (!temporal_scene_format(color0->format) || (!temporal_wanted() && !temporal_off() && !coop_overlay_wants_camera())) return;
     State& s = st();
     std::lock_guard lk(s.mu);
     const uint64_t now = texture_frame_no();
@@ -852,6 +853,7 @@ void temporal_note_scene_draw(const Texture* color0, uint32_t width, uint32_t he
     k.fov_y = plain ? 2.0f * std::atan(1.0f / p11) : 0.0f;
     k.width = width, k.height = height, k.depth = depth, k.depth_gen = texture_destroy_generation(), k.frame = now;
     k.scene_format = color0->format;
+    coop_overlay_camera(k.current, k.jitter, now);
     k.valid = true;
 }
 
@@ -1067,7 +1069,13 @@ bool stretch(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImage
 bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in, VkImageView in_view, Texture* out,
                       VkImageView out_view, uint32_t out_level) {
     const int mode = temporal_mode();
-    if (mode == ur::GAME) return temporal_off() && stretch(cmd, key, known, in, in_view, out, out_view, out_level);
+    if (mode == ur::GAME) {
+        if (temporal_off()) return stretch(cmd, key, known, in, in_view, out, out_view, out_level);
+        // Observe the default game's output size for camera selection, without replacing its upscale.
+        if (coop_overlay_wants_camera() && known && out && out->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32)
+            note_output(out, out_level);
+        return false;
+    }
     State& s = st();
     std::lock_guard lk(s.mu);
     if (!known) {   // (another network of the upscale's shape: only the scene into the picture, the rest untouched and unsaid)

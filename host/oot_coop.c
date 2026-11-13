@@ -1383,7 +1383,7 @@ static void gameplay_context_locked(void) {
         coop_sync_offer(G.eng, &offer, coop_now_ms()) && offer.accepted && coop_sync_open(G.eng)) {
         context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
         context.capabilities = COOP_GAMEPLAY_DURABLE;
-        if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && (presence & COOP_PRESENCE_BODIES))
+        if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && presence)
             context.capabilities |= COOP_GAMEPLAY_PRESENTATION;
         context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
         context.room_session = view.session;

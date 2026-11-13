@@ -75,6 +75,7 @@
 #include "coop.h"
 #include "coop_players.h"
 #include "oot_coop.h"
+#include "../gpu/vk/vk_api.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -248,6 +249,35 @@ static const char *map_now(Ctx *c, char *out, size_t cap) {
         if (!h) return out;
     }
     return out;
+}
+
+/* Read-only Int flags used by the native heart HUD. Unknown never becomes an empty meter. */
+static int health_number(Ctx *c, uint32_t hash, uint16_t *out) {
+    const uint64_t mgr = rd64(c, rd64(c, GAMEDATA_HOLDER)), cn = mgr + 0xc8;
+    if (!mgr || !rd_ok(cn, 0x28)) return 0;
+    const uint32_t count = rd32(c, cn + CN_COUNT), cap = rd32(c, cn + CN_CAP);
+    const uint64_t entries = rd64(c, cn + CN_ENTRIES), table = rd64(c, cn + CN_TABLE);
+    if (!count || !cap || count > (1u << 20) || cap > (1u << 20) ||
+        !rd_ok(entries, 0x28ull * count) || !rd_ok(table, 8ull * cap)) return 0;
+    for (uint32_t k = 0, i = hash % cap; k < cap; k++, i = i + 1 == cap ? 0 : i + 1) {
+        const uint32_t h = rd32(c, table + 8ull * i);
+        if (!h) return 0;
+        if (h != hash) continue;
+        const uint32_t index = rd32(c, table + 8ull * i + 4);
+        if (index >= count) return 0;
+        const uint32_t value = rd32(c, entries + 0x28ull * index + 0x1c);
+        if (value > COOP_POS_HEALTH_MAX) return 0;
+        *out = (uint16_t)value;
+        return 1;
+    }
+    return 0;
+}
+
+static void health_read(Ctx *c, CoopPos *me) {
+    if (!(hos_oot_coop_presence() & COOP_PRESENCE_HEALTH)) return;
+    uint16_t life, maximum;
+    if (health_number(c, 0x31ab5580u, &life) && health_number(c, 0xfbe01da1u, &maximum) &&
+        maximum && life <= maximum) me->health_q = life, me->max_health_q = maximum;
 }
 
 static int event_playing(Ctx *c) {
@@ -624,6 +654,7 @@ typedef struct { int member; uint64_t now; const CoopPos *pose; } BodyWrite;
 
 static int body_write(void *game, const void *payload) {
     const BodyWrite *body = payload;
+    if (!(hos_oot_coop_presence() & COOP_PRESENCE_CHILD_BODY)) return 0;
     if (P.storage_failed) return 0;
     if (!P.show || body->member < 1 || body->member > COOP_MAX_MEMBERS || !body->pose || !age_permitted(body->pose->flags)) return 0;
     if (!P.blocks) {
@@ -787,12 +818,18 @@ static void on_view(const CoopView *v, void *user) {
 
 /* ---- Link's update */
 
-/* The place this game sends: with the switch off (it shows nobody) no place and no animation, only the map and flags. */
+/* Strip fields whose purpose the accepted charter did not permit, before packing either send path. */
 static void place_hidden(CoopPos *me) {
-    if (P.show) return;
-    memset(me->pos, 0, sizeof me->pos), me->yaw = 0, me->nslots = 0;
-    me->sword = me->shield = me->hands = 0;
-    memset(me->slot, 0, sizeof me->slot);
+    const int permissions = hos_oot_coop_presence();
+    const int body = P.show && age_permitted(me->flags);
+    if (!(permissions & COOP_PRESENCE_HEALTH)) me->health_q = me->max_health_q = 0;
+    if (!(permissions & (COOP_PRESENCE_BODIES | COOP_PRESENCE_ARROWS | COOP_PRESENCE_PLACE))) me->area[0] = 0;
+    if (!body || !(permissions & COOP_PRESENCE_EQUIPMENT)) me->sword = me->shield = me->hands = 0;
+    if (!body) me->nslots = 0, memset(me->slot, 0, sizeof me->slot);
+    if (!body && !(permissions & COOP_PRESENCE_ARROWS)) {
+        me->flags |= COOP_POS_SLOW;
+        memset(me->pos, 0, sizeof me->pos), me->yaw = 0;
+    } else me->flags &= (uint8_t)~COOP_POS_SLOW;
 }
 
 static void update(Ctx *c, uint64_t actor) {
@@ -822,6 +859,7 @@ static void update(Ctx *c, uint64_t actor) {
     const int disclose = age_permitted(me.flags);
     if (P.show && disclose && P.anim) anim_read(c, actor, &me);
     if (P.show && disclose && P.gear && (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT)) equipment_read(c, actor, &me);
+    health_read(c, &me);
     if (P.test) test_feed(&me, now);
     place_hidden(&me);
 
@@ -877,7 +915,8 @@ void hos_oot_coop_players_tick(int loaded, int open) {
             me.flags |= COOP_POS_LOADED | (P.last_me.flags & COOP_POS_ADULT);
             memcpy(me.area, P.last_me.area, sizeof me.area);
         }
-        if (age_permitted(me.flags)) n = coop_players_send(&P.store, buf, sizeof buf, &me, now);
+        place_hidden(&me);
+        n = coop_players_send(&P.store, buf, sizeof buf, &me, now);
     }
     ReleaseSRWLockExclusive(&P.lock);
     if (n) coop_send(COOP_K_POS, buf, n);
@@ -892,6 +931,59 @@ int hos_oot_coop_players_last(int id, char area[COOP_POS_TEXT + 1], uint8_t *fla
     if (has && area) memcpy(area, at.area, COOP_POS_TEXT + 1);
     if (has && flags) *flags = at.flags;
     return has;
+}
+
+static int same_ticket(const CoopGameplayTicket *a, const CoopGameplayTicket *b) {
+    return a->owner == b->owner && a->generation == b->generation && a->session == b->session;
+}
+
+int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age_ms) {
+    if (!out || id < 1 || id > COOP_MAX_MEMBERS || !__atomic_load_n(&P.on, __ATOMIC_ACQUIRE) ||
+        !(hos_oot_coop_shown() & (1u << id))) return 0;
+    CoopGameplayTicket ticket, after;
+    if (!hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)id, &ticket)) return 0;
+    if (!TryAcquireSRWLockExclusive(&P.lock)) return 0;
+    const int has = same_ticket(&P.ticket[id], &ticket) && coop_players_last(&P.store, id, coop_now_ms(), out, age_ms);
+    ReleaseSRWLockExclusive(&P.lock);
+    return has && hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)id, &after) && same_ticket(&ticket, &after);
+}
+
+int hos_coop_overlay_snapshot(MkwVkCoopOverlay *out, int labels) {
+    out->nmarks = 0;
+    if (labels < 1 || labels > 2 || !hos_oot_coop_playing() || !hos_oot_coop_presence()) return 0;
+    CoopOffer offer;
+    if (!hos_oot_coop_offer(&offer) || !offer.accepted) return 0;
+    int names = 0, permissions = 0;
+    coop_feature_present(&offer.rules, COOP_RULE_NAMES, &names);
+    coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &permissions);
+    const int arrows = labels == 2 && (permissions & COOP_PRESENCE_ARROWS);
+    if (!names && !arrows) return 0;
+    if (!TryAcquireSRWLockExclusive(&P.game_lock)) return 0;
+    const uint64_t now = coop_now_ms();
+    for (int i = 0; i < offer.n && out->nmarks < HOS_COOP_MEMBERS; i++) {
+        const int id = offer.member[i].id;
+        CoopPos pose;
+        uint64_t age = 0;
+        if (!hos_oot_coop_players_snapshot(id, &pose, &age) || age >= COOP_PLAYERS_SILENT_MS ||
+            now < P.me_ms || now - P.me_ms >= 500 || !(pose.flags & COOP_POS_IN_WORLD) ||
+            (pose.flags & COOP_POS_SLOW) || !pose.area[0] || strcmp(pose.area, P.last_me.area)) continue;
+        const int name = names && age_permitted(pose.flags) && P.puppet[id].state == PP_SHOWN;
+        if (!name && !arrows) continue;
+        if (!TryAcquireSRWLockExclusive(&P.lock)) continue;
+        const int shown = coop_players_show(&P.store, id, 1u << id, P.last_me.area, now, &pose);
+        ReleaseSRWLockExclusive(&P.lock);
+        if (shown != COOP_PLAYER_SHOWN) continue;
+        MkwVkCoopMark *m = &out->mark[out->nmarks++];
+        memset(m, 0, sizeof *m);
+        memcpy(m->position, pose.pos, sizeof m->position);
+        m->position[1] += pose.flags & COOP_POS_ADULT ? 1.9f : 1.3f;
+        m->flags = (uint8_t)((name ? HOS_COOP_MARK_NAME : 0) | (arrows ? HOS_COOP_MARK_ARROW : 0));
+        if (names) coop_name_clean(m->name, sizeof m->name, (const uint8_t *)offer.member[i].name,
+                                   strnlen(offer.member[i].name, sizeof offer.member[i].name));
+    }
+    ReleaseSRWLockExclusive(&P.game_lock);
+    if (!hos_oot_coop_presence() || !hos_oot_coop_playing()) out->nmarks = 0;
+    return out->nmarks != 0;
 }
 
 void hos_oot_coop_players_start(void) {

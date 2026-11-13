@@ -9,11 +9,10 @@
 // heard within COOP_PLAYERS_SILENT_MS, its game sends at the full rate (COOP_POS_SLOW clear), its Link stands in a map,
 // and that map is this game's. Not thread safe: the caller holds its lock.
 //
-// Every game in a room sends its POS while co-op is on, whether it shows the others or not: at the full rate
-// (COOP_PLAYERS_SEND_MS) while it shows them and its Link stands in a map; otherwise (it shows nobody: COOP_POS_SLOW;
-// or no save is played, or it loads, changes map, pauses or an event holds Link: COOP_POS_IN_WORLD clear) only every
-// COOP_PLAYERS_SLOW_MS and at once when its map or its flags change, so that the Co-op tab of every game can say where
-// each member is (coop_players_last).
+// Only a signed accepted presentation context sends POS. The session expands the send into accepted-session
+// unicasts and cancels queued poses when consent changes. With local body display off, permitted map/health state
+// uses COOP_PLAYERS_SLOW_MS; the independent arrows permission may still send precise positions at the full rate.
+// Outside play IN_WORLD is clear. The list treats missing or stale values as unknown, never as zero.
 #pragma once
 #include <stddef.h>
 #include <stdint.h>

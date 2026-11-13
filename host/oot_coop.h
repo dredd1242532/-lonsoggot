@@ -53,6 +53,8 @@ void hos_oot_coop_players_start(void);
 void hos_oot_coop_players_update(Ctx *c, uint64_t actor);
 void hos_oot_coop_players_tick(int loaded, int open);
 int hos_oot_coop_players_last(int id, char area[COOP_POS_TEXT + 1], uint8_t *flags, uint64_t *age_ms);
+/* Copied newest pose, only for the still-current accepted presentation ticket. Freshness is returned, not assumed. */
+int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age_ms);
 
 /* host/nn_fs.c: the save folder copied, under the lock the save mount's writes take, to <user>/<folder>/<prefix><UTC
    time>/ (the newest keep copies without a prefix are kept; prefixed ones stay until the player deletes them). 1 and

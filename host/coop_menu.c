@@ -37,6 +37,8 @@ int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
 int hos_oot_coop_contributors(CoopContributor *out, int max);
 int hos_oot_coop_rules_changed(void);
+int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age_ms);
+int hos_oot_destination(int index, const char **child, const char **adult);
 
 static char g_name[64], g_server[64];   /* as the tab's fields have them */
 _Static_assert(HOS_COOP_STATE_OFF == (int)COOP_OFF && HOS_COOP_STATE_LEFT == (int)COOP_LEFT &&
@@ -180,6 +182,31 @@ int hos_coop_menu_feature(int index, MkwVkCoopFeature *out) {
     return 1;
 }
 
+/* Reuse the reviewed destination vocabulary, not packet text or a new extracted map-name table.
+   An age variant with a different base name has no safe label in that vocabulary. */
+static int friend_place(const char *area) {
+    const char *child, *adult;
+    for (int i = 0; i < 128 && hos_oot_destination(i, &child, &adult); i++) {
+        if (child && !strcmp(area, child)) return i + 1;
+        if (adult && !strcmp(area, adult)) {
+            if (!child || (strcspn(child, "_") == strcspn(adult, "_") &&
+                           !memcmp(child, adult, strcspn(child, "_")))) return i + 1;
+            return -1;
+        }
+    }
+    return -1;
+}
+
+static void friend_information(MkwVkCoopMember *m, const CoopRules *rules) {
+    int permissions = 0;
+    CoopPos pose;
+    uint64_t age = 0;
+    if (!m->accepted || m->self || m->away || !coop_feature_present(rules, COOP_RULE_PRESENCE, &permissions) ||
+        !hos_oot_coop_players_snapshot(m->id, &pose, &age) || age >= 3000 || !(pose.flags & COOP_POS_IN_WORLD)) return;
+    if ((permissions & COOP_PRESENCE_PLACE) && pose.area[0]) m->place = friend_place(pose.area);
+    if (permissions & COOP_PRESENCE_HEALTH) m->health_q = pose.health_q, m->max_health_q = pose.max_health_q;
+}
+
 void hos_coop_menu_view(MkwVkCoopView *out) {
     memset(out, 0, sizeof *out);
     if (demo_on()) {
@@ -239,6 +266,7 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
                     out->member[k].accepted = (uint8_t)(offer.accepted && offer.member[j].key[0] && !offer.member[j].accepted_as[0]);
                 }
     }
+    for (int k = 0; k < out->n; k++) friend_information(&out->member[k], &offer.rules);
     CoopContributor who[COOP_MAX_MEMBERS * 2];
     const int n = hos_oot_coop_contributors(who, COOP_MAX_MEMBERS * 2);
     for (int j = 0; j < n; j++)
