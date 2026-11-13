@@ -7391,11 +7391,12 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     // with the fallback's layout, its task and mesh stages read another program's buffers, and descriptors the push left
     // as they were: stale addresses, like the one RADV faulted on in Hyrule Field (#792))
     const bool slotgen = desc_slotgen_on();
-    // (RX_VK_READBACK_EARLY: a program that writes a storage buffer builds its descriptors at each draw, so each write is noted
+    // (RX_VK_READBACK_EARLY, once a read of pages written in place has waited: a program that writes a storage buffer builds its
+    // descriptors at each draw, so each write is noted
     // with the part it is recorded in (vk_memory.cpp early_in_place_write); a draw that kept the set before noted nothing, and a
     // read could have gone on after an earlier writer's part)
     static const bool early = readback_early_on();
-    const bool early_rebind = early && [&] {
+    const bool early_rebind = early && memory_readback_early_active() && [&] {
         for (const Stage& st : p.stages)
             for (const auto& d : st.info.storage_buffers_descriptors)
                 if (d.is_written) return true;

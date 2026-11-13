@@ -2075,7 +2075,10 @@ bool memory_rb_waited_range(uint64_t guest, uint64_t size) {
         if (a < guest + size && guest < b) return true;
     return false;
 }
-bool memory_split_wanted() { return split_wanted.exchange(false, std::memory_order_relaxed); }
+bool memory_split_wanted() {   // (asked at every op the replay records: a load, the exchange only when one was asked for)
+    return split_wanted.load(std::memory_order_relaxed) && split_wanted.exchange(false, std::memory_order_relaxed);
+}
+bool memory_readback_early_active() { return early_any.load(std::memory_order_relaxed); }
 /// (RX_VK_LOG_RB_WRITERS) the writers of a range's pages in the newest submission any of them was written in: the earliest first
 /// writer and the latest last one (by part, then by draw count), and how many of its pages that submission wrote
 bool memory_rb_writers(uint64_t guest, uint64_t size, RbWriter& first, RbWriter& last, int* pages) {

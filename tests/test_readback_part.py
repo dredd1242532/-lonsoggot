@@ -104,13 +104,21 @@ static int held_back;
 static uint64_t fence_handed;             // (the newest value handed out, as fence() when the readback begins)
 static readback_late::Rules late_rules;   // (RX_VK_READBACK_LATE: none set, until the checks of it)
 static bool readback_late_wanted(uint64_t size, bool newest) { return readback_late::wanted(late_rules, size, newest); }
+// (RX_VK_READBACK_EARLY, off here: tests/test_readback_early.py checks its wait)
+static bool readback_early_on() { return false; }
+static void memory_rb_waited(uint64_t, uint64_t) {}
+static uint64_t memory_in_place_writer_part(uint64_t, uint64_t, uint64_t) { return 0; }
+static std::atomic<int64_t> st_early_waits{0}, st_early_ns{0}, st_early_whole{0};
+struct Host { uint64_t gpu_guest(uint64_t g) const { return g; } };
+static Host host_v;
+static Host* host = &host_v;
 /// what a readback of [guest, guest + size) waits for: the recording (0: none)
 static uint64_t readback(uint64_t guest, uint64_t size) {
     bool w = false;
     waited_seq = 0;
     uint64_t part = 0, whole = 0;
     const uint64_t v = memory_writeback_value(guest, size, nullptr, &part, &whole);
-    const uint64_t f0 = fence_handed;
+    const uint64_t f0 = fence_handed, gpu = guest;
     /* CHOICE */
     (void)w;
     return waited_seq;

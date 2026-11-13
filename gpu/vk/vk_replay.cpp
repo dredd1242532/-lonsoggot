@@ -3250,13 +3250,16 @@ void invalidate(uint64_t gpu, uint64_t size) {
             // (memory_split_wanted). Not known (0: written before it was on, or its part not mapped): the whole submission, as before. A
             // range RX_VK_READBACK_LATE reads late is not waited for at all, here either
             bool early_done = false;
-            if (pending && !late && readback_early_on() && unforced && by_part) {
+            // (only a read with a page written in place pending: with VRAM mirrors (a dGPU) a page is written back by part already,
+            // and nothing is noted, split or rebuilt for it: on an RTX 5090 the switch cost ~2 fps doing that and waited early 0 times.
+            // A sparse mirror's block with no memory yet is written in place for a submission: those pages take the early wait)
+            if (pending && !late && readback_early_on() && unforced && by_part && whole > completed()) {
                 memory_rb_waited(host->gpu_guest(gpu), size);
                 const uint64_t writer = memory_in_place_writer_part(host->gpu_guest(gpu), size, whole);
                 const uint64_t target = std::max(writer, part);   // (a mirror's part as well, when pages of both kinds are read)
                 int ok = 0;
                 const auto e0 = std::chrono::steady_clock::now();
-                if (writer && (whole > completed()) && wait_recorded_part(target, UINT64_MAX, &ok)) {
+                if (writer && wait_recorded_part(target, UINT64_MAX, &ok)) {
                     early_done = true, w = true;
                     st_early_waits.fetch_add(1, std::memory_order_relaxed);
                     st_early_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - e0).count(),

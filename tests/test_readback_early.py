@@ -14,7 +14,8 @@ after the writer. Cut from the source and run:
   - such a write asks for its part to end (once), not the uniform updates written at a part's end; the ranges are at most 64,
     the oldest let go with its pages;
   - invalidate's early wait: for the newest of the in-place writer's part and a mirror's part, when a page written in place is
-    not done; the whole submission otherwise (writer not known, only mirrored pages pending, the part not found);
+    not done; the whole submission otherwise (writer not known, only mirrored pages pending, the part not found); none for a
+    range RX_VK_READBACK_LATE reads late;
   - with RX_VK_PARALLEL=2 or more the switch is left off (a segment's part never reaches the recordings' timeline);
   - the wiring: note_direct_write notes every in-place write; the early wait comes before the choice of the usual wait, which
     it replaces only when it waited; the replay ends a part after an op that asked, at least RX_VK_READBACK_EARLY_GAP draws
@@ -84,6 +85,7 @@ uint64_t memory_in_place_writer_part(uint64_t guest, uint64_t size, uint64_t who
 void memory_rb_waited(uint64_t guest, uint64_t size);
 bool memory_rb_waited_range(uint64_t guest, uint64_t size);
 bool memory_split_wanted();
+bool memory_readback_early_active();
 namespace {
 /* PAGES */
 std::atomic<uint64_t> mem_rec_part{0}, mem_in_place_part{0};
@@ -105,10 +107,12 @@ int main(int argc, char** argv) {
     const bool on = argc > 1 && !std::strcmp(argv[1], "on");
     check(readback_early_on() == on, "the switch is read");
     write(1 * P, 1 * P + 64, 10, 5, kDispatch);
+    check(!memory_readback_early_active(), "idle before a read of pages written in place waited");
     check(memory_in_place_writer_part(1 * P, 64, 10) == 0, "before any read waited: nothing kept");
     check(!memory_split_wanted(), "and no split asked for");
     memory_rb_waited(1 * P, 0x3980);   // (pages 1-4)
     check(memory_rb_waited_range(1 * P + 100, 8) == on, "a range whose read waited is known");
+    check(memory_readback_early_active() == on, "and the tracking in use");
     check(!memory_rb_waited_range(9 * P, 8), "another is not");
     write(1 * P, 1 * P + 0x3980, 11, 7, kDispatch);
     check(memory_in_place_writer_part(1 * P, 0x3980, 11) == (on ? 7u : 0u), "a write in place to it keeps its part");
@@ -143,7 +147,7 @@ CHOICE = r"""
 #include <cstdio>
 static uint64_t done_value;
 static uint64_t completed() { return done_value; }
-static bool early_on = true;
+static bool early_on = true, late_rule = false;   // (late_rule: RX_VK_READBACK_LATE names the range)
 static bool readback_early_on() { return early_on; }
 static uint64_t writer_part;
 static uint64_t memory_in_place_writer_part(uint64_t, uint64_t, uint64_t) { return early_on ? writer_part : 0; }
@@ -171,6 +175,7 @@ static bool choose(uint64_t v, uint64_t part, uint64_t whole) {
     const uint64_t gpu = 0x1000, size = 0x3980;
     bool w = false;
     waited_part = 0;
+    const bool pending = v > completed(), late = pending && late_rule;
     /* EARLY */
     (void)w;
     return early_done;
@@ -189,10 +194,13 @@ int main() {
     check(!choose(12, 0, 12), "the part not found: the whole submission");
     part_known = true;
     check(!choose(9, 0, 9), "done already: no wait");
+    late_rule = true;
+    check(!choose(12, 0, 12) && waited_part == 0, "a range RX_VK_READBACK_LATE reads late: no wait, not marked");
+    late_rule = false;
     early_on = false;
     check(!choose(12, 0, 12), "off: the usual choice");
-    check(st_early_waits == 3 && st_early_whole == 3, "counted");
-    check(waited_marks == 6, "each read that waited with the switch on marked its pages");
+    check(st_early_waits == 3 && st_early_whole == 2, "counted");
+    check(waited_marks == 5, "each read with a page written in place pending marked its pages (not one of mirrored pages only)");
     return failures ? 1 : 0;
 }
 """
@@ -217,7 +225,7 @@ def main():
     writers = between(memory, "namespace {\nthread_local uint32_t wr_what = 0;", "/// (RX_VK_LOG_RB_WRITERS) the writers of a range's pages")
     inv = block(replay, "void invalidate(uint64_t gpu, uint64_t size) {")
     early = between(inv, "bool early_done = false;", "if (early_done) {")
-    if "if (early_done) {\n            } else if (v > completed()) {\n                int ok = 0;" not in inv:
+    if "if (early_done) {\n            } else if (pending && !late) {\n                int ok = 0;" not in inv:
         raise SystemExit("FAIL: invalidate: the early wait no longer replaces the usual choice only when it waited")
     if inv.index("bool early_done = false;") > inv.index("const bool in_place_after = memory_in_place_part() > part;"):
         raise SystemExit("FAIL: invalidate: the early wait comes after the usual choice")
@@ -229,7 +237,8 @@ def main():
     if "early_in_place_write(p.lo + off, p.lo + std::min(off + size, p.hi - p.lo), mem_rec_value);" not in mem_note.split("if (size <=")[0]:
         raise SystemExit("FAIL: note_direct_write does not note every write in place for the early wait, whatever its size")
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
-    if "const bool same_desc = !no_reuse && !early_rebind && " not in draw or "if (d.is_written) return true;" not in draw:
+    if "const bool same_desc = !no_reuse && !early_rebind && " not in draw or "if (d.is_written) return true;" not in draw or \
+            "const bool early_rebind = early && memory_readback_early_active() && [&] {" not in draw:
         raise SystemExit("FAIL: vk_draw.cpp: a draw of a program that writes storage buffers may keep the set before, its write not noted")
     if "if (early && !dry && memory_rb_waited_range(host->gpu_guest(u.dst), u.size)) split_after = true;" not in rep:
         raise SystemExit("FAIL: replay: an update of uniforms a read waited for does not end its part")

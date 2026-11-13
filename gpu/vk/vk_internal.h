@@ -330,6 +330,7 @@ uint64_t memory_in_place_writer_part(uint64_t guest, uint64_t size, uint64_t who
 void memory_rb_waited(uint64_t guest, uint64_t size);
 bool memory_rb_waited_range(uint64_t guest, uint64_t size);
 bool memory_split_wanted();
+bool memory_readback_early_active();   // (a read of pages written in place has waited: the tracking is in use)
 void memory_note_cpu_read(uint64_t guest, uint64_t size);   // (invalidate) a CPU read: a large binding over it keeps its write-back
 void memory_note_cpu_access(uint64_t guest, uint64_t size, bool write);   // (and a CPU write a mirror sync copies: wb_learn.h)
 bool memory_wb_followed(uint64_t lo, uint64_t hi);   // (whether a large binding wb_learn.h follows overlaps [lo, hi))
