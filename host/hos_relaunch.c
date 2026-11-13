@@ -99,7 +99,7 @@ static int relaunch(void) {
     if (!env) return 0;
     int count = 0;
     for (int i = 0; i < r.envc; i++)
-        if (strncmp(r.envp[i], "HOS_COOP_PROFILE_TICKET=", 23)) env[count++] = r.envp[i];
+        if (strncmp(r.envp[i], "HOS_COOP_PROFILE_TICKET=", 24)) env[count++] = r.envp[i];
     if (*ticket) env[count++] = ticket_env;
     r.envp = env;
     /* (every file this process opened closes with it, as at an exit: the new one opens its own) */

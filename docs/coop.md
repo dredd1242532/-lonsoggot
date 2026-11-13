@@ -791,6 +791,9 @@ save data is copied: no room keys, tokens, mods or other user-folder contents.
 Save, temporary and cache mounts, existence checks and save backups all use the
 selected working root. The mount choice lasts until process exit, never changes
 under an open native save handle, and is made before the first game mount.
+A successful request closes the old process's save-write gate before releasing
+the copy barrier, so a late autosave cannot rewrite the original before exit.
+Copy/return restarts suppress inherited automatic room joining and acceptance.
 
 A private one-use restart ticket binds the complete working copy's BLAKE2b-256
 digest. `HOS_COOP_PROFILE_TICKET` is internal restart state, not a user setting.

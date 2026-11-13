@@ -1131,8 +1131,8 @@ static void say_stats(uint64_t now) {
 
 static void on_tick(uint64_t now, void *user) {
     (void)user;
-    if (coop_profile_active()) { publish_none(); return; }
     sync_on();
+    if (coop_profile_active()) { publish_none(); return; }
     {   /* a room joined before these hooks were registered, or a view hook that came and went: the view as it is */
         CoopView v;
         coop_view_get(&v);

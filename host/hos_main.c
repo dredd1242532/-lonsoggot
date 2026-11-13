@@ -1874,8 +1874,6 @@ static int game_main(int argc, char **argv) {
            it in its own main, below; on Windows it was never started: no status and no "discord:" line in any log */
         void hos_discord_start(void);
         hos_discord_start();
-        void coop_init(void);
-        coop_init();   /* (co-op's thread when HOS_COOP or the options file's coop= is on: host/coop.c) */
     }
 #endif
     static char beside_image[MAX_PATH], beside_romfs[MAX_PATH], beside_user[MAX_PATH];
@@ -1910,15 +1908,28 @@ static int game_main(int argc, char **argv) {
     CreateDirectoryA(hos_user_dir, NULL);
     {
         int coop_profile_init(const char *, const char *);
+        const char *ticket = getenv("HOS_COOP_PROFILE_TICKET");
+        const int switched = ticket && *ticket;
         if (!coop_profile_init(hos_user_dir, getenv("HOS_COOP_PROFILE_TICKET"))) {
             hos_log("coop: temporary profile ticket failed; no save was mounted. Start again normally to use your own saves.");
             return 1;
+        }
+        /* Reconnect and consent are fresh local decisions, not inherited test
+           auto-join/auto-accept settings from the process that lent a save. */
+        if (switched) {
+#ifdef _WIN32
+            _putenv("HOS_COOP=0"); _putenv("HOS_COOP_AUTO=off"); _putenv("HOS_COOP_ACCEPT=");
+#else
+            setenv("HOS_COOP", "0", 1); setenv("HOS_COOP_AUTO", "off", 1); unsetenv("HOS_COOP_ACCEPT");
+#endif
         }
 #ifdef _WIN32
         _putenv("HOS_COOP_PROFILE_TICKET=");
 #else
         unsetenv("HOS_COOP_PROFILE_TICKET");
 #endif
+        void coop_init(void);
+        coop_init();   /* only after the native profile choice is settled */
     }
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
@@ -2137,8 +2148,6 @@ int main(int argc, char **argv) {
     if (!prepare_shaders) {   /* (longshot) the Discord status (discord_rpc.c) and co-op (host/coop.c): only a game run */
         void hos_discord_start(void);
         hos_discord_start();
-        void coop_init(void);
-        coop_init();
     }
     HANDLE t = CreateThread(NULL, 64u << 20, game_thread, NULL, 0, NULL);
     if (!t) {

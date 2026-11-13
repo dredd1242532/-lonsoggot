@@ -127,6 +127,8 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
 void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
 /* (the same layer's tick: each present that read the flags, with the gate's answer) */
 void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
+static int temporary_profile;
+int coop_profile_active(void) { return temporary_profile; }
 static int rules_said, views, scans, applies, probes;
 static void read_rules(CoopRules *r, int say) { coop_rules_default(r); rules_said += say; }
 static void read_test_aid(void) {}
@@ -762,6 +764,12 @@ int main(int argc, char **argv) {
         TICK(), hos_oot_coop_present(&c);
         TICK(), hos_oot_coop_present(&c);
         CHECK(G.state == ST_ON && !G.on && G.bound && probes == 1 && !scans && !applies && !rules_said && hooks.view == 1);
+        FRESH(1);
+        temporary_profile = 1, env_coop = "1";
+        TICK(), hos_oot_coop_present(&c);
+        TICK(), hos_oot_coop_present(&c);
+        CHECK(!G.bound && !scans && !applies);
+        temporary_profile = 0;
 #undef FRESH
 #undef TICK
     }

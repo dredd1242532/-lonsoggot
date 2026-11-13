@@ -259,13 +259,13 @@ static int quota(uint64_t extra) {
 const char *coop_profile_root(void) { return selected_root[0] ? selected_root : normal_root; }
 int coop_profile_active(void) { return active_id[0] != 0; }
 const char *coop_profile_note(void) { return note; }
-const char *coop_profile_restart_token(void) { return pending; }
+const char *coop_profile_restart_token(void) { return pending[0] ? pending : coop_profile_active() ? "normal" : ""; }
 
 int coop_profile_init(const char *normal, const char *token) {
     pending[0] = active_id[0] = selected_root[0] = note[0] = 0;
     if (!normal || snprintf(normal_root, sizeof normal_root, "%s", normal) >= (int)sizeof normal_root ||
         !path(store, normal_root, "coop-sessions")) return 0;
-    if (!token || !*token) {
+    if (!token || !*token || !strcmp(token, "normal")) {
         if (kind(store) == 2) snprintf(note, sizeof note, "Normal saves selected. Temporary copies, including interrupted sessions, are kept separately.");
         return 1;
     }

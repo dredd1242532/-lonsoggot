@@ -28,7 +28,7 @@ RUN_ALL_SKIP = {"windows": "the posix layer's file functions: Linux"}
 ROOT = Path(__file__).resolve().parents[1]
 
 # host/nn_fs.c's save copy, in source order
-FS_PIECES = ["#define SAVE_QUIET_MS", "static SRWLOCK save_lock", "static char save_root[", "static volatile LONG save_writers;",
+FS_PIECES = ["#define SAVE_QUIET_MS", "static SRWLOCK save_lock", "static char save_root[", "static volatile LONG save_writers;", "static volatile LONG save_transition;",
              "static volatile LONG64 save_changed_ms;", "static void save_lock_shared(void) {", "static int in_save_root(",
              "static void save_stamp(void)", "static int save_change_begin(", "static void save_change_end(",
              "static int save_writer_open(", "static void save_writer_close(void) {", "static void save_mounted(",
@@ -278,6 +278,11 @@ int main(int argc, char **argv) {
     char other[PATH_MAX];
     snprintf(other, sizeof other, "%s-other\\x", save);   /* (a folder whose name starts like the save's is not in it) */
     CHECK(!save_change_begin(other));
+    /* A late autosave after a successful copy cannot rewrite the normal root. */
+    InterlockedExchange(&save_transition, 1);
+    CHECK(save_change_begin(in_path) == -1 && save_writer_open(in_path) == -1);
+    CHECK(!save_change_begin(other) && !InterlockedCompareExchange(&save_writers, 0, 0));
+    InterlockedExchange(&save_transition, 0);
     printf("PASS: every copy holds one whole save; a save waits for a copy under way; eight kept in order, the first kept, partials cleared\n");
     return 0;
 }
@@ -332,6 +337,8 @@ static __thread DWORD last_error;
 #define HOS_FS_PATH 1024   /* (host/nn_fs.c's path buffers) */
 static const char *hos_user_dir;
 static const char *fs_user_dir(void) { return hos_user_dir; }
+static int coop_profile_active(void) { return 0; }
+static int coop_profile_path_safe(const char *p) { (void)p; return 1; }
 static int hos_vcore_away(void) { return 0; }
 static void hos_vcore_back(void) {}
 static int64_t hos_now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000000000LL + t.tv_nsec; }

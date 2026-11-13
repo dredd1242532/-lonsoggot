@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
         if (!host_path("temp:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 7;
         if (!host_path("cache:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 8;
         if (host_path("save:/../outside", out, sizeof out, &writable)) return 9;
-        if (!coop_profile_return() || coop_profile_restart_token()[0]) return 10;
+        if (!coop_profile_return() || strcmp(coop_profile_restart_token(), "normal")) return 10;
     } else if (!strcmp(argv[2], "normal")) {
         if (coop_profile_active() || strcmp(coop_profile_root(), argv[1])) return 11;
         puts(coop_profile_root());

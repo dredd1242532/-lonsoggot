@@ -61,6 +61,7 @@ static BOOL fs_CreateDirectory(const char *p, LPSECURITY_ATTRIBUTES sa) { return
 static BOOL fs_DeleteFile(const char *p) { return DeleteFileW(FS_W(p)); }
 static BOOL fs_RemoveDirectory(const char *p) { return RemoveDirectoryW(FS_W(p)); }
 static BOOL fs_MoveFileEx(const char *a, const char *b, DWORD flags) { return MoveFileExW(FS_W(a), FS_W(b), flags); }
+static BOOL fs_CopyFile(const char *a, const char *b, BOOL exclusive) { return CopyFileW(FS_W(a), FS_W(b), exclusive); }
 static HANDLE fs_FindFirstFile(const char *p, WIN32_FIND_DATAA *fd) {
     WIN32_FIND_DATAW w;
     const HANDLE h = FindFirstFileW(FS_W(p), &w);
@@ -79,6 +80,7 @@ static BOOL fs_FindNextFile(HANDLE h, WIN32_FIND_DATAA *fd) {
 #define DeleteFileA fs_DeleteFile
 #define RemoveDirectoryA fs_RemoveDirectory
 #define MoveFileExA fs_MoveFileEx
+#define CopyFileA fs_CopyFile
 #define FindFirstFileA fs_FindFirstFile
 #define FindNextFileA fs_FindNextFile
 #endif
@@ -185,7 +187,7 @@ static int host_path(const char *guest_mem, char *out, size_t cap, int *writable
             if (!guest_path_ok(rest)) break;
             if (mounts[i].writable || !hos_mods_romfs(rest, out, cap))
                 if ((size_t)snprintf(out, cap, "%s/%s", mounts[i].root, rest) >= cap) break;   /* (cut short: not this path) */
-            if (coop_profile_active() && !coop_profile_path_safe(out)) break;
+            if (mounts[i].writable && coop_profile_active() && !coop_profile_path_safe(out)) break;
             if (writable) *writable = mounts[i].writable;
             ok = 1;
             break;
@@ -260,6 +262,7 @@ static SRWLOCK save_lock = SRWLOCK_INIT;
    Also the control bridge's (hos_fs_save_root) */
 static char save_root[HOS_FS_PATH];
 static volatile LONG save_writers;
+static volatile LONG save_transition;   /* successful copy/return request: no later autosave before process exit */
 static volatile LONG64 save_changed_ms;
 
 static void save_lock_shared(void) {
@@ -281,18 +284,23 @@ static void save_stamp(void) { InterlockedExchange64(&save_changed_ms, hos_now_n
 /* A change of host path begins: 1 when it is in the save folder, save_lock then held shared until save_change_end. */
 static int save_change_begin(const char *host) {
     save_lock_shared();
+    if (InterlockedCompareExchange(&save_transition, 0, 0) && in_save_root(host)) {
+        ReleaseSRWLockShared(&save_lock);
+        return -1;
+    }
     if (in_save_root(host)) return 1;
     ReleaseSRWLockShared(&save_lock);
     return 0;
 }
 static void save_change_end(int held) {
-    if (!held) return;
+    if (held <= 0) return;
     save_stamp();
     ReleaseSRWLockShared(&save_lock);
 }
 /* A file of host path opened for writing: 1 when it is in the save folder (counted until save_writer_close). */
 static int save_writer_open(const char *host) {
     const int held = save_change_begin(host);
+    if (held < 0) return -1;
     if (held) InterlockedIncrement(&save_writers);
     save_change_end(held);
     return held;
@@ -318,7 +326,11 @@ static int copy_tree(const char *src, const char *dst) {
     if (f == INVALID_HANDLE_VALUE) return 1;   /* (an empty folder) */
     int ok = 1;
     do {
-        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..") || fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            if (coop_profile_active()) { ok = 0; break; }
+            continue;
+        }
         char a[HOS_FS_PATH], b[HOS_FS_PATH];
         if ((size_t)snprintf(a, sizeof a, "%s\\%s", src, fd.cFileName) >= sizeof a ||
             (size_t)snprintf(b, sizeof b, "%s\\%s", dst, fd.cFileName) >= sizeof b) {
@@ -373,6 +385,10 @@ int hos_save_copy(const char *folder, const char *prefix, int keep, char *out, s
     }
     char parent[HOS_FS_PATH], name[96], part[HOS_FS_PATH], dst[HOS_FS_PATH];
     snprintf(parent, sizeof parent, "%s\\%s", fs_user_dir(), folder);
+    if (coop_profile_active() && (!coop_profile_path_safe(save_root) || !coop_profile_path_safe(parent))) {
+        ReleaseSRWLockExclusive(&save_lock);
+        return 0;
+    }
     CreateDirectoryA(parent, NULL);
     /* <prefix><UTC time>, and copies in one second numbered on from the last (-002, -003...): the names sort as the copies
        were made, also after the oldest of that second was pruned (a number used again would sort first and go next) */
@@ -399,6 +415,10 @@ int hos_save_copy(const char *folder, const char *prefix, int keep, char *out, s
     }
     last_second = now, last_number = number;
     snprintf(part, sizeof part, "%s\\.partial-%s", parent, name);
+    if (coop_profile_active() && !coop_profile_path_safe(part)) {
+        ReleaseSRWLockExclusive(&save_lock);
+        return 0;
+    }
     delete_tree(part);
     const int copied = copy_tree(save_root, part);
     ReleaseSRWLockExclusive(&save_lock);
@@ -420,6 +440,7 @@ int hos_save_profile_ask(int returning) {
     const int64_t quiet = hos_now_ns() / 1000000 - InterlockedCompareExchange64(&save_changed_ms, 0, 0);
     int ok = !InterlockedCompareExchange(&save_writers, 0, 0) && quiet >= SAVE_QUIET_MS;
     if (ok) ok = returning ? coop_profile_return() : coop_profile_prepare();
+    if (ok) InterlockedExchange(&save_transition, 1);
     ReleaseSRWLockExclusive(&save_lock);
     return ok;
 }
@@ -579,7 +600,7 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
             if (ov && !*ov) ov = NULL;
             __atomic_store_n(&overlay, ov, __ATOMIC_RELAXED);
         }
-        const char *rel = !want_write && ov ? strstr(g, ":/") : NULL;
+        const char *rel = !want_write && ov && !(writable && coop_profile_active()) ? strstr(g, ":/") : NULL;
         if (rel) {
             char alt[HOS_FS_PATH];
             snprintf(alt, sizeof alt, "%s/%s", ov, rel + 2);
@@ -589,7 +610,8 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
             }
         }
     }
-    const int in_save = want_write && save_writer_open(path);   /* (longshot; the core is away already) */
+    const int in_save = want_write ? save_writer_open(path) : 0;   /* preserve refusal (-1), not a boolean */
+    if (in_save < 0) { if (away) hos_vcore_back(); RET(R_NOT_MOUNTED); return; }
     if (!want_write) hos_oot_coop_rom_open(g);   /* (longshot: co-op notes the title screen, host/oot_coop.c) */
     HANDLE h = CreateFileA(path, GENERIC_READ | (want_write ? GENERIC_WRITE : 0), FILE_SHARE_READ | FILE_SHARE_WRITE,
                            NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -720,8 +742,9 @@ HLE(_ZN2nn2fs10CreateFileEPKcl) {
     char path[HOS_FS_PATH];
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
-    make_dirs(path);
     const int held = save_change_begin(path);
+    if (held < 0) { RET(R_NOT_MOUNTED); return; }
+    make_dirs(path);
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         const DWORD e = GetLastError();
@@ -742,6 +765,7 @@ HLE(_ZN2nn2fs10DeleteFileEPKc) {
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
     const int held = save_change_begin(path);
+    if (held < 0) { RET(R_NOT_MOUNTED); return; }
     const BOOL ok = DeleteFileA(path);
     save_change_end(held);
     RET(ok ? 0 : R_PATH_NOT_FOUND);
@@ -750,8 +774,9 @@ HLE(_ZN2nn2fs15CreateDirectoryEPKc) {
     char path[HOS_FS_PATH];
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
-    make_dirs(path);
     const int held = save_change_begin(path);
+    if (held < 0) { RET(R_NOT_MOUNTED); return; }
+    make_dirs(path);
     const BOOL ok = CreateDirectoryA(path, NULL);
     const DWORD e = ok ? 0 : GetLastError();
     save_change_end(held);
@@ -781,6 +806,7 @@ HLE(_ZN2nn2fs26DeleteDirectoryRecursivelyEPKc) {
     int writable = 0;
     if (!host_path(gstr(ARG(0)), path, sizeof path, &writable) || !writable) { RET(R_PATH_NOT_FOUND); return; }
     const int held = save_change_begin(path);
+    if (held < 0) { RET(R_NOT_MOUNTED); return; }
     /* (longshot) the folder named itself a link: the link goes, never what it points to (as for the links inside) */
     const DWORD at = GetFileAttributesA(path);
     if (at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_REPARSE_POINT)) {
@@ -797,6 +823,7 @@ HLE(_ZN2nn2fs10RenameFileEPKcS2_) {
     if (!host_path(gstr(ARG(0)), a, sizeof a, &w1) || !host_path(gstr(ARG(1)), b, sizeof b, &w2) || !w1 || !w2) { RET(R_PATH_NOT_FOUND); return; }
     int held = save_change_begin(a);
     if (!held) held = save_change_begin(b);
+    if (held < 0) { RET(R_NOT_MOUNTED); return; }
     const BOOL ok = MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING);
     save_change_end(held);
     RET(ok ? 0 : R_PATH_NOT_FOUND);
