@@ -572,11 +572,15 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   output you chose. At your screen's own size the HUD and text map pixel for pixel. Above 2560x1440 the game's render
   targets get a bigger GPU pool, so a full-size 3D fits. Where the screen's modes are not known (Linux), the menu offers
   1920x1080, 2560x1440, 3840x2160, 5120x1440 and 5120x2880. For a size the menu does not offer, type it in
-  **Custom output size** (Enter or A to edit it, Enter or A again to set it, Esc or B to leave it as it was; Ctrl+V
-  pastes), or set `output_res=<width>x<height>` in `longshot_options.ini`: each side a multiple of 8, at least 640x360,
+  **Custom output size** (Enter or the pad's confirm button to edit and set it, Esc or the back button to cancel).
+  On a controller, D-pad Left/Right moves the caret, Up/Down cycles its digit or separator, the right shoulder inserts
+  a digit and the left shoulder removes a character. At the end, Up/Down adds a character. The shown Paste button
+  still pastes; with a keyboard, Ctrl+V or Shift+Insert does the same. Full-width digits and `ｘ` become ASCII.
+  Or set `output_res=<width>x<height>` in `longshot_options.ini`: each side a multiple of 8, at least 640x360,
   at most 5120x2880's pixels, and between 5:4 and 48:9 in shape. The menu says why it refuses a size; in the file,
   anything else uses the game's reduced 2048x1152. The Output resolution row chooses the typed size from its list when it is
   already there, including sizes found after a monitor change, or offers it as your own choice and selects its shape.
+  Typing a 16:9 size keeps Aspect ratio on the monitor's shape when it already follows the monitor.
   The size this run started with stays available until the next start, so returning to the starting shape still
   restores that size even after a custom-size edit.
   A picture wider or narrower than 16:9 is kept to 5120x2160's pixels, so above that a size of another shape is

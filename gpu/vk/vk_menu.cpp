@@ -1171,17 +1171,18 @@ MENU_HINTS(hn_prompts, 0,
 
 // ---- (longshot) text fields: rows whose value is typed (MkwVkHost.take_text: WM_CHAR on Windows, SDL's text input on Linux;
 // RX_VK_MENU_SCRIPT's TYPE). A field holds printable ASCII alone, as the menu's glyphs are baked for it (vk_imgui.cpp
-// bake_some): any other character, typed or pasted, is left out, and its allow() can take fewer. While a field has the keyboard
-// (editing, menu_tick) the keys type into it and do nothing else: Left, Right, Home and End move the caret, Backspace and
+// bake_some): full-width digits and x are folded to ASCII, other characters are left out, and allow() can take fewer.
+// While editing (menu_tick), keys type into the field only: Left, Right, Home and End move the caret, Backspace and
 // Delete remove a character, Ctrl+V and Shift+Insert paste the clipboard's first line (the host does: take_text), Enter sets
 // the text (the field's apply, which can refuse it and say why), Esc puts the text back as it was. A controller's confirm and
-// back are Enter and Esc, its D-pad's Left and Right move the caret, its paste button (menu_keys::paste) pastes; a click
-// elsewhere is Enter, a right click Esc; F1, Home and closing the menu are Esc too ----
+// back are Enter and Esc, its D-pad moves the caret and cycles characters, its shoulders add and remove a character,
+// its paste button (menu_keys::paste) pastes; a click elsewhere is Enter, a right click Esc; closing the menu is Esc too ----
 struct TextField {
     char text[64];                     // (NUL-terminated)
     int len = 0, caret = 0;            // (in bytes, a character each: ASCII)
     int max = 63;                      // (the most it holds, below sizeof text)
     bool (*allow)(char c) = nullptr;   // (of the printable ASCII, what it takes; nullptr all of it)
+    const char* (*pad_chars)(const TextField&) = nullptr;   // (characters offered at the caret, in cycling order)
 };
 enum { kTextGoOn, kTextDone, kTextCancel };
 /// One input to a field: a character typed (a Unicode code point) or HOS_TEXT_KEY | an editing key (vk_api.h). The text and its
@@ -1202,9 +1203,29 @@ int text_edit(TextField& f, uint32_t in) {
         case VK_DELETE:
             if (f.caret < f.len) memmove(f.text + f.caret, f.text + f.caret + 1, (size_t)(f.len - f.caret)), f.len--;
             break;
+        case VK_UP:
+        case VK_DOWN:
+        case VK_INSERT: {
+            if (!f.pad_chars) break;
+            const char* chars = f.pad_chars(f);
+            const int n = (int)strlen(chars), key = (int)(in & ~(uint32_t)HOS_TEXT_KEY);
+            if (!n) break;
+            const char c = f.caret < f.len ? f.text[f.caret] : 0;
+            const char* at = c ? strchr(chars, c == 'X' ? 'x' : c) : nullptr;
+            const int next = key == VK_INSERT ? 0 : at ? ((int)(at - chars) + (key == VK_UP ? 1 : n - 1)) % n
+                                                                      : key == VK_UP ? 0 : n - 1;
+            if (key == VK_INSERT || f.caret == f.len) {
+                const int caret = f.caret;
+                text_edit(f, (uint32_t)chars[next]);
+                f.caret = caret;   // (the new character is the one to cycle)
+            } else if (!f.allow || f.allow(chars[next])) f.text[f.caret] = chars[next];
+            break;
+        }
         }
         return kTextGoOn;
     }
+    if (in >= 0xff10 && in <= 0xff19) in = '0' + in - 0xff10;
+    else if (in == 0xff58) in = 'x';
     if (in < 0x20 || in > 0x7e || f.len >= std::min(f.max, (int)sizeof f.text - 1) || (f.allow && !f.allow((char)in)))
         return kTextGoOn;   // (not printable ASCII, not this field's, or no room: left out)
     memmove(f.text + f.caret + 1, f.text + f.caret, (size_t)(f.len - f.caret + 1));
@@ -2473,7 +2494,14 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
 /// Custom output size: the Output resolution's size of the player's own (custom_output), typed, as output_res= in
 /// longshot_options.ini sets it (parse_output: the same rules)
 bool output_size_char(char c) { return (c >= '0' && c <= '9') || c == 'x' || c == 'X'; }
-TextField output_field{{}, 0, 0, 11, output_size_char};
+const char* output_pad_chars(const TextField& f) {
+    // (one separator, after 1 to 5 width digits; partial text is fine until Done)
+    if (f.caret < 1 || f.caret > 5 || f.len - f.caret - (f.caret < f.len) > 5) return "0123456789";
+    for (int i = 0; i < f.len; i++)
+        if (i != f.caret && (f.text[i] == 'x' || f.text[i] == 'X')) return "0123456789";
+    return "0123456789x";
+}
+TextField output_field{{}, 0, 0, 11, output_size_char, output_pad_chars};
 /// The field as the setting is: the size of the player's own, or empty
 void output_field_show() {
     char t[24] = "";
@@ -2524,7 +2552,7 @@ const char* output_field_apply() {
         output_started = last_choice();
     }
     aspect_started = started_monitor ? aspect_monitor_value() : aspect_index(started_shape);
-    opts.ultrawide = aspect_of_choice(opts.output_res, output_field.len ? 0 : follow_host);
+    opts.ultrawide = aspect_of_choice(opts.output_res, follow_host);
     for (Row& r : rows) {
         if (r.value == &opts.output_res) r.hi = last_choice();
         if (r.value == &opts.ultrawide) r.hi = aspect_last();
@@ -3351,6 +3379,12 @@ void draw_options(ui::Ctx& c) {
     const char* compact_key_name = opts.compact_menu_key == 1 ? "RCtrl" : "RShift";
     if (field && editing == field->field) {
         prompts_n = 0;
+        prompt_list[prompts_n++] = {ui::kLeftRight, "Caret"};
+        if (c.pad) {
+            prompt_list[prompts_n++] = {ui::kUpDown, "Character"};
+            prompt_list[prompts_n++] = {ui::kAddChar, "Add"};
+            prompt_list[prompts_n++] = {ui::kRemoveChar, "Remove"};
+        }
         prompt_list[prompts_n++] = {ui::kPaste, "Paste"};
         prompt_list[prompts_n++] = {ui::kConfirm, "Done"}, prompt_list[prompts_n++] = {ui::kBack, "Cancel"};
     } else {
@@ -5167,17 +5201,20 @@ void menu_tick() {
             if (!edit_enter_held || typed[i] != (HOS_TEXT_KEY | VK_RETURN)) feed(typed[i]);
         if (done != kTextGoOn) edit_keys_until = prof_now() + 50000000LL;   // (the keyboard's Enter or Esc: above)
         for (const uint32_t in : scripted) feed(in);
-        // (the controller: the D-pad's Left and Right move the caret, confirm and back are Enter and Esc)
-        if (pad(HOS_PAD_LEFT)) feed(HOS_TEXT_KEY | VK_LEFT);
-        if (pad(HOS_PAD_RIGHT)) feed(HOS_TEXT_KEY | VK_RIGHT);
+        // (the controller edits without a keyboard; the D-pad's repeats use the existing repeat clock)
+        const int pads[] = {HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT, HOS_PAD_RIGHT};
+        const int keys[] = {VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT};
+        for (int i = 0; i < 4; i++)
+            if (pad(pads[i]) || (press[i + 1] && (raw >> pads[i] & 1))) feed(HOS_TEXT_KEY | (uint32_t)keys[i]);
+        if (pad(HOS_PAD_RSHOULDER)) feed(HOS_TEXT_KEY | VK_INSERT);
+        if (pad(HOS_PAD_LSHOULDER)) feed(HOS_TEXT_KEY | (editing->caret < editing->len ? VK_DELETE : VK_BACK));
         if (pad(pad_confirm)) feed(HOS_TEXT_KEY | VK_RETURN);
         if (pad(pad_back)) feed(HOS_TEXT_KEY | VK_ESCAPE);
-        if (mouse && done == kTextGoOn) {   // (a click elsewhere sets the text, a right click puts it back; the wheel scrolls)
+        if (mouse && done == kTextGoOn) {   // (a click elsewhere sets the text, a right click puts it back; no wheel scrolling)
             const menu_hit::Hit hit = hits.at((float)mx, (float)my);
             const bool on_field = hit.part == menu_hit::kRow && hit.index == tab_selected[cur_tab];
             if ((ptr.pressed & HOS_MOUSE_LEFT) && !on_field) done = kTextDone;
             if (ptr.pressed & HOS_MOUSE_RIGHT) done = kTextCancel;
-            if (ptr.wheel) wheel_rows[cur_tab] += ptr.wheel, changed = true;
         }
         if (done != kTextGoOn) edit_end(done == kTextDone), changed = true;
     } else if (open_now.load() && page == 5) {   // (longshot) the restart question: Later (the default) or Restart now

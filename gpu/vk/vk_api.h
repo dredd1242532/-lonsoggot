@@ -111,7 +111,7 @@ typedef struct MkwVkSetting {
     int restart, fixed;   /* the change applies at the next start; nothing to choose on this PC (the menu shows it greyed) */
 } MkwVkSetting;
 
-/* (longshot, version 20) typed text for the Insert menu's text fields (MkwVkHost.take_text, host/rx_backend.c): a character
+/* (longshot, version 22) typed text for the Insert menu's text fields (MkwVkHost.take_text, host/rx_backend.c): a character
    comes as its Unicode code point, an editing key as HOS_TEXT_KEY | its Windows key code (VK_LEFT, VK_RIGHT, VK_HOME, VK_END,
    VK_BACK, VK_DELETE, VK_RETURN, VK_ESCAPE). The focus take_text is given: none, a field has the keyboard, or that and a paste
    asked (the clipboard's first line comes as typed) */

@@ -2,13 +2,12 @@
 size of the player's own, which before could only be set in longshot_options.ini).
 
 The menu's own functions are cut out of gpu/vk/vk_menu.cpp by their text and driven with key and text events as the host
-gives them (MkwVkHost.take_text): typing, the caret's keys, Backspace and Delete, the length limit, what a field takes (printable
-ASCII alone, as the menu's glyphs are baked; a character outside it is left out), Enter and Esc; then Custom output size's
-Enter, which sets the Output resolution row to the size typed, or says why not. The host's side, cut out of host/rx_backend.c,
-is compiled as C: the queue between the window's thread and the menu, nothing kept while no field has the keyboard, UTF-8 from
-SDL's text input and the clipboard, its first line alone, a broken sequence left out. Then the wiring is checked in the
-source: the interface's new member last and its version bumped, WM_CHAR and SDL's text input put into the queue, the menu
-telling the host whether a field has the keyboard, RX_VK_MENU_SCRIPT's TYPE. No GPU, game or window.
+gives them (MkwVkHost.take_text): typing, the caret's keys, Backspace and Delete, the length limit, printable ASCII with
+full-width digits/x folded before filtering, Enter and Esc; then Custom output size's Enter, which sets the Output resolution
+row to the size typed, or says why not. The real focused menu_tick branch handles pad-only entry, editing and the wheel.
+The host's side, cut out of host/rx_backend.c, is compiled as C: the bounded queue, focus, UTF-8 and first-line paste.
+The Windows focused key branch is run with key-state stubs to check paste repeats. Wiring checks allow later API members
+after take_text while requiring host_take_text in its matching slot. No GPU, game or window.
 
 Each generated source opts out of Microsoft's secure-CRT deprecation annotations before any header, as the other
 fixtures do. The test still treats warnings as errors and executes the same field and queue checks on Windows.
@@ -49,6 +48,7 @@ def need(text, pattern, what):
 
 MENU_FIXTURE = r'''#define _CRT_SECURE_NO_WARNINGS
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -59,8 +59,12 @@ MENU_FIXTURE = r'''#define _CRT_SECURE_NO_WARNINGS
 #include "gpu/vk/menu_restart.h"
 using namespace mkwvk;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
-enum { VK_BACK = 8, VK_TAB = 9, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25, VK_RIGHT = 0x27,
-       VK_DELETE = 0x2e };
+constexpr int VK_BACK = 8, VK_TAB = 9, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25,
+              VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_INSERT = 0x2d, VK_DELETE = 0x2e;
+enum { HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_WEST, HOS_PAD_NORTH, HOS_PAD_BACK, HOS_PAD_GUIDE, HOS_PAD_START,
+       HOS_PAD_LSTICK, HOS_PAD_RSTICK, HOS_PAD_LSHOULDER, HOS_PAD_RSHOULDER, HOS_PAD_UP, HOS_PAD_DOWN, HOS_PAD_LEFT,
+       HOS_PAD_RIGHT };
+enum { HOS_MOUSE_LEFT = 1, HOS_MOUSE_RIGHT = 2 };
 @@TEXT_ENUMS@@
 struct { int output_res, preset, ultrawide, handheld, audio_output; } opts;
 struct Row { int* value; int hi; bool restart; };
@@ -101,6 +105,8 @@ static void startup(const char* output, int follow = 0) {
     custom_output = {0, 0};
     output_extras.clear();
     (void)output_shapes();
+    // A later screen's mode joins the same dynamic list used by outputs_follow_screen.
+    if (screen_w && (screen_w != 1920 || screen_h != 1080)) output_extras.push_back({screen_w, screen_h});
     opts.output_res = parse_output(output), opts.ultrawide = follow;
     outputs_sync();
     restart_state = {};
@@ -108,7 +114,136 @@ static void startup(const char* output, int follow = 0) {
     output_field_show();
     saves = 0, menu_refresh = false, released = nullptr;
 }
+// The real focused branch, with only the outside world stubbed. No keyboard event is used in the pad tests.
+std::atomic<bool> open_now{true};
+uint32_t raw = 0, pad_press = 0, typed[64] = {};
+int typed_n = 0, pad_confirm = HOS_PAD_EAST, pad_back = HOS_PAD_SOUTH;
+bool press[13] = {}, changed = false, mouse = false;
+int64_t edit_keys_until = 0;
+std::vector<uint32_t> scripted;
+int cur_tab = 0, tab_selected[1] = {}, wheel_rows[1] = {}, mx = 0, my = 0;
+struct { int pressed = 0, wheel = 0; } ptr;
+namespace menu_hit { enum { kRow }; struct Hit { int part = kRow, index = 0; }; }
+struct { menu_hit::Hit at(float, float) { return {}; } } hits;
+bool pad(int button) { return (pad_press >> button & 1) != 0; }
+int GetAsyncKeyState(int) { return 0; }
+int64_t prof_now() { return 100000000LL; }
+void focused_tick() {
+    @@FOCUSED@@
+}
+void tap(int button, int count = 1) {
+    for (int i = 0; i < count; i++) {
+        raw = pad_press = 1u << button;
+        focused_tick();
+        raw = pad_press = 0;
+        focused_tick();
+    }
+}
+void test_pad_only_entry() {
+    startup("0");
+    edit_start(output_field, output_field_apply);
+    CHECK(is(output_field, "", 0));
+    for (const char c : std::string("1920x800")) {
+        tap(HOS_PAD_RSHOULDER);   // insert 0, then cycle it; no TYPE or text input
+        tap(HOS_PAD_UP, c == 'x' ? 10 : c - '0');
+        tap(HOS_PAD_RIGHT);
+    }
+    CHECK(is(output_field, "1920x800", 8) && !saves);
+    tap(pad_confirm);
+    CHECK(!editing && saves == 1 && output_at(opts.output_res).w == 1920 && output_at(opts.output_res).h == 800);
+    std::puts("PASS: test_pad_only_entry: empty field to committed 1920x800");
+}
+void test_pad_edit_existing() {
+    startup("1920x800");
+    edit_start(output_field, output_field_apply);
+    tap(HOS_PAD_LEFT, 3), tap(HOS_PAD_DOWN, 2);
+    CHECK(is(output_field, "1920x600", 5));
+    tap(HOS_PAD_RIGHT), tap(HOS_PAD_LSHOULDER);
+    CHECK(is(output_field, "1920x60", 6));
+    tap(HOS_PAD_RSHOULDER);
+    CHECK(is(output_field, "1920x600", 6));
+    tap(HOS_PAD_RIGHT, 2), tap(HOS_PAD_UP);
+    CHECK(is(output_field, "1920x6000", 8));
+    tap(HOS_PAD_RIGHT), tap(HOS_PAD_LSHOULDER);   // end caret removes the previous character
+    CHECK(is(output_field, "1920x600", 8));
+    tap(pad_confirm);
+    CHECK(!editing && saves == 1 && output_at(opts.output_res).h == 600);
+    edit_start(output_field, output_field_apply);
+    tap(HOS_PAD_LSHOULDER), tap(pad_back);
+    CHECK(!editing && saves == 1 && !strcmp(output_field.text, "1920x600"));
+    std::puts("PASS: test_pad_edit_existing: cycle, remove, insert, append, commit and cancel");
+}
+void test_pad_character_limits() {
+    startup("0");
+    edit_start(output_field, output_field_apply);
+    tap(HOS_PAD_DOWN);   // no leading separator
+    CHECK(is(output_field, "9", 0));
+    tap(HOS_PAD_UP);
+    CHECK(is(output_field, "0", 0));
+    // D-pad repeats follow menu_tick's existing repeat clock, not keyboard text events.
+    raw = 1u << HOS_PAD_UP, press[1] = true;
+    focused_tick();
+    raw = 0, press[1] = false;
+    CHECK(is(output_field, "1", 0));
+    text_set(output_field, "12345x67890");
+    tap(HOS_PAD_RSHOULDER), tap(HOS_PAD_UP);   // full buffer: no insertion or append
+    CHECK(is(output_field, "12345x67890", 11));
+    tap(HOS_PAD_LEFT), tap(HOS_PAD_DOWN);
+    CHECK(is(output_field, "12345x67899", 10));   // no second separator
+    tap(HOS_PAD_LEFT, 5), tap(HOS_PAD_UP);
+    CHECK(is(output_field, "12345067899", 5));   // separator cycles to 0
+    tap(HOS_PAD_DOWN);
+    CHECK(is(output_field, "12345x67899", 5));
+    tap(pad_back);
+    std::puts("PASS: test_pad_character_limits: separator position, repeats and full buffer");
+}
+void test_edit_wheel() {
+    startup("0");
+    edit_start(output_field, output_field_apply);
+    mouse = true;
+    for (const int wheel : {-3, 1, 4}) {
+        ptr.wheel = wheel, changed = false;
+        focused_tick();
+        CHECK(wheel_rows[0] == 0 && editing == &output_field && !changed && !saves);
+    }
+    ptr.wheel = 0, mouse = false;
+    edit_end(false);
+    std::puts("PASS: test_edit_wheel: edited field does not scroll out of view");
+}
+void test_full_width() {
+    text_set(output_field, "");
+    for (uint32_t c = 0xff10; c <= 0xff19; c++) text_edit(output_field, c);
+    CHECK(is(output_field, "0123456789", 10));
+    text_edit(output_field, 0xff58);
+    CHECK(is(output_field, "0123456789x", 11));
+    TextField digits;
+    digits.allow = [](char c) { return c >= '0' && c <= '9'; };
+    text_set(digits, "");
+    text_edit(digits, 0xff58), text_edit(digits, 0xff11);
+    CHECK(is(digits, "1", 1));   // the converted character must still pass allow()
+    std::puts("PASS: test_full_width: all ten digits and x folded before the allow check");
+}
+void test_monitor_shape() {
+    for (const auto screen : {display_modes::Size{2560, 1080}, display_modes::Size{5120, 1440}}) {
+        screen_w = screen.w, screen_h = screen.h;
+        startup("2048x1152", 1);
+        const std::string shape = aspect_shape(opts.ultrawide);
+        CHECK(shape == (screen.w == 2560 ? "21:9" : "32:9"));
+        CHECK(apply("2048x1152") == nullptr && aspect_shape(opts.ultrawide) == shape && aspect_follows_host(opts.ultrawide));
+        CHECK(!restart_changed(rows[0]) && !restart_changed(rows[1]));
+        startup("2048x1152", 0);
+        CHECK(apply("2048x1152") == nullptr && aspect_shape(opts.ultrawide) == "16:9");
+    }
+    screen_w = 1920, screen_h = 1080;
+    std::puts("PASS: test_monitor_shape: 21:9 and 32:9 keep the monitor's shape for typed 2048x1152");
+}
 int main() {
+    test_pad_only_entry();
+    test_pad_edit_existing();
+    test_pad_character_limits();
+    test_edit_wheel();
+    test_full_width();
+    test_monitor_shape();
     TextField f;
     text_set(f, "");
     CHECK(is(f, "", 0));
@@ -283,6 +418,51 @@ int main(void) {
 }
 '''
 
+WINDOWS_FIXTURE = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
+enum { VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_INSERT = 0x2d, VK_LEFT = 0x25, VK_RIGHT = 0x27,
+       VK_HOME = 0x24, VK_END = 0x23, VK_BACK = 8, VK_DELETE = 0x2e, VK_RETURN = 13, VK_ESCAPE = 0x1b };
+@@TEXT_ENUMS@@
+static int focused = 1, ctrl = 0, shift = 0, pastes = 0, keys = 0;
+static uint32_t last_key;
+static int hos_text_focus(void) { return focused; }
+static int GetKeyState(int k) { return (k == VK_CONTROL ? ctrl : shift) ? -1 : 0; }
+static void paste_clipboard(int w) { (void)w; pastes++; }
+static void hos_text_put(uint32_t c) { last_key = c; keys++; }
+static void keydown(uint32_t wp, intptr_t lp) {
+    const int w = 0;
+    @@WIN_KEYS@@
+}
+int main(void) {
+    ctrl = 1;
+    keydown('V', 0), keydown('V', (intptr_t)1 << 30);
+    CHECK(pastes == 1 && keys == 0);
+    ctrl = 0, shift = 1;
+    keydown(VK_INSERT, 0), keydown(VK_INSERT, (intptr_t)1 << 30);
+    CHECK(pastes == 2 && keys == 0);
+    shift = 0;
+    keydown('V', 0), keydown(VK_INSERT, 0);
+    CHECK(pastes == 2 && keys == 0);
+    keydown(VK_BACK, 0), keydown(VK_BACK, (intptr_t)1 << 30);
+    CHECK(keys == 2 && last_key == (HOS_TEXT_KEY | VK_BACK));
+    focused = 0, ctrl = 1;
+    keydown('V', 0), keydown(VK_BACK, 0);
+    CHECK(pastes == 2 && keys == 2);
+    puts("PASS: test_windows_paste_repeats: Ctrl+V and Shift+Insert once per press; editing keys still repeat");
+    return 0;
+}
+'''
+
+
+def check_host_table(fields, table):
+    if "take_text" not in fields or len(table) != len(fields) or table[fields.index("take_text")] != "host_take_text":
+        raise SystemExit("FAIL: vk_api.h / rx_backend.c: vk_host does not give host_take_text in take_text's place (%d members, "
+                         "%d values)" % (len(fields), len(table)))
+    if fields.index("take_text") <= fields.index("screen_size") or table[fields.index("screen_size")] != "host_screen_size":
+        raise SystemExit("FAIL: take_text must follow screen_size, with both callbacks in their interface slots")
+
 
 def compile_run(cxx, lang, std, source, name, tmp):
     """source compiled as lang (c++ or c, the C++ driver given -x) and run"""
@@ -309,11 +489,18 @@ def main():
                      block(menu, "void outputs_sync("), block(menu, "int row_restart_value("),
                      block(menu, "int restart_slot_of("), block(menu, "bool restart_changed("),
                      block(menu, "void restart_values("),
-                     between(menu, "bool output_size_char(", "struct FieldRow {")])
+                     between(menu, "bool output_size_char(", "struct FieldRow {"),
+                     between(menu, "TextField* editing =", "// ---- (longshot) the Controls page:")])
     host_cut = between(backend, "enum { TEXT_QUEUE", "static const MkwVkHost vk_host")
+    focused = block(menu, "if (open_now.load() && editing) {")
+    win = (ROOT / "host/display.c").read_text(encoding="utf-8")
+    win_keys = block(win[win.index("case WM_KEYDOWN: {"):], "if (hos_text_focus()) {")
     with tempfile.TemporaryDirectory(prefix="menu-text-") as tmp:
-        compile_run(a.cxx, "c++", "c++20", MENU_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", cut), "menu", tmp)
+        compile_run(a.cxx, "c++", "c++20", MENU_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", cut)
+                    .replace("@@FOCUSED@@", focused), "menu", tmp)
         compile_run(a.cxx, "c", "c11", HOST_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", host_cut), "host", tmp)
+        compile_run(a.cxx, "c", "c11", WINDOWS_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@WIN_KEYS@@", win_keys),
+                    "windows", tmp)
 
     # ---- the wiring ----
     version = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
@@ -326,12 +513,23 @@ def main():
     fields = [re.search(r"\(\*(\w+)\)", d).group(1) if "(*" in d else d.split()[-1] for d in decls if d]
     table = [v.strip() for v in code(between(backend, "static const MkwVkHost vk_host = {", "};")).split("{", 1)[1].split(",")]
     table = [v for v in table if v]
-    if "take_text" not in fields or len(table) != len(fields) or table[fields.index("take_text")] != "host_take_text":
-        raise SystemExit("FAIL: vk_api.h / rx_backend.c: vk_host does not give host_take_text in take_text's place (%d members, "
-                         "%d values)" % (len(fields), len(table)))
-    if fields[-2:] != ["screen_size", "take_text"] or table[fields.index("screen_size")] != "host_screen_size":
-        raise SystemExit("FAIL: take_text must follow screen_size, with both callbacks in their interface slots")
-    win = (ROOT / "host/display.c").read_text(encoding="utf-8")
+    check_host_table(fields, table)
+    check_host_table(fields + ["later_callback"], table + ["host_later_callback"])
+    before = fields.index("take_text")
+    check_host_table(fields[:before] + ["main_callback"] + fields[before:],
+                     table[:before] + ["host_main_callback"] + table[before:])
+    wrong = table.copy()
+    wrong[before] = "host_screen_size"
+    try:
+        check_host_table(fields, wrong)
+    except SystemExit:
+        pass
+    else:
+        raise SystemExit("FAIL: test_api_append: misplaced host_take_text was accepted")
+    comment_version = re.search(r"/\* \(longshot, version (\d+)\) typed text", api)
+    if not comment_version or int(comment_version.group(1)) != 22:
+        raise SystemExit("FAIL: text API comment must name its introduction at version 22")
+    print("PASS: test_api_append: members may follow screen_size or take_text; positional wiring still required")
     need(win, r"case WM_CHAR: \{.*?hos_text_put\(c\);.*?return 0;", "display.c: WM_CHAR does not reach the menu's text field")
     need(win, r"case WM_KEYDOWN: \{.*?if \(hos_text_focus\(\)\) \{.*?paste_clipboard\(w\);.*?hos_text_put\(HOS_TEXT_KEY \| \(uint32_t\)wp\);",
          "display.c: the editing keys and Ctrl+V do not reach the menu's text field")
@@ -357,6 +555,11 @@ def main():
     need(tick, r"edit_end\(false\);\s*// \(longshot: a text field being edited", "menu_tick: closing the menu does not end the edit")
     need(tick, r'!strcmp\(key, "TYPE"\)', "menu_tick: RX_VK_MENU_SCRIPT has no TYPE")
     need(tick, r"pad\(pad_paste\)", "menu_tick: a controller cannot paste")
+    ui = (ROOT / "gpu/vk/vk_ui.h").read_text(encoding="utf-8")
+    for glyph, label in (("kUpDown", "Character"), ("kLeftRight", "Caret"), ("kAddChar", "Add"), ("kRemoveChar", "Remove")):
+        need(menu, r'\{ui::' + glyph + r', "' + label + r'"\}', "text field: missing " + label + " prompt")
+    need(ui, r"pr.g == kAddChar && \*l == 'L'.*?pr.g == kRemoveChar && \*l == 'R'",
+         "text field: Add and Remove do not show right and left shoulders")
     need(menu, r'\{TAB_GRAPHICS, "Custom output size", nullptr,', "vk_menu.cpp: no Custom output size row")
     need(menu, r'const FieldRow field_rows\[\] = \{\{"Custom output size", &output_field, output_field_apply\}\};',
          "vk_menu.cpp: Custom output size is not a text field")

@@ -598,8 +598,11 @@ case with `_` for spaces (`frame_generation=2`, `invert_camera_x=1`), except Out
 `gpu/vk/vk_menu.cpp` writes the whole file at every change (`save`), with `options_version=5`,
 `microphone_device=<name>` when a microphone is chosen by name, and the controls (`pad_<button>`, `key_<button>` and `toggle_<button>`:
 the README's [Controls](../README.md#controls)). A value outside a row's range is clamped when it is read. A text field
-(Custom output size, typed: printable ASCII only, while the menu's glyphs are baked for it) is saved as its setting is:
-Custom output size as `output_res`. Where the
+(Custom output size: printable ASCII, with full-width digits and `ｘ` folded to ASCII) is saved as its setting is:
+Custom output size as `output_res`. A pad can edit it without a keyboard: D-pad Left/Right moves the caret, Up/Down
+cycles the character, the right shoulder inserts a digit and the left shoulder removes a character. The end caret
+can also append with Up/Down. Confirm commits, Back cancels, and the shown Paste button still pastes. No platform
+screen keyboard is requested. Where the
 number is not the obvious one:
 
 `toggle_<button>=0|1` is the Controls page's Toggle column: 0 Off (default), 1 press once to hold and again to release.

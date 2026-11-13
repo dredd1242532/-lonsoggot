@@ -408,7 +408,9 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
             if (!mod) set_fullscreen(w, !fullscreen);
         }
         if (hos_text_focus()) {   /* (a text field of the Insert menu has the keyboard: its editing keys, repeats too, and paste) */
-            if ((wp == 'V' && GetKeyState(VK_CONTROL) < 0) || (wp == VK_INSERT && GetKeyState(VK_SHIFT) < 0)) paste_clipboard(w);
+            if ((wp == 'V' && GetKeyState(VK_CONTROL) < 0) || (wp == VK_INSERT && GetKeyState(VK_SHIFT) < 0)) {
+                if (!(lp & (1 << 30))) paste_clipboard(w);
+            }
             else if (wp == VK_LEFT || wp == VK_RIGHT || wp == VK_HOME || wp == VK_END || wp == VK_BACK || wp == VK_DELETE ||
                      wp == VK_RETURN || wp == VK_ESCAPE)
                 hos_text_put(HOS_TEXT_KEY | (uint32_t)wp);

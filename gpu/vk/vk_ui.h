@@ -173,7 +173,7 @@ inline void glow(Ctx& c, ImVec2 a0, ImVec2 b0) {
 inline void gold(Ctx& c, ImVec2 a0, ImVec2 b0) { c.d->AddRectFilledMultiColor(a0, b0, kGoldHi, kGoldHi, kGold, kGold); }
 
 // ---- the button prompts: the keys, or a controller's buttons by position (any layout: the dot lit) ----
-enum Glyph { kUpDown, kLeftRight, kTabs, kConfirm, kBack, kKey, kCompact, kPaste };   // (kPaste: Ctrl+V, or the pad's paste_dot)
+enum Glyph { kUpDown, kLeftRight, kTabs, kConfirm, kBack, kKey, kCompact, kPaste, kAddChar, kRemoveChar };
 struct Prompt {
     Glyph g;
     const char* what;
@@ -222,14 +222,17 @@ inline float glyph(Ctx& c, float px, ImVec2 p, const Prompt& pr, bool draw) {
         }
         case kConfirm: return key(p.x, "Enter");
         case kPaste: return key(p.x, "Ctrl+V");
+        case kAddChar: return key(p.x, "Ins");
+        case kRemoveChar: return key(p.x, "Del");
         default: return key(p.x, "Esc");
         }
     }
     const float r = hh * 0.5f;
     const ImVec2 m(p.x + r, my);
-    if (pr.g == kTabs) {   // (the shoulder buttons)
+    if (pr.g == kTabs || pr.g == kAddChar || pr.g == kRemoveChar) {   // (the shoulder buttons)
         float x = p.x;
         for (const char* l : {"L", "R"}) {
+            if ((pr.g == kAddChar && *l == 'L') || (pr.g == kRemoveChar && *l == 'R')) continue;
             const float w = hh * 1.25f;
             if (draw) {
                 c.d->AddRectFilled(ImVec2(x, p.y + 2 * s), ImVec2(x + w, p.y + hh - 2 * s), cap, (hh - 4 * s) * 0.5f);
