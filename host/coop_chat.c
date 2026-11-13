@@ -53,7 +53,7 @@ static void add_line(CoopChat *s, int member, int kind, const char *text, uint64
     memset(l, 0, sizeof *l);
     l->at = now, l->session = p->session;
     l->line.kind = (uint8_t)kind, l->line.member = (uint8_t)member;
-    snprintf(l->line.name, sizeof l->line.name, "%s", p->name);
+    memcpy(l->line.name, p->name, sizeof l->line.name);
     snprintf(l->line.text, sizeof l->line.text, "%s", text ? text : "");
     s->next = (s->next + 1) % COOP_CHAT_HISTORY;
     if (s->count < COOP_CHAT_HISTORY) s->count++;

@@ -397,7 +397,7 @@ int main() {
     text_set(small, nullptr);
     CHECK(is(small, "", 0));
     small.max = 1000;   // (never past its buffer)
-    for (int i = 0; i < 100; i++) text_edit(small, 'z');
+    for (size_t i = 0; i < sizeof small.text + 8; i++) text_edit(small, 'z');
     CHECK(small.len == (int)sizeof small.text - 1 && small.text[small.len] == 0);
     small.len = 500, small.caret = -3;   // (out of range: taken back into it)
     text_edit(small, K | VK_END);

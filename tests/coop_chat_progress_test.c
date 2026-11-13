@@ -61,7 +61,7 @@ int main(void) {
     assert(observations == before);
     assert(coop_feature_set(&a->mine, COOP_RULE_SOCIAL, 1)); originate(a);
     send_digest(a, 2, send_to, a);
-    assert(!coop_sync_member_accepted(b, 1, 101));
+    assert(coop_sync_offer(b, &o, 17000) && !o.accepted); /* identity consent is not acceptance of changed terms */
     assert(observations == before);
     coop_sync_free(a); coop_sync_free(b);
     puts("PASS chat-progress: signed shared flags only after acceptance, unchanged/duplicate/forged sections do not repeat notices");

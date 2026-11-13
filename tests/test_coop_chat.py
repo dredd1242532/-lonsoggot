@@ -128,24 +128,29 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--cc', default='gcc'); p.add_argument('--cxx',default='g++')
     p.add_argument('--source-root',type=Path,default=ROOT); p.add_argument('--mutations',action='store_true')
+    p.add_argument('--part', choices=['all','core','progress','menu','mutations'], default='all')
     a=p.parse_args(); root=a.source_root.resolve(); host=root/'host'
     with tempfile.TemporaryDirectory(prefix='longshot-chat-') as td:
         tmp=Path(td)
         flags=['-D_GNU_SOURCE','-D_CRT_SECURE_NO_WARNINGS','-Wall','-Wextra','-Werror','-O1','-I'+str(host),'-I'+str(root)]
         mono=root/'third_party/monocypher/monocypher.c'
         core=[a.cc,'-std=c11',*flags,str(ROOT/'tests/coop_chat_test.c'),str(host/'coop_chat_runtime.c'),str(host/'coop_state.c'),str(host/'coop_proto.c'),str(mono)]
-        run(core+['-o',str(tmp/'core')]); run([str(tmp/'core')])
+        if a.part in ('all','core'):
+            run(core+['-o',str(tmp/'core')]); run([str(tmp/'core')])
         progress=[a.cc,'-std=c11',*flags,str(ROOT/'tests/coop_chat_progress_test.c'),str(host/'coop_proto.c'),str(mono)]
-        run(progress+['-o',str(tmp/'progress')]); run([str(tmp/'progress')])
+        if a.part in ('all','progress'):
+            run(progress+['-o',str(tmp/'progress')]); run([str(tmp/'progress')])
         source=menu_source(root); (tmp/'menu.cpp').write_text(source)
         menu_cmd=[a.cxx,'-std=c++20',*flags,str(tmp/'menu.cpp'),'-o',str(tmp/'menu')]
-        run(menu_cmd); run([str(tmp/'menu')])
-        if a.mutations:
+        if a.part in ('all','menu'):
+            run(menu_cmd); run([str(tmp/'menu')])
+        if a.mutations or a.part == 'mutations':
             # The harness changes production definitions in an isolated include directory, not assertions.
             text=(host/'coop_chat.c').read_text()
             mutations={
                 'mute':('if (p->muted || now < p->next_ms)', 'if (now < p->next_ms)'),
                 'replay':('if (!sequence || sequence <= p->received) return 0;', 'if (!sequence) return 0;'),
+                'rate':('if (p->muted || now < p->next_ms)', 'if (p->muted)'),
                 'acceptance':('if (!s->enabled) return 0;', 'if (0) return 0;'),
                 'history':('if (s->count < COOP_CHAT_HISTORY) s->count++;','s->count++;'),
                 'scene':('if (!safe) return 1;', 'if (0) return 1;'),
