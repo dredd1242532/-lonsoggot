@@ -4603,8 +4603,8 @@ void texture_frame(uint64_t completed) {
             }
         }
     }
-    // (longshot) the 90% rule and the driver's limit let go of their excess, not of an eighth of the cache: vram_compact.h.
-    // RX_VK_EVICT_EXCESS=0: to 7/8 of their budget, as before
+    // (longshot) the 90% rule and the driver's limit let go of their excess, not of an eighth of the cache, while that excess is
+    // small (a large one is cut to 7/8 as before): vram_compact.h. RX_VK_EVICT_EXCESS=0: always to 7/8 of their budget, as before
     static const bool excess_only = !getenv("RX_VK_EVICT_EXCESS") || atoi(getenv("RX_VK_EVICT_EXCESS")) != 0;
     const uint64_t rule_to = excess_only ? vram_compact::rule_target(total_bytes, size_budget, rule_budget)
                                          : vram_compact::rule_target(total_bytes, rule_budget);
