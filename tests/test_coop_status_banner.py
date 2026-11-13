@@ -55,10 +55,14 @@ int main() {
     Draw d;
     for (float scale : {0.75f, 1.0f, 1.5f}) {
         ui::Ctx c{scale, &d, {}};
-        for (bool temporary : {false, true}) {
+        for (bool temporary : {false, true}) for (bool diagnostic : {false, true}) {
             coop_now = MkwVkCoopView{};
             coop_now.state = HOS_COOP_STATE_LEFT;
             coop_now.temporary_save = temporary;
+            coop_now.duel_diagnostic = diagnostic;
+            std::snprintf(coop_now.duel_terms, sizeof coop_now.duel_terms, "Diagnostic terms");
+            std::snprintf(coop_now.duel_score, sizeof coop_now.duel_score, "Diagnostic score");
+            std::snprintf(coop_now.duel_note, sizeof coop_now.duel_note, "No native fight");
             std::snprintf(coop_now.status, sizeof coop_now.status, "%s", refusal);
             if (temporary) std::snprintf(coop_now.save_note, sizeof coop_now.save_note, "%s", note);
             count = 0; draw_header(c, 0, 1000 * scale, 100 * scale, 700 * scale);
@@ -68,6 +72,11 @@ int main() {
                 CHECK(box_bottom - text_y(note) >= 16 * scale);
             } else CHECK(text_y(note) == -1);
             CHECK(box_bottom - text_y(refusal) >= 16 * scale);
+            if (diagnostic) {
+                CHECK(text_y("Diagnostic terms") >= 0 && text_y("Diagnostic score") >= 0 && text_y("No native fight") >= 0);
+                for (int i = 1; i < count; i++) CHECK(texts[i].y - texts[i - 1].y >= 24 * scale);
+                CHECK(box_bottom - texts[count - 1].y >= 16 * scale);
+            }
             coop_now.status[0] = 0;
             count = 0; draw_header(c, 0, 1000 * scale, 100 * scale, 700 * scale);
             CHECK(text_y("Make a room or join one.") >= 0);

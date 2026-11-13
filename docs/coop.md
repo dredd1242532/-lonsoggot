@@ -790,6 +790,94 @@ forwarding-inclusive budget, data alone needs more than 26 seconds; headers,
 ACKs, receipt delays, loss and competing work add time. This is a size/budget
 calculation, not a measured internet rate or an ETA.
 
+## Diagnostic arena readiness and duel ledger
+
+**This build still cannot start a fight.** With `HOS_COOP_HITS_TRACE=1`, a joined PvP setup room shows
+**Ready for duel**, its signed arena/hearts/rounds/kit summary, and the reason Ready is unavailable.
+The second press binds the displayed preview digest and rules epoch; changed terms or sessions disarm it.
+It never claims a successful Ready, creates collision, changes native health, or sends combat controls.
+Ordinary builds and `HOS_COOP_HITS_TRACE=0` do not show this diagnostic action.
+
+The game-free `coop_duel` engine implements the subsequent Ready/countdown/round protocol, rather than
+pretending the existing attack trace is a native hit input. Its only hit input is a trusted receiver observer:
+the attack identity contains **no damage amount, actor pointer, file or address**. The observer must establish
+activation, allowed kit, contact, range/facing/height, solid cover, native shield/invulnerability and native
+pre-clamp quarter-heart damage. A missing observer refuses; an attacker cannot choose the receiver's loss.
+No production observer or arena-safety adapter is installed. The runtime boundary is isolated in
+`host/coop_duel_menu.c`; a later reviewed native binding must supply these proofs and the session/game-thread
+dispatch together, without replacing the ledger or enabling a remote amount fallback.
+
+Required signed terms are combat16=1, native model97=1, attack classes19=1 (sword), shield21=0,
+hearts31=1..40, rounds34=1/3/5, grace20=250..2000ms, damage18=0..400%, arena37=1,
+healing35=0, revive36=0, hazards38=0 and time39=0. Defaults are 10 hearts, best of3, 700ms and 100%.
+The kit additionally requires explicit age32, catalog83=1 and mask40=3 (child sword/shield) or12 (adult
+sword/shield); other supplied item/magic/count bits must be zero. Legacy normalized-HP rule17 refuses.
+Registry defaults are maker settings, never missing-rule permission. Unsupported terms refuse Ready.
+These are stable feature IDs, not numeric host-option IDs.
+
+The core terms digest covers the complete canonical signed feature/category list (unknown entries too),
+maker identity, both ordered member sessions, a fresh increasing match ID and the canonical arena digest.
+Each local context also pins the accepted offer, save/area/kit generations and fresh observed state.
+Ready requires all build/copy/kit/spawn/environment/contact/damage/shield capabilities, expires after30s,
+and never implies room acceptance. Both explicit Readies start a3s countdown. Losing consent, a participant,
+the relay, a capability, safe play, or any pinned generation interrupts and clears **both** Readies.
+The native owner must map `menu_or_chat` to pause/menu or chat-input focus, and queue a successful menu Ready
+only after closing that menu; neither a chat finishing key nor a menu action may become a sword input.
+
+Hearts are separate in-memory quarter-heart units. Only this receiver's observer changes its hearts; a
+peer's status changes only the peer's displayed hearts. Stable attack IDs are consumed even on grace/miss/
+stale refusal, independent of EVENT IDs; old IDs never revive after silence. Observation admission is bounded
+to32 burst and16/s, with a250ms receiver-clock age bound. Damage scaling has exact fractional carry,
+applied once; 0% practice cannot lose hearts. No native health, death, save or inventory setter is called.
+
+A lethal result opens a500ms collection barrier for already-observed simultaneous hits, followed by both
+victims' closed final-heart records. Both zero is a draw, no point. Missing closure after2s interrupts,
+never awards a network-induced win. Best of1/3/5 means first to1/2/3 wins; ties do not consume a win.
+Every next round resets hearts/replay/grace and requires fresh Ready. Scores never enter a save.
+`coop_duel_score_text` supplies the receiver-owned round/state, both heart totals and score for presentation.
+COMBAT_CONTROL9 has a strict104-byte version1 codec for Ready, victim status/closure and cancellation;
+it is game-free only here, not registered by the runtime. Existing HIT8 observations and ATTACK10 remain
+unchanged. EVENT ACK is transport delivery, not Ready, a hit or a completed round.
+
+### Private arena descriptor
+
+`HOS_COOP_ARENA_FILE=<local file>` is read only on a diagnostic Ready attempt, only with
+`HOS_COOP_HITS_TRACE=1`, after acceptance and temporary-copy checks. A missing/invalid descriptor refuses.
+It is never a network-selected path, never downloaded, and no arena file or coordinates ship in the product.
+The format is an exact384-byte `LSARENA` file: all integers little-endian, floats IEEE754 binary32.
+
+| Byte offset | Field |
+|---|---|
+|0|8-byte `LSARENA` plus NUL magic|
+|8,10,12|u16 format1, byte length384, authored arena ID1|
+|14,15|u8 age0 child/1 adult; vertex count3..16|
+|16,20|u32 environment15 (enemy, interaction, recovery and progression fences); authored time policy0|
+|24,44|20-byte supported build ID;64-byte NUL-padded local map key|
+|108,140|32-byte progression/area-variant digest;32-byte source-save digest|
+|172|two sets of four floats: native ground x/y/z and yaw radians,0 facing+z|
+|204,208,212|float lower/upper safe y and positive boundary inset|
+|216|16 x/z vertex pairs; unused pairs zero|
+|344,376|32-byte private survey-evidence digest;8 reserved zero bytes|
+
+Validation rejects nonfinite/out-of-range coordinates, malformed/unsupported versions, absent provenance,
+unsupported age/environment/time, wrong map/build/variant, concave/self-crossed/reversed/degenerate boundaries,
+spawns outside the inset safe volume, coincident spawns and facing away from the other spawn. The authored
+numeric limits are parser bounds, **not** measured reach, safe native distances or certification.
+The boundary is one strictly convex clear patch; do not include a hazard/hole and pretend it is excluded.
+A byte-valid descriptor does not prove ground, clearance, time policy or native capability.
+
+Survey privately from a disposable Kokiri checkpoint: choose two grounded, connected ends of clear central
+ground away from doors, talks, ledges, water, exits and tutorials. Record build/source-save hashes, age,
+progression variant, actual map key, sampled ground/facing, the walked inset boundary and clearance evidence.
+Do not guess height from a model origin or reuse a child's coordinates for an adult. Load the baseline twice
+independently, verify each placement with full-body/ground captures and native fresh-state readings, walk,
+turn, guard and swing at both ends, then swap A/B and repeat. Approach every boundary and nearby interaction;
+any unexpected actor, load/event, recovery source or unsafe edge disqualifies the descriptor.
+Keep coordinates and native identifiers in private survey storage, not source control or public reports.
+
+`tests/test_coop_duel.py` executes these authored synthetic boundaries and both receivers, including broken-copy
+negative controls. It is not a game proof of sword reach, cover, native damage, usable kit or safe arena clearance.
+
 ## Native combat observations (not playable PvP)
 
 The Room rules page's **Native hit observations** (`coop_hit_events`, signed rule 30, default Off) shares only

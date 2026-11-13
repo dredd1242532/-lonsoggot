@@ -587,6 +587,8 @@ inline constexpr Entry kpt_BR[] = {
     {"adult only", "só adulto"},
     {"the game folder", "do jogo"},
     {"your home folder", "pessoal"},
+    {"Ready for duel", "Pronto para o duelo"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leia as regras assinadas da sala e pressione duas vezes. Apenas diagnóstico: esta versão não pode iniciar uma luta."},
 };
 inline constexpr Entry kes_419[] = {
     {" (native)", " (nativa)"},
@@ -1166,6 +1168,8 @@ inline constexpr Entry kes_419[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "la carpeta del juego"},
     {"your home folder", "tu carpeta personal"},
+    {"Ready for duel", "Listo para el duelo"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y presiona dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
 };
 inline constexpr Entry kes[] = {
     {" (native)", " (nativa)"},
@@ -1747,6 +1751,8 @@ inline constexpr Entry kes[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "la carpeta del juego"},
     {"your home folder", "tu carpeta personal"},
+    {"Ready for duel", "Listo para el duelo"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y pulsa dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
 };
 inline constexpr Entry kfr[] = {
     {" (native)", " (native)"},
@@ -2323,6 +2329,8 @@ inline constexpr Entry kfr[] = {
     {"adult only", "adulte seul"},
     {"the game folder", "le dossier du jeu"},
     {"your home folder", "votre dossier personnel"},
+    {"Ready for duel", "Prêt pour le duel"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lisez les règles signées du salon, puis appuyez deux fois. Diagnostic uniquement : cette version ne peut pas lancer de combat."},
 };
 inline constexpr Entry kde[] = {
     {" (native)", " (nativ)"},
@@ -2894,6 +2902,8 @@ inline constexpr Entry kde[] = {
     {"adult only", "nur erwachsen"},
     {"the game folder", "dem Spielordner"},
     {"your home folder", "dem Benutzerordner"},
+    {"Ready for duel", "Bereit zum Duell"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lies die signierten Raumregeln und drücke zweimal. Nur Diagnose: Diese Version kann keinen Kampf starten."},
 };
 inline constexpr Entry kit[] = {
     {" (native)", " (nativa)"},
@@ -3468,6 +3478,8 @@ inline constexpr Entry kit[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "del gioco"},
     {"your home folder", "home"},
+    {"Ready for duel", "Pronto al duello"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leggi le regole firmate della stanza, poi premi due volte. Solo diagnostica: questa versione non può avviare un combattimento."},
 };
 inline constexpr Entry knl[] = {
     {" (native)", " (native)"},
@@ -4033,6 +4045,8 @@ inline constexpr Entry knl[] = {
     {"adult only", "alleen volwassen"},
     {"the game folder", "de spelmap"},
     {"your home folder", "je thuismap"},
+    {"Ready for duel", "Klaar voor duel"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lees de ondertekende kamerregels en druk tweemaal. Alleen diagnose: deze versie kan geen gevecht starten."},
 };
 inline constexpr Entry kpl[] = {
     {" (native)", " (natywna)"},
@@ -4607,6 +4621,8 @@ inline constexpr Entry kpl[] = {
     {"adult only", "tylko dorosły"},
     {"the game folder", "folderze gry"},
     {"your home folder", "folderze domowym"},
+    {"Ready for duel", "Gotowość do pojedynku"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Przeczytaj podpisane zasady pokoju, potem naciśnij dwa razy. Tylko diagnostyka: ta wersja nie może rozpocząć walki."},
 };
 inline constexpr Entry kru[] = {
     {" (native)", " (нативное)"},
@@ -5195,6 +5211,8 @@ inline constexpr Entry kru[] = {
     {"adult only", "только взрослый"},
     {"the game folder", "папке игры"},
     {"your home folder", "домашней папке"},
+    {"Ready for duel", "Готовность к дуэли"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Прочитайте подписанные правила комнаты, затем нажмите дважды. Только диагностика: эта версия не может начать бой."},
 };
 inline constexpr Entry kja[] = {
     {" (native)", " (ネイティブ)"},
@@ -5776,6 +5794,8 @@ inline constexpr Entry kja[] = {
     {"adult only", "大人のみ"},
     {"the game folder", "ゲームフォルダー"},
     {"your home folder", "ホームフォルダー"},
+    {"Ready for duel", "決闘の準備"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "署名済みのルームルールを読み、2回押してください。診断専用です。このビルドでは戦闘を開始できません。"},
 };
 inline constexpr Entry kko[] = {
     {" (native)", " (네이티브)"},
@@ -6362,6 +6382,8 @@ inline constexpr Entry kko[] = {
     {"adult only", "어른 전용"},
     {"the game folder", "게임 폴더"},
     {"your home folder", "홈 폴더"},
+    {"Ready for duel", "결투 준비"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "서명된 방 규칙을 읽고 두 번 누르세요. 진단 전용이며, 이 빌드에서는 전투를 시작할 수 없습니다."},
 };
 inline constexpr Entry kzh_Hans[] = {
     {" (native)", " (原生)"},
@@ -6943,6 +6965,8 @@ inline constexpr Entry kzh_Hans[] = {
     {"adult only", "仅限成年"},
     {"the game folder", "游戏文件夹"},
     {"your home folder", "用户主文件夹"},
+    {"Ready for duel", "准备决斗"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "阅读已签名的房间规则，然后按两次。仅用于诊断：此版本无法开始战斗。"},
 };
 inline constexpr Entry kzh_Hant[] = {
     {" (native)", " (原生)"},
@@ -7524,22 +7548,24 @@ inline constexpr Entry kzh_Hant[] = {
     {"adult only", "僅限成年"},
     {"the game folder", "遊戲資料夾"},
     {"your home folder", "使用者主資料夾"},
+    {"Ready for duel", "準備決鬥"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "閱讀已簽署的房間規則，然後按兩次。僅供診斷：此版本無法開始戰鬥。"},
 };
 inline constexpr Lang kLangs[] = {
     {"en", "English", nullptr, 0},
-    {"pt-BR", "Português (Brasil)", kpt_BR, 571},
-    {"es-419", "Español (Latinoamérica)", kes_419, 577},
-    {"es", "Español (España)", kes, 579},
-    {"fr", "Français", kfr, 574},
-    {"de", "Deutsch", kde, 569},
-    {"it", "Italiano", kit, 572},
-    {"nl", "Nederlands", knl, 563},
-    {"pl", "Polski", kpl, 572},
-    {"ru", "Русский", kru, 586},
-    {"ja", "日本語", kja, 579},
-    {"ko", "한국어", kko, 584},
-    {"zh-Hans", "简体中文", kzh_Hans, 579},
-    {"zh-Hant", "繁體中文", kzh_Hant, 579},
+    {"pt-BR", "Português (Brasil)", kpt_BR, 573},
+    {"es-419", "Español (Latinoamérica)", kes_419, 579},
+    {"es", "Español (España)", kes, 581},
+    {"fr", "Français", kfr, 576},
+    {"de", "Deutsch", kde, 571},
+    {"it", "Italiano", kit, 574},
+    {"nl", "Nederlands", knl, 565},
+    {"pl", "Polski", kpl, 574},
+    {"ru", "Русский", kru, 588},
+    {"ja", "日本語", kja, 581},
+    {"ko", "한국어", kko, 586},
+    {"zh-Hans", "简体中文", kzh_Hans, 581},
+    {"zh-Hant", "繁體中文", kzh_Hant, 581},
 };
 inline constexpr int kLangCount = sizeof kLangs / sizeof kLangs[0];
 }  // namespace mkwvk::menu_i18n

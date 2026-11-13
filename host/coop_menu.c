@@ -20,6 +20,7 @@
 #include "coop.h"
 #include "coop_state.h"
 #include "coop_profile.h"
+#include "coop_duel_menu.h"
 int hos_save_profile_ask(int returning);
 #include "../gpu/vk/vk_api.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
@@ -276,6 +277,7 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
         for (int k = 0; k < out->n; k++)
             if (who[j].self && out->member[k].self) copy_text(out->member[k].key, sizeof out->member[k].key, who[j].key);
     out->remedies = hos_oot_coop_is_maker();
+    hos_coop_duel_menu_view(out, &v, &offer);
 }
 
 int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
@@ -318,6 +320,8 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return hos_oot_coop_rules_changed();
     case HOS_COOP_CMD_GO_FRIEND:
         return number >= 1 && number <= COOP_MAX_MEMBERS && hos_oot_coop_warp_ask((int)number, text);
+    case HOS_COOP_CMD_DUEL_READY:
+        return hos_coop_duel_menu_ready(text, number);
     case HOS_COOP_CMD_TEMP_SAVE: {
         CoopView v;
         coop_view_get(&v);

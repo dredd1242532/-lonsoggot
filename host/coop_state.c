@@ -381,6 +381,20 @@ static const CoopFeatureRule feature_rules[] = {
     {95, "coop_loadout_bottle_3", 0, 11, 0},
     {96, "coop_loadout_bottle_4", 0, 11, 0},
     {98, "coop_loadout_preset", 0, 4, 0},
+    // Diagnostic duel terms. These never grant a native combat capability by themselves.
+    {16, "coop_combat_mode", 0, 1, 0, "Duel permission", "Off, or a two-player duel after separate Ready and native safety checks."},
+    {18, "coop_pvp_damage", 0, 400, 100, "Duel damage percent", "Native receiver damage scaled once. Zero is no-damage practice."},
+    {19, "coop_pvp_items", 0, 2047, 1, "Duel attack classes", "Only sword bit 0 is supported by the first duel contract."},
+    {20, "coop_pvp_grace", 250, 2000, 700, "Duel hit grace (ms)", "The receiver ignores further hits during this grace interval."},
+    {21, "coop_pvp_shield", 0, 2, 0, "Duel shield", "Only 0 (native shield) is supported; custom shield modes refuse Ready."},
+    {31, "coop_duel_hearts", 1, 40, 10, "Duel hearts", "Separate duel hearts, never the game's health. One heart is four ledger units."},
+    {34, "coop_duel_rounds", 1, 5, 3, "Duel best of", "Choose 1, 3 or 5. Even values refuse Ready; a draw awards no point."},
+    {35, "coop_duel_healing", 0, 2, 0, "Duel healing", "Only 0 (no healing) is supported by the first duel."},
+    {36, "coop_duel_revive", 0, 1, 0, "Duel revive", "Only Off is supported; a duel never causes native death."},
+    {37, "coop_arena", 0, 1, 0, "Duel arena", "0 none; 1 Kokiri. Requires privately surveyed data; no coordinates ship with the game."},
+    {38, "coop_arena_hazards", 0, 1, 0, "Arena hazards", "Only Off is supported. Clear ground and safe interactions must be verified locally."},
+    {39, "coop_arena_time", 0, 2, 0, "Arena time policy", "Only 0 (the surveyed authored policy) is supported; no repeated clock setters."},
+    {97, "coop_damage_model", 1, 1, 1, "Duel damage model", "Native receiver calculation only. No guessed weapon damage table."},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop

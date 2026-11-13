@@ -619,6 +619,24 @@ int main(int argc, char** argv) {
     room.member[1].accepted = 1; coop_refresh(&changed);
     coop_press(row(kCoopWarp)); tick_closed(); CHECK(!pending);
     coop_press(row(kCoopWarp)); tick_pending(row(kCoopLeave)); CHECK(!pending && n_asked == 1);
+    room.duel_diagnostic = 1;
+    room.state = HOS_COOP_STATE_JOINED;
+    room.rules_epoch = 99;
+    std::snprintf(room.duel_digest, sizeof room.duel_digest, "%064d", 1);
+    coop_refresh(&changed);
+    CHECK(coop_row_shown(row(kCoopDuel), coop_now));
+    n_asked = 0;
+    coop_press(row(kCoopDuel));
+    CHECK(pending == &row(kCoopDuel) && !n_asked);
+    room.duel_digest[0] = 'f';   // no old second press after changed terms
+    coop_refresh(&changed);
+    CHECK(!pending && !n_asked);
+    coop_press(row(kCoopDuel));
+    coop_press(row(kCoopDuel));
+    CHECK(n_asked == 1 && asked[0].cmd == HOS_COOP_CMD_DUEL_READY && asked[0].number == 99);
+    CHECK(!std::strcmp(asked[0].text, room.duel_digest));
+    room.duel_diagnostic = 0;
+    CHECK(!coop_row_shown(row(kCoopDuel), room));
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
     for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
 #ifdef COOP_MENU_REAL_ENGINE
@@ -647,11 +665,8 @@ static void set_env(const char *name, const char *value) {
 }
 void hos_coop_menu_view(MkwVkCoopView *out);
 int hos_coop_menu_command(int cmd, const char *text, uint32_t number);
-#ifndef COOP_MENU_REAL_ENGINE
-const CoopFeatureRule *coop_feature_at(int index) { (void)index; return NULL; }   /* no registry rows in this fixture */
-#else
+#ifdef COOP_MENU_REAL_ENGINE
 static CoopSync *view_engine;
-int coop_feature_present(const CoopRules *r, int id, int *value) { (void)r; (void)id; (void)value; return 0; }
 #endif
 int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age) { (void)id; (void)out; (void)age; return 0; }
 int hos_oot_destination(int index, const char **child, const char **adult) { (void)index; (void)child; (void)adult; return 0; }
@@ -863,6 +878,7 @@ static void real(void) {
     temporary = 1;
     hos_coop_menu_view(&v);
     CHECK(v.temporary_save && !strcmp(v.save_note, "Temporary copy"));
+    CHECK(!hos_coop_menu_command(HOS_COOP_CMD_DUEL_READY, "old terms", 3));
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_TEMP_SAVE, NULL, 0) && profile_asks == 1 && session.state == COOP_OFF);
     temporary = 0;
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_GO_FRIEND, "1111-2222-3333-4444", 2));
