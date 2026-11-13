@@ -3,6 +3,7 @@
   "source": "README.md",
   "sections": {
     "## Project status": "67a0b428847a145e63b3a01ec9781e5315ffddbb6dfa0d837c53fe329d85a138",
-    "### What you need": "714f18a71495f811590d187d539b964975d069969923314d740ad0827cabeb5d"
-  }
+    "### What you need": "e7b4314760d285f664c2c5aabb3cb14cac90e1a11a7b47db1f2095c7f401dfa4"
+  },
+  "reviewNotes": "Reviewed against upstream 5eaaf7f: only the requirement paragraph about downloading tools changed to explain that the launcher installs the builder. Game, OS, CPU, GPU, memory and disk rules are unchanged; calculator rules and advice remain applicable."
 }
