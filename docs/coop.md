@@ -727,9 +727,27 @@ The receiver's clock offset saturates at the signed-integer limit rather than ov
 `nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
 only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
 or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
-The animation switch loads it only with local player display enabled. Conflicting user mods disable those generated
-assets with a clear line instead of combining incompatible tables. Without animation assets the explicitly
-non-animated standing menu model remains available; it is not described as a walking/full-pose body.
+The animation switch loads it only with local player display enabled. The shared filename contract is
+`host/coop_players_assets.h`: the child actor pack, ActorInfo, GameActorInfo and the resource size table.
+Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
+`CoopPuppet_<id>` from that age's local source actors; both generator and loader consume every listed output.
+An additional age therefore needs one contract entry, with no separate age list or literal file count.
+The generator resolves each versioned table name from the source RomFS and checks its output against that contract
+before writing. The loader resolves those same source names and requires each exact indexed output to be a nonempty
+file; another table version, a directory, or unrelated files cannot fill a missing slot. The former total of five
+included an adult actor pack; the child-only family intentionally does not generate or require that pack.
+Unrelated extra files do not change readiness. User mods still win; replacing a generated file disables animated
+actors with a clear log line, while nonconflicting mods leave them enabled. Missing or incomplete output keeps
+animation unavailable. Without animation assets the explicitly non-animated standing menu model remains available;
+it is not described as a walking/full-pose body.
+
+`tests/test_coop_players_assets.py --cc gcc` runs authored generation through the unchanged production loader over
+real temporary directories (native Win32 file calls on Windows, the production POSIX file calls on Linux).
+`--mods-revision COMMIT` selects that commit's `host/mods.c` without altering it; `--mods-source PATH` selects a saved
+source file. The generator can independently be selected with `LONGSHOT_COOP_ASSETS_SOURCE`.
+For a built copy, `--asset-folder GAME/coop-players/romfs --romfs GAME/romfs` instead checks the exact generated
+filename set and loader readiness read-only, with user mods isolated out. It reads no game asset contents and
+starts no game. These checks cover the asset boundary, not animation quality in play.
 
 | Setting | Default | Meaning |
 |---|---|---|

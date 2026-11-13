@@ -6,6 +6,7 @@ supplies animation references, settings and heap allowance. No model or animatio
 import argparse
 import copy
 from pathlib import Path
+import re
 import struct
 import sys
 import zlib
@@ -211,20 +212,41 @@ class Romfs:
         return self.zstd.ZstdDecompressor(dict_data=d).decompressobj().decompress(data)
 
     def one(self, pattern):
-        paths = sorted(self.root.glob(pattern))
+        paths = sorted(p for p in self.root.glob(pattern) if p.is_file())
         if len(paths) != 1:
             raise ValueError('expected one ' + pattern)
         return paths[0].relative_to(self.root).as_posix()
 
 
+def asset_files():
+    """Read the same filename contract compiled into the runtime loader."""
+    path = Path(__file__).resolve().parents[1] / 'host/coop_players_assets.h'
+    text = re.sub(r'/\*.*?\*/', '', path.read_text(encoding='utf-8'), flags=re.S)
+    files = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        entry = re.fullmatch(r'COOP_PLAYER_ASSET\((actor|table), (\w+), "([^"]+)"\)', line.strip())
+        if not entry or entry[2] in files:
+            raise ValueError('invalid co-op asset filename contract: ' + line)
+        files[entry[2]] = entry[1], entry[3]
+    if not files:
+        raise ValueError('empty co-op asset filename contract')
+    return files
+
+
 def generate(rom, out):
     """The output tree is private builder output, not a mod to be distributed."""
-    tables = [rom.one('RSDB/' + name + '.Product.*.rstbl.byml.zs') for name in ('ActorInfo', 'GameActorInfo')]
+    contract = asset_files()
+    required = {name: rom.one(path) if '*' in path else path for name, (_, path) in contract.items()}
+    tables = [required[name] for name in ('actor_info', 'game_actor_info')]
     table_docs = [Byml(rom.read(path)) for path in tables]
-    size_path = rom.one('System/Resource/ResourceSizeTable.*.rsizetable.zs')
+    size_path = required['resource_sizes']
     sizes = Sizes(rom.read(size_path))
     changed = {}
-    for age in ('Child',):
+    for age, (kind, _) in contract.items():
+        if kind != 'actor':
+            continue
         menu, world, puppet = 'PouchPlayer_' + age, 'Player_' + age, 'CoopPuppet_' + age
         menu_path, world_path = ['Pack/Actor/' + n + '.pack.zs' for n in (menu, world)]
         source = rom.read(menu_path)
@@ -257,7 +279,7 @@ def generate(rom, out):
         raw = doc.encode()
         pack[param(puppet)] = raw
         sizes.grow(param(menu), param(puppet), len(pack[param(menu)]), len(raw))
-        path = 'Pack/Actor/' + puppet + '.pack.zs'
+        path = required[age]
         changed[path] = sarc_write(pack)
         sizes.grow(menu_path, path, len(source), len(changed[path]))
         for table in table_docs:
@@ -272,6 +294,8 @@ def generate(rom, out):
         changed[path] = doc.encode()
         sizes.grow(path, path, len(doc.data), len(changed[path]))
     changed[size_path] = sizes.encode()
+    if set(changed) != set(required.values()):
+        raise ValueError('generated files do not match the co-op asset filename contract')
     compress = rom.zstd.ZstdCompressor(level=3)
     for path, blob in changed.items():
         target = Path(out) / path

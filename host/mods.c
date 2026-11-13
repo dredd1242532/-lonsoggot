@@ -22,6 +22,7 @@
 #include "../gpu/vk/compat/longshot_env.h"
 
 int hos_ini_option(const char *key, int otherwise);
+extern const char *hos_romfs_dir;   /* nn_fs.c: resolve the same table versions as the generator */
 static int coop_assets_ready;
 static char coop_assets_root[MAX_PATH];
 int hos_coop_players_assets(void) { return coop_assets_ready; }
@@ -123,6 +124,44 @@ static int index_romfs(const char *host_dir, const char *rel, int depth) {
     return files;
 }
 
+static int coop_assets_complete(void) {
+    static const char *const required[] = {
+#define COOP_PLAYER_ASSET(kind, id, path) path,
+#include "coop_players_assets.h"
+#undef COOP_PLAYER_ASSET
+    };
+    for (size_t i = 0; i < sizeof required / sizeof required[0]; i++) {
+        char key[MAX_PATH];
+        snprintf(key, sizeof key, "%s", required[i]);
+        if (strchr(key, '*')) {
+            /* As Romfs.one in the generator: one source table, and its exact output name.
+               An unrelated file or another version's table cannot fill a missing slot. */
+            if (!hos_romfs_dir) return 0;
+            char pattern[MAX_PATH];
+            const int n = snprintf(pattern, sizeof pattern, "%s/%s", hos_romfs_dir, required[i]);
+            if (n < 0 || (size_t)n >= sizeof pattern) return 0;
+            WIN32_FIND_DATAA fd;
+            HANDLE f = FindFirstFileA(pattern, &fd);
+            if (f == INVALID_HANDLE_VALUE) return 0;
+            char *name = strrchr(key, '/') + 1;
+            const size_t cap = sizeof key - (size_t)(name - key);
+            int matches = 0;
+            do {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                if (++matches > 1) break;
+                const int len = snprintf(name, cap, "%s", fd.cFileName);
+                if (len < 0 || (size_t)len >= cap) { matches = 0; break; }
+            } while (FindNextFileA(f, &fd));
+            FindClose(f);
+            if (matches != 1) return 0;
+        }
+        lower_slash(key);
+        const Entry *e = find(key);
+        if (!e || e->is_dir || !e->size) return 0;
+    }
+    return 1;
+}
+
 /* the mod folders under root, sorted (a mod: a folder holding romfs or exefs) */
 typedef struct { char path[MAX_PATH]; char name[MAX_PATH]; } Mod;
 static Mod *mods;
@@ -173,7 +212,8 @@ void hos_mods_init(const char *image_path) {
         char *slash = (char *)last_sep(coop_assets_root);
         if (slash) {
             snprintf(slash + 1, sizeof coop_assets_root - (size_t)(slash + 1 - coop_assets_root), "coop-players\\romfs");
-            coop_assets_ready = index_romfs(coop_assets_root, "", 0) == 5;
+            index_romfs(coop_assets_root, "", 0);
+            coop_assets_ready = coop_assets_complete();
             hos_log("coop: players: locally built animation assets %s", coop_assets_ready ? "loaded" : "missing or incomplete");
         }
     }
