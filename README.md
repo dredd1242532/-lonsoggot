@@ -1044,7 +1044,7 @@ behind the sound. `HOS_VIDEO_NO_CATCHUP=1` skips nothing. `HOS_VIDEO_ACQUIRE_TRI
 of the clock. After a movie stops or is flushed, and nothing new has been submitted, there is no wait.
 
 On Windows, a PC with 4 logical processors or fewer decodes the movies on 2 threads rather than one per processor, so
-the decoder leaves the game's own threads their time. One such report (Intel UHD Graphics, 4 threads, 16 GB) showed the
+the decoder leaves the game's own threads their time. Unity's laptop (Intel UHD Graphics, 4 threads, 16 GB) showed the
 title and the opening movie at about 35 fps of 60, with the game's thread waiting 14 to 24 ms on most frames; that report
 was not run again with this change. `HOS_DAV1D_THREADS=<n>` sets the count on any PC.
 
