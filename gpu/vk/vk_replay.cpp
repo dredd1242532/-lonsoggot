@@ -1740,8 +1740,8 @@ void maybe_split(VkCommandBuffer& cmd) {
     // through its frame. Written at each part's end, on Intel without mirrors: white blocks and haze at Kokiri, and a
     // whole-screen white flash every 8 frames on the Arc 140V (https://github.com/NotRexed/Hookshot/issues/999).
     // Measured on an Intel iGPU only (no mirrors), so the default there; with mirrors (Arc discrete) the write goes to the
-    // mirror and nothing was seen: left as before. RX_VK_SPLIT_UBFLUSH=1: written at each part's end, as before, =0: at the
-    // last part's on any GPU)
+    // mirror, and it was not tested there: left as before. RX_VK_SPLIT_UBFLUSH=1: written at each part's end, as before,
+    // =0: at the last part's on any GPU)
     static const bool part_flush = [] {
         const char* e = getenv("RX_VK_SPLIT_UBFLUSH");
         return e ? env_on("RX_VK_SPLIT_UBFLUSH") : dev.props.vendorID != 0x8086 || pools_mirrored();
