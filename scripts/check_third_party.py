@@ -55,10 +55,12 @@ def ignored(root, paths):
     """The paths (relative to root, with /) .gitignore leaves out: by its rules alone, tracked or not"""
     if not paths or git(root, "rev-parse", "--show-toplevel") is None:
         return set()
-    # (bytes, not text: in text mode Windows sends each path with a \r, which matches no rule, so ignored files counted)
-    out = subprocess.run(["git", "check-ignore", "--no-index", "--stdin"], cwd=root,
-                         input=("\n".join(paths) + "\n").encode("utf-8"), capture_output=True)
-    return set(out.stdout.decode("utf-8").splitlines()) - {""}
+    # (-z and bytes, both ways: in text mode Windows sent each path with a \r, which matches no rule; and without -z git
+    # quotes a path with a non-ASCII byte in its answer, "third_party/x/\303\251.dll", which matches none of ours. Either
+    # way an ignored file was hashed with the part)
+    out = subprocess.run(["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=root,
+                         input="".join(p + "\0" for p in paths).encode("utf-8"), capture_output=True)
+    return set(out.stdout.decode("utf-8").split("\0")) - {""}
 
 
 def files(root, part):
