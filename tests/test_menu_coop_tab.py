@@ -56,7 +56,8 @@ MENU_FIXTURE = r'''#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
-enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25, VK_RIGHT = 0x27, VK_DELETE = 0x2e };
+enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25,
+       VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_INSERT = 0x2d, VK_DELETE = 0x2e };
 @@API@@
 @@TABS@@
 @@ROW@@
@@ -118,7 +119,31 @@ static void set_room(int state, const char* code, uint32_t offer, int accepted) 
     coop_refresh(&changed);
     CHECK(changed);
 }
+namespace ui {
+enum Glyph { kLeftRight, kUpDown, kAddChar, kRemoveChar, kPaste, kConfirm, kBack };
+struct Prompt { Glyph g; const char* what; };
+}
+static unsigned edit_prompts(TextField& f, bool pad) {
+    const struct { TextField* field; } row{&f};
+    const auto* field = &row;
+    const TextField* editing = &f;
+    const struct { bool pad; } c{pad};
+    ui::Prompt prompt_list[7]{};
+    int prompts_n = 0;
+    @@PROMPTS@@
+    unsigned mask = 0;
+    for (int i = 0; i < prompts_n; i++) mask |= 1u << prompt_list[i].g;
+    return mask;
+}
 int main() {
+    const unsigned text_prompts = (1u << ui::kLeftRight) | (1u << ui::kPaste) | (1u << ui::kConfirm) | (1u << ui::kBack);
+    CHECK(edit_prompts(coop_name_field, false) == text_prompts);
+    CHECK(edit_prompts(coop_name_field, true) == (text_prompts | (1u << ui::kRemoveChar)));
+    CHECK(edit_prompts(coop_relay_field, true) == (text_prompts | (1u << ui::kRemoveChar)));
+    CHECK(edit_prompts(coop_join_field, true) == (text_prompts | (1u << ui::kRemoveChar)));
+    TextField digits;
+    digits.pad_chars = [](const TextField&) { return "0123456789"; };
+    CHECK(edit_prompts(digits, true) == (text_prompts | (1u << ui::kRemoveChar) | (1u << ui::kUpDown) | (1u << ui::kAddChar)));
     // ---- the rows by the room's state ----
     CHECK(kRows == 1 + kCoopRows);   // (every row of the tab is one coop_kind knows)
     for (const Row& r : rows) CHECK(r.tab != TAB_COOP || (coop_kind(r) >= 0 && !r.value && r.help && std::strlen(r.help) > 20));
@@ -473,6 +498,7 @@ def main():
         "@@ROWMAP@@": block(menu, "int tab_row_to_global("),
         "@@APPLY@@": between(menu, "/// (longshot) Enter on the Co-op tab's Your name", "/// Custom output size: the Output"),
         "@@PRESS@@": between(menu, "/// (longshot) Enter (or a click) on a Co-op row", "// ---- (longshot) the Controls page"),
+        "@@PROMPTS@@": block(menu, "if (field && editing == field->field) {"),
     }
     source = MENU_FIXTURE
     for k, v in cut.items():

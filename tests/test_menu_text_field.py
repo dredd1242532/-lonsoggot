@@ -605,7 +605,8 @@ def main():
                      block(menu, "int restart_slot_of("), block(menu, "bool restart_changed("),
                      block(menu, "void restart_values("),
                      between(menu, "bool output_size_char(", "struct FieldRow {"),
-                     between(menu, "TextField* editing =", "// ---- (longshot) the Controls page:")])
+                     between(menu, "TextField* editing =", "void edit_start("),
+                     block(menu, "void edit_start("), block(menu, "void edit_end(")])
     host_cut = between(backend, "enum { TEXT_QUEUE", "static const MkwVkHost vk_host")
     focused = block(menu, "if (open_now.load() && editing) {")
     win = (ROOT / "host/display.c").read_text(encoding="utf-8")

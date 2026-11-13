@@ -53,6 +53,11 @@ bool intel_compiler_row() { return false; }   // (not Intel graphics on Windows:
 int upscalers_available() { return 1; }
 constexpr int DLSS_OK = 0;
 int dlss_why() { return 1; }
+int coop_now = 0;
+bool coop_row_shown(const Row&, int) {
+    assert(false && "the Debug-only fixture must not ask for Co-op row visibility");
+    return false;
+}
 namespace ur {
 bool upscaler_shown(int n) { return n > 1; }
 bool model_shown(bool available) { return available; }

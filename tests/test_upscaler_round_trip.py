@@ -109,6 +109,18 @@ bool can_bind() { return false; }
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
+// No Co-op rows in this fixture: keep their unrelated save/load hooks separate, as the other menu fixtures do.
+// test_menu_coop_tab exercises the real room keys and fields; the bounded text stand-in matches test_menu_keys.
+struct TextField { char text[64]; int len = 0, max = 63; };
+TextField coop_name_field, coop_relay_field;
+void text_set(TextField& f, const char* t) {
+    f.len = (int)std::min(std::strlen(t), sizeof f.text - 1);
+    std::memcpy(f.text, t, (size_t)f.len);
+    f.text[f.len] = 0;
+}
+bool coop_relay_whole = true;
+const char* row_key(const Row&, const char* named) { return named; }
+bool coop_option_line(const char*, const char*) { return false; }
 /* SAVE */
 void restart() {
     opts = Options{};

@@ -188,6 +188,10 @@ makes (`coop_progress` .. `coop_ammo`, see "What is shared") and **Co-op at star
 Leave take a second press. `HOS_COOP_DEMO=1` runs the tab on a made-up room, for screenshots: no session starts and
 nothing is sent.
 
+The text fields take keyboard input or a paste. With a controller, Left and Right move the caret, the left shoulder
+removes a character, and Paste, Done and Cancel work as in Custom output size. Unlike that numeric field, the name,
+relay and room-secret fields have no character picker, so they do not show Character or Add prompts.
+
 ## The log
 
 Every line of the session starts with `coop: `. The room's secret never reaches the log: a room is named by its first

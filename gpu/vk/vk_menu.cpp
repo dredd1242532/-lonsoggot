@@ -3695,8 +3695,10 @@ void draw_options(ui::Ctx& c) {
         prompts_n = 0;
         prompt_list[prompts_n++] = {ui::kLeftRight, "Caret"};
         if (c.pad) {
-            prompt_list[prompts_n++] = {ui::kUpDown, "Character"};
-            prompt_list[prompts_n++] = {ui::kAddChar, "Add"};
+            if (field->field->pad_chars) {
+                prompt_list[prompts_n++] = {ui::kUpDown, "Character"};
+                prompt_list[prompts_n++] = {ui::kAddChar, "Add"};
+            }
             prompt_list[prompts_n++] = {ui::kRemoveChar, "Remove"};
         }
         prompt_list[prompts_n++] = {ui::kPaste, "Paste"};
