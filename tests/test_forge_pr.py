@@ -5,7 +5,8 @@ in), and --ready only when the description passes check_pr_description.py; pr re
 refuses an incomplete description (--force goes on with a warning), prints the check's warnings, and takes WIP: and the
 'needs measurements' label off; pr wip puts WIP: back (and the label, when asked); pr
 edit keeps the WIP state; pr update edits the description and comments in one step, or only comments; pr comment takes
---body-file; pr status shows the state, the check, the checklist, the reviews and the last comments.
+--body-file; the fork and the PR's head use the login Forgejo has now, not the one saved at sign-in (an
+account can be renamed); pr status shows the state, the check, the checklist, the reviews and the last comments.
 
     python -I -B tests/test_forge_pr.py
 """
@@ -60,12 +61,15 @@ class Forgejo:
     def __call__(self, method, path, body=None):
         self.calls.append((method, path, body))
         base = "/repos/MagicBeanDev/Longshot"
+        if method == "GET" and path == "/user":
+            return {"login": "alice"}
         if method == "GET" and path.startswith("/repos/alice/Longshot/branches/"):
             return {"name": path.rsplit("/", 1)[1]}
         assert path.startswith(base), path
         path = path[len(base):]
         parts = path.split("?")[0].strip("/").split("/")
         if method == "POST" and parts == ["pulls"]:
+            assert body["head"].startswith("alice:"), body["head"]   # (the login Forgejo has now)
             pr = self.add(len(self.prs) + 1, body["title"], body["body"])
             pr["head"]["sha"], pr["merge_base"] = "992a2420" + "1" * 32, "7afe6ae1" + "2" * 32
             return dict(pr)
@@ -114,8 +118,9 @@ class PR(unittest.TestCase):
         self.forgejo = Forgejo()
         self.patches = [mock.patch.object(forge, "api", self.forgejo),
                         mock.patch.object(forge, "api_text", self.forgejo.text),
-                        mock.patch.object(forge, "token", lambda: {"login": "alice", "access_token": "t"}),
-                        mock.patch.object(forge, "ensure_fork", lambda login: ("alice/Longshot", False)),
+                        # (the login saved at sign-in, from before the account was renamed: the server's is the one used)
+                        mock.patch.object(forge, "token", lambda: {"login": "alice-before", "access_token": "t"}),
+                        mock.patch.object(forge, "ensure_fork", lambda login: ("%s/Longshot" % login, False)),
                         mock.patch.object(forge.auth, "forge_request", no_network),
                         mock.patch.object(forge.auth, "forge_session", no_network)]
         for p in self.patches:
