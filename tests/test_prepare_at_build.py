@@ -61,6 +61,19 @@ class PrepareShadersTests(unittest.TestCase):
         self.assertEqual(code, 5)
         self.assertIn("exit status 5", not_prepared(lines)[0])
 
+    def test_a_stalled_driver_is_not_promised_for_the_first_start(self):
+        # (exit 4: the watchdog left longshot_prepare_skipped, and the game's starts skip the preparation while it is there)
+        code, lines = prepared(stub("import sys; print('@@stage shaders Preparing shaders'); sys.exit(4)"))
+        self.assertEqual(code, 4)
+        line = not_prepared(lines)
+        self.assertEqual(len(line), 1)
+        self.assertIn("(the GPU driver stopped responding)", line[0])
+        self.assertNotIn("first start", line[0])
+        self.assertIn("first draws it", line[0])
+        self.assertIn("the next build or update tries the preparation again", line[0])
+        for stand_in, code in (("import sys; sys.exit(3)", 3), ("import sys; sys.exit(5)", 5)):
+            self.assertTrue(not_prepared(prepared(stub(stand_in))[1])[0].endswith(make_game.FIRST_START), code)
+
     def test_a_silent_hang_is_stopped_and_not_a_failed_build(self):
         # (prints its stage, then nothing: as a driver deadlock or a crash dialog left open. silence is 15 minutes in a build)
         started = time.monotonic()
