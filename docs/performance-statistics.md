@@ -9,7 +9,7 @@ renderer and map, each on its own.
 
 - The tick, on the launcher's page. Ticking it writes `send=1` to the game folder's `longshot_perf.ini`;
   unticking deletes the file, every summary that hasn't been sent yet, and the copies in `perf_sent/`.
-- `perf_sent/` in the game folder: each summary the relay took, exactly as it was sent (the newest 48). A player or a
+- `perf_sent/` in the game folder: each summary the relay took, exactly as it was sent (the 48 sent last). A player or a
   tester can open them to see what went to the team; `python -I nx2/perf_report.py <folder>` says how many are there.
 - Nothing in the game. The log says `vk: performance statistics on (...)` at the first frame when it's on.
 

@@ -7,7 +7,8 @@ frame added at each present, the events where they happen), and the launcher's s
     and a release only for the folder's build; each one the relay took or refused is deleted; one it couldn't take now
     (not reached, 429, 5xx) stops the sending and stays; with the tick off nothing is sent;
   - at most 48 wait: the oldest past that go unsent;
-  - each one the relay took is kept as sent in perf_sent/ (the newest 48), for a tester to read; off deletes those too;
+  - each one the relay took is kept as sent in perf_sent/ (the 48 sent last), for a tester to read; off deletes those too,
+    and none is kept once the tick is off; a copy that can't be kept doesn't stop the sending;
   - the relay's address is perf_reports in nx2/addresses.ini (none in the code);
   - the summary's map before the first one: "Preparing shaders", then "Title and intro".
 
@@ -138,6 +139,28 @@ def launcher_side(tmp):
         pr.send_waiting(str(f6), url=relay.url)
         check(len(relay.bodies) == pr.MAX_PENDING and relay.bodies[0]["n"] == 5, "at most 48: the oldest go unsent")
         check(len(list((f6 / pr.SENT).glob("*.json"))) == pr.MAX_PENDING, "perf_sent/ keeps the newest 48")
+
+        f10 = game_folder(tmp, "clock was wrong", summaries=1)
+        (f10 / pr.SENT).mkdir()
+        for n in range(pr.MAX_PENDING):   # (copies named by a clock in 2030, written long ago)
+            old = f10 / pr.SENT / ("1900000000-%d.json" % n)
+            old.write_text("{}")
+            os.utime(old, (1000 + n, 1000 + n))
+        pr.send_waiting(str(f10), url=relay.url)
+        kept = {p.name for p in (f10 / pr.SENT).glob("*.json")}
+        check(len(kept) == pr.MAX_PENDING and "1700000000-0.json" in kept and "1900000000-0.json" not in kept,
+              "perf_sent/ keeps the ones sent last, whatever their names' time")
+
+        f11 = game_folder(tmp, "copy fails", summaries=2)
+        (f11 / pr.SENT).write_text("not a folder")
+        got = pr.send_waiting(str(f11), url=relay.url)
+        check(got == {"sent": 2, "refused": 0, "left": 0} and not list((f11 / pr.PENDING).glob("*.json")),
+              "a copy that can't be kept: the summaries still count as sent, and leave perf_pending/ (%s)" % got)
+
+        f12 = game_folder(tmp, "unticked while sending", summaries=1)
+        pr.set_sending(str(f12), False)
+        pr.keep_sent(str(f12), "1700000000-0.json", b"{}")
+        check(not (f12 / pr.SENT).exists(), "unticked during a send: no copy kept after the player said no")
     finally:
         relay.close()
 
