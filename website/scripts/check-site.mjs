@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { siteConfig } from '../site.config.mjs';
 import { contentSources } from '../content-sources.mjs';
 import { verifyCompatibilitySources } from './verify-compatibility-sources.mjs';
+import { readTeam } from '../src/lib/team.mjs';
 import { readProblemSearchHash } from '../src/lib/problem-search.mjs';
 
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,7 +23,7 @@ async function walk(dir) {
   }
 }
 await walk(dist);
-const publishedRoutes = new Set([...contentSources.values(), '', 'about', 'antivirus', 'compatibility', 'progress', '404.html']);
+const publishedRoutes = new Set([...contentSources.values(), '', 'about', 'team', 'antivirus', 'compatibility', 'progress', '404.html']);
 for (const file of files) {
   const route = path.relative(dist, file).replaceAll(path.sep, '/').replace(/\/?index\.html$/, '');
   assert(publishedRoutes.has(route), `Unexpected published page: ${route}`);
@@ -78,6 +79,10 @@ for (const asset of ['longshot.png', 'teary-elf-bean.png', 'grappling-hook-bean.
 }
 const commonIssues = await readFile(path.join(dist, 'guides/common-issues/index.html'), 'utf8');
 assert(commonIssues.includes(`href="${base}antivirus/"`), 'Download safety link must stay on the site');
+const team = await readFile(path.join(dist, 'team/index.html'), 'utf8');
+for (const member of await readTeam()) assert(team.includes(`href="${member.profile}"`), `Missing team profile: ${member.id}`);
+assert(team.includes('id="add-your-profile"'), 'Roster contribution section missing');
+assert(team.includes(siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'website/team/README.md'), 'Roster instructions must target the website branch');
 const home = await readFile(path.join(dist, 'index.html'), 'utf8');
 assert(!/hookshot/i.test(home), 'Retired front-page branding');
 assert(home.includes('Longshot by team magicbean'), 'Longshot page identity missing');

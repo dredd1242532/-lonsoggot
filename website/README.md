@@ -40,6 +40,12 @@ upright and italic. Libertinus Serif Semibold remains for large headings; code s
 monospace. Font provenance and original notices are retained in `src/assets/fonts/`
 and `public/fonts/`. No external font service or game-extracted fonts are used.
 
+## Team roster
+
+The `/Longshot/team/` page builds from one JSON file per person in `team/`.
+See [the roster contribution guide](team/README.md) to add, update or remove your
+profile through a pull request. There is no separate member list or runtime API.
+
 ## Content and source guards
 
 `content-sources.mjs` lists the imported pages. Edit their original files in `docs/`,

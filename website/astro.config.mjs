@@ -44,6 +44,7 @@ export default defineConfig({
         { label: 'Workflow ↗', link: 'https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/workflow.md' },
         { label: 'Pipeline lists ↗', link: 'https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/assets/pipeline_states/README.md' },
       ] },
+      { label: 'Team magicbean', slug: 'team' },
       { label: 'About Longshot', slug: 'about' },
     ],
   })],

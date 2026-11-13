@@ -6,6 +6,7 @@ description: Longshot by team magicbean.
 **Longshot by team magicbean.** Serious recompilation. Slightly emotional beans.
 
 The site brings together player guides, development updates and support.
+Meet [team magicbean](/Longshot/team/) and add your profile to the roster.
 Follow the [team repository](https://git.magicbean.dev/MagicBeanDev/Longshot) for source, proposals and reports.
 
 ## Guides and updates

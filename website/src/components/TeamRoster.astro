@@ -1,0 +1,84 @@
+---
+import { readTeam } from '../lib/team.mjs';
+import { siteConfig } from '../../site.config.mjs';
+// Astro runs from website/; pass the source directory explicitly after bundling.
+const members = await readTeam('team');
+const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+const rosterSource = siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'website/team';
+---
+<div class="team-page not-content">
+  <section class="team-intro" aria-labelledby="team-intro-title">
+    <div><p class="team-kicker">THE PEOPLE BEHIND LONGSHOT</p><h2 id="team-intro-title">Serious recompilation.<br /><em>A very human bean team.</em></h2><p>Code, curiosity and the occasional emotional bean. Meet the people making Longshot, and follow their work straight from their Git profiles.</p><a class="team-button" href="#add-your-profile">Add your profile <span aria-hidden="true">↗</span></a></div>
+    <img src={`${base}branding/magicbean-team-logo.webp`} alt="Team magicbean logo" width="512" height="512" />
+  </section>
+  <section aria-labelledby="roster-title" class="team-roster">
+    <div class="team-section-heading"><h2 id="roster-title">Meet the beans</h2><span>{members.length} {members.length === 1 ? 'profile' : 'profiles'} · A–Z</span></div>
+    <p class="team-note">Our roster grows as teammates add themselves.</p>
+    <ul class="team-grid" role="list">
+      {members.map(member => <li class="team-card">
+        <div class="team-card-top"><span class="team-initial" aria-hidden="true">{member.initial}</span><span class="team-host">{member.host}</span></div>
+        <h3>{member.name}</h3><p class="team-handle">@{member.handle}</p>
+        {member.bio && <p class="team-bio">{member.bio}</p>}
+        {member.focus.length > 0 && <ul class="team-focus" aria-label="Focus areas" role="list">{member.focus.map(label => <li>{label}</li>)}</ul>}
+        <a class="team-profile" href={member.profile} aria-label={`View ${member.name} on ${member.host}`}>View Git profile <span aria-hidden="true">↗</span></a>
+      </li>)}
+      {members.length < 2 && <li class="team-card team-example">
+        <div class="team-card-top"><span class="team-initial" aria-hidden="true">?</span><span class="team-host">EXAMPLE PROFILE</span></div>
+        <h3>Your fellow bean</h3><p class="team-handle">@your-handle</p>
+        <p class="team-bio">A short introduction goes here. What you work on, what you love, and perhaps one questionable bean joke.</p>
+        <ul class="team-focus" aria-label="Example focus areas" role="list"><li>Graphics</li><li>Testing</li></ul>
+        <a class="team-profile" href="#add-your-profile">Make this spot yours <span aria-hidden="true">↗</span></a>
+      </li>}
+    </ul>
+    {!members.length && <p class="team-empty">The first bean has yet to check in. Add your profile below.</p>}
+  </section>
+  <section class="team-join" id="add-your-profile" aria-labelledby="join-title">
+    <div><p class="team-kicker">YOUR NEXT COMMIT COULD BE YOU</p><h2 id="join-title">Join the lineup.</h2><p>Already part of team magicbean? Add a name, your Git profile and a little about what you do. Handles welcome. Bean jokes optional.</p><a class="team-button" href={`${rosterSource}/README.md`}>How to add yourself <span aria-hidden="true">↗</span></a></div>
+    <ol class="team-steps"><li><strong>Make your profile</strong><span>Add one small profile file using the example in the guide.</span></li><li><strong>Send a pull request</strong><span>Push to your fork. The team reviews your addition.</span></li><li><strong>Meet your fellow beans</strong><span>Your card appears when the updated site is published.</span></li></ol>
+  </section>
+  <p class="team-endnote">Here for the wider project history? <a href={`${base}about/#credits-and-licensing`}>Read the credits and acknowledgements.</a></p>
+</div>
+<style>
+  .team-page { font-size: 1.0625rem; line-height: 1.65; }
+  .team-page * { box-sizing: border-box; }
+  .team-page :is(h2,h3,p,ul,ol) { margin: 0; }
+  .team-page h2 { font: 600 clamp(1.8rem,3vw,2.6rem)/1.15 var(--longshot-font-heading); color: var(--sl-color-white); letter-spacing: -.025em; }
+  .team-page a { text-underline-offset: .25em; }
+  .team-page a:focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 5px; }
+  .team-intro { display: grid; grid-template-columns: minmax(0,1fr) 200px; align-items: center; gap: 3rem; padding: 2rem 0 3.5rem; border-bottom: 1px solid var(--border); }
+  .team-page .team-kicker { font-size: .72rem; font-weight: 700; letter-spacing: .12em; color: var(--sl-color-text-accent); }
+  .team-intro h2 { margin: 1rem 0; font-size: clamp(2.2rem,4vw,3.8rem); }
+  .team-intro em { color: var(--sl-color-text-accent); font-style: normal; }
+  .team-intro p:not(.team-kicker), .team-join p:not(.team-kicker) { color: var(--soft-text); max-width: 36rem; margin-bottom: 1.5rem; }
+  .team-intro img { width: 100%; height: auto; }
+  .team-button { display: inline-flex; align-items: center; gap: 1.7rem; padding: .7rem 1rem; min-height: 48px; border-radius: 7px; background: var(--studio-accent); color: var(--studio-ink); font-weight: 700; text-decoration: none; }
+  .team-button:hover { background: #daf5b2; }
+  .team-roster { padding-block: 3rem; }
+  .team-section-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .7rem; }
+  .team-section-heading > span, .team-note, .team-endnote { font-size: .95rem; color: var(--soft-text); }
+  .team-page .team-note { margin: .8rem 0 1.8rem; }
+  .team-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,17rem),1fr)); gap: 1rem; padding: 0; list-style: none; }
+  .team-card { display: flex; flex-direction: column; min-width: 0; max-width: 32rem; padding: 1.6rem; border: 1px solid var(--border); background: var(--panel); border-radius: 12px; }
+  .team-example { border-style: dashed; background: transparent; }
+  .team-card-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+  .team-initial { display: grid; place-items: center; flex: 0 0 54px; height: 60px; border: 1px solid var(--sl-color-gray-4); border-radius: 50% 45% 50% 40%; font-size: 1.6rem; font-weight: 700; color: var(--sl-color-text-accent); background: var(--sl-color-accent-low); }
+  .team-host { font-size: .8rem; color: var(--soft-text); }
+  .team-card h3 { font: 700 1.45rem/1.25 var(--sl-font); overflow-wrap: anywhere; }
+  .team-handle { font-size: .92rem; color: var(--soft-text); overflow-wrap: anywhere; }
+  .team-card .team-handle { margin-bottom: 1.2rem; }
+  .team-card .team-focus { margin-bottom: 1.5rem; }
+  .team-page .team-bio { margin-top: 1rem; color: var(--soft-text); overflow-wrap: anywhere; }
+  .team-focus { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 1rem 0 0; }
+  .team-focus li { border: 1px solid var(--border); border-radius: 4px; padding: .2rem .5rem; font-size: .8rem; }
+  .team-profile { display: flex; align-items: center; justify-content: space-between; min-height: 48px; padding-top: 1rem; margin-top: auto; border-top: 1px solid var(--border); color: var(--sl-color-text-accent); }
+  .team-join { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; padding: 2.5rem; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; scroll-margin-top: calc(var(--sl-nav-height) + 1rem); }
+  .team-join h2 { margin: .6rem 0 1rem; }
+  .team-steps { list-style: decimal-leading-zero; padding-left: 2rem; }
+  .team-steps li { padding: 0 0 1.2rem .6rem; }
+  .team-steps li::marker { color: var(--sl-color-text-accent); font-weight: 700; }
+  .team-steps strong, .team-steps span { display: block; }
+  .team-steps span { color: var(--soft-text); font-size: .95rem; margin-top: .3rem; }
+  .team-page .team-endnote { margin-top: 2rem; }
+  .team-endnote a { color: var(--sl-color-text-accent); }
+  @media (max-width: 49.99rem) { .team-intro { grid-template-columns: 1fr; gap: 1.5rem; } .team-intro img { width: 100px; order: -1; } .team-join { grid-template-columns: 1fr; gap: 2rem; padding: 1.5rem; } }
+</style>
