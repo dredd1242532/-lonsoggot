@@ -1,6 +1,6 @@
 // The replay's GPU-time collection (vk_replay.cpp gpu_time_collect, compiled from the real source by test_gpu_time_run.py)
-// against a fake query pool: every timed recording counted once, none read before its queries are available, and a run of
-// finished slots read in one vkGetQueryPoolResults. No Vulkan, GPU or game data.
+// against a fake query pool: every timed recording counted once, when its own slot comes round, none read before its queries
+// are available, and a run of finished slots read in one vkGetQueryPoolResults. No Vulkan, GPU or game data.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -97,11 +97,11 @@ static void run(const std::string& c) {
         require(st_gpu_ns == (int64_t)want, "sum of the recordings' times");
         require(st_gpu_max_ns == 119, "longest recording");
         require(calls <= 2, "a run of finished slots read in one call");
-    } else if (c == "behind") {   // the GPU behind on slots 1-3: they wait for their turn, slot 4 is read with slot 0
+    } else if (c == "behind") {   // the GPU behind on slots 1-3: they wait for their turn; slot 4 read with slot 0, counted in its own
         timed(0, 10, true), timed(1, 20, false), timed(2, 30, false), timed(3, 40, false), timed(4, 50, true);
         reuse(0);
-        require(st_gpu_ns == 60, "slots 0 and 4 read, 1-3 not yet");
-        require(ts_pending[1] && ts_pending[2] && ts_pending[3] && !ts_pending[4], "unfinished slots stay pending");
+        require(st_gpu_ns == 10 && calls == 1, "slot 0 counted, slot 4 read with it but not counted yet");
+        require(ts_pending[1] && ts_pending[2] && ts_pending[3] && ts_pending[4], "the others stay pending");
         for (int i = 1; i <= 3; i++) available[2 * i] = available[2 * i + 1] = true;
         for (int i = 1; i <= 4; i++) reuse(i);
         require(st_gpu_ns == 150, "every recording counted once");
@@ -118,7 +118,8 @@ static void run(const std::string& c) {
     } else if (c == "ring_end") {   // the run stops at the pool's end: no query past it
         timed(46, 1, true), timed(47, 2, true), timed(0, 4, true);
         reuse(46);
-        require(st_gpu_ns == 3 && ts_pending[0], "slots 46 and 47 read, slot 0 in its turn");
+        reuse(47);
+        require(st_gpu_ns == 3 && calls == 1 && ts_pending[0], "slots 46 and 47 read in one call, slot 0 in its turn");
     } else if (c == "not_pending") {   // a slot never timed (a parallel segment's) is not read
         reuse(3);
         require(calls == 0 && st_gpu_ns == 0, "nothing read");
@@ -129,8 +130,25 @@ static void run(const std::string& c) {
         timed(0, 30, true);
         ts_pending[1] = true;   // (slot 1 recorded and submitted again; the GPU has not reached it)
         reuse(0);
-        require(st_gpu_ns == 60, "slot 1's old times not counted again");
+        require(st_gpu_ns == 60, "slot 0's new use counted");
         require(ts_pending[1], "slot 1's new use still pending");
+        timed(1, 50, true);   // (the GPU reaches slot 1's new use; then it comes round)
+        reuse(1);
+        require(st_gpu_ns == 110, "slot 1's new times counted, not its old ones");
+    } else if (c == "cadence") {   // each recording counted when its own slot comes round, as one slot a call counts it: the
+        // sum and the longest after every reuse, with the longest cleared every 5 reuses (a consumer's window), are those of one
+        // slot a call, while the calls are fewer
+        const uint64_t ns[12] = {40, 7, 90, 3, 15, 60, 8, 8, 120, 1, 33, 70};
+        for (int i = 0; i < 12; i++) timed(i, ns[i], true);
+        int64_t sum = 0, longest = 0;
+        for (int i = 0; i < 12; i++) {
+            if (i % 5 == 0) st_gpu_max_ns = 0, longest = 0;
+            reuse(i);
+            sum += ns[i], longest = std::max<int64_t>(longest, ns[i]);
+            require(st_gpu_ns == sum, "the sum after each reuse");
+            require(st_gpu_max_ns == longest, "the longest in each window");
+        }
+        require(calls == 1, "one call for the run");
     } else if (c == "each") {   // the default (RX_VK_TS_RUN unset): one call a slot, as before
         run_switch = false;
         for (int i = 0; i < 6; i++) timed(i, 5, true);

@@ -329,11 +329,15 @@ int64_t st_gpu_ns, st_gpu_max_ns;
 // (hookshot) With the slot's own times, the same call reads those of the slots after it that are still unread and that the GPU has
 // finished (each query's availability), up to kTsRun slots: one vkGetQueryPoolResults for a run of recordings, not one each. On an
 // RX 9070 XT (AMD's Windows driver) the per-slot calls were 0.16 ms a frame of the presentation thread in Hyrule Field, ~50 a frame.
+// The times read ahead are kept and counted when their own slot comes round, as one slot a call counts them, so the GPU time each
+// 120-present window sees (the Breakdown, the movie network check, Auto (this PC)'s tuning) is the same as without the switch.
 // A query's availability can still show a slot's previous use until the reset recorded in its next command buffer runs, so each
 // slot's queries are also reset on the host when its slot comes round (its last submit done, before it is recorded again; the pool
 // once when made): an available result is then the current use's. One not available yet stays pending for its own turn.
 // Opt-in, RX_VK_TS_RUN=1; the default still reads one slot a call, and so does a device without hostQueryReset
 constexpr int kTsRun = 16;
+bool ts_read_ahead[kRecordings];   // (a pending slot's times read with an earlier slot's: in ts_ahead until its turn)
+uint64_t ts_ahead[kRecordings][2];
 bool ts_run() {
     static const bool v = [] {
         if (!env_on("RX_VK_TS_RUN")) return false;
@@ -349,25 +353,28 @@ void gpu_time_add(uint64_t t0, uint64_t t1) {
     st_gpu_ns += ns;
     st_gpu_max_ns = std::max(st_gpu_max_ns, ns);
 }
-/// slot's times (its last submit done) and those of the pending slots after it that the GPU has written
+/// slot's times (its last submit done), counted now, and those of the pending slots after it that the GPU has written, kept
 void gpu_time_read_run(int slot) {
-    ts_pending[slot] = false;
     int n = 1;
-    while (n < kTsRun && slot + n < kRecordings && ts_pending[slot + n]) n++;
+    while (n < kTsRun && slot + n < kRecordings && ts_pending[slot + n] && !ts_read_ahead[slot + n]) n++;
     uint64_t t[kTsRun][2][2] = {};   // (a slot's start and end, each its value and its availability)
     const VkResult res = vkGetQueryPoolResults(dev.device, ts_pool, 2 * slot, 2 * n, sizeof t, t, 2 * sizeof(uint64_t),
                                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
     if (res != VK_SUCCESS && res != VK_NOT_READY) return;
-    for (int i = 0; i < n; i++) {
-        if (!t[i][0][1] || !t[i][1][1]) continue;   // (the slot's own: dropped, as before; the others: read in their turn)
-        ts_pending[slot + i] = false;
-        gpu_time_add(t[i][0][0], t[i][1][0]);
-    }
+    if (t[0][0][1] && t[0][1][1]) gpu_time_add(t[0][0][0], t[0][1][0]);   // (the slot's own; not written: dropped, as before)
+    for (int i = 1; i < n; i++)
+        if (t[i][0][1] && t[i][1][1])   // (not written yet: read in its turn)
+            ts_read_ahead[slot + i] = true, ts_ahead[slot + i][0] = t[i][0][0], ts_ahead[slot + i][1] = t[i][1][0];
 }
 void gpu_time_collect(Recording& r) {
     if (!ts_pool) return;
     if (ts_run()) {
-        if (ts_pending[r.slot]) gpu_time_read_run(r.slot);
+        if (ts_pending[r.slot]) {
+            ts_pending[r.slot] = false;
+            if (ts_read_ahead[r.slot]) gpu_time_add(ts_ahead[r.slot][0], ts_ahead[r.slot][1]);
+            else gpu_time_read_run(r.slot);
+        }
+        ts_read_ahead[r.slot] = false;
         vkResetQueryPool(dev.device, ts_pool, 2 * r.slot, 2);   // (done: unavailable until its next use writes them)
         return;
     }

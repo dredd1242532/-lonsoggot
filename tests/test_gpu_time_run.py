@@ -17,7 +17,7 @@ import tempfile
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ("run", "behind", "own_unavailable", "half_written", "ring_end", "not_pending", "stale", "each", "no_host_reset")
+CASES = ("run", "behind", "own_unavailable", "half_written", "ring_end", "not_pending", "stale", "cadence", "each", "no_host_reset")
 RESET = "        vkResetQueryPool(dev.device, ts_pool, 2 * r.slot, 2);"
 START = "int64_t st_gpu_ns, st_gpu_max_ns;\n"
 FUNC = "void gpu_time_collect(Recording& r) {"
