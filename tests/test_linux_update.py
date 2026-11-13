@@ -2,6 +2,8 @@
 
 python -I -B tests/test_linux_update.py
 """
+import contextlib
+import importlib.util
 import io
 import os
 import shutil
@@ -11,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -322,7 +325,8 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(linux_update.parse_list(local).tag, "v2.1.0")
         with self.assertRaises(ValueError):
             linux_update.parse_list(local, local=False)
-        with self.assertRaises(ValueError):
+        # (and no list is downloaded at all: the builder looks up no release, the Longshot Launcher does)
+        with mock.patch.dict(os.environ, {"LONGSHOT_LINUX_LIST": ""}), self.assertRaises(RuntimeError):
             linux_update.fetch_manifest(get=lambda url: local.encode())
 
     def test_a_download_reads_at_most_its_limit(self):
@@ -356,7 +360,7 @@ class UpdateTests(unittest.TestCase):
         import urllib.request
         handlers = [h for h in linux_update._OPENER.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)]
         self.assertEqual([type(h) for h in handlers], [linux_update._HttpsRedirects])   # (in place of urllib's, not beside it)
-        first = urllib.request.Request("https://github.com/NotRexed/Longshot/releases/download/v9/part.zip",
+        first = urllib.request.Request("https://git.magicbean.dev/api/packages/MagicBeanDev/generic/longshot-parts/store/part.zip",
                                        headers={"User-Agent": "Longshot"})
         onward = handlers[0].redirect_request(first, None, 302, "Found", {}, "https://objects.example.invalid/part.zip")
         self.assertEqual(onward.full_url, "https://objects.example.invalid/part.zip")
@@ -389,8 +393,8 @@ class UpdateTests(unittest.TestCase):
         http = next(h for h in linux_update._OPENER.handlers if type(h) is urllib.request.HTTPHandler)
         with mock.patch.object(https, "https_open", https_open), mock.patch.object(http, "http_open", http_open), \
                 self.assertRaisesRegex(ValueError, "not an https link: 'http://objects.example.invalid/part.zip'"):
-            linux_update._request("https://github.com/NotRexed/Longshot/releases/download/v9/part.zip", 5)
-        self.assertEqual(asked, ["https://github.com/NotRexed/Longshot/releases/download/v9/part.zip"])
+            linux_update._request("https://git.magicbean.dev/api/packages/MagicBeanDev/generic/longshot-parts/store/part.zip", 5)
+        self.assertEqual(asked, ["https://git.magicbean.dev/api/packages/MagicBeanDev/generic/longshot-parts/store/part.zip"])
 
     def test_a_link_chain_cannot_leave_the_staging_tree(self):
         # x/../.. is inside the folder as written, but the system resolves x first: a link made after it (in the same zip
@@ -492,32 +496,24 @@ class UpdateTests(unittest.TestCase):
             (root / "longshot-linux.txt").write_text(
                 "tag v1.1-rc.1\npart %s 10 usr/share/longshot file://%s/rc.zip\nfile nx2/marker.py\n" % ("a" * 64, tmp),
                 encoding="utf-8")
-            stable = "tag v1.0\npart %s 10 usr/share/longshot https://example.invalid/old.zip\nfile nx2/marker.py\n" % ("b" * 64)
-            got = linux_update.startup_manifest(str(root), get=lambda url: stable.encode())
-            self.assertEqual((got.tag, got.parts[0].sha), ("v1.1-rc.1", "a" * 64))     # (its own: nothing reinstalled)
-            newer = "tag v1.2\npart %s 10 usr/share/longshot https://example.invalid/new.zip\nfile nx2/marker.py\n" % ("c" * 64)
-            got = linux_update.startup_manifest(str(root), get=lambda url: newer.encode())
-            self.assertEqual((got.tag, got.parts[0].sha), ("v1.2", "c" * 64))          # (a newer release still wins)
+            # (the list given on this PC, LONGSHOT_LINUX_LIST, wins over the tools' own: a deliberate choice)
+            given = Path(tmp) / "given.txt"
+            given.write_text("tag v1.2\npart %s 10 usr/share/longshot https://example.invalid/new.zip\nfile nx2/marker.py\n"
+                             % ("c" * 64), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"LONGSHOT_LINUX_LIST": str(given)}):
+                got = linux_update.startup_manifest(str(root))
+            self.assertEqual((got.tag, got.parts[0].sha), ("v1.2", "c" * 64))
+            # (none given: nothing is downloaded, and its own list stays)
+            with mock.patch.dict(os.environ, {"LONGSHOT_LINUX_LIST": ""}), self.assertRaises(RuntimeError):
+                linux_update.startup_manifest(str(root))
+            self.assertEqual(linux_update.read_manifest(str(root)).tag, "v1.1-rc.1")
             # a LONGSHOT_LINUX_LIST is taken even when the tags match (a patched part for a release, issue 990)
             (root / "patched.txt").write_text(
                 "tag v1.1-rc.1\npart %s 10 usr/share/longshot file://%s/patched.zip\nfile nx2/marker.py\n" % ("d" * 64, tmp),
                 encoding="utf-8")
             with mock.patch.dict(os.environ, {"LONGSHOT_LINUX_LIST": str(root / "patched.txt")}):
-                got = linux_update.startup_manifest(str(root), get=lambda url: stable.encode())
+                got = linux_update.startup_manifest(str(root))
                 self.assertEqual(got.parts[0].sha, "d" * 64)
-            # an AppImage at the latest release keeps using its bundled list (nothing was ever reinstalled there)
-            release = Path(tmp) / "release"
-            appdir(release)     # (VERSION v1)
-            (release / "longshot-linux.txt").write_text(
-                "tag v1\npart %s 10 usr/share/longshot file://%s/release.zip\nfile nx2/marker.py\n" % ("e" * 64, tmp),
-                encoding="utf-8")
-            same = "tag v1\npart %s 10 usr/share/longshot https://example.invalid/old.zip\nfile nx2/marker.py\n" % ("b" * 64)
-            got = linux_update.startup_manifest(str(release), get=lambda url: same.encode())
-            self.assertEqual(got.parts[0].sha, "e" * 64)
-            # and one older than the release still downloads it
-            (release / "usr" / "share" / "longshot" / "VERSION").write_text("v0.9\n", encoding="utf-8")
-            got = linux_update.startup_manifest(str(release), get=lambda url: stable.encode())
-            self.assertEqual(got.parts[0].sha, "b" * 64)
 
     def test_a_changed_part_is_downloaded_and_the_rest_are_kept(self):
         with tempfile.TemporaryDirectory(prefix="longshot-parts-") as tmp:
@@ -660,7 +656,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_the_folder_launcher_finds_the_builder_under_the_builder_home(self):
         # LONGSHOT_BUILDER_HOME is the data directory, as XDG_DATA_HOME is: linux_update installs to
-        # <home>/longshot/builder and host/hos_update.c looks there, so the launcher must too
+        # <home>/longshot/builder, so the folder launcher must look there
         with tempfile.TemporaryDirectory(prefix="longshot-folder-") as tmp:
             root = Path(tmp)
             game = root / "game"
@@ -861,9 +857,11 @@ class UpdateTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "the Linux sysroot copy loop")
     def test_sysroot_system_aliases_round_trip_as_library_bytes(self):
-        script = (ROOT / "scripts" / "linux" / "appimage.sh").read_text(encoding="utf-8")
+        # (the sysroot is made by deps.sh tools, then packed as tools.lock's archive: scripts/tools.py pack and unpack, the
+        # builder's first start and the launcher, carry it; the parts list below is the older path)
+        script = (ROOT / "scripts" / "linux" / "deps.sh").read_text(encoding="utf-8")
         start = script.index("for f in crt1.o ")
-        loop = script[start:script.index("\ndone", start) + len("\ndone")]
+        loop = script[start:script.index("\n    done", start) + len("\n    done")]
         with tempfile.TemporaryDirectory(prefix="longshot-sysroot-") as tmp:
             root = Path(tmp)
             system = root / "system"
@@ -884,6 +882,14 @@ class UpdateTests(unittest.TestCase):
             dest = root / "unpacked"
             linux_update._unpack(archive.read_bytes(), str(dest), None)
             self.assertEqual((dest / "lib" / "x86_64-linux-gnu" / alias.name).read_bytes(), real.read_bytes())
+            spec = importlib.util.spec_from_file_location("tools", ROOT / "scripts" / "tools.py")
+            tools = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(tools)
+            with contextlib.redirect_stdout(io.StringIO()):
+                tools.pack(str(source), str(root / "sysroot.zip"))
+            tools.unpack(str(root / "sysroot.zip"), "sysroot", str(root / "tool"))
+            self.assertEqual(os.readlink(root / "tool" / "lib"), "usr/lib")   # (the one link: relative, as packed)
+            self.assertEqual((root / "tool" / "lib" / "x86_64-linux-gnu" / alias.name).read_bytes(), real.read_bytes())
             self.assertEqual(os.readlink(alias), str(real))
             self.assertEqual(real.read_bytes(), b"private library bytes")
 
