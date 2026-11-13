@@ -132,12 +132,7 @@ static int reset_with_packet_in_flight(uint64_t end_pos, Where where, bool end_i
     replay_mu.lock();
     packet_in_flight();
     watchdog();
-    std::thread opener;
-    if (!rec::g_own || where == Where::OUTSIDE || end_instead || end_pos)   // (a call that must wait: the gate opened soon after)
-        opener = std::thread([] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            open_gate();
-        });
+    rec::g_test_producer_waits = open_gate;   // (the call waits for the recorder: the packet let run then, never before)
     rec::slot_begin(end_pos);
     if (where == Where::OWN_SLOT) {
         rec::OwnSlot own;
@@ -148,11 +143,11 @@ static int reset_with_packet_in_flight(uint64_t end_pos, Where where, bool end_i
         else vkResetDescriptorPool(kDev, kPool, 0);
     }
     rec::slot_done();
+    rec::g_test_producer_waits = nullptr;
     const int at = g_ran_at;
     open_gate();
     replay_mu.unlock();
     g_done = g_armed.load();
-    if (opener.joinable()) opener.join();
     if (g_watchdog) fail("the call waited for the recorder held in its packet (3 s watchdog)");
     return at;
 }
@@ -212,7 +207,8 @@ int main(int argc, char** argv) {
     vkx::vkCmdWriteTimestamp2 = gated_timestamp;
     vkx::vkResetDescriptorPool = seen_reset_descriptor_pool;
     vkx::vkEndCommandBuffer = seen_end;
-    std::printf("mode %d own %d idle_wait %d\n", rec::mode(), (int)rec::g_own, (int)rec::g_idle_wait);
+    const int mode = rec::mode();   // (first: it reads the switches)
+    std::printf("mode %d own %d idle_wait %d\n", mode, (int)rec::g_own, (int)rec::g_idle_wait);
     if (c == "env") pass(c);   // (the switches as the renderer reads them: the Python side checks the line)
     if (rec::mode() != rec::THREAD) fail("RX_VK_RECORDER=thread expected");
 
@@ -267,16 +263,18 @@ int main(int argc, char** argv) {
         rec::g_test_idle_waiting = race_hook;
         warm_up();               // (the recorder started; it idles, waiting on W: the hook not armed yet)
         race_armed = true;
-        replay_mu.lock();        // (a packet: the recorder woken, run, idle again, into the hook)
-        vkCmdWriteTimestamp2(kCmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, (VkQueryPool)(uintptr_t)0x40, 0);
-        replay_mu.unlock();
+        fake_wake(nullptr);      // (the parked recorder let go with nothing new: it idles again, into the armed hook)
         if (!wait_until([] { return race_step.load() == 1; })) fail("the recorder never reached its wait");
+        {
+            std::lock_guard lk(w_mu);
+            w_woken = false;     // (a wake left from above, had the recorder not been parked yet)
+        }
         w_wake_works = false;    // (from here: only the compare)
         replay_mu.lock();
         vkCmdWriteTimestamp2(kCmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, (VkQueryPool)(uintptr_t)0x40, 0);
         rec::t_prod->flush();
         race_step = 2;
-        const bool ran = wait_until([] { return g_ran.load() == 2; });
+        const bool ran = wait_until([] { return g_ran.load() == 1; });
         if (!ran) release_parked();
         replay_mu.unlock();
         if (!ran) fail("the recorder waited on W after a publish it should have compared against (3 s)");

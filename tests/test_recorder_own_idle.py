@@ -70,8 +70,15 @@ def source_problems(replay, draw, others):
         p.append("begin_recording: rec::slot_begin() must come before the OwnSlot")
     if not (0 <= begin.find("draw_begin_recording(") < begin.find("rec::slot_done();")):
         p.append("begin_recording: rec::slot_done() must come after draw_begin_recording")
-    own = begin[begin.find("rec::OwnSlot"):]
-    own = own[:own.find("}")]
+    own, at = "", begin.rfind("{", 0, begin.find("rec::OwnSlot"))   # (the block the OwnSlot is in, braces matched)
+    if at >= 0:
+        depth, i = 0, at
+        while i < len(begin):
+            depth += {"{": 1, "}": -1}.get(begin[i], 0)
+            i += 1
+            if not depth:
+                break
+        own = begin[at:i]
     for call in ("vkResetCommandPool(dev.device, r.pool", "vkResetCommandPool(dev.device, r.upload_pool", "vkBeginCommandBuffer(r.cmd",
                  "vkBeginCommandBuffer(r.upload"):
         if call not in own:

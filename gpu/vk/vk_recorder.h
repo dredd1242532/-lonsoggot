@@ -336,6 +336,7 @@ inline void (*g_thread_start_hook)() = nullptr;
 #ifdef RX_REC_TEST_HOOKS
 inline void (*g_test_idle_locked)() = nullptr;   // (tests: called in idle() with sleep_mu held)
 inline void (*g_test_idle_waiting)() = nullptr;   // (tests, RX_VK_RECORDER_IDLE=wait: called in idle() with sleeping set, before the wait)
+inline void (*g_test_producer_waits)() = nullptr;   // (tests: called in wait_idle() as the producer starts waiting for the recorder)
 #endif
 /// The recorder thread cannot go on (an exception out of a driver call): logged, written to stderr and the process ended, as
 /// vk_replay.cpp's replay_fatal does (exit code 3). Never swallowed: a packet not run is a command lost
@@ -416,6 +417,9 @@ struct Recorder {
         flush();
         const uint64_t target = w;
         if (idle_at(target)) return;
+#ifdef RX_REC_TEST_HOOKS
+        if (g_test_producer_waits) g_test_producer_waits();
+#endif
         const uint64_t t0 = now_ns();
         spin([&] { return idle_at(target); });
         note_wait(k, now_ns() - t0);
