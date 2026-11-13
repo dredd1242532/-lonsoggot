@@ -32,7 +32,7 @@ struct {
     struct { bool pipelineCreationCacheControl = true; } vk13;
     void* device = nullptr;
 } dev;
-struct Program { uint64_t key = 0x1234; };
+struct Program { uint64_t key = 0x1234; std::atomic<bool> modules_dropped{false}; };
 struct NvnState {};
 struct Targets {};
 std::vector<std::string> logs;

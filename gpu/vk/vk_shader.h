@@ -27,6 +27,11 @@ struct Stage {
     // program cache (vk_progcache.cpp), which every translated program passes. Not in vk_shader.cpp, whose bytes are part of
     // the translator's stamp: a change there translates every player's programs again
     mutable uint32_t phis = 0;
+    // (longshot) where its SPIR-V is in longshot_programs.bin, and how many words (0: compressed or translated in this run, so
+    // its module stays): once precompile_run has built its pipelines, its module can be let go on Linux and made again from the
+    // file if play ever builds a new pipeline state variant for this program
+    int64_t code_at = 0;
+    uint64_t code_words = 0;
 };
 
 /// A texture handle the stage reads from a storage buffer: its handle program (Shader::Info::handle_programs, Eden's
@@ -90,6 +95,17 @@ struct Program {
     // SPIR-V is in longshot_programs.bin, and how many words; 0 words: it has its module (program_cache_complete makes it)
     int64_t code_at = 0;
     uint64_t code_words = 0;
+    // (longshot) the record's position and stored size in longshot_programs.bin, and whether program_cache_drop_modules let go of
+    // its graphics VkShaderModules (so program_cache_complete_graphics checks the atomic before taking light_mu, checks the record
+    // head at record_at before reading the stages' SPIR-V, and sets remake_failed instead of failed if a remake fails so pipelines
+    // built in the precompile keep drawing)
+    int64_t record_at = 0;
+    uint64_t record_size = 0;
+    std::atomic<bool> modules_dropped{false};
+    std::atomic<bool> remake_failed{false};
+    // (longshot) precompile_run built this program's noted graphics pipelines before the title (false for an un-noted program or
+    // variant, or when graphics pipelines are left to first draw, whose graphics modules stay for its first draw in play)
+    bool graphics_built = false;
 };
 
 enum class ProgramKind { Graphics, Compute, Mesh };
@@ -133,6 +149,12 @@ void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn)
 /// program_cache_load): its SPIR-V is read and its module made here, before the first use of the module (vk_draw.cpp dispatch).
 /// True: it is whole (or was). False: its code did not read or made no module; it is marked failed
 bool program_cache_complete(Program& p);
+/// (longshot) The graphics stages of a program whose modules were let go after the precompile (program_cache_drop_modules):
+/// remade from longshot_programs.bin before play builds a new pipeline variant for it
+bool program_cache_complete_graphics(const Program& p);
+/// (longshot) Lets go of the VkShaderModules of ready programs whose pipelines are built and whose stages can be remade from
+/// longshot_programs.bin (or are compute stages that need no another pipeline); returns how many modules were destroyed
+size_t program_cache_drop_modules();
 /// (longshot) Every kept graphics and mesh program's key, in the file's order, no record read; *loaded: the variants in memory already
 std::vector<uint64_t> program_cache_keys(std::vector<Program*>* loaded);
 const Program* program_find(uint64_t key, uint64_t variant);

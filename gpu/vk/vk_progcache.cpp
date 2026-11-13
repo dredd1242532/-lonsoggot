@@ -486,6 +486,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
         Reader r{payload, payload + payload_size};
         auto p = std::make_unique<Program>();
         p->key = key;
+        if (!(d.kind & kCompressedKind)) p->record_at = d.at, p->record_size = d.size;
         get_head(r, *p);
         p->variant = answers_hash(*p);
         const uint64_t n = r.count(1);
@@ -495,8 +496,13 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
             Stage& st = p->stages.back();
             st.nvn_stage = r.get<int>();
             st.vk_stage = r.get<VkShaderStageFlagBits>();
+            const uint8_t* const code_p = r.p;
             std::vector<uint32_t> spirv;
             r.list(spirv);
+            if (!(d.kind & kCompressedKind) && !spirv.empty()) {
+                st.code_at = d.at + (int64_t)(code_p + 8 - payload);
+                st.code_words = spirv.size();
+            }
             r.list(st.c1);
             get_info(r, st.info);
             if (r.bad || spirv.empty()) {
@@ -836,6 +842,118 @@ void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn)
         if (p->layout) vkDestroyPipelineLayout(dev.device, p->layout, nullptr);
         if (p->set_layout) vkDestroyDescriptorSetLayout(dev.device, p->set_layout, nullptr);
     }
+}
+
+bool program_cache_complete_graphics(const Program& prog) {
+    if (prog.failed || prog.remake_failed.load(std::memory_order_acquire)) return false;
+    if (!prog.modules_dropped.load(std::memory_order_acquire)) return true;
+    const size_t head_size = disk_zstd ? kZstdHead : 16;
+    if (!prog.record_size || prog.record_at < (int64_t)head_size) {
+        const_cast<Program&>(prog).remake_failed.store(true, std::memory_order_release);
+        return false;
+    }
+    // (read with the worker's own handle on the file, and the modules made before taking light_mu: neither light_mu nor disk_mu is
+    // held across the disk reads or vkCreateShaderModule, so a dispatch or pick on the replay thread never waits behind them)
+    FILE* own_in = !disk_path.empty() ? fopen(disk_path.c_str(), "rb") : nullptr;
+    auto read_at = [&](int64_t pos, void* dst, size_t bytes) -> bool {
+        if (own_in) return _fseeki64(own_in, pos, SEEK_SET) == 0 && fread(dst, 1, bytes, own_in) == bytes;
+        std::lock_guard dk(disk_mu);
+        return disk_in && _fseeki64(disk_in, pos, SEEK_SET) == 0 && fread(dst, 1, bytes, disk_in) == bytes;
+    };
+    uint64_t head[2]{};
+    bool ok = read_at(prog.record_at - (int64_t)head_size, head, 16) && head[0] == prog.key && head[1] == prog.record_size;
+    std::vector<VkShaderModule> made(prog.stages.size(), VK_NULL_HANDLE);
+    for (size_t i = 0; ok && i < prog.stages.size(); i++) {
+        const Stage& st = prog.stages[i];
+        if (prog.fallback && (st.vk_stage & (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)))
+            continue;
+        if (!st.code_words) continue;
+        std::vector<uint32_t> spirv((size_t)st.code_words);
+        ok = read_at(st.code_at, spirv.data(), spirv.size() * 4);
+        if (ok) made[i] = make_module(spirv);
+        if (!made[i]) {
+            ok = false;
+            static std::atomic<int> logged{0};
+            if (logged++ < 20)
+                logf("vk: program cache: the code of program %016llx at %lld did not read or made no module: left out",
+                     (unsigned long long)prog.key, (long long)st.code_at);
+        }
+    }
+    if (own_in) fclose(own_in);
+    std::lock_guard lk(light_mu);
+    Program& p = const_cast<Program&>(prog);
+    if (!p.modules_dropped.load(std::memory_order_relaxed)) {
+        for (VkShaderModule m : made)
+            if (m) vkDestroyShaderModule(dev.device, m, nullptr);
+        return !p.remake_failed.load(std::memory_order_relaxed);
+    }
+    if (!ok) {
+        for (VkShaderModule m : made)
+            if (m) vkDestroyShaderModule(dev.device, m, nullptr);
+        p.remake_failed.store(true, std::memory_order_release);
+        return false;
+    }
+    for (size_t i = 0; i < p.stages.size(); i++) {
+        if (!made[i]) continue;
+        if (!p.stages[i].module) p.stages[i].module = made[i];
+        else vkDestroyShaderModule(dev.device, made[i], nullptr);
+    }
+    p.remake_failed.store(false, std::memory_order_release);
+    p.modules_dropped.store(false, std::memory_order_release);
+    return true;
+}
+
+size_t program_cache_drop_modules() {
+    std::lock_guard sk(shader_mu);
+    std::lock_guard lk(light_mu);
+    size_t dropped = 0;
+    for (auto& kv : programs) {
+        for (auto& p : kv.second) {
+            if (!p || !p->ready.load(std::memory_order_acquire) || p->failed) continue;
+            if (p->compute) {
+                if ((p->compute_pipeline != VK_NULL_HANDLE || p->compute_state.load(std::memory_order_acquire) == 2) &&
+                    !p->stages.empty() && p->stages[0].module) {
+                    vkDestroyShaderModule(dev.device, p->stages[0].module, nullptr);
+                    p->stages[0].module = VK_NULL_HANDLE;
+                    dropped++;
+                }
+                continue;
+            }
+            if (p->fallback && p->compute_state.load(std::memory_order_acquire) == 2) {
+                for (Stage& st : p->stages) {
+                    if (st.module && st.vk_stage == VK_SHADER_STAGE_COMPUTE_BIT) {
+                        vkDestroyShaderModule(dev.device, st.module, nullptr);
+                        st.module = VK_NULL_HANDLE;
+                        dropped++;
+                    }
+                }
+            }
+            // (for an un-noted program or variant, or when no graphics pipeline was built before the title: keep its vertex and
+            // fragment modules so its first draw in play builds from memory without a disk read)
+            if (!p->graphics_built) continue;
+            bool can_drop = true;
+            for (const Stage& st : p->stages) {
+                if (!st.module) continue;
+                if (p->fallback && (st.vk_stage & (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)))
+                    continue;
+                if (!st.code_words) { can_drop = false; break; }
+            }
+            if (!can_drop) continue;
+            bool any_gfx = false;
+            for (Stage& st : p->stages) {
+                if (p->fallback && (st.vk_stage & (VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_TASK_BIT_EXT | VK_SHADER_STAGE_MESH_BIT_EXT)))
+                    continue;
+                if (st.module) {
+                    vkDestroyShaderModule(dev.device, st.module, nullptr);
+                    st.module = VK_NULL_HANDLE;
+                    dropped++;
+                    any_gfx = true;
+                }
+            }
+            if (any_gfx) p->modules_dropped.store(true, std::memory_order_release);
+        }
+    }
+    return dropped;
 }
 
 /// (longshot, the prepare's driver part: vk_draw.cpp warm_libraries) the key of every kept graphics and mesh program, whoever made

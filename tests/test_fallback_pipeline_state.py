@@ -52,6 +52,7 @@ struct Stage {
 struct Program {
     uint64_t key = 1;
     bool mesh = false, fallback = false;
+    std::atomic<bool> modules_dropped{false};
     std::vector<Stage> stages;
     VkPipelineLayout layout = VK_NULL_HANDLE;
 };

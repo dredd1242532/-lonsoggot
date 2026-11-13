@@ -28,6 +28,7 @@
 
 #include "vk_internal.h"
 #include "vk_texture.h"   // (upload_command_buffer)
+#include "vk_draw.h"      // (linux_pressure_shortfall)
 #include "vk_gprof.h"      // (RX_VK_PASS_TIMING)
 #include "import_hold.h"
 #include "mirror_budget.h"   // (mirror_budget's rules: Auto's, and a preset's cap)
@@ -35,6 +36,7 @@
 #include "wb_learn.h"
 #include "mirror_inherit.h"
 #include "retired_give_back.h"
+#include "linux_pressure.h"
 #ifdef __linux__
 #include <cerrno>
 #include <dlfcn.h>
@@ -957,6 +959,15 @@ void cap_buf_retire(std::map<uint32_t, CapBuf>::iterator it) {
     cap_bytes -= it->second.size;
     cap_buf_free(it->second.buffer, it->second.alloc, it->second.map, it->second.size);
     cap_bufs.erase(it);
+}
+void cap_free_trim(uint64_t keep_bytes) {
+    std::lock_guard lk(cap_free_mu);
+    while (!cap_free.empty() && cap_free_bytes > keep_bytes) {
+        const FreeBuf f = cap_free.back();
+        cap_free.pop_back();
+        cap_free_bytes -= std::min(cap_free_bytes, f.size);
+        destroy_buffer(f.buffer, f.alloc);
+    }
 }
 // (a capture's buffer by its size class: 2, 4, 8, then 16 MB and up to the MB. It was never under 16 MB, for captures of ~1 MB:
 // 25 kept ones were 413 MB of host-cached system memory, all resident, and three to a 64 MB block left 14 MB of each unused.
@@ -3400,6 +3411,7 @@ void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
 // unbound.) ----
 bool system_heap_usage(uint64_t* used, uint64_t* budget);   // (vk_vma.cpp)
 std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;
+uint64_t evicted_import_bytes = 0;
 int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
@@ -3407,6 +3419,7 @@ constexpr uint64_t kImportIdle = 600;
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
+        evicted_import_bytes -= std::min(evicted_import_bytes, p.hi - p.lo);
         destroy_import_buffer(p.buffer);
         vkFreeMemory(dev.device, p.memory, nullptr);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
@@ -3447,7 +3460,17 @@ void imports_give_back() {   // (pools_mu held)
     // retired imports wait; elsewhere they go back at every submission and this valve reads what it always read)
     if (retired_mode() == retired_give_back::Mode::GRACE) used = retired_give_back::settled(used, dead_import_bytes);
     const uint64_t want = retired_give_back::want(used, cap, high, low);
-    if (!want) return;
+    uint64_t want_bytes = want;
+    uint64_t over_seq = 0;
+    if (const uint64_t over = linux_pressure_shortfall(&over_seq)) {
+        static uint64_t last_over_seq = 0;
+        if (over_seq != last_over_seq) {
+            last_over_seq = over_seq;
+            cap_free_trim(32ull << 20);
+            want_bytes = std::max(want_bytes, linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes));
+        }
+    }
+    if (!want_bytes) return;
     std::vector<std::map<uint64_t, Pool>::iterator> idle;
     for (auto it = imported.begin(); it != imported.end(); ++it) {
         const Pool& p = it->second;
@@ -3459,11 +3482,12 @@ void imports_give_back() {   // (pools_mu held)
     uint64_t freed = 0;
     int n = 0;
     for (auto it : idle) {
-        if (freed >= want) break;
+        if (freed >= want_bytes) break;
         Pool& p = it->second;
         guest_pages_set(p.lo, p.hi, 0);
         p.retired_value = mem_rec_value;   // (this submission's recording is being made: freed once it is done)
         freed += p.hi - p.lo;
+        evicted_import_bytes += p.hi - p.lo;
         n++;
         evicted_pools.push_back(imported.extract(it));
     }
