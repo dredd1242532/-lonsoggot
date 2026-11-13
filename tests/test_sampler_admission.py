@@ -35,6 +35,13 @@ def main():
     actual = "\n".join(block(source, marker) for marker in [
         "VkSamplerAddressMode wrap(", "uint32_t aniso_override() {", "VkCompareOp compare_op(",
         "VkSampler sampler_make(int id, bool compare) {", "VkSampler sampler_for(int id, bool compare) {"])
+    # (sampler_for's per-thread table: a TLS_OBJECT in the source, a plain thread_local here)
+    table = source[source.index("struct SamplerEntry {"):source.index("VkSampler sampler_for(int id, bool compare) {")]
+    tls = re.search(r"^TLS_OBJECT\(sampler_table, SamplerTable\)$", table, re.M)
+    assert tls, "sampler_for's table is no longer TLS_OBJECT(sampler_table, SamplerTable): update this check"
+    table = table[:tls.start()] + "thread_local SamplerTable sampler_table_tls{};\n" \
+        "inline SamplerTable& sampler_table() { return sampler_table_tls; }\n" + table[tls.end():]
+    actual = actual.replace("VkSampler sampler_for(int id, bool compare) {", table + "VkSampler sampler_for(int id, bool compare) {")
     # Keep standard-container behavior, replacing only the allocator to target an individual cache.
     for old, new in [
         ("std::unordered_map<int, std::pair<uint32_t, nvn_samp_par>> seen", "FaultMap<int, std::pair<uint32_t, nvn_samp_par>, Seen> seen"),

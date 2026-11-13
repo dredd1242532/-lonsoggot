@@ -511,6 +511,40 @@ static void load_longshot_env(void) {
     fclose(f);
 }
 
+#ifndef _WIN32
+/* (linux) What static_tls_room (below, first in main) did about the back end's static TLS, logged once the log is open */
+static char static_tls_note[512];
+/* (linux) A switch as longshot_env.txt (or HOS_ENV_FILE's file) sets it, for a switch read before load_longshot_env reads the file
+   (HOS_STATIC_TLS, in static_tls_room): its last line for the name, as the file's later lines replace its earlier ones; NULL when
+   the file doesn't set it. The caller asks only for a name the environment doesn't set: the environment goes first */
+static const char *env_file_peek(const char *name, char *out, size_t size) {
+    char path[MAX_PATH + 32];
+    const char *other = getenv("HOS_ENV_FILE");
+    if (other && *other) {
+        snprintf(path, sizeof path, "%s", other);
+    } else {
+        DWORD n = hos_game_path_a(path, MAX_PATH);
+        while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
+        memcpy(path + n, "longshot_env.txt", 17);
+    }
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+    const size_t name_len = strlen(name);
+    const char *found = NULL;
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *s = line;
+        if ((unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) s += 3;   /* (Notepad's BOM) */
+        while (*s == ' ' || *s == 9) s++;
+        size_t len = strlen(s);
+        while (len && (s[len - 1] == 10 || s[len - 1] == 13 || s[len - 1] == ' ' || s[len - 1] == 9)) s[--len] = 0;
+        if (!strncmp(s, name, name_len) && s[name_len] == '=') snprintf(out, size, "%s", s + name_len + 1), found = out;
+    }
+    fclose(f);
+    return found;
+}
+#endif
+
 /* Switches this build no longer reads, still set (in the environment or longshot_env.txt, as older issues told players):
    one log line each, naming what took its place, so a bug report shows the switch did nothing */
 static void removed_switch_notes(void) {
@@ -1806,6 +1840,9 @@ static int game_main(int argc, char **argv) {
     }
     hos_log("longshot %s", LONGSHOT_VERSION);   /* (the log's first line: which build a report comes from) */
     removed_switch_notes();
+#ifndef _WIN32
+    if (static_tls_note[0]) hos_log("%s", static_tls_note);
+#endif
     void hos_control_start(const char *version);
     hos_control_start(LONGSHOT_VERSION);   /* (HOS_CONTROL=<socket>: the control bridge, host/control.c) */
     const char *image = NULL;
@@ -2073,21 +2110,51 @@ static void driver_cache_folder(void) {
    gives a module loaded after the start a TLS block of its own per thread, found at every access through __tls_get_addr or a dynamic
    TLS descriptor: on a Steam Deck 2.4% of the render thread was that call, with more in the accessors around it, for thousands of
    accesses a draw. With room reserved for it (glibc.rtld.optional_static_tls, read only when a process starts) the loader puts the
-   module's ~48 KB in the static block, where its TLS descriptors (nx2/build.py, -mtls-dialect=gnu2) resolve to a constant offset.
-   So the game starts itself again once, first of all, with the tunable added to GLIBC_TUNABLES. Kept as it is: HOS_STATIC_TLS=0, a
-   GLIBC_TUNABLES that names the tunable already, or an exec that failed (the game goes on without it) */
+   module's TLS in the static block, where its TLS descriptors (nx2/build.py, -mtls-dialect=gnu2) resolve to a constant offset.
+   nx2/build.py checks at its link that the module's TLS segment fits HOS_STATIC_TLS_ROOM, and the back end logs where it landed
+   ("vk: TLS"). So the game starts itself again once, first of all, with the tunable added to GLIBC_TUNABLES; started again, it puts
+   GLIBC_TUNABLES back as it was, so what it starts (xdg-open, a browser) doesn't get the room on its threads too (glibc read it at
+   the start already; host/hos_relaunch.c's restart reads /proc/self/environ, the start's, and keeps it). Kept as it is, each logged
+   (static_tls_note): HOS_STATIC_TLS off (the environment's, or longshot_env.txt's: read here, before load_longshot_env), a
+   GLIBC_TUNABLES that names the tunable already, or an exec that failed (the game goes on without it). Without the room the
+   descriptors take glibc's dynamic path, slower than the default TLS model (RX_VK_TLS=gd builds that) */
 #define HOS_STATIC_TLS_ROOM 98304
 static void static_tls_room(char **argv) {
+    if (env_on("HOS_STATIC_TLS_DONE")) {   /* (the game started again: the room is made) */
+        const char *was = getenv("HOS_STATIC_TLS_WAS");
+        if (was) setenv("GLIBC_TUNABLES", was, 1);
+        else unsetenv("GLIBC_TUNABLES");
+        unsetenv("HOS_STATIC_TLS_WAS"), unsetenv("HOS_STATIC_TLS_DONE");
+        snprintf(static_tls_note, sizeof static_tls_note, "static TLS: started again with glibc.rtld.optional_static_tls=%d for the "
+                 "Vulkan back end's thread-local data (\"vk: TLS\" says where it landed)", HOS_STATIC_TLS_ROOM);
+        return;
+    }
+    char in_file[64];
     const char *off = getenv("HOS_STATIC_TLS");
-    if ((off && !strcmp(off, "0")) || env_on("HOS_STATIC_TLS_DONE")) return;
+    if (!off) off = env_file_peek("HOS_STATIC_TLS", in_file, sizeof in_file);
+    if (off && env_value_off(off)) {
+        snprintf(static_tls_note, sizeof static_tls_note, "static TLS: HOS_STATIC_TLS=%s: not started again for room; the Vulkan back "
+                 "end's thread-local data stays in blocks of its own, reached through glibc's slower descriptor path", off);
+        return;
+    }
     const char *was = getenv("GLIBC_TUNABLES");
-    if (was && strstr(was, "glibc.rtld.optional_static_tls")) return;
+    if (was && strstr(was, "glibc.rtld.optional_static_tls")) {
+        snprintf(static_tls_note, sizeof static_tls_note, "static TLS: GLIBC_TUNABLES sets glibc.rtld.optional_static_tls already: "
+                 "kept, not started again (\"vk: TLS\" says whether the back end's data fit): %s", was);
+        return;
+    }
     char tunables[2048];
     const int n = snprintf(tunables, sizeof tunables, "%s%sglibc.rtld.optional_static_tls=%d", was && *was ? was : "",
                            was && *was ? ":" : "", HOS_STATIC_TLS_ROOM);
-    if (n <= 0 || n >= (int)sizeof tunables) return;
+    if (n <= 0 || n >= (int)sizeof tunables) {
+        snprintf(static_tls_note, sizeof static_tls_note, "static TLS: GLIBC_TUNABLES is too long (%d characters) to add to: not "
+                 "started again for room", n);
+        return;
+    }
     char *keep = was ? strdup(was) : NULL;
     setenv("HOS_STATIC_TLS_DONE", "1", 1);   /* (once: the game started again does not try again) */
+    if (was) setenv("HOS_STATIC_TLS_WAS", was, 1);   /* (what the game started again puts back) */
+    else unsetenv("HOS_STATIC_TLS_WAS");
     setenv("GLIBC_TUNABLES", tunables, 1);
     /* (the executable's own path, not /proc/self/exe: the process is named by the path's last part, and "exe" was what pgrep,
        earlyoom and the harnesses saw after the restart) */
@@ -2096,9 +2163,13 @@ static void static_tls_room(char **argv) {
     const char *path = "/proc/self/exe";
     if (len > 0) self[len] = 0, path = self;
     execv(path, argv);
+    const int err = errno;
     if (keep) setenv("GLIBC_TUNABLES", keep, 1);   /* (the exec failed: on as before) */
     else unsetenv("GLIBC_TUNABLES");
+    unsetenv("HOS_STATIC_TLS_DONE"), unsetenv("HOS_STATIC_TLS_WAS");
     free(keep);
+    snprintf(static_tls_note, sizeof static_tls_note, "static TLS: starting again for room failed (%.240s: %s): the Vulkan back end's "
+             "thread-local data stays in blocks of its own, reached through glibc's slower descriptor path", path, strerror(err));
 }
 int main(int argc, char **argv) {
     int hos_display_init(void);

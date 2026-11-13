@@ -33,6 +33,7 @@ import hashlib
 import json
 import math
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script folder off)
 import kit
+import elf_tls
 import lifted_c
 import rtgen
 import logo_rgba
@@ -68,6 +70,21 @@ POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("LONGSHOT_SYSROOT", "")
 EXE = "longshot" if LINUX else "longshot.exe"
 VK_LIB = "longshot_vk.so" if LINUX else "longshot_vk.dll"
+
+
+def vk_tls_flags():
+    """(Linux: the back end's thread_local variables through TLS descriptors. It is dlopen'ed, so with the default model each access
+    was a call of __tls_get_addr: 2.4% of the Steam Deck's render thread, with the accessors around it more. A descriptor of a
+    module whose TLS the loader placed in the static block (host/hos_main.c static_tls_room) is a constant offset, as the
+    executable's own are; the link checks that the module's TLS fits that room (nx2/elf_tls.py). RX_VK_TLS=gd: the default model,
+    as before. -mtls-dialect=gnu2 is x86-64's: another machine keeps the default model)"""
+    if not LINUX or os.environ.get("RX_VK_TLS", "gnu2") == "gd":
+        return []
+    if platform.machine().lower() not in ("x86_64", "amd64"):
+        print("vk: TLS descriptors (-mtls-dialect=gnu2) are x86-64's, this is %s: the back end's TLS in the default model"
+              % platform.machine(), flush=True)
+        return []
+    return ["-mtls-dialect=gnu2"]
 
 
 def check_vk_symbols(so):
@@ -1180,11 +1197,7 @@ def main():
             with open(f, "rb") as src:
                 stamp.update(os.path.relpath(f, vk).replace("\\", "/").encode() + src.read().replace(bytes((13, 10)), bytes((10,))))
         shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % stamp.hexdigest()[:16]
-        # (Linux: the back end's thread_local variables through TLS descriptors. It is dlopen'ed, so with the default model each access
-        # was a call of __tls_get_addr: 2.4% of the Steam Deck's render thread, with the accessors around it more. A descriptor of a
-        # module whose TLS the loader placed in the static block (host/hos_main.c static_tls_room) is a constant offset, as the
-        # executable's own are. RX_VK_TLS=gd: the default model, as before)
-        vk_tls = ["-mtls-dialect=gnu2"] if LINUX and os.environ.get("RX_VK_TLS", "gnu2") != "gd" else []
+        vk_tls = vk_tls_flags()
         vflags = target() + CPU + (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + vk_tls + [   # (longshot: the replay is the frame's limit now)
             # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
             "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
@@ -1427,6 +1440,12 @@ def main():
             return 1
         if LINUX and not check_vk_symbols(vdll):
             return 1
+        if LINUX and vk_tls_flags():   # (its TLS in the static room the game makes, or every access takes the slow path)
+            with open(os.path.join(kit.HERE, "..", "host", "hos_main.c"), encoding="utf-8") as f:
+                fits, line = elf_tls.check(vdll, elf_tls.room(f.read()))
+            print(line, flush=True)
+            if not fits:
+                return 1
         print("linked %s: %d MB (%.0fs)" % (vdll, os.path.getsize(vdll) >> 20, time.time() - t))
     if a.dll:
         dll = os.path.join(out, "longshot_game.dll")   # (+ longshot_game.map: crash offsets -> f_<guest address>)

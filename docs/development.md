@@ -148,6 +148,16 @@ meter read late is the white flashes the wait is there for. `RX_VK_LOG_READBACK_
 every 3,000 calls (calls, waits and their time, how many had the newest submission as their writer, how many were read
 late), which is how the ranges worth a rule are found on a PC.
 
+(Linux) `HOS_STATIC_TLS` (on unless set off) makes room for the Vulkan back end's thread-local data in the static TLS
+block: the game starts itself again once, first of all, with `glibc.rtld.optional_static_tls` added to `GLIBC_TUNABLES`
+(and puts `GLIBC_TUNABLES` back once started again, so what it starts doesn't get the room too). `longshot_vk.so` is
+dlopen'ed and built with TLS descriptors (`RX_VK_TLS`, under Building), which are a constant offset only in that block;
+without the room glibc puts the data in a block of its own, silently, and every access takes its dynamic path, slower
+than a build without descriptors. `HOS_STATIC_TLS=0` (or `off`, in the environment or `longshot_env.txt`, which is read for
+this switch before the rest) skips the restart, for an A/B. The log says what happened: a `static TLS:` line (started
+again, or why not: the switch, a `GLIBC_TUNABLES` that sets the tunable already, a failed restart) and `vk: TLS:` (the
+segment's size, and whether it landed in the static block).
+
 `RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
 with Native HDR and PsychoV35. The successful upscale supplies NVIDIA frame generation with depth, camera and actor
 motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this
@@ -308,6 +318,7 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `RX_MARCH=<level>` | The CPU level to build for (default this PC's: `x86-64-v3`, else `x86-64-v2`, else `x86-64`) |
 | `RX_VK_ONLY=1` | Only the Vulkan back end, with no lift |
 | `LONGSHOT_VK_PREBUILT=<longshot_vk.so>` | (Linux) The Vulkan back end as built already, the AppImage's; set aside by a build with DLSS (`LONGSHOT_NGX_SDK`) or AMD FSR 4 (`LONGSHOT_FSR=1`, `make_game.py --fsr`), which compiles its own |
+| `RX_VK_TLS=gd` | (Linux) The Vulkan back end's thread-locals in the default TLS model, not through TLS descriptors (`-mtls-dialect=gnu2`, the default on x86-64). With descriptors the link checks that the back end's TLS segment fits the room the game reserves (`HOS_STATIC_TLS`, `nx2/elf_tls.py`) and fails when it doesn't |
 | `OOT_WORK`, `OOT_DUMP`, `OOT_EXEFS`, `OOT_ROMFS` | The work folder and the dump's folders, over `work/dump.txt` |
 
 The Longshot Launcher's build settings set two of these for its build. **Build workers**: Automatic keeps

@@ -2717,17 +2717,17 @@ VkSampler sampler_make(int id, bool compare);
 // changed (sampler_registrations_generation). RX_VK_SAMPLER_CACHE=0 turns off both this table and the parameters' cache inside
 // sampler_make; =1 or the Sampler cache row turns the parameters' cache on (this table stays on, as it is without the option)
 bool sampler_cache_on();   // (longshot, RX_VK_SAMPLER_CACHE and the Sampler cache row: defined below with the descriptor fingerprint's)
+struct SamplerEntry { uint64_t gen; VkSampler s; };
+// (longshot) a thread's table on the heap (a TLS_OBJECT, freed with the thread's others): 128 KB of zeros in the module's TLS segment
+// made it too big for the static TLS room the game reserves (host/hos_main.c static_tls_room), and every thread_local of the back
+// end went through glibc's dynamic path
+struct SamplerTable { SamplerEntry e[2][4096]; };   // (value-initialized by tls_make: gen 0, never filled; the generation starts at 1)
+TLS_OBJECT(sampler_table, SamplerTable)
 VkSampler sampler_for(int id, bool compare) {
     static const bool on = !getenv("RX_VK_SAMPLER_CACHE") || atoi(getenv("RX_VK_SAMPLER_CACHE")) != 0;
     if (!on || id < 0 || id >= 4096) return sampler_make(id, compare);
-    struct Entry { uint64_t gen; VkSampler s; };
-    // (longshot) on the heap, a thread's own: 128 KB of zeros in the module's TLS segment made it too big for the static TLS room
-    // the game reserves (host/hos_main.c static_tls_room), and every thread_local of the back end went through __tls_get_addr
-    struct Table { Entry e[2][4096]{}; };   // (gen 0: never filled; the generation starts at 1)
-    static thread_local std::unique_ptr<Table> table;
-    if (!table) table.reset(new Table());
     const uint64_t gen = sampler_registrations_generation();   // (read first: a registration after it makes the next call miss)
-    Entry& e = table->e[compare ? 1 : 0][id];
+    SamplerEntry& e = sampler_table().e[compare ? 1 : 0][id];
     if (e.gen == gen) return e.s;
     const VkSampler made = sampler_make(id, compare);
     if (made) e = {gen, made};   // (a failed creation is retryable without a new registration)

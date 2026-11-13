@@ -16,6 +16,9 @@
 #ifndef _WIN32
 #include <unistd.h>   // (sysconf: the RAM, auto_profile)
 #endif
+#if defined(__linux__) && defined(__x86_64__)
+#include <link.h>   // (dl_iterate_phdr: tls_place)
+#endif
 
 #include "vk_api.h"
 #include "vk_draw.h"
@@ -190,8 +193,57 @@ bool create_instance() {
     return true;
 }
 
+#if defined(__linux__) && defined(__x86_64__)
+// (longshot, linux) Where this module's thread-local data landed, logged once at the start ("vk: TLS"): in the static TLS block,
+// where host/hos_main.c static_tls_room made room for it and its TLS descriptors (nx2/build.py, -mtls-dialect=gnu2) are a constant
+// offset from the thread pointer, or in a block of its own, every access then through glibc's dynamic path (slower than the default
+// TLS model). glibc places it silently either way: without room (HOS_STATIC_TLS off, a GLIBC_TUNABLES of its own with less, a
+// segment grown past the room) a dlopen still succeeds
+namespace tls_place {
+thread_local unsigned char probe;
+struct Where {
+    size_t size = 0;      // (the module's PT_TLS segment)
+    uintptr_t below = 0;  // (the probe's distance below the thread pointer)
+    bool in_static = false;
+};
+int segment(dl_phdr_info* info, size_t, void* out) {
+    const uintptr_t self = reinterpret_cast<uintptr_t>(&segment);
+    bool mine = false;
+    size_t tls = 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)& ph = info->dlpi_phdr[i];
+        const uintptr_t at = info->dlpi_addr + ph.p_vaddr;
+        if (ph.p_type == PT_LOAD && self >= at && self < at + ph.p_memsz) mine = true;
+        if (ph.p_type == PT_TLS) tls = ph.p_memsz;
+    }
+    if (!mine) return 0;
+    static_cast<Where*>(out)->size = tls;
+    return 1;
+}
+Where where() {
+    Where w;
+    *static_cast<volatile unsigned char*>(&probe) = 1;   // (this thread's block made, wherever glibc puts it)
+    uintptr_t tp;
+    asm volatile("mov %%fs:0, %0" : "=r"(tp));   // (x86-64: the thread pointer; the static TLS block lies just below it)
+    const uintptr_t at = reinterpret_cast<uintptr_t>(&probe);
+    dl_iterate_phdr(segment, &w);
+    w.below = tp - at;
+    w.in_static = at < tp && w.below <= (1u << 20);   // (a block of its own is malloc'ed, far from the thread's TCB)
+    return w;
+}
+}  // namespace tls_place
+#endif
+
 bool pick_device() {
     menu_init();
+#if defined(__linux__) && defined(__x86_64__)
+    if (const tls_place::Where w = tls_place::where(); w.in_static)
+        logf("vk: TLS: %zu bytes, in the static TLS block (%zu below the thread pointer): each access a constant offset", w.size,
+             (size_t)w.below);
+    else
+        logf("vk: TLS: %zu bytes, NOT in the static TLS block: every thread_local access of the back end goes through glibc's dynamic "
+             "path, slower than without TLS descriptors (the log's \"static TLS\" line says why; HOS_STATIC_TLS)", w.size);
+#endif
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(dev.instance, &n, nullptr);
     std::vector<VkPhysicalDevice> all(n);
