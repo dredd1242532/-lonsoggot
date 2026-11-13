@@ -91,7 +91,7 @@ def test_module_changed(d):
     for build in (base, mine):
         write(build / "obj" / "a.o", b"same a")
         write(build / "obj" / "host_hos_main.o", b"version " + build.name.encode())
-        (build / "objs.rsp").write_text("".join('"%s"\n' % (build / "obj" / n) for n in ("a.o", "host_hos_main.o")))
+        (build / "objs.rsp").write_text("".join('"%s"\n' % (build / "obj" / n) for n in ("a.o", "host_hos_main.o")), encoding="utf-8")
     mc = lambda changed_source=False: packs.module_changed(str(base), str(mine), "objs.rsp", "host_hos_main.o", changed_source)
     check("only the version differs: the base's module", not mc())
     check("the version's own source changed: the pack's", mc(True))
@@ -99,7 +99,7 @@ def test_module_changed(d):
     check("another object differs: the pack's", mc())
     write(mine / "obj" / "a.o", b"same a")
     write(mine / "obj" / "b.o", b"new")
-    (mine / "objs.rsp").write_text("".join('"%s"\n' % (mine / "obj" / n) for n in ("a.o", "b.o", "host_hos_main.o")))
+    (mine / "objs.rsp").write_text("".join('"%s"\n' % (mine / "obj" / n) for n in ("a.o", "b.o", "host_hos_main.o")), encoding="utf-8")
     check("another set of objects: the pack's", mc())
     check("no link list in the base: the pack's", packs.module_changed(str(d / "none"), str(mine), "objs.rsp", "host_hos_main.o", False))
 
@@ -168,8 +168,11 @@ def test_guards(d):
                                                          "--romfs", "r", "--exefs", "e", "--tree", str(ROOT)], "plain game folder")
     refused("a runtime inside the base's game folder", ["rt", str(base), str(base / "game" / "runtime")], "folder of its own")
     check("...and nothing written there", not (base / "game" / "runtime").exists())
-    write(base / "game" / "language.txt", b"# the game's language\nde-DE\n")
-    check("the base's language is read for its packs", packs.game_language(str(base / "game")) == "de-DE")
+    write(base / "game" / "language.txt", b"# the game's language\n  # an indented note\nnot-a-code\nde\n")
+    check("the base's language is read for its packs, as make_game.py reads it (indented comments and unknown lines "
+          "skipped)", packs.game_language(str(base / "game")) == "de")
+    write(base / "game" / "language.txt", b"  # only a note\n")
+    check("no language line: none", packs.game_language(str(base / "game")) is None)
     for name in ("../game", "..", "a/b", str(d)):
         refused("the pack name %r" % name, ["pack", str(base), name, "--tree", str(ROOT)], "pack's name")
     check("the base is still there", (base / "game" / "user" / "save0.bin").exists())
@@ -401,6 +404,33 @@ def test_predict_budget(d):
               len(envs) == 1 and envs[0].get("RX_VK_PREDICT_S") == "45")
 
 
+def test_seed(d):
+    """--seed copies every cache the seed folder holds, the play files too (recent pipelines can live only there), and
+    nothing else"""
+    seed = d / "seed"
+    for name, data in (("mkw_vk_pipelines.bin", b"p"), ("mkw_vk_pipelines_play_3.bin", b"play"), (packs.CACHES[0], b"c"),
+                       ("longshot_log.txt", b"log"), ("image.bin", b"game")):
+        write(seed / name, data)
+
+    def fake_make_game(tree, b, work, game, env):
+        for m in packs.MODULES:
+            write(Path(game) / m[0], b"built")
+            if m[1]:
+                write(Path(work) / "sa" / "build" / m[1], b"map")
+    saved = packs.make_game, packs.changed_files, packs.git, packs.subprocess.run
+    packs.make_game, packs.changed_files, packs.git = fake_make_game, (lambda tree, commit: set()), (lambda tree, *a: "c" * 40)
+    packs.subprocess.run = lambda argv, **kw: packs.subprocess.CompletedProcess(argv, 0)
+    try:
+        packs.main(["base", str(d / "b"), "--romfs", "r", "--exefs", "e", "--tree", str(ROOT), "--seed", str(seed)])
+    finally:
+        packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved
+    game = d / "b" / "game"
+    for name in ("mkw_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin", packs.CACHES[0]):
+        check("the seed's %s is copied" % name, (game / name).exists())
+    for name in ("longshot_log.txt", "image.bin"):
+        check("the seed's %s is not" % name, not (game / name).exists())
+
+
 def test_warm(d):
     """warm plays a runtime with no pack, copies back the caches play made or grew and nothing else, and deletes the runtime"""
     base_dir, game = fake_base(d)
@@ -471,7 +501,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="longshot-dev-packs-") as d:
         d = Path(d)
         for name, t in (("mc", test_module_changed), ("pf", test_pack_folders), ("rt", test_generated_and_runtime),
-                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("warm", test_warm), ("busy", test_busy)):
+                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy)):
             (d / name).mkdir()
             t(d / name)
     print("test_dev_packs: ok")

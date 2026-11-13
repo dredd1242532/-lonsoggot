@@ -333,13 +333,10 @@ def check_folders(d, b):
                          (what, b[what], f))
 
 
-def game_language(game):
-    """The language a game folder was built in (its language.txt), so a pack is built in the base's"""
-    try:
-        with open(os.path.join(game, "language.txt"), encoding="utf-8") as f:
-            return next((line.strip() for line in f if line.strip() and not line.startswith("#")), None)
-    except OSError:
-        return None
+def game_language(game, root=ROOT):
+    """The language a game folder was built in, so a pack is built in the base's: make_game.py's own reader of its
+    language.txt (a known code line; comments, also indented ones, and anything else skipped), or None"""
+    return load_make_game(root).folder_language(game)
 
 
 def link_or_copy(src, dst):
@@ -375,9 +372,9 @@ def cmd_base(a):
     if dirty:
         sys.exit("%s has uncommitted or untracked sources (%s): a base is a commit" % (tree, ", ".join(sorted(dirty)[:5])))
     os.makedirs(game, exist_ok=True)
-    if a.seed:
-        for c in CACHES:
-            if os.path.isfile(os.path.join(a.seed, c)) and not os.path.exists(os.path.join(game, c)):
+    if a.seed:   # (every cache file, the play files too: recent pipelines can live only in them, vk_draw.cpp play_path)
+        for c in sorted(os.listdir(a.seed)):
+            if is_cache(c) and os.path.isfile(os.path.join(a.seed, c)) and not os.path.exists(os.path.join(game, c)):
                 shutil.copy2(os.path.join(a.seed, c), os.path.join(game, c))
     b = {"commit": git(tree, "rev-parse", "HEAD"), "work": work, "game": game, "romfs": os.path.abspath(a.romfs),
          "exefs": os.path.abspath(a.exefs), "seeded_from": a.seed, "language": a.language, "predict_s": a.predict_s}
