@@ -76,7 +76,7 @@ static void wire_cases(void) {
     const uint8_t malformed[] = {0xed, 0xa0, 0x80};
     message(2, malformed, sizeof malformed);
     assert(!coop_chat_receive(&s, 2, 202, packet, packet_n, 15000));
-    const char cleanable[] = "hé\\n\\t\\342\\200\\256llo";
+    const char cleanable[] = "hé\n\t\342\200\256llo";
     message(3, cleanable, sizeof cleanable - 1);
     assert(coop_chat_receive(&s, 2, 202, packet, packet_n, 17000));
     assert(coop_chat_snapshot(&s, &feed, 17000, 1) && !strcmp(feed.line[0].text, "héllo"));
