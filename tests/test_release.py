@@ -531,7 +531,7 @@ class ReleasedAs(unittest.TestCase):
         names = [f % tag if "%s" in f else f for f in files]
         sums = "".join("%s  %s\n" % (hashlib.sha256(n.encode()).hexdigest(), n) for n in sorted(sums_of or names))
         sums_file = self.dir / ("sums-" + tag)
-        sums_file.write_text(sums)
+        sums_file.write_bytes(sums.encode())   # (bytes: the signature is over the same bytes as the uploaded SHA256SUMS)
         rid = len(FakeForgejo.releases) + 1
         assets = []
         for name, data in [(n, n.encode()) for n in names] + [("SHA256SUMS", sums.encode())] + \
