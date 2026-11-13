@@ -214,26 +214,46 @@ class Bump(unittest.TestCase):
         self.assertEqual(release.previous_tag("v3.1.0", 3, str(self.dir)), "v3.0.0")   # (a stable: since the stable before)
 
 
+    def cliff_stub(self, folder):
+        """The environment for a git-cliff in folder that prints its arguments, one a line. Windows runs no #! script: a
+        .cmd hands its arguments to Python. The .cmd stays ASCII and reads Python's and the script's paths from the
+        environment, which cmd.exe keeps as Unicode: written into the file, a path with an accented letter was read in
+        the console's code page and Python got a broken path. It prints in UTF-8, as git-cliff does (a pipe's default
+        on Windows is the ANSI code page)"""
+        if os.name == "nt":
+            script = folder / "git-cliff-stub.py"
+            script.write_text("import sys\nsys.stdout.reconfigure(encoding='utf-8')\nfor a in sys.argv[1:]: print(a)\n",
+                              encoding="utf-8")
+            stub = folder / "git-cliff-stub.cmd"
+            stub.write_text('@"%GIT_CLIFF_STUB_PYTHON%" -I "%GIT_CLIFF_STUB_SCRIPT%" %*\n', encoding="ascii")
+            return {"GIT_CLIFF": str(stub), "GIT_CLIFF_STUB_PYTHON": sys.executable, "GIT_CLIFF_STUB_SCRIPT": str(script)}
+        stub = folder / "git-cliff-stub"
+        stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return {"GIT_CLIFF": str(stub)}
+
     def test_the_first_notes_give_git_cliff_no_range(self):
         # (git-cliff takes a lone ref for a range and stops: SetCommitRangeError("HEAD", unable to parse OID), the
         # launcher's first nightlies. With no tag before and no first commit, it is given no range: the whole history)
         self.commit("feat: a")
-        stub = self.dir / "git-cliff-stub"
-        if os.name == "nt":   # (Windows runs no #! script: a .cmd hands its arguments to Python, which prints them)
-            (self.dir / "git-cliff-stub.py").write_text("import sys\nfor a in sys.argv[1:]: print(a)\n", encoding="utf-8")
-            stub = self.dir / "git-cliff-stub.cmd"
-            stub.write_text('@"%s" -I "%s" %%*\n' % (sys.executable, self.dir / "git-cliff-stub.py"), encoding="utf-8")
-        else:
-            stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
-            stub.chmod(0o755)
-        with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
+        stub = self.cliff_stub(self.dir)
+        with mock.patch.dict(os.environ, stub), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
             args = release.notes("nightly-2-0123abcd", "launcher", root=str(self.dir)).split()
         self.assertEqual(args[-2:], ["--strip", "all"])
         self.git("tag", "v1.0.0")
         self.commit("fix: b")
-        with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
+        with mock.patch.dict(os.environ, stub), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
             args = release.notes("nightly-3-0123abcd", "launcher", root=str(self.dir)).split()
         self.assertEqual(args[-1], "v1.0.0..HEAD")
+
+    def test_the_git_cliff_stand_in_runs_from_a_unicode_path(self):
+        # (a temporary folder under a user name such as "Zoë": the stand-in still gets its arguments through)
+        folder = Path(tempfile.mkdtemp(prefix="release-cliff-Zoë-"))
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.commit("feat: a")
+        with mock.patch.dict(os.environ, self.cliff_stub(folder)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
+            args = release.notes("nightly-2-0123abcd", "launcher", root=str(self.dir)).split()
+        self.assertEqual(args[-2:], ["--strip", "all"])
 
 class ReleasePage(unittest.TestCase):
     """The release page publish writes: the launcher's starts with big download links to its own files; Longshot's with "to
