@@ -2309,7 +2309,7 @@ def main(a=None):
     # files begin)
     os.makedirs(os.path.join(work, "image"), exist_ok=True)
     seed_work(work)
-    env ={"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
+    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
     if os.path.exists(os.path.join(work, "hot_funcs.txt")):
         env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
     if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):
