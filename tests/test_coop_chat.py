@@ -26,7 +26,7 @@ def between(text, first, last):
     return text[start:text.index(last, start)]
 
 
-MENU = r'''#define _CRT_SECURE_NO_WARNINGS
+MENU = r'''#define _Static_assert static_assert
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -35,7 +35,7 @@ MENU = r'''#define _CRT_SECURE_NO_WARNINGS
 #include <cstring>
 #include "gpu/vk/vk_api.h"
 #include "host/coop_chat_text.h"
-enum { VK_BACK=8, VK_RETURN=13, VK_ESCAPE=27, VK_END=35, VK_HOME=36, VK_LEFT=37, VK_RIGHT=39, VK_DELETE=46 };
+constexpr int VK_BACK=8, VK_RETURN=13, VK_ESCAPE=27, VK_END=35, VK_HOME=36, VK_LEFT=37, VK_RIGHT=39, VK_DELETE=46;
 static int64_t now_ns=100000000;
 static int64_t prof_now() { return now_ns; }
 static int key_held;
@@ -61,7 +61,7 @@ static int hos_control_input(uint64_t* b, int32_t s[4]) { *b|=1; s[1]=32767; ret
 int main() {
     storage.take_text=take_text; storage.coop_feed=feed; storage.coop_chat=command;
     live.visible=live.can_chat=1; live.generation=4;
-    chat_open(); assert(editing==&chat_field && menu_chat_focus() && menu_is_open() && text_focus==HOS_TEXT_ON);
+    pending=&storage; chat_open(); assert(!pending && text_calls && editing==&chat_field && menu_chat_focus() && menu_is_open() && text_focus==HOS_TEXT_ON);
     for (char c : "wasd") if (c) text_edit(chat_field,(uint32_t)c);
     chat_option=menu_chat_focus(); uint64_t buttons=99; int32_t sticks[4]={1,2,3,4}; hos_oc_note_bits=7;
     chat_input_entry(&buttons,sticks); assert(!buttons && !sticks[0] && !sticks[1] && !sticks[2] && !sticks[3] && !hos_oc_note_bits);
@@ -85,7 +85,8 @@ int main() {
     text_edit(utf,HOS_TEXT_KEY|VK_BACK); assert(utf.len==6 && utf.caret==2);
     text_edit(utf,HOS_TEXT_KEY|VK_DELETE); assert(utf.len==2 && utf.caret==2);
     text_edit(utf,0x202e); text_edit(utf,'\n'); assert(utf.len==2);
-    for(int i=0;i<100;i++) text_edit(utf,0x4e2d); assert(utf.len==191);
+    for(int i=0;i<100;i++) { text_edit(utf,0x4e2d); }
+    assert(utf.len==191);
     text_edit(utf,0x00e9); assert(utf.len==191); text_edit(utf,'a'); assert(utf.len==192);
     puts("PASS chat-input: real editor/focus ownership, UTF-8 caret/deletion, Enter/Esc, held-key/pad fence, focus loss, generation cancellation, typing cannot move Link, off input restored");
 }

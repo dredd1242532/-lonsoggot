@@ -1067,16 +1067,17 @@ def main():
     version = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
     host_struct = between(api, "typedef struct MkwVkHost {", "} MkwVkHost;")
     members = [l.strip() for l in host_struct.splitlines() if l.strip().endswith(");") and "(*" in l]
-    if members[-5:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
+    if members[-7:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
                         "int (*coop_command)(int cmd, const char *text, uint32_t number);",
                         "int (*coop_feature)(int index, MkwVkCoopFeature *out);",
-                        "int (*coop_overlay)(MkwVkCoopOverlay *out, int labels);"]:
-        raise SystemExit("FAIL: vk_api.h: the Co-op calls are not after take_text in MkwVkHost's appended order "
-                         "(host/rx_backend.c fills it by position)")
-    if version < 29:
-        raise SystemExit("FAIL: vk_api.h: the combined co-op interface needs API 29")
-    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*hos_coop_overlay_snapshot,\s*\};",
-         "rx_backend.c: vk_host does not end with the Co-op tab's calls")
+                        "int (*coop_overlay)(MkwVkCoopOverlay *out, int labels);",
+                        "int (*coop_feed)(MkwVkCoopFeed *out);",
+                        "int (*coop_chat)(int command, const char *text, uint32_t number);"]:
+        raise SystemExit("FAIL: vk_api.h: combined co-op callbacks must follow take_text in host initializer order")
+    if version != 29:
+        raise SystemExit("FAIL: vk_api.h: combined co-op interface uses API 29")
+    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*hos_coop_overlay_snapshot,\s*hos_coop_feed, hos_coop_chat_command,\s*\};",
+         "rx_backend.c: vk_host does not end with the combined co-op callbacks")
     need(menu, r"TAB_DEBUG = 4,[^\n]*\n\s*TAB_COOP = 5,[^\n]*\n\s*TAB_COUNT = 6,", "vk_menu.cpp: the Co-op tab is not the strip's last")
     need(menu, r'tab_titles\[TAB_COUNT\] = \{"Graphics", "Audio", "Gameplay", "Controls", "Debug", "Co-op"\}', "vk_menu.cpp: no Co-op title")
     slots = re.search(r"int scrolled_to\[TAB_RULES \+ 1\] = \{([^}]*)\}", menu).group(1)

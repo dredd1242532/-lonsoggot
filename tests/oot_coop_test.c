@@ -730,6 +730,17 @@ int main(int argc, char **argv) {
         CHECK(G.bound && scans == 1 && applies == 1);            /* the save in play is read and shared */
         CHECK(hooks.view == 1);
         CHECK(hooks.players_ticks == 2 && hooks.tick_loaded == 1 && hooks.tick_open == 1);
+        CHECK(!chat_safe); /* unknown event manager hides the feed */
+        const uint64_t chat_holder = galloc(8), chat_events = galloc(112);
+        st(0x84c9e090ULL, chat_holder, 8), st(chat_holder, chat_events, 8);
+        TICK(), hos_oot_coop_present(&c);
+        CHECK(chat_safe);
+        st(chat_events + 104, 1, 8);
+        TICK(), hos_oot_coop_present(&c);
+        CHECK(!chat_safe); /* dialogue/cutscene hides it immediately, not after a pose timeout */
+        st(0x84c9e090ULL, 0, 8);
+        TICK(), hos_oot_coop_present(&c);
+        CHECK(!chat_safe);
         view.state = COOP_OFF;
         if (hooks.view_fn) hooks.view_fn(&view, NULL);
         const unsigned disabled_reads = guest_reads;

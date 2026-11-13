@@ -25,6 +25,7 @@ enum { GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000,
        VK_LBUTTON = 1, VK_RBUTTON = 2, VK_MBUTTON = 4, VK_XBUTTON1 = 5, VK_XBUTTON2 = 6 };
 static int front, menu_background, menu_open, bridge_active, bootstrap_polls, pad_merges, key_queries, mouse_queries, focus_queries, commands;
 static uint64_t bridge_buttons;
+static int chat_focus, bridge_on, bridge_reads;
 typedef int64_t LONG64;
 volatile LONG64 hos_present_count = 1000;
 static int frame_reads;
@@ -53,7 +54,12 @@ static int origin_logs, script_logs;
 static long long logged_origin;
 volatile int64_t hos_hid_last_read;
 volatile int hos_nvn_sync_log_on;
-int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)stick; *buttons |= bridge_buttons; return bridge_active; }
+int hos_control_input(uint64_t *buttons, int32_t stick[4]) {
+    bridge_reads++;
+    *buttons |= bridge_buttons;
+    if (bridge_on) { *buttons = 0xffff; stick[0] = stick[1] = 32767; }
+    return bridge_on || bridge_active;
+}
 static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + address; }
 #define GP(a) at(a)
 #define G32(a) (*(uint32_t *)at(a))
@@ -62,7 +68,7 @@ static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + a
 #define RET(value) (c->x[0] = (uint64_t)(value))
 
 int rx_option(int id, int otherwise) {
-    return id == HOS_OPT_HOLD_TOGGLE ? toggle_flags : id == HOS_OPT_WALK_MODE ? walk_mode :
+    return id == HOS_OPT_CHAT_FOCUS ? chat_focus : id == HOS_OPT_HOLD_TOGGLE ? toggle_flags : id == HOS_OPT_WALK_MODE ? walk_mode :
            id == HOS_OPT_WALK_SPEED ? walk_speed : id == 6 ? mouse_mode : id == 4 ? menu_background : id == 1 ? menu_open : otherwise;
 }
 int64_t hos_now_ns(void) { return now_ns; }
@@ -351,6 +357,19 @@ int main(int argc, char **argv) {
     if (!strcmp(name, "hold-toggle")) {
         hold_toggle_case();
         puts("PASS: actual Npad hold-to-toggle, menu, focus, binding reset and pause");
+        free(memory); return 0;
+    }
+    if (!strcmp(name, "chat")) {
+        front = 1, chat_focus = 1, bridge_on = 1, hos_oc_note_bits = 0xffff;
+        packet(0, 0, 0, 0);
+        CHECK(!bootstrap_polls && !pad_merges && !key_queries && !mouse_queries && !bridge_reads && !hos_oc_note_bits);
+        front = 0, menu_background = 1;
+        packet(0, 0, 0, 0); /* even background pads and exclusive bridge input stay out */
+        CHECK(!pad_merges && !bridge_reads);
+        front = 1, chat_focus = 0, bridge_on = 0;
+        packet((1ULL << B_A) | (1ULL << B_B) | (1ULL << B_X), 32767, 32767, 8000);
+        CHECK(bootstrap_polls == 1 && pad_merges && key_queries && mouse_queries && bridge_reads);
+        puts("PASS: chat owns full production script/bridge/keyboard/mouse/pad/ocarina/Npad path; release restores input");
         free(memory);
         return 0;
     }

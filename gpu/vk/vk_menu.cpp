@@ -5906,7 +5906,13 @@ void menu_tick() {
             if (!strcmp(key, "CHAT") && !editing) chat_open();
             if (!strcmp(key, "TYPE") && next[n] == ':') {
                 const size_t len = strcspn(next + n + 1, ",");
-                for (size_t i = 0; i < len; i++) scripted.push_back((unsigned char)next[n + 1 + i]);
+                for (size_t i = 0; i < len;) {
+                    uint32_t point = 0;
+                    const unsigned consumed = coop_text_next((const uint8_t*)next + n + 1 + i, len - i, &point);
+                    if (!consumed) break;
+                    scripted.push_back(point);
+                    i += consumed;
+                }
                 n += (int)len + 1;
             }
             // (longshot) ROW:<name>: the shown tab's row of that name selected, if it shows (nothing if not): a script that does

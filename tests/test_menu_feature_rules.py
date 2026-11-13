@@ -151,9 +151,9 @@ def main():
 extern "C" int hos_coop_menu_feature(int, MkwVkCoopFeature*);
 static float test_aspect() { return 4.0f / 3.0f; }
 struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t);
-              int (*coop_feature)(int, MkwVkCoopFeature*); float (*aspect_ratio)(); }
-    host_value{nullptr, nullptr, hos_coop_menu_feature, test_aspect}, *host = &host_value;'''
-    cpp = replace_once(cpp, "struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t); } host_value{nullptr, nullptr}, *host = &host_value;",
+              int (*coop_feature)(int, MkwVkCoopFeature*); float (*aspect_ratio)(); int (*coop_chat)(int, const char*, uint32_t); }
+    host_value{nullptr, nullptr, hos_coop_menu_feature, test_aspect, nullptr}, *host = &host_value;'''
+    cpp = replace_once(cpp, "struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t); int (*coop_chat)(int, const char*, uint32_t); } host_value{nullptr, nullptr, nullptr}, *host = &host_value;",
                        host.replace("@@TYPES@@", max_features + "\n" + feature_type + "\n" + setting_type))
     cpp = replace_once(cpp, '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},',
                        '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},\n'
