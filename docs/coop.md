@@ -622,7 +622,8 @@ A visible registered key is owned and written once by the menu. Existing lines f
 build does not recognize retain their contents; they are not rewritten with defaults. The same holds when an old
 options file is loaded/migrated at startup and next saved. `tests/test_menu_feature_rules.py` compiles the real
 registry, host metadata callback and menu persistence against empty and synthetic registries, including an unchanged
-five-field entry, a newly appended labelled entry and all three persistence cases.
+five-field entry, a newly appended labelled entry and all three persistence cases. Its startup fixture supplies
+the ordinary output-resolution presence flag too, without changing how the real options parser reads it.
 
 Progress-message format 5 appends a count and up to 64 `(u8 number, little-endian i16 value)` entries to the charter,
 before its signature. Numbers are nonzero, unique and increasing; values range from -32768 to 32767, with each

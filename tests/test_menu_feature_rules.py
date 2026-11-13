@@ -24,9 +24,9 @@ void mic_tell_host() {}
 int rumble_step(int v) { return v; }
 void startup_read() {
     coop_feature_init();
-    bool has_options = false, has_vram_budget = false, has_memory_budget = false;
+    bool has_options = false, has_vram_budget = false, has_memory_budget = false, has_output = false;
     @@LOAD@@
-    (void)has_options; (void)has_vram_budget; (void)has_memory_budget;
+    (void)has_options; (void)has_vram_budget; (void)has_memory_budget; (void)has_output;
 }
 static int occurrences(const char* key) {
     const std::string all = slurp(), prefix = std::string(key) + "=";
