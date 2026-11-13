@@ -5,6 +5,8 @@
 # alone (--accept-nvidia-license), and nothing of it is uploaded or cached.
 # AMD FSR 4 (LONGSHOT_FSR=1: AMD's MIT headers, nothing downloaded) is built in the same run: both engines share
 # vk_temporal.cpp.
+# It runs on the Linux runner (there is no Windows one, docs/forgejo-runners.md): RX_TARGET=windows, with llvm-mingw's Linux
+# build of tools.lock's release (scripts/builder_package.py --host linux), as build-windows.yml builds the back end.
 name: Vulkan back end with NVIDIA DLSS
 
 on:
@@ -61,7 +63,7 @@ defaults:
 jobs:
   vulkan-dlss:
     name: Windows Vulkan back end with NVIDIA DLSS and AMD FSR 4 (llvm-mingw, link check)
-    runs-on: windows-2022
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -95,13 +97,15 @@ jobs:
           python-version: '3.12'
       - name: llvm-mingw version
         id: llvm
-        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name)" >> "$GITHUB_OUTPUT"
+        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
       - uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm
           key: ${{ steps.llvm.outputs.name }}
       - name: llvm-mingw
-        run: echo "LONGSHOT_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
+        run: |
+          echo "LONGSHOT_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
+          echo "RX_TARGET=windows" >> "$GITHUB_ENV"
       - name: NVIDIA's DLSS SDK (headers and nvsdk_ngx_s.lib)
         run: python -I scripts/ngx_sdk.py --platform windows --build-only --accept-nvidia-license "$RUNNER_TEMP/ngx-sdk"
       - name: longshot_vk.dll with NVIDIA DLSS and AMD FSR 4
@@ -111,7 +115,7 @@ jobs:
           LONGSHOT_FSR: '1'
         run: |
           OOT_WORK="$RUNNER_TEMP/vk-work" RX_CPM="$GITHUB_WORKSPACE/_deps/cpm" LONGSHOT_NGX_SDK="$RUNNER_TEMP/ngx-sdk" \
-            python -I nx2/build.py --standalone --jobs "$NUMBER_OF_PROCESSORS" | tee "$RUNNER_TEMP/vk-build.log"
+            python -I nx2/build.py --standalone --jobs "$(nproc)" | tee "$RUNNER_TEMP/vk-build.log"
           test "${PIPESTATUS[0]}" -eq 0
           grep -q "with NVIDIA DLSS" "$RUNNER_TEMP/vk-build.log"
           grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-build.log"

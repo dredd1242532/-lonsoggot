@@ -3,8 +3,10 @@
 # tests/test_*.py and nx2/test_*.py (all of them, even after a failure), the C++ unit tests under gpu/vk/tests and a
 # byte-compile of every tracked Python file, and writes a table of them to the run's summary. A check that needs a GPU,
 # the game or MSVC says so, and why, in its own file (RUN_ALL_SKIP). No game data is involved.
-# Each system runs the tests in two parts at once (run_all.py --shard, split by tests/run_all_times.json): each part is
-# one job, and every check is in exactly one of them. Windows' own build checks (MSVC, the Builder) are in its part 1.
+# The tests run in two parts at once (run_all.py --shard, split by tests/run_all_times.json): each part is one job, and
+# every check is in exactly one of them. The Windows Builder's checks (its compile, its worker delivery) are in part 1, on
+# Linux with EnableWindowsTargeting. There is no Windows runner (docs/forgejo-runners.md): what only Windows can check
+# (the suite on Windows' Python, MSVC's compile of the native checks) is in RELEASING.md, "Needs a Windows tester".
 # On Linux the C and C++ compiles go through ccache (the compilers in its PATH), with the cache main's runs leave
 # (actions/cache: read by every run, written only by a push to main, so a pull request never writes what another reads).
 name: CI
@@ -66,10 +68,6 @@ jobs:
           - os: ubuntu-24.04
             shard: 1/2
           - os: ubuntu-24.04
-            shard: 2/2
-          - os: windows-2022
-            shard: 1/2
-          - os: windows-2022
             shard: 2/2
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -146,50 +144,22 @@ jobs:
           echo "$tool_dir/bin" >> "$GITHUB_PATH"
 
       # (the steps below all run when one before them failed, so one run shows every failure)
-      - name: Check Windows native source regressions
-        if: ${{ !cancelled() && runner.os == 'Windows' && matrix.shard == '1/2' }}
-        shell: cmd
-        run: |
-          @echo off
-          set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-          if not exist "%VSWHERE%" (
-            echo Visual Studio locator not found.
-            exit /b 1
-          )
-          set "VSROOT="
-          for /f "usebackq delims=" %%i in (`call "%VSWHERE%" -latest -products * -version "[17.0,18.0)" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%i"
-          if not defined VSROOT (
-            echo Visual Studio 2022 C++ tools not found.
-            exit /b 1
-          )
-          if not exist "%VSROOT%\Common7\Tools\VsDevCmd.bat" (
-            echo Visual Studio developer command prompt not found.
-            exit /b 1
-          )
-          call "%VSROOT%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-          if errorlevel 1 exit /b 1
-          where cl
-          if errorlevel 1 exit /b 1
-          cl /nologo /std:c++17 /W4 /WX /EHsc /Fo"%TEMP%\present_rect_test.obj" /Fe:"%TEMP%\present_rect_test.exe" gpu\vk\tests\present_rect_test.cpp
-          if errorlevel 1 exit /b 1
-          "%TEMP%\present_rect_test.exe"
-          if errorlevel 1 exit /b 1
-          python -I -B tests/test_invalidate_vcore.py --cxx cl
-          if errorlevel 1 exit /b 1
+      # (the WPF builder and its worker checks are net8.0-windows: EnableWindowsTargeting brings Windows' reference packs to
+      # Linux. The worker checks run on Linux's .NET, with Linux's Python as the child)
       - name: Set up .NET for Windows Builder checks
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        if: ${{ !cancelled() && matrix.shard == '1/2' }}
         uses: https://github.com/actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '8.0.x'
       - name: Check Windows Builder worker delivery
-        if: ${{ !cancelled() && runner.os == 'Windows' && matrix.shard == '1/2' }}
-        shell: pwsh
+        if: ${{ !cancelled() && matrix.shard == '1/2' }}
         run: |
-          dotnet restore tests/builder_workers/BuilderWorkersTests.csproj --configfile tests/builder_workers/NuGet.Config
-          dotnet run --project tests/builder_workers/BuilderWorkersTests.csproj --configuration Release --no-restore -- (Get-Command python).Source
+          dotnet restore tests/builder_workers/BuilderWorkersTests.csproj --configfile tests/builder_workers/NuGet.Config -p:EnableWindowsTargeting=true
+          dotnet run --project tests/builder_workers/BuilderWorkersTests.csproj --configuration Release --no-restore \
+            -p:EnableWindowsTargeting=true -- "$(command -v python)"
       - name: Compile Windows Builder
-        if: ${{ !cancelled() && runner.os == 'Windows' && matrix.shard == '1/2' }}
-        run: dotnet build builder/LongshotBuilder/LongshotBuilder.csproj --configuration Debug -p:NuGetAudit=false
+        if: ${{ !cancelled() && matrix.shard == '1/2' }}
+        run: dotnet build builder/LongshotBuilder/LongshotBuilder.csproj --configuration Debug -p:NuGetAudit=false -p:EnableWindowsTargeting=true
       # (--strict: a check whose compiler, headers or package is missing here fails instead of being skipped)
       - name: Every test
         if: ${{ !cancelled() }}

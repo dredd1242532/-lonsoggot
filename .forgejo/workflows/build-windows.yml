@@ -4,7 +4,11 @@
 # tools are not in it: tools.lock names them, and the setup or the launcher downloads them on the player's PC. The Windows
 # Vulkan back end is compiled too, with the same llvm-mingw: players build it on their PC, this only checks that it still
 # builds. The zip is a workflow artifact; called by release.yml with the version's name, it is the release's.
-# The runner is a Windows one with the label windows-2022 (docs/forgejo-runners.md).
+# Every job runs on the Linux runner (ubuntu-24.04): there is no Windows one (docs/forgejo-runners.md). The setup and the
+# Vulkan back end are cross-compiled with llvm-mingw's Linux build of tools.lock's release (scripts/builder_package.py,
+# LINUX_LLVM_MINGW), the WPF builder is published for win-x64 with EnableWindowsTargeting, and the files are checked as
+# Windows files (their PE headers, resources and runtime) and started under Wine. What only a Windows PC can check is in
+# RELEASING.md, "Needs a Windows tester".
 name: Windows builder
 
 on:
@@ -45,7 +49,7 @@ defaults:
 jobs:
   package:
     name: Longshot Builder zip
-    runs-on: windows-2022
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out source
@@ -64,9 +68,14 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # (llvm-objdump and llvm-readobj below read the Windows files; Wine starts them, in Xvfb: WPF makes a hidden window
+      # before the builder reads its arguments)
+      - name: Wine
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends wine64 xvfb xauth
+
       - name: llvm-mingw version
         id: llvm
-        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name)" >> "$GITHUB_OUTPUT"
+        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
       # (a release unpacks llvm-mingw from its checked download, not from a cache other runs write)
       - if: env.RELEASE_TAG == ''
         uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -74,7 +83,7 @@ jobs:
           path: ${{ runner.temp }}/llvm
           key: ${{ steps.llvm.outputs.name }}
       - name: llvm-mingw
-        run: echo "LLVM_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
+        run: echo "LLVM_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
 
       # (the Release workflow's name for the version: v3.1.0, v3.1.0-rc.1, or the nightly's nightly-<count>-<commit>; any other run
       # is git describe --long's, v3.0.1-3-g1a2b3c4. The builder's MSBuild version is a release's number, else 0.0.0)
@@ -103,9 +112,12 @@ jobs:
             -o "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
           ls -l "$RUNNER_TEMP/LongshotBuilder-Setup.exe"
 
+      # (self-contained for win-x64, as the project's Release configuration has it; EnableWindowsTargeting: the WPF
+      # targeting and runtime packs come from NuGet on a system that is not Windows)
       - name: Longshot Builder
         run: >-
           dotnet publish builder/LongshotBuilder/LongshotBuilder.csproj --configuration Release
+          --runtime win-x64 -p:EnableWindowsTargeting=true
           -p:Version="$VERSION" -p:NuGetAudit=false --output "$RUNNER_TEMP/publish"
 
       # (it stops when assets/pipeline_states/, the sources of the pipeline state list every release ships, hold none or one does not read)
@@ -121,6 +133,22 @@ jobs:
             --out "dist/LongshotBuilder-$TAG-windows-x64.zip"
           ls -l dist
 
+      # (what a Windows build gave and a Linux one could quietly lose: the setup's icon, manifest and version (windres),
+      # and its imports; the builder's GUI subsystem, its apphost's version and manifest, win-x64 self-contained .NET 8
+      # with WPF. scripts/check_windows_files.py says what is wrong)
+      - name: Check the Windows files
+        run: >-
+          python -I scripts/check_windows_files.py --objdump "$LLVM_MINGW/bin/llvm-objdump"
+          --readobj "$LLVM_MINGW/bin/llvm-readobj" "dist/LongshotBuilder-$TAG-windows-x64.zip"
+      # (the setup's --play of an empty folder and the builder's --cli with no Python: each says why it stops, with no
+      # window and nothing downloaded. A sign that they load and their imports, .NET and WPF resolve, not a test of what
+      # they do. Wine's mscoree must stay on: its loader maps .NET's IL assemblies through it. Gecko is not wanted)
+      - name: Start them under Wine
+        run: |
+          export WINEPREFIX="$RUNNER_TEMP/wine" WINEDEBUG=-all WINEDLLOVERRIDES="mshtml="
+          xvfb-run -a python -I scripts/check_windows_files.py \
+            --wine "$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)" "dist/LongshotBuilder-$TAG-windows-x64.zip"
+
       - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: LongshotBuilder-windows
@@ -129,7 +157,7 @@ jobs:
 
   vulkan:
     name: Windows Vulkan back end (llvm-mingw)
-    runs-on: windows-2022
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - name: Check out source
@@ -165,15 +193,18 @@ jobs:
           python-version: '3.12'
       - name: llvm-mingw version
         id: llvm
-        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name)" >> "$GITHUB_OUTPUT"
+        run: echo "name=$(python -I scripts/builder_package.py llvm-mingw --name --host linux)" >> "$GITHUB_OUTPUT"
       # (a release unpacks llvm-mingw from its checked download, not from a cache other runs write)
       - if: env.RELEASE_TAG == ''
         uses: https://github.com/actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/llvm
           key: ${{ steps.llvm.outputs.name }}
+      # (RX_TARGET=windows: nx2/build.py builds the Windows back end on Linux, README.md "The Windows game, built on Linux")
       - name: llvm-mingw
-        run: echo "LONGSHOT_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm")" >> "$GITHUB_ENV"
+        run: |
+          echo "LONGSHOT_MINGW=$(python -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
+          echo "RX_TARGET=windows" >> "$GITHUB_ENV"
       # The back end's compiled objects (nx2/build.py's object cache, vk-work/objcache: each object under the SHA-1 of its
       # source, its flags and the headers it can see), for pull requests, as the Linux AppImage workflow keeps its own: a
       # pull request compiles only the files its change reaches, not all of them (about 160 s here). Written after every
@@ -203,7 +234,7 @@ jobs:
           RX_RELEASE: '1'
         run: |
           OOT_WORK="$RUNNER_TEMP/vk-work" RX_CPM="$GITHUB_WORKSPACE/_deps/cpm" \
-            python -I nx2/build.py --standalone --jobs "$NUMBER_OF_PROCESSORS"
+            python -I nx2/build.py --standalone --jobs "$(nproc)"
           ls -l "$RUNNER_TEMP/vk-work/sa/build/longshot_vk.dll"
       # (the object cache down to the objects this build used, as the Linux AppImage workflow prunes its own: each object
       # in sa/build/obj names its key in <obj>.sha1. Nothing goes when no stamp is found)
@@ -242,9 +273,6 @@ jobs:
     name: dav1d for Windows (llvm-mingw)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
-      LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
     steps:
       - name: Check out source
         uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -253,13 +281,9 @@ jobs:
           persist-credentials: false
       - name: Meson, nasm and Wine
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build nasm wine64
+      # (the Linux build scripts/builder_package.py pins, its SHA-256 checked)
       - name: llvm-mingw (Linux)
-        run: |
-          curl -fL --retry 5 --retry-delay 10 --proto '=https' -o "$RUNNER_TEMP/llvm.tar.xz" \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
-          echo "$LLVM_MINGW_SHA256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum -c -
-          tar -xJf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
-          echo "LONGSHOT_MINGW=$RUNNER_TEMP/$LLVM_MINGW" >> "$GITHUB_ENV"
+        run: echo "LONGSHOT_MINGW=$(python3 -I scripts/builder_package.py llvm-mingw "$RUNNER_TEMP/llvm" --host linux)" >> "$GITHUB_ENV"
       - name: dav1d
         run: scripts/windows/dav1d.sh "$RUNNER_TEMP/cpm"
       - name: host/dav1d_av1.c on it, under Wine
