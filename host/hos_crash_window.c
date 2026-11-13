@@ -1,7 +1,7 @@
 /* (longshot) The crash window (docs/crash-report-window.md). At a crash nothing handles, report_crash (host/mkw_glue.c)
    writes the CRASH: lines and flushes the log, then calls hos_crash_window_open: it leaves crash_pending.txt in the game
-   folder and starts the builder's crash window, <builder> --crash <game folder>, which shows the player the report and
-   sends it only when they press Send Help (nx2/crash_report.py, builder/linux/longshot_builder.py show_crash).
+   folder and starts the Longshot Launcher's crash window, <launcher> --crash <game folder>, which shows the player the
+   report and sends it only when they press Send Help (LongshotLauncher's crash window, which runs nx2/crash_report.py).
 
    The window is another process: a broken heap, a lost GPU or a stuck thread in this one cannot take it down. And this
    one does as little as it can: the command is made at startup (hos_crash_window_init), so the handler allocates nothing
@@ -9,14 +9,16 @@
      Windows: CreateProcessW, detached, as the unhandled exception filter may;
      Linux: vfork and execve (report_crash runs in the signal handler there: fork would run glibc's fork handlers, which
      take malloc's lock, and a crash inside malloc would hang on it). The window's output goes to /dev/null, not into the
-     log the report reads.
-   If the window doesn't start (the builder moved, the process was killed before), the marker stays, and the builder offers
-   the report at the next --play or --launch.
+     log the report reads. The child also clears its signal mask (the crash's signal is blocked in the handler, and
+     execve keeps the mask: the window, and a game it starts with Play, would die on a fault with no handler run) and
+     closes the game's other files (the log, sockets, the GPU device: the window outlives the game).
+   If the window doesn't start (the launcher moved, the process was killed before), the marker stays, and the launcher
+   offers the report at its next start.
 
-   The builder is longshot_version.txt's builder= (and builder_args=, the Python builder's start script, on Windows), as the
-   game folder's launcher finds it (nx2/make_game.py writes them). Nothing happens with crash_reports=0 in
-   longshot_options.ini, LONGSHOT_NO_CRASH_WINDOW=1 (test runs, benchmarks), or no builder= line (a folder built from a
-   checkout without LONGSHOT_BUILDER_EXE). */
+   The launcher is longshot_version.txt's builder= (and builder_args=, when a builder needs arguments before --crash), as
+   nx2/make_game.py writes it from LONGSHOT_BUILDER_EXE: the launcher that built the folder. Nothing happens with
+   crash_reports=0 in longshot_options.ini, LONGSHOT_NO_CRASH_WINDOW=1 (test runs, benchmarks), or no builder= line (a
+   folder built from a checkout without LONGSHOT_BUILDER_EXE). */
 #include "hos_paths.h"   /* (first: hos_game_path_a, and windows.h on Windows) */
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,8 @@ static wchar_t marker_w[CW_PATH];
 static wchar_t command_w[CW_PATH * 3];   /* (CreateProcessW may write into it) */
 #else
 #include <fcntl.h>
+#include <signal.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #define CW_SEP '/'
 extern char **environ;
@@ -90,7 +94,7 @@ void hos_crash_window_init_in(const char *folder) {
     char exe[CW_PATH], args[CW_PATH];
     version_value(folder, "builder=", exe, sizeof exe);
     if (!exe[0]) {
-        hos_log("crash window: no builder= in longshot_version.txt: a crash is offered at the next launch instead");
+        hos_log("crash window: no builder= in longshot_version.txt: a crash is offered at the launcher's next start instead");
         return;
     }
     version_value(folder, "builder_args=", args, sizeof args);
@@ -105,7 +109,7 @@ void hos_crash_window_init_in(const char *folder) {
         !MultiByteToWideChar(CP_UTF8, 0, marker, -1, marker_w, (int)(sizeof marker_w / sizeof *marker_w)))
         return;
 #else
-    (void)args;   /* (the AppImage takes --crash itself) */
+    (void)args;   /* (the launcher's AppImage takes --crash itself) */
     if (strlen(exe) >= sizeof builder || strlen(folder) >= sizeof folder_arg) return;
     strcpy(builder, exe);
     strcpy(folder_arg, folder);
@@ -173,6 +177,13 @@ void hos_crash_window_open(void) {
         setsid();   /* (its own session: it outlives this process, and a terminal's Ctrl+C doesn't reach it) */
         const int null = open("/dev/null", O_RDWR);
         if (null >= 0) dup2(null, 0), dup2(null, 1), dup2(null, 2);
+        sigset_t none;   /* (sigprocmask and close are async-signal-safe; close_range is one system call, Linux 5.9) */
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
+#ifdef SYS_close_range
+        if (syscall(SYS_close_range, 3u, ~0u, 0u) != 0)
+#endif
+            for (int fd = 3; fd < 4096; fd++) close(fd);
         execve(builder, window_argv, environ);
         _exit(127);
     }

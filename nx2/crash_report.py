@@ -1,5 +1,6 @@
-"""A crash report from a game folder, for the crash window (docs/crash-report-window.md): what the builders show the player
-after a crash, and send only when they press Send Help. No UI here: the Linux and Windows builders and the tests share it.
+"""A crash report from a game folder, for the crash window (docs/crash-report-window.md): what the Longshot Launcher shows
+the player after a crash, and sends only when they press Send Help. No UI here: the launcher (LongshotLauncher's crash
+window) runs this file with --window and --send --json, and the tests import it.
 
 The report is built from what is on disk, never from the crashed process:
 
@@ -19,6 +20,18 @@ the hardware hashes, anything else from the game folder, and the user's name in 
 
     python -I nx2/crash_report.py <game folder>          prints the report the window would show, sends nothing
     python -I nx2/crash_report.py <game folder> --send   sends it (a test: the window is the way players send)
+
+For the launcher's window, one JSON object on stdout, nothing sent:
+    python -I nx2/crash_report.py <game folder> --window
+        {"crash": false} with no crash waiting; else {"crash": true, "time": the marker's time=, "report": the report,
+        "rows": the card's [name, value, show], "settings": and "log": the Show texts, "issue_place", "issue_number",
+        "always_send"}
+and, after Send Help (or with Always send), the send's answer:
+    python -I nx2/crash_report.py <game folder> --send --json [--time <the --window's time>]
+        {"sent": true|false, "said": why (not sent) or the comment's link, "link": where the Sent page's link goes,
+        "kept": whether the report is kept for next time}; the marker is dropped when it isn't kept (only that crash's
+        with --time). The send is its own process: a window closed while it runs leaves it to finish, and the report
+        is kept unless it was sent or refused.
 """
 import configparser
 import json
@@ -38,7 +51,7 @@ ADDRESSES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "addresses.
 def address(key, path=ADDRESSES):
     """A service's address from nx2/addresses.ini (kept out of the code, to edit in one place); "" when it isn't there"""
     ini = configparser.ConfigParser(interpolation=None)
-    try:   # (utf-8-sig: an editor's BOM; a file that doesn't parse turns the uses off, it never stops the builders)
+    try:   # (utf-8-sig: an editor's BOM; a file that doesn't parse turns the uses off, it never stops the launcher)
         ini.read(path, encoding="utf-8-sig")
         return ini.get("addresses", key, fallback="").strip()
     except (configparser.Error, UnicodeDecodeError):
@@ -85,8 +98,12 @@ RELEASE_VERSION = re.compile(r"^v?\d+\.\d+\.\d+(?:-rc\.\d+)?$|^nightly-\d+-[0-9a
 SETTING = re.compile(r"^([a-z0-9_]+)=(-?\d+|\d+x\d+|\d+,\d+)$")
 NOT_SENT = re.compile(r"^(key_|pad_)|^(microphone_device|auto_for|auto_tuned)$")
 
-HOMES = [(re.compile(r"/home/[^/\s]+"), "~"), (re.compile(r"/var/home/[^/\s]+"), "~"), (re.compile(r"/Users/[^/\s]+"), "~"),
-         (re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s]+", re.I), "%USERPROFILE%")]
+# (most specific first: /var/home/<name> before /home/<name>, and a drive's \home\<name> before either matches its tail)
+HOMES = [  # (Wine and Proton: the Linux side through a drive, Z:\home\<name>\Games\Longshot, while the prefix's own home
+         # is C:\users\steamuser)
+         (re.compile(r"[A-Za-z]:[\\/]+(?:var[\\/]+)?home[\\/]+[^\\/\s]+", re.I), "~"),
+         (re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s]+", re.I), "%USERPROFILE%"),
+         (re.compile(r"/var/home/[^/\s]+"), "~"), (re.compile(r"/home/[^/\s]+"), "~"), (re.compile(r"/Users/[^/\s]+"), "~")]
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
@@ -392,7 +409,7 @@ def summary(report):
 
 
 def card(report, rows):
-    """The window's "What the report holds" rows, the same in both builders: (name, value, what Show opens: None,
+    """The window's "What the report holds" rows: (name, value, what Show opens: None,
     "settings" or "log"). rows are settings()'s."""
     changed = sum(1 for _k, _v, c in rows if c)
     return [("Version", report["version"], None),
@@ -471,16 +488,44 @@ def send(report, url=ENDPOINT, timeout=10):
             type(e).__name__), True
 
 
+def window(folder):
+    """--window: what the launcher's crash window shows, nothing sent"""
+    found = pending(folder)
+    if not found:
+        return {"crash": False}
+    report = build(folder, found[1])
+    rows = settings(folder)
+    return {"crash": True, "time": marker_time(folder), "report": report, "rows": [list(r) for r in card(report, rows)],
+            "settings": settings_text(rows), "log": log_text(report), "issue_place": issue_place(),
+            "issue_number": issue_number(), "always_send": always_send(folder)}
+
+
+def send_json(folder, when=None):
+    """--send --json: the window's send, in its own process"""
+    found = pending(folder)
+    if not found:
+        return {"sent": False, "said": "There is no crash report waiting.", "link": "", "kept": False}
+    ok, said, keep = send(build(folder, found[1]))
+    if not keep:
+        clear(folder, when)
+    return {"sent": ok, "said": said, "link": comment_link(said) if ok else "", "kept": keep}
+
+
 def main():
-    folder = next((a for a in sys.argv[1:] if not a.startswith("--")), None)
+    args = sys.argv[1:]
+    when = args[args.index("--time") + 1] if "--time" in args[:-1] else None
+    folder = next((a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] != "--time")), None)
     if not folder:
         sys.exit(__doc__)
+    if "--window" in args or "--json" in args:   # (one line of JSON for the launcher; ensure_ascii: whatever its console)
+        print(json.dumps(send_json(folder, when) if "--send" in args else window(folder)))
+        return
     found = pending(folder)
     if not found:
         sys.exit("no crash waiting in %s (%s)" % (folder, MARKER))
     report = build(folder, found[1])
     print(json.dumps(report, indent=2))
-    if "--send" in sys.argv[1:]:
+    if "--send" in args:
         ok, said, keep = send(report)
         print(("sent: " if ok else "not sent: ") + said)
         if not keep:

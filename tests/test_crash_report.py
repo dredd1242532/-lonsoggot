@@ -3,7 +3,7 @@ in a made-up home, no game:
 
   - the report holds exactly the relay's fields, each within the relay's limits, and the whole stays under its 128 KiB;
   - nothing from the game's memory: no register row, no memory row of the crash;
-  - no home folder and no user name in any field (~, %USERPROFILE%, <user>), on Linux and Windows paths;
+  - no home folder and no user name in any field (~, %USERPROFILE%, <user>), on Linux and Windows paths and Wine's Z:;
   - the settings: every one, defaults included, the changed ones first; never the bindings, the microphone's name, the
     hardware hashes or lines the game doesn't write itself; within 4000 characters with every row at its longest;
   - the release flag: true only for a release's version built from the release's own sources (the fingerprint in
@@ -15,7 +15,8 @@ in a made-up home, no game:
     lines; a user name word is redacted only as written (alice, not Alice in "Alice's");
   - a marker cut short or with a bad time is still a marker; an answer from the server that can't be read keeps the report;
   - the addresses come from nx2/addresses.ini (none in the code), and with none set nothing is sent and the report kept;
-  - the window's rows (card), the settings' and the log's Show text: the same for the Tk and the Qt builders;
+  - the window's rows (card), the settings' and the log's Show text, and what the launcher's crash window reads: --window's
+    JSON (nothing sent), and --send --json's answer, which drops the marker only when the report isn't kept;
   - the report passes the relay's checks (Bean-Ops deploy/crash-relay/crash_relay.py parse, mirrored here: the version's
     characters, the CRASH: exception line with a module+offset place).
 
@@ -24,6 +25,7 @@ python -I -B tests/test_crash_report.py
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -153,6 +155,11 @@ class CrashReportTest(unittest.TestCase):
         self.assertIn("/run/media/<user>/Games", text)
         self.assertEqual(cr.redact(r"C:\Users\Bob\AppData\Roaming\Longshot", home="", user=""), r"%USERPROFILE%\AppData\Roaming\Longshot")
         self.assertEqual(cr.redact("/Users/carol/Library", home="", user=""), "~/Library")
+        self.assertEqual(cr.redact("/var/home/dan/Games", home="", user=""), "~/Games")
+        # (Wine and Proton: the game folder on the Linux side through Z:, while the prefix's home is steamuser's)
+        self.assertEqual(cr.redact(r"Z:\home\gabriel\Games\Longshot\bin", home="C:\\Users\\steamuser", user="steamuser"),
+                         r"~\Games\Longshot\bin")
+        self.assertEqual(cr.redact("z:/var/home/gabriel/Games", home="C:\\Users\\steamuser", user="steamuser"), "~/Games")
         # (a user name anywhere as a word of its own, as in a temporary folder named after the home: not inside a word)
         self.assertEqual(cr.redact("/tmp/x-1000/-home-alice-Desktop/tools/longshot", home=HOME, user="alice"),
                          "/tmp/x-1000/-home-<user>-Desktop/tools/longshot")
@@ -347,7 +354,7 @@ class CrashReportTest(unittest.TestCase):
                      "audio in: Bob's Blue Yeti not found: no such device, tried again from time to time"):
             self.assertNotIn("Yeti", cr.clean("[hos audio] " + line, cr.LINE_LIMIT), line)
 
-    def test_addresses_ini_with_a_bom_or_broken_never_stops_the_builders(self):
+    def test_addresses_ini_with_a_bom_or_broken_never_stops_the_launcher(self):
         good = Path(cr.ADDRESSES).read_bytes()
         with tempfile.TemporaryDirectory() as tmp:
             ini = Path(tmp, "addresses.ini")
@@ -382,6 +389,48 @@ class CrashReportTest(unittest.TestCase):
         log = cr.log_text(r)
         self.assertTrue(log.startswith(r["crash"][0]))
         self.assertIn("--- the %d log lines before it ---" % len(r["log_tail"]), log)
+
+    def run_cli(self, *args):
+        out = subprocess.run([sys.executable, "-I", str(ROOT / "nx2" / "crash_report.py"), *args], capture_output=True,
+                             text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(len(out.stdout.splitlines()), 1, "one line of JSON")
+        return json.loads(out.stdout)
+
+    def test_the_launchers_window_reads_one_json_line_and_nothing_is_sent(self):
+        f = self.make()
+        w = self.run_cli(f.path, "--window")
+        self.assertTrue(w["crash"])
+        self.assertEqual(set(w), {"crash", "time", "report", "rows", "settings", "log", "issue_place", "issue_number",
+                                  "always_send"})
+        self.assertEqual(w["time"], cr.marker_time(f.path))
+        self.assertEqual([r[0] for r in w["rows"]][:2], ["Version", "Release build"])
+        self.assertFalse(w["always_send"])
+        self.assertTrue(Path(f.path, cr.MARKER).exists(), "--window sends nothing and keeps the marker")
+        Path(f.path, cr.MARKER).unlink()
+        self.assertEqual(self.run_cli(f.path, "--window"), {"crash": False})
+
+    def test_the_launchers_send_answers_in_json_and_keeps_what_it_should(self):
+        f = self.make()
+        sent = []
+        real = cr.send
+        try:
+            for answer, kept in (((False, "Couldn't reach", True), True), ((False, "refused (400)", False), False)):
+                Path(f.path, cr.MARKER).write_text("log=longshot_log.txt\ntime=%d\n" % time.time(), encoding="utf-8")
+                cr.send = lambda report, a=answer: sent.append(report) or a
+                out = cr.send_json(f.path, cr.marker_time(f.path))
+                self.assertEqual((out["sent"], out["kept"]), (False, kept))
+                self.assertEqual(Path(f.path, cr.MARKER).exists(), kept)
+            Path(f.path, cr.MARKER).write_text("log=longshot_log.txt\ntime=%d\n" % time.time(), encoding="utf-8")
+            cr.send = lambda report: (True, cr.ISSUE_URL + "#issuecomment-12", False)
+            out = cr.send_json(f.path, "1")   # (another crash's time: this marker is a later crash's, and stays)
+            self.assertEqual((out["sent"], out["link"]), (True, cr.ISSUE_URL + "#issuecomment-12"))
+            self.assertTrue(Path(f.path, cr.MARKER).exists())
+        finally:
+            cr.send = real
+        self.assertEqual(len(sent), 2)
+        # (the command line itself, against no server: nx2/addresses.ini's relay isn't reached from a test)
+        self.assertEqual(self.run_cli(f.path, "--window")["crash"], True)
 
     def test_the_addresses_are_in_addresses_ini(self):
         self.assertTrue(cr.ENDPOINT.startswith("https://") and cr.ENDPOINT.endswith("/crash"))

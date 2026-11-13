@@ -6,6 +6,7 @@ stand-in builder, no game:
   - once per process: a second crash starts no second window;
   - nothing at all with crash_reports=0, LONGSHOT_NO_CRASH_WINDOW on (env_on: 0, false, off and no are off) or no builder= line (no marker either: the next
     launch has nothing to offer from a window that was turned off);
+  - the window starts with no signal blocked (the crash's is, in the handler) and none of the game's files;
   - the wiring: report_crash opens it after the log is flushed, and the game's start makes the command once the log is
     open.
 
@@ -15,6 +16,7 @@ import argparse
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -28,6 +30,8 @@ RUN_ALL_SKIP = {"windows": "the Linux spawn (vfork, execve): the Windows one is 
 ROOT = Path(__file__).resolve().parents[1]
 
 DRIVER = r"""
+#include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +51,15 @@ void hos_log(const char *fmt, ...) {
 int main(int argc, char **argv) {
     hos_crash_window_init_in(argv[1]);
     (void)argc;
+    /* (as in the game's crash handler: the crash's signal blocked (on_driver_fault has no SA_NODEFER), and a file of the
+       game's open without O_CLOEXEC) */
+    sigset_t segv;
+    sigemptyset(&segv);
+    sigaddset(&segv, SIGSEGV);
+    sigprocmask(SIG_BLOCK, &segv, NULL);
+    char leak[4096];
+    snprintf(leak, sizeof leak, "%s/the game's file", argv[1]);
+    if (open(leak, O_WRONLY | O_CREAT, 0644) < 0) return 2;
     for (int i = 0; i < atoi(argv[2]); i++) hos_crash_window_open();
     return 0;
 }
@@ -54,7 +67,10 @@ int main(int argc, char **argv) {
 
 # (the stand-in builder: what it was started with, and whether its output reached anyone)
 BUILDER = """#!/bin/sh
-printf '%s\\n' "$@" > "$(dirname "$0")/started.txt"
+d="$(dirname "$0")"
+grep '^SigBlk:' /proc/$$/status > "$d/mask.txt"
+ls -l /proc/$$/fd | grep -c "the game's file" > "$d/files.txt"
+printf '%s\\n' "$@" > "$d/started.txt"
 echo "builder output"
 """
 
@@ -133,6 +149,11 @@ def main():
         m = re.fullmatch(r"log=longshot_log\.txt\ntime=(\d+)\n", marker)
         check(m is not None and before - 2 <= int(m.group(1)) <= time.time() + 2, "crash_pending.txt: the log and the time")
         check("builder output" not in out, "the builder's output is not the game's")
+        mask = (f / "tools" / "mask.txt").read_text().split()
+        # (SIGSEGV's bit, 1 << (11 - 1): the stand-in's shell blocks SIGCHLD itself while it runs grep)
+        check(len(mask) == 2 and not int(mask[1], 16) & 1 << (signal.SIGSEGV - 1),
+              "the window starts with the crash's signal unblocked (%s)" % " ".join(mask))
+        check((f / "tools" / "files.txt").read_text().strip() == "0", "the game's files aren't passed to the window")
         check("crash window: on a crash" in out, "the game's log says where the window comes from")
         time.sleep(0.5)
         check(len(list(f.glob("tools/started*"))) == 1, "once per process")
