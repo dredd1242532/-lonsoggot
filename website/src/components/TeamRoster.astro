@@ -13,7 +13,7 @@ const rosterSource = siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'w
   </section>
   <section aria-labelledby="roster-title" class="team-roster">
     <div class="team-section-heading"><h2 id="roster-title">Meet the beans</h2><span>{members.length} {members.length === 1 ? 'profile' : 'profiles'}</span></div>
-    <p class="team-note">Faces from Git. Beans at heart.</p>
+    <p class="team-note">Beans, beans, they’re good for your heart.</p>
     <ul class="team-grid" role="list">
       {members.map(member => <li class="team-card">
         <div class="team-card-top"><span class="team-avatar" aria-hidden="true"><span class="team-initial">{member.initial}</span>{member.avatar && <img data-team-avatar src={member.avatar} alt="" width="72" height="72" loading="lazy" decoding="async" referrerpolicy="no-referrer" />}</span><span class="team-host">{member.host}</span></div>
