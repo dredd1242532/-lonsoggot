@@ -34,15 +34,23 @@ public:
     }
 
     size_t size() const { return count_; }
+    size_t capacity() const { return slots_.size(); }
 
     void clear() {
-        if (!count_) return;
-        count_ = 0;
-        if (slots_.size() > kKeptSlots) {   // (a cache cleared at its size limit: its memory goes back too)
+        if (count_ && slots_.size() > kKeptSlots) {   // (a cache cleared at its size limit: its memory goes back too)
+            count_ = 0;
             std::vector<Slot>().swap(slots_);
             mask_ = 0, shift_ = 64;
             return;
         }
+        reset();
+    }
+
+    /// Empty, the array kept whatever its size: for a map emptied often that fills again to about the same size
+    /// (RecordingRes::c1_at, at every recording's start), so it isn't given back and grown again from 16 each time
+    void reset() {
+        if (!count_) return;
+        count_ = 0;
         for (Slot& s : slots_)
             if (s.used) s = Slot{};
     }

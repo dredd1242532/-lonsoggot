@@ -148,7 +148,7 @@ void map_against_std(std::mt19937_64& r, uint64_t (*key)(std::mt19937_64&), Make
         }
         }
         if (a.size() > cap) a.clear();
-        if (b.size() > cap) b.clear();
+        if (b.size() > cap) (i & 1 ? b.clear() : b.reset());   // (either empties it: reset keeps the array)
         same_maps(a, b, k, __LINE__);
     }
     if (a.size() != b.size()) { fprintf(stderr, "sizes differ\n"); exit(1); }
@@ -164,6 +164,20 @@ uint64_t dense_key(std::mt19937_64& r) { return r() % 2 ? r() % 64 : (r() % 64) 
 
 int main() {
     std::mt19937_64 r(2107);
+    {   // (clear gives a big array back; reset, as c1_at's at every recording's start, keeps it and empties it)
+        FlatMap<uintptr_t, int> m;
+        for (uintptr_t i = 1; i <= 10000; i++) m[i << 8] = (int)i;
+        const size_t big = m.capacity();
+        m.reset();
+        if (m.size() || m.capacity() != big || m.find(5 << 8)) { fprintf(stderr, "reset did not empty and keep\n"); return 1; }
+        for (uintptr_t i = 1; i <= 10000; i++) m[i << 8] = (int)i + 1;
+        if (m.capacity() != big || m.find(77 << 8)->second != 78) { fprintf(stderr, "refilled after reset: wrong\n"); return 1; }
+        m.clear();
+        if (m.size() || m.capacity() || m.find(5 << 8)) { fprintf(stderr, "clear kept a big array\n"); return 1; }
+        m[3] = 4;
+        m.clear();
+        if (m.capacity() != 16) { fprintf(stderr, "clear gave a small array back\n"); return 1; }
+    }
     map_against_std<uint64_t>(r, texture_key, [](std::mt19937_64& g) { return g(); }, 2048, 400000);
     map_against_std<uint64_t>(r, hash_key, [](std::mt19937_64& g) { return g(); }, 1 << 30, 200000);
     map_against_std<std::pair<uint32_t, uint8_t>>(r, slot_key, [](std::mt19937_64& g) {
@@ -238,6 +252,8 @@ def harness():
             raise SystemExit(f"vk_draw.cpp: {decl} is gone")
     if "thread_local FlatMap<uint64_t, Pick> picks;" not in shader:
         raise SystemExit("vk_shader.cpp: picks is no longer a FlatMap")
+    if "r.c1_at.reset();" not in draw or "r.c1_at.clear();" in draw:
+        raise SystemExit("vk_draw.cpp: c1_at is emptied at each recording's start with reset (its array kept), not clear")
     body = "VkFormat last_view_format = VK_FORMAT_UNDEFINED;\n" + hits + view_of
     old = "namespace old_impl {\ntemplate <class K, class V> using FlatMap = std::unordered_map<K, V>;\n" + body + "}\n"
     new = "namespace new_impl {\n" + body + "}\n"
