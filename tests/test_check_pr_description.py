@@ -4,9 +4,9 @@ measurements; the checklist is kept whole: an unticked or deleted For everyone b
 checklist at all fails, while If applicable boxes (the AI trailers among them) may stay unticked; Testing has its
 three parts (Tested, Not tested, Needs other testers), filled in, each tester line with its test request or "request to
 open" (a warning, and pr ready's refusal), and naming something the Measurements say was measured as untested is a
-warning; Measurements' columns must name main and this PR with their commits, never a bare Before and After; a
-Flags and settings table or "None" is required, and a switch the diff adds must be listed; a menu change with no flags
-and a rebase since the measurements are warnings; a work-in-progress PR (WIP: or [WIP], as Forgejo reads them) passes
+warning; Measurements' columns must name main and this PR with their commits, never a bare Before and After; the
+Flags and settings note is never a gate: missing, empty, a row missing a cell, a switch the diff adds that it doesn't
+list and a menu change with no flags are warnings, like a rebase since the measurements; a work-in-progress PR (WIP: or [WIP], as Forgejo reads them) passes
 with a notice; and the workflow runs the script on Forgejo's events.
 
 python -I -B tests/test_check_pr_description.py
@@ -105,7 +105,7 @@ class Check(unittest.TestCase):
         lists = check.sections(check.sections(TEMPLATE)["Checklist"], "###")
         self.assertNotIn("Assisted-by", lists["For everyone"])
         self.assertIn("Assisted-by", lists["If applicable"])
-        self.assertIn("Flags table filled in", lists["If applicable"])
+        self.assertIn("Flags noted, and the switch reference updated", lists["If applicable"])
 
     def test_an_unticked_or_deleted_box_fails(self):
         body = GOOD.replace("- [x] Rebased on current `main`.", "- [ ] Rebased on current `main`.")
@@ -178,21 +178,40 @@ class Check(unittest.TestCase):
         self.assertEqual(check.problems(section(filled(), "Measurements", example_measurements().replace(
             "Baseline: nightly @ 55b976c0 (last nightly before #2602)\n", ""))), [unsaid])
 
-    def test_flags(self):
-        self.assertEqual(check.problems(section(GOOD, "Flags and settings", "None.")), [])
-        self.assertEqual(check.problems(section(GOOD, "Flags and settings", "Some, see the code.")),
+    def test_flags_is_a_note_never_a_gate(self):
+        def review(body, diff=None):
+            found, warnings = check.review(body, diff=diff)
+            self.assertEqual(found, [], "the Flags note never fails the check")
+            return warnings
+        self.assertEqual(review(section(GOOD, "Flags and settings", "None.")), [])
+        self.assertEqual(review(section(GOOD, "Flags and settings", "Some, see the code.")),
                          ["## Flags and settings has neither a filled-in row nor 'None'"])
-        empty_cell = GOOD.replace("| Unset | No: a testing switch |", "| Unset | |")
-        self.assertEqual(check.problems(empty_cell), [
-            "## Flags and settings: '`RX_VK_MENU_FONT_SCALE`' has no 'Goal: on by default?' (write '-' when there is "
+        self.assertEqual(review(section(GOOD, "Flags and settings", "")),
+                         ["## Flags and settings is empty: write None, or a row per flag"])
+        no_flags = GOOD[:GOOD.index("## Flags and settings")] + GOOD[GOOD.index("## Measurements"):]
+        self.assertEqual(review(no_flags), ["no ## Flags and settings: a note on what the PR adds and what you "
+                                            "recommend, or None"])
+        self.assertEqual(review(no_flags, diff=DIFF), ["no ## Flags and settings (the diff adds RX_VK_NEW_THING): a "
+                                                       "note on what the PR adds and what you recommend, or None"])
+        template_flags = check.sections(TEMPLATE)["Flags and settings"]
+        self.assertEqual(review(section(GOOD, "Flags and settings", check.without_comments(template_flags).strip())),
+                         ["## Flags and settings still holds the template's placeholders: <flag>"])
+        empty_cell = GOOD.replace("| Unset | Off by default: a testing switch |", "| Unset | |")
+        self.assertEqual(review(empty_cell), [
+            "## Flags and settings: '`RX_VK_MENU_FONT_SCALE` (new)' has no 'Recommendation' (write '-' when there is "
             "nothing)"])
-        self.assertEqual(check.problems(GOOD.replace("| Ultrawide 3440x1440 |", "| |")), [], "the last column is optional")
-        # (a switch the diff adds must be listed; one only moved, or only in the docs, is not new)
+        # (a switch the diff adds and the note doesn't list; one only moved, or only in the docs, is not new)
         self.assertEqual(check.diff_changes(DIFF)[0], ["RX_VK_NEW_THING"])
-        self.assertEqual(check.problems(GOOD, diff=DIFF),
+        self.assertEqual(review(GOOD, diff=DIFF), ["the diff adds RX_VK_NEW_THING, which ## Flags and settings does "
+                                                   "not list"])
+        self.assertEqual(review(section(GOOD, "Flags and settings", "None"), diff=DIFF),
                          ["the diff adds RX_VK_NEW_THING, which ## Flags and settings does not list"])
-        self.assertEqual(check.problems(section(GOOD, "Flags and settings", "None"), diff=DIFF),
-                         ["the diff adds RX_VK_NEW_THING, which ## Flags and settings does not list"])
+
+    def test_the_flags_columns(self):
+        header = check.tables(check.sections(TEMPLATE)["Flags and settings"])[0][0]
+        self.assertEqual(header, ["Flag", "What it does", "Default now", "Recommendation", "Helps on", "Doesn't help on",
+                                  "Untested on"])
+        self.assertIn("on by default / off by default / on after more testing", " ".join(TEMPLATE.split()))
 
     def test_warnings(self):
         none = section(GOOD, "Flags and settings", "None")
@@ -234,8 +253,8 @@ class Check(unittest.TestCase):
             self.assertEqual(check.main(["--file", str(tmp)]), 0)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(check.main(["--file", str(tmp), "--diff", str(diff)]), 1)
-        self.assertIn("::error::the diff adds RX_VK_NEW_THING", out.getvalue())
+            self.assertEqual(check.main(["--file", str(tmp), "--diff", str(diff)]), 0)
+        self.assertIn("::warning::the diff adds RX_VK_NEW_THING", out.getvalue())
 
     def test_the_workflow(self):
         wf = (ROOT / ".forgejo" / "workflows" / "pr-description.yml").read_text(encoding="utf-8")

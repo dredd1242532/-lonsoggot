@@ -40,8 +40,8 @@ requests): a title starting with "WIP: ", Forgejo's draft mark. pr create opens 
 from .forgejo/pull_request_template.md when no --body or --body-file is given; --ready opens it ready, when the
 description is complete already; it fills in the commits the Measurements name (main's: the merge base; this PR's:
 the branch's head). pr ready takes WIP: off after the same check as the PR description workflow
-(check_pr_description.py: every section filled in, the measurements named by commit, the Flags table, every For
-everyone box ticked), and refuses when it fails
+(check_pr_description.py: every section filled in, the measurements named by commit, every For everyone box
+ticked; the Flags note only warns), and refuses when it fails
 (--force goes on with a warning); pr wip puts it back. The description is the PR as it is now, the comments its
 history: pr update edits the description and posts a comment saying what changed in one step.
 """
@@ -452,8 +452,8 @@ def cmd_pr_status(args):
         else " (it is marked ready: pr wip %d if it needs more work)" % pr["number"])))
     for f in found:
         print("  - " + f)
-    for w in warnings:
-        print("  warning: " + w)
+    for w in warnings:   # (the Flags and settings note is never a gate: what it leaves out is a note)
+        print("  %s: %s" % ("note" if "Flags and settings" in w else "warning", w))
     parts = desc.testing_parts(desc.sections(desc.without_comments(body)).get("Testing", ""))
     needs = parts.get("Needs other testers", "").strip()
     if not parts:

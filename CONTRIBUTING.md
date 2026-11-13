@@ -266,6 +266,9 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 
 ## Commits and pull requests
 
+Every pull request uses the [pull request template](.forgejo/pull_request_template.md): its sections are the
+description, its checklist stays whole, and `forge.py pr ready` checks it before review.
+
 Longshot's `main` takes reviewed pull requests only. You work on a branch, push it to your fork and open the pull
 request from there. Set up pushing once: `python -I scripts/forge.py fork` makes your fork and the remote
 `forge-fork` (`pr create` does it too if you haven't).
@@ -281,16 +284,17 @@ python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missi
 1. Name the branch for the change: `fix/...`, `linux/...`, `builder/...`, `docs/...`. One topic per pull request: a fix
    doesn't carry a refactor, and two unrelated fixes are two PRs.
 2. Write the title as a Conventional Commit ([below](#pull-request-titles)).
-3. Fill in the description from [the template](.forgejo/pull_request_template.md): the web page puts it in the box,
+3. Fill in the description from [the pull request template](.forgejo/pull_request_template.md): the web page puts it in the box,
    and `forge.py pr create` starts from it when you give no `--body-file`, with the commits filled in. Each heading
    says in a line what a good answer looks like:
    - **Why**: the problem or goal a player would notice, in one or two sentences ("The menu's text is cut off at 4K");
    - **What changed**: bullets by area, with the files and functions a reviewer should read;
-   - **Flags and settings**: a row per switch, menu row, ini key or build flag added or changed (what it does, its
-     default, whether it should be on by default, where it helps and where it is untested), or "None";
+   - **Flags and settings**: a note for reviewers and testers, not a gate: a row per switch, menu row, ini key or
+     build flag added or changed (what it does, its default, your recommendation: on by default, off by default or
+     on after more testing, with why; where it helps, where it doesn't and where it is untested), or "None";
    - **Measurements**: `main` and this PR, each at its commit, the hardware, the scene, the method, how to reproduce
      it, the table and the log lines ([what counts](#measurements));
-   - **Testing**, in three parts: **Tested** (what you ran and checked, where and how, including what you checked
+   - **Testing** (the [template](.forgejo/pull_request_template.md)'s section), in three parts: **Tested** (what you ran and checked, where and how, including what you checked
      but didn't measure), **Not tested** (what the PR could affect that nobody has run yet, and why) and **Needs other
      testers** (a line per thing you can't test yourself: what to check, the result expected, and its
      [test request](docs/test-requests.md); "None" if you covered everything). The PR goes ready only once those test
@@ -320,7 +324,8 @@ follow up from the command line ([docs/forge.md](docs/forge.md)).
 
 ### Measurements
 
-Every pull request shows its effect with numbers or proof, `main` against this PR:
+Every pull request shows its effect with numbers or proof, `main` against this PR, in the Measurements section of
+the [pull request template](.forgejo/pull_request_template.md):
 
 | Change | What counts as its measurement |
 |---|---|

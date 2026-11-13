@@ -1,12 +1,10 @@
 """Check a pull request's description against the template (.forgejo/pull_request_template.md, CONTRIBUTING.md
 "Commits and pull requests"):
 
-  - Why, What changed, Flags and settings, Measurements, Testing and Risk and rollback there, filled in, none of the
-    template's <...> stand-ins left;
+  - Why, What changed, Measurements, Testing and Risk and rollback there, filled in, none of the template's <...>
+    stand-ins left;
   - Testing: its three parts, Tested, Not tested and Needs other testers, each filled in; Needs other testers is
     "None", or a line per thing with its test request (a T-XXXX id or a link) or "request to open";
-  - Flags and settings: "None", or a table with a filled-in row per flag; every RX_*, HOS_* or LONGSHOT_* name the
-    diff adds is listed there;
   - Measurements: a table whose columns each name what they measured with its hash, never a bare Before and After:
     one the change ("this PR @ <hash>", or a named build that carries it), one the baseline ("main @ <hash>", or a
     named build). main against this PR needs nothing more; anything else says which column is the baseline in a
@@ -15,8 +13,10 @@
   - the whole checklist kept: every box of "For everyone" there and ticked, and the "If applicable" list there (its
     boxes may stay unticked, or say n/a).
 
-Warnings, which do not fail it: a diff that changes the menu's code while Flags and settings says None, a PR rebased
-onto a newer main than the one measured, Not tested or Needs other testers naming something the Measurements say was
+Warnings, which do not fail it: Flags and settings, a note on what the PR adds and the author's recommendation, never
+a gate (missing, empty or with the template's stand-ins; a row missing a cell; an RX_*, HOS_* or LONGSHOT_* name the
+diff adds that isn't listed; a change to the menu's code while it says None), a PR rebased onto a newer main than the
+one measured, Not tested or Needs other testers naming something the Measurements say was
 measured, and a test request still to open (forge.py pr ready refuses that one: the PR goes ready once they are open).
 
 A pull request still in work in progress (a title starting with WIP: or [WIP], Forgejo's draft mark, or the API's
@@ -44,7 +44,7 @@ TEMPLATE = Path(__file__).resolve().parents[1] / ".forgejo" / "pull_request_temp
 WIP_PREFIXES = ("WIP:", "[WIP]")
 NEEDS_MEASUREMENTS = "needs measurements"   # (the label of a PR sent back to WIP for its measurements)
 # The sections a description fills in; Screenshots, Reviewer notes and Issues may stay empty.
-REQUIRED = ("Why", "What changed", "Flags and settings", "Measurements", "Testing", "Risk and rollback")
+REQUIRED = ("Why", "What changed", "Measurements", "Testing", "Risk and rollback")
 FLAGS = "Flags and settings"
 TESTING_PARTS = ("Tested", "Not tested", "Needs other testers")
 # A part of Testing: "**Tested:** ...", "Tested: ..." or a "### Tested" heading ("Tested but not measured: ..." is a
@@ -191,7 +191,8 @@ def measurement_problems(text):
     return out
 
 
-def flags_problems(text, switches):
+def flags_notes(text, switches):
+    """What the Flags and settings note leaves out: warnings only, it is never a gate"""
     out = []
     plain = text.strip()
     rows = []
@@ -201,7 +202,7 @@ def flags_problems(text, switches):
     if not rows and not re.match(r"^none\b", plain, re.I):
         out.append("## Flags and settings has neither a filled-in row nor 'None'")
     for header, r in rows:
-        for i, name in enumerate(header[:-1]):   # (the last column, "Untested, but should help on", is optional)
+        for i, name in enumerate(header):
             if i >= len(r) or not r[i]:
                 out.append("## Flags and settings: '%s' has no '%s' (write '-' when there is nothing)" % (r[0], name))
     listed = text if rows else ""
@@ -310,12 +311,19 @@ def review(body, diff=None, merge_base=None, template=None):
             out.append("## %s is empty" % name)
         elif name == "Measurements":
             out += measurement_problems(text)
-        elif name == FLAGS:
-            out += flags_problems(text, switches)
         elif name == "Testing":
             out += testing_problems(text)
-    if FLAGS not in top and switches:
-        out.append("the diff adds %s, and there is no ## Flags and settings" % ", ".join(switches))
+    flags = top.get(FLAGS)
+    left = sorted(s for s in stand_ins if s in (flags or ""))
+    if flags is None:
+        warn.append("no ## Flags and settings%s: a note on what the PR adds and what you recommend, or None" % (
+            " (the diff adds %s)" % ", ".join(switches) if switches else ""))
+    elif left:
+        warn.append("## Flags and settings still holds the template's placeholders: %s" % ", ".join(left[:3]))
+    elif not flags.strip():
+        warn.append("## Flags and settings is empty: write None, or a row per flag")
+    else:
+        warn += flags_notes(flags, switches)
     lists = sections(top.get("Checklist", ""), "###")
     everyone = lists.get("For everyone")
     if "Checklist" not in top:
@@ -330,7 +338,7 @@ def review(body, diff=None, merge_base=None, template=None):
         out += ["not ticked: " + item for ticked, item in boxes(everyone) if not ticked]
         out += ["missing from For everyone: " + item for _, item in boxes(for_everyone(without_comments(template)) or "")
                 if key(item) not in have]
-    flags = top.get(FLAGS, "").strip()
+    flags = (flags or "").strip()
     if files & set(MENU_CODE) and (not flags or re.match(r"^none\b", flags, re.I)):
         warn.append("the diff changes %s and ## Flags and settings says None: list any menu row or ini key it adds "
                     "or changes" % ", ".join(sorted(files & set(MENU_CODE))))

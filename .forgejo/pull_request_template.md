@@ -18,15 +18,15 @@
 
 ## Flags and settings
 
-<!-- One row per environment variable (RX_VK_*, HOS_*, LONGSHOT_*), menu row or option, ini key, or build or
-     command-line flag this PR adds or changes; "None" instead of the table when there is none. Goal: yes / no /
-     after more testing, with a short reason. The last column is optional. Document each one where its kind is
-     documented: docs/development.md, "Switches for testing and debugging" and "The options file", and the README's
-     option table for a menu row. -->
+<!-- A note for reviewers and testers: what this PR adds or changes (an environment variable such as RX_VK_*, HOS_*
+     or LONGSHOT_*, a menu row or option, an ini key, a build or command-line flag) and what you recommend: on by
+     default / off by default / on after more testing, with a short reason. "None" when there is none. Document each
+     one: docs/development.md, "Switches for testing and debugging" and "The options file"; the README's option table
+     for a menu row. -->
 
-| Flag | New or changed | What it does | Default now | Goal: on by default? | Helps on | Doesn't help on | Untested on | Untested, but should help on |
-|---|---|---|---|---|---|---|---|---|
-| <flag> | | | | | | | | |
+| Flag | What it does | Default now | Recommendation | Helps on | Doesn't help on | Untested on |
+|---|---|---|---|---|---|---|
+| <flag> | | | | | | |
 
 ## Measurements
 
@@ -111,7 +111,7 @@ Fixes #
 ### If applicable
 
 - [ ] AI assistance recorded with `Assisted-by:` / `Co-Authored-By:` trailers.
-- [ ] Flags table filled in; README / docs/development.md switch reference updated.
+- [ ] Flags noted, and the switch reference updated (docs/development.md, the README).
 - [ ] Screenshots for a change that shows on screen.
 - [ ] A row in `docs/tested-configurations.md` for each measured run.
 - [ ] `MKWVK_API_VERSION` bumped (`gpu/vk/vk_api.h`'s `MkwVkHost` or `MkwVkRenderer` changed).

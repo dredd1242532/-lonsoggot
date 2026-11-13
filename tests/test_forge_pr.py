@@ -200,15 +200,14 @@ class PR(unittest.TestCase):
     def test_ready_checks_the_diff_and_warns(self):
         self.forgejo.add(5, "WIP: fix: x", FILLED)["merge_base"] = "0123456789abcdef"
         self.forgejo.diffs[5] = DIFF
+        out = self.run_forge("pr", "status", "5")[1]
+        self.assertIn("  note: the diff adds RX_VK_NEW_THING, which ## Flags and settings does not list", out)
+        self.assertIn("  warning: measured on main 7afe6ae1", out)
         code, _, err = self.run_forge("pr", "ready", "5")
-        self.assertEqual(code, 1)
-        self.assertIn("the diff adds RX_VK_NEW_THING, which ## Flags and settings does not list", err)
+        self.assertEqual(code, 0, err)   # (the Flags note never stops it, nor does a warning)
+        self.assertIn("warning: the diff adds RX_VK_NEW_THING, which ## Flags and settings does not list", err)
         self.assertIn("warning: measured on main 7afe6ae1, but the PR is now on main 01234567", err)
         self.assertIn(("GET", "/repos/MagicBeanDev/Longshot/pulls/5.diff", None), self.forgejo.calls)
-        self.forgejo.diffs[5] = ""
-        code, out, err = self.run_forge("pr", "ready", "5")
-        self.assertEqual(code, 0, err)
-        self.assertIn("warning: measured on main", err, "a warning does not stop it")
 
     def test_ready_waits_for_the_test_requests(self):
         body = FILLED.replace("(T-9MZ4)", "(request to open)")
