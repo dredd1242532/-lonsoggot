@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -218,8 +219,13 @@ class Bump(unittest.TestCase):
         # launcher's first nightlies. With no tag before and no first commit, it is given no range: the whole history)
         self.commit("feat: a")
         stub = self.dir / "git-cliff-stub"
-        stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
-        stub.chmod(0o755)
+        if os.name == "nt":   # (Windows runs no #! script: a .cmd hands its arguments to Python, which prints them)
+            (self.dir / "git-cliff-stub.py").write_text("import sys\nfor a in sys.argv[1:]: print(a)\n", encoding="utf-8")
+            stub = self.dir / "git-cliff-stub.cmd"
+            stub.write_text('@"%s" -I "%s" %%*\n' % (sys.executable, self.dir / "git-cliff-stub.py"), encoding="utf-8")
+        else:
+            stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
+            stub.chmod(0o755)
         with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
             args = release.notes("nightly-2-0123abcd", "launcher", root=str(self.dir)).split()
         self.assertEqual(args[-2:], ["--strip", "all"])
@@ -381,7 +387,7 @@ class Publish(unittest.TestCase):
         notes.write_text("## v3.0.0-rc.1\n")
         a, b = self.dir / "Longshot-v3.0.0-rc.1-x86_64.AppImage", self.dir / "SHA256SUMS"
         a.write_bytes(b"\x7fELF builder")
-        b.write_text("sums\n")
+        b.write_bytes(b"sums\n")
         run("--product", "longshot", "publish", "v3.0.0-rc.1", "--target", "abc", "--notes", notes, a, b)
         rel = FakeForgejo.releases[0]
         self.assertEqual((rel["tag_name"], rel["draft"], rel["prerelease"], rel["name"]), ("v3.0.0-rc.1", False, True, "Longshot v3.0.0-rc.1"))
@@ -531,7 +537,7 @@ class ReleasedAs(unittest.TestCase):
         names = [f % tag if "%s" in f else f for f in files]
         sums = "".join("%s  %s\n" % (hashlib.sha256(n.encode()).hexdigest(), n) for n in sorted(sums_of or names))
         sums_file = self.dir / ("sums-" + tag)
-        sums_file.write_text(sums)
+        sums_file.write_bytes(sums.encode())   # (the bytes served: in text mode Windows would sign "\r\n" lines)
         rid = len(FakeForgejo.releases) + 1
         assets = []
         for name, data in [(n, n.encode()) for n in names] + [("SHA256SUMS", sums.encode())] + \
