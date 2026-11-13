@@ -23,6 +23,7 @@
 #include "vk_antilag.h"   // (AMD Anti-Lag 2: which game frame a set shows, antilag_frame / antilag_present_frame)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation through NGX: dlss_fg_frames)
 #include "vk_reflex.h"   // (NVIDIA Reflex: which game frame a set shows, reflex_frame / reflex_present_frame)
+#include "vk_xr.h"
 #include "vk_fsr3_inputs.h"   // (AMD FSR 3.1 frame interpolation's depth and motion)
 #include "vk_fsr3fi.h"
 #include "vk_menu.h"
@@ -556,9 +557,12 @@ bool framegen_wanted(int menu_value, int allow) {
     return allow && menu_value >= 1;   // (1: Auto)
 }
 
+// (hookshot-quest) not with a headset: the window's presents go no faster than Link's virtual monitor (60 Hz), so made frames
+// took the game's own (4 made a frame at a 240 Hz display: 15 fps), and a picture held back for them reached the headset
+// with another frame's eye
 bool framegen_on() {
     static const int allow = !getenv("RX_VK_FRAMEGEN") || atoi(getenv("RX_VK_FRAMEGEN")) != 0;
-    return framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed;
+    return framegen_wanted(opts.framegen, allow) && !dev.offscreen && !fg.failed && !xr_enabled();
 }
 
 // Ultrawide's menus (the Insert menu's Ultrawide menus): which of nx2/oot_wide.py's keep-list screens keep the whole picture, told

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "vk_fsr3.h"
+#include "vk_xr.h"
 #include "vk_fsr3_inputs.h"
 #include "vk_draw.h"      // (descriptors_disturbed)
 #include "vk_gprof.h"     // (RX_VK_PASS_TIMING: a span per pass, so the report names them)
@@ -781,7 +782,7 @@ bool fail(const char* why) {   // (the network runs: why, when it changes and ev
 
 bool fsr3_chosen() {
     static const int env = env_switch("RX_VK_FSR");
-    if (env == 0) return false;
+    if (env == 0 || xr_no_temporal()) return false;   // (hookshot-quest: not in stereo, as temporal_mode)
     // (the Upscaler row's FSR 3.1, upscaler_rows.h, read each time: the row changes it while the game runs. RX_VK_DLSS=1 / 2
     // or RX_VK_FSR4=1 / 2 goes over the row, its FSR 3.1 too: vk_temporal.cpp's chain draws then)
     return (env > 0 || (opts.dlss == upscaler_rows::FSR3 && !temporal_env_chosen())) && fsr3::supported();

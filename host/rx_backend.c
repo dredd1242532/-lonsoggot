@@ -355,6 +355,42 @@ void rx_close_asked(void) {
     void (*close_asked)(void) = (void (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_close_asked");
     if (close_asked) close_asked();
 }
+/* (hookshot-quest) the gameplay camera seen from the headset's eye for this frame (gpu/vk/vk_xr.cpp mkwvk_xr_view): the game's
+   eye and target in, the view's 3x4 rows (world to camera) out; 0 when no headset shows the game in stereo, or the back end
+   is one without the export */
+/* (phase: 1 the first frame of a pair of one moment, 2 the second, 0 no pairs: host/nn_vi.c realtime_step) */
+int rx_xr_view(const double eye[3], const double target[3], float out[12], int phase) {
+    static int (*fn)(const double *, const double *, float *);
+    static int (*fn2)(const double *, const double *, float *, int);
+    static int looked;   /* (looked up once; twice in a race finds the same) */
+    if (!__atomic_load_n(&looked, __ATOMIC_ACQUIRE) && vk_module) {
+        fn = (int (*)(const double *, const double *, float *))(void *)GetProcAddress(vk_module, "mkwvk_xr_view");
+        fn2 = (int (*)(const double *, const double *, float *, int))(void *)GetProcAddress(vk_module, "mkwvk_xr_view2");
+        __atomic_store_n(&looked, 1, __ATOMIC_RELEASE);
+    }
+    return fn2 ? fn2(eye, target, out, phase) : fn ? fn(eye, target, out) : 0;
+}
+/* (the step of a pair's second frame in microseconds while stereo wants its frames in pairs, 0 otherwise) */
+int rx_xr_sync(void) {
+    static int (*fn)(void);
+    static int looked;   /* (looked up once; twice in a race finds the same) */
+    if (!__atomic_load_n(&looked, __ATOMIC_ACQUIRE) && vk_module) {
+        fn = (int (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_xr_sync");
+        __atomic_store_n(&looked, 1, __ATOMIC_RELEASE);
+    }
+    return fn ? fn() : 0;
+}
+/* (hookshot-quest) the field of view the cameras take while stereo runs: out[0] the tangent of half its height, out[1] its width
+   over its height; 0 when the game's own is to stay (gpu/vk/vk_xr.cpp mkwvk_xr_projection) */
+int rx_xr_projection(float out[2]) {
+    static int (*fn)(float *);
+    static int looked;   /* (looked up once; twice in a race finds the same) */
+    if (!__atomic_load_n(&looked, __ATOMIC_ACQUIRE) && vk_module) {
+        fn = (int (*)(float *))(void *)GetProcAddress(vk_module, "mkwvk_xr_projection");
+        __atomic_store_n(&looked, 1, __ATOMIC_RELEASE);
+    }
+    return fn ? fn(out) : 0;
+}
 void rx_resize(int width, int height) { vk ? vk->resize(width, height) : wgr_resize(width, height); }
 const char *rx_describe(void) { return vk ? vk->describe() : wgr_describe(); }
 void rx_stats(int64_t *draws, int64_t *skipped, int64_t *pipelines) {

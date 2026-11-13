@@ -82,7 +82,8 @@ volatile float hos_text_scale, hos_camera_scale;
 static int live_cap = -1;   /* (the Game frame rate cap row changed in play: HOS_OPT_FPS_CAP's answer, -1 the renderer not up) */
 int rx_option(int id, int otherwise) { return id == HOS_OPT_FPS_CAP && live_cap >= 0 ? live_cap : otherwise; }
 volatile uint64_t hos_step_probe, hos_res_module;
-volatile uint32_t hos_frame_seconds_bits;
+volatile uint32_t hos_frame_seconds_bits, hos_step_read_bits, hos_vr_tiny_bits;
+int rx_xr_sync(void) { return 0; }   /* (no headset: no pairs of frames, host/rx_backend.c) */
 @HOST@
 static uint64_t a64_fpx_div32_div32(void *c, uint64_t a, uint64_t b) {
     float x, y; uint32_t w;

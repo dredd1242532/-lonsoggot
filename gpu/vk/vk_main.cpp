@@ -2,6 +2,7 @@
 // wants where the GPU has them: mesh shaders, host memory import, graphics pipeline libraries), the window's
 // swapchain, and the rx_* table (vk_api.h). The NVN replay itself is vk_replay.cpp.
 #include "vk_paths.h"
+#include "vk_xr.h"
 #include "vk_loader.h"
 
 #include <atomic>
@@ -182,7 +183,7 @@ bool create_instance() {
     // RX_VK_VALIDATION=1: the Khronos validation layer (when installed)
     const char* layer = "VK_LAYER_KHRONOS_validation";
     if (env_on("RX_VK_VALIDATION")) ci.enabledLayerCount = 1, ci.ppEnabledLayerNames = &layer;
-    if (vkCreateInstance(&ci, nullptr, &dev.instance) != VK_SUCCESS) {
+    if (!xr_create_instance(&ci, &dev.instance) && vkCreateInstance(&ci, nullptr, &dev.instance) != VK_SUCCESS) {
         logf("vk: vkCreateInstance failed");
         return false;
     }
@@ -254,6 +255,10 @@ bool pick_device() {
         return false;
     }
     dev.physical = all[best];
+    if (const VkPhysicalDevice headset = xr_physical_device()) {   // (hookshot-quest) the GPU the headset is on
+        if (headset != dev.physical) logf("vk: the headset's GPU instead of device %d", best);
+        dev.physical = headset;
+    }
     vkGetPhysicalDeviceProperties(dev.physical, &dev.props);
     vkGetPhysicalDeviceMemoryProperties(dev.physical, &dev.memory);
     return true;
@@ -653,7 +658,7 @@ bool create_device() {
     ci.pQueueCreateInfos = qs.data();
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
-    if (vkCreateDevice(dev.physical, &ci, nullptr, &dev.device) != VK_SUCCESS) {
+    if (!xr_create_device(dev.physical, &ci, &dev.device) && vkCreateDevice(dev.physical, &ci, nullptr, &dev.device) != VK_SUCCESS) {
         logf("vk: vkCreateDevice failed");
         return false;
     }
@@ -682,6 +687,7 @@ bool create_device() {
     coopmat_init();
     reflex_device_created();
     antilag_device_created();
+    xr_device_ready();   // (hookshot-quest) the headset's session, when VR is on
     if (dev.push_descriptor) {
         VkPhysicalDevicePushDescriptorPropertiesKHR pp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR};
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -906,6 +912,7 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // The renderer copies into swapchain images. Readback is optional and only available on surfaces that allow it.
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
         ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    dev.swap_transfer_src = (ci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;   // (hookshot-quest: the headset's copy)
     // (longshot) the overlays Dear ImGui draws (vk_imgui.cpp) render into it. Every surface allows it (the Vulkan spec)
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
         ci.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -1567,6 +1574,7 @@ void mkwvk_close_asked(void) {
     module_ids_flush();
     fsr4_close();             // (AMD FSR 4's tuned layers: their background builds stopped first, what they made then saved below)
     pipeline_cache_close();   // (in play: the pipelines made since the last save, kept for the next start)
+    xr_shutdown();            // (hookshot-quest: the headset's session ended properly before the process goes)
     if (prep_running.load() && !prepare_stopped()) {
         logf("vk: the window was closed while the shaders were prepared: stopping, what is done is kept");
         prepare_stop();

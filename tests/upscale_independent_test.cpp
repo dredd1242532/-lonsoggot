@@ -121,6 +121,7 @@ void pass(int, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSam
     dispatched_w = w; dispatched_h = h; sampled_view = b.begin()->first; dispatched_pipe = p.pipe;
 }
 void logf(const char*, ...) { CHECK(dispatches > 0); ++logs; }
+bool xr_enabled() { return false; }   // (no headset, vk_xr.cpp)
 // PRODUCTION_FUNCTIONS
 void reset() {
     scale = {}; fg = {}; opts = {}; wide_now = WideSides{}; dev.push_descriptor = true; vkCmdPushDescriptorSetKHR = true;

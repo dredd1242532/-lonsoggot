@@ -88,6 +88,7 @@ static bool focused, pad_last;
 static Options opts;
 static HWND GetForegroundWindow() { return 1; }
 static DWORD GetCurrentProcessId() { return 1; }
+static bool xr_running() { return false; }   // (no headset: the window's own focus decides)
 static void GetWindowThreadProcessId(HWND, DWORD* pid) { *pid = focused ? 1 : 2; }
 static int GetAsyncKeyState(int key) { return key == down_key ? 0x8000 : 0; }
 static bool take_key_press(int key) {
@@ -199,7 +200,7 @@ static struct { int steps = 0; bool went_down = false; } auto_tuning;   // (and 
 static std::string mic_key(const char* name) { return name; }
 static void mic_tell_host() {}
 static int rumble_step(int v) { return v; }
-struct Row { int tab; const char* name; int* value; int lo, hi; };
+struct Row { int tab; const char* name; int* value; int lo, hi; void (*apply)(const Row&) = nullptr; };
 // INI_KEY
 // BIND_NAMES
 static Row rows[] = {{0, "Menu shortcut", &opts.menu_shortcut, 0, 2}};

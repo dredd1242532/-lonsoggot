@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "vk_paths.h"
+#include "vk_xr.h"
 #include "vk_menu.h"
 #include "vk_menu_hit.h"
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
@@ -85,8 +86,9 @@ enum MenuTab {
     TAB_AUDIO = 1,
     TAB_GAMEPLAY = 2,
     TAB_CONTROLS = 3,
-    TAB_DEBUG = 4,   // (the OoT debug tools of #785, a tab of their own)
-    TAB_COUNT = 5,
+    TAB_VR = 4,      // (hookshot-quest: the headset's settings, hookshot_vr.ini's: vk_xr.h XrOpt)
+    TAB_DEBUG = 5,   // (the OoT debug tools of #785, a tab of their own)
+    TAB_COUNT = 6,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
     TAB_PAGE = TAB_MOTION + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
@@ -108,6 +110,9 @@ struct Row {
                                   // tests/test_preset_exempt.py)
     signed char cheat = -1;   // (a debug tool, on the Debug tab with the tools on: its index in the cheat_ tables, -1 none)
     bool heading = false;     // (a section's title on its tab, not a row: the selection steps over it)
+    // (a row kept elsewhere than the options file, the VR tab's in hookshot_vr.ini: called when its value changes, and the
+    // options file neither writes nor reads it)
+    void (*apply)(const Row& r) = nullptr;
 };
 /// A row's hints from a table, the value lo first (nullptr: none for that value)
 const char* hint_in(const char* const* t, int n, int lo, int v, int variant) {
@@ -1168,6 +1173,45 @@ MENU_HINTS(hn_prompts, 0,
            "The Switch's buttons.", "An Xbox controller's.", "A PlayStation 4 controller's.", "A PlayStation 5 controller's.",
            "A Steam Deck's.", "The keys and mouse buttons your controls put each action on.")
 
+// (hookshot-quest) the VR tab: its rows are vk_xr.cpp's settings (xr_opt[]), kept in hookshot_vr.ini, not in the options file
+const char* tx_cm(int v) {
+    static char b[16];
+    snprintf(b, sizeof b, "%.2f m", v / 100.0);
+    return b;
+}
+const char* tx_metres(int v) {
+    static char b[16];
+    snprintf(b, sizeof b, "%d m", v);
+    return b;
+}
+const char* tx_wide_percent(int v) {
+    static char b[16];
+    snprintf(b, sizeof b, "%d%%", v);
+    return b;
+}
+const char* tx_vr_view(int v) { return v ? "Stereo 3D" : "Flat screen"; }
+const char* tx_vr_head(int v) { return v ? "Moves and turns" : "Turns only"; }
+const char* tx_vr_upscaler(int v) { return v ? "As Graphics" : "Game's own"; }
+const char* tx_vr_window(int v) {
+    static const char* const t[] = {"The game's frames", "Both eyes", "Left eye"};
+    return t[std::clamp(v, 0, 2)];
+}
+/// VR headset: what the headset is doing now (variant 0: the longest, for the help's height)
+const char* hn_vr(int, int variant) {
+    static char b[96];
+    if (variant > 0) return nullptr;
+    snprintf(b, sizeof b, "Now: %s.", variant < 0 ? xr_status() : "Waiting for the headset");
+    return b;
+}
+MENU_HINTS(hn_vr_view, 0, "The game on a big screen in front of you, as in a cinema.",
+           "The game's camera at your eyes: the world has depth, and you can look around and lean.")
+MENU_HINTS(hn_vr_upscaler, 0, "Sharper edges, more shimmer on fine detail such as grass and flowerbeds.",
+           "The Graphics tab's Upscaler, DLSS or FSR, for each eye: smoother, and can ghost on near edges.")
+MENU_HINTS(hn_vr_window, 0, "Each frame as the game drew it: the eyes in turn.", "Both eyes side by side.",
+           "The left eye alone, filling the window: a steady picture to record or stream.")
+bool is_vr_recenter(const struct Row& r);
+void vr_apply(const Row& r) { xr_opt_changed((int)(r.value - xr_opt)); }   // (applied at once and kept in hookshot_vr.ini)
+
 Row rows[] = {
     // Graphics, in sections: a heading row is a section's title (draw_options draws it, the selection steps over it). The
     // Quality preset first, as it sets rows in every section. (Reflex, Anti-Lag 2, the Upscaler and the DLSS model only where
@@ -1359,6 +1403,90 @@ Row rows[] = {
      "Which key switches between the full menu and the compact bar (or opens directly to the compact bar when held "
      "with the menu shortcut).",
      nullptr, false, true},
+    // VR (hookshot-quest): the headset. The 3D view's, the HUD's and Advanced's rows with the Stereo 3D view, the screen's with
+    // the Flat screen: row_shown
+    {TAB_VR, "VR headset", &xr_opt[XO_VR], 0, 1, 1, tx_onoff,
+     "Shows the game in a headset over Quest Link, Air Link or Virtual Desktop. Off plays on the desktop only. Applies "
+     "after a restart, with the headset's link running.", hn_vr, true, true, -1, false, vr_apply},
+    {TAB_VR, "View", &xr_opt[XO_STEREO], 0, 1, 1, tx_vr_view,
+     "How the headset shows the game. This menu and the start-up screen always show on the flat screen. Applies after a "
+     "restart.", hn_vr_view, true, true, -1, false, vr_apply},
+    {TAB_VR, "Recentre view", nullptr, 0, 0, 0, nullptr,
+     "Puts the view, the HUD and the screen in front of you as you face now. The same as F8, or holding both sticks in for "
+     "a second."},
+    {TAB_VR, "3D view", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_VR, "First person", &xr_opt[XO_FIRST_PERSON], 0, 1, 1, tx_onoff,
+     "Your eyes at Link's face instead of behind him. A quick tap of the left stick, or F9, switches it while you play; this "
+     "row is how the game starts.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "First person eye height", &xr_opt[XO_FP_HEIGHT], -20, 80, 5, tx_cm,
+     "In first person, how far above the point the game's camera follows on Link your eyes are. Raise it if you feel too "
+     "short.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "First person eye forward", &xr_opt[XO_FP_FORWARD], -20, 80, 5, tx_cm,
+     "In first person, how far ahead of Link's middle your eyes are. Raise it if you see the inside of his head or his hat.",
+     nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "World scale", &xr_opt[XO_WORLD_SCALE], 50, 400, 10, tx_wide_percent,
+     "The game's metres for one of yours. 100% is life size; higher makes the world smaller, a diorama in front of you.",
+     nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Eye separation", &xr_opt[XO_SEPARATION], 0, 200, 10, tx_wide_percent,
+     "How far apart the two eyes' cameras are, as a share of your own eyes' distance. 100% is true depth; lower is flatter, "
+     "and 0% gives both eyes one picture.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Level horizon", &xr_opt[XO_HORIZON], 0, 1, 1, tx_onoff,
+     "Leaves the game camera's tilt out, so the horizon stays level and only your head tilts the view: the comfortable one. "
+     "Off: the view tilts as the game's camera does.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Head movement", &xr_opt[XO_HEAD_MOTION], 0, 1, 1, tx_vr_head,
+     "Whether moving your head moves your eyes in the world, so you can lean and look around things, or only its turning "
+     "counts.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Fill the view", &xr_opt[XO_FILL], 0, 1, 1, tx_onoff,
+     "The game draws the headset's whole field of view. Off: its own narrower picture, with black around it.", nullptr,
+     false, true, -1, false, vr_apply},
+    {TAB_VR, "Upscaler in 3D", &xr_opt[XO_DLSS], 0, 1, 1, tx_vr_upscaler,
+     "What scales the 3D up for each eye.", hn_vr_upscaler, false, true, -1, false, vr_apply},
+    {TAB_VR, "Desktop window", &xr_opt[XO_MIRROR], 0, 2, 1, tx_vr_window,
+     "What the game's window on the desktop shows while you play in the headset.", hn_vr_window, false, true, -1, false, vr_apply},
+    {TAB_VR, "HUD", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_VR, "HUD panel", &xr_opt[XO_HUD], 0, 1, 1, tx_onoff,
+     "The hearts, buttons, map and text on a panel of their own that stays in front of your eyes. Off: drawn into the 3D "
+     "picture, where they are in the world's way.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "HUD distance", &xr_opt[XO_HUD_DISTANCE], 50, 500, 10, tx_cm, "How far in front of your eyes the HUD's panel is.",
+     nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "HUD width", &xr_opt[XO_HUD_WIDTH], 50, 400, 10, tx_cm,
+     "How wide the HUD's panel is. Narrower brings the hearts and buttons in from the edges of your view.", nullptr, false,
+     true, -1, false, vr_apply},
+    {TAB_VR, "HUD height", &xr_opt[XO_HUD_HEIGHT], -100, 100, 5, tx_cm,
+     "The panel's middle above (+) or below (-) your eyes.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Reticle at the aim", &xr_opt[XO_HUD_AIM], 0, 1, 1, tx_onoff,
+     "The HUD's middle, where the game draws the slingshot's and the bow's reticle, is shown far off where the game aims "
+     "instead of on the panel, so it lies on the target. Off: all of the HUD on the panel.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Reticle area", &xr_opt[XO_HUD_CENTER], 10, 90, 5, tx_wide_percent,
+     "How much of the HUD's width and height counts as its middle, the part shown at the aim.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Reticle distance", &xr_opt[XO_HUD_AIM_DISTANCE], 5, 100, 5, tx_metres,
+     "How far away the reticle is shown. Far, so it lies on what it aims at for both eyes.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Flat screen", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_VR, "Screen distance", &xr_opt[XO_SCREEN_DISTANCE], 50, 1000, 10, tx_cm, "How far in front of you the screen is.",
+     nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Screen width", &xr_opt[XO_SCREEN_WIDTH], 30, 1000, 10, tx_cm,
+     "How wide the screen is. Its height follows the picture's shape.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Screen height", &xr_opt[XO_SCREEN_HEIGHT], -200, 200, 5, tx_cm,
+     "The screen's middle above (+) or below (-) your eyes.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Controllers", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_VR, "Touch controllers", &xr_opt[XO_TOUCH], 0, 1, 1, tx_onoff,
+     "The headset's own controllers play the game as a gamepad. Off when you play with another controller, so a Touch "
+     "controller lying on the desk presses nothing.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Touch motion aiming", &xr_opt[XO_GYRO], 0, 1, 1, tx_onoff,
+     "The right Touch controller's motion as the gamepad's gyroscope, for the game's Motion controls. Applies after a "
+     "restart.", nullptr, true, true, -1, false, vr_apply},
+    {TAB_VR, "Swap Touch sticks", &xr_opt[XO_SWAP], 0, 1, 1, tx_onoff,
+     "On the Touch controllers: move with the right stick and turn the camera with the left.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Advanced", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_VR, "Paired frames", &xr_opt[XO_SYNC], 0, 1, 1, tx_onoff,
+     "The game advances in pairs of frames, one for each eye, so both eyes show the same moment. Off: each eye a moment "
+     "later than the other, which shimmers in fast motion.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Headset pacing", &xr_opt[XO_PACE], 0, 1, 1, tx_onoff,
+     "Each pair of eyes is given to the headset once, at its own pace, so the headset's smoothing fills the frames between. "
+     "Off: the way before, kept for comparing.", nullptr, false, true, -1, false, vr_apply},
+    {TAB_VR, "Camera smoothing", &xr_opt[XO_SMOOTH], 0, 1, 1, tx_onoff,
+     "This renderer's own turning of the picture between the game's frames. Leave it off with Headset pacing on.", nullptr,
+     false, true, -1, false, vr_apply},
     // Debug: the tools' switch, the tools themselves below it while they are on (cheat: menu_tick does what they do), then the
     // developer's rows
     {TAB_DEBUG, "Debug tools", &opts.debug_tools, 0, 1, 1, tx_onoff,
@@ -1597,6 +1725,19 @@ const char* cheat_button_text(int i) {
     return i >= 0 && i < kCheatRows ? buttons[i] : "";
 }
 constexpr int kRows = sizeof rows / sizeof rows[0];
+bool is_vr_recenter(const Row& r) { return r.tab == TAB_VR && !r.value && !r.heading; }
+/// The VR tab's rows: the 3D view's with the Stereo 3D view chosen, the screen's with the Flat screen
+bool vr_row_shown(const Row& r) {
+    if (r.tab != TAB_VR) return true;
+    if (!xr_built()) return r.value == &xr_opt[XO_VR];   // (a build without it: the one row, which says so)
+    const bool stereo = xr_opt[XO_STEREO] != 0;
+    if (r.heading) return !strcmp(r.name, "Flat screen") ? !stereo : !strcmp(r.name, "Controllers") ? true : stereo;
+    if (!r.value) return true;
+    const int id = (int)(r.value - xr_opt);
+    if (id >= XO_STEREO_FIRST && id <= XO_STEREO_LAST) return stereo;
+    if (id >= XO_SCREEN_FIRST && id <= XO_SCREEN_LAST) return !stereo;
+    return true;
+}
 
 int ultrawide_read = 1;   // (ultrawide= as read: saved again while HOS_OUTPUT_RES holds the Output resolution and the row is as it was)
 /// (longshot) The Aspect ratio and Output resolution rows' ends from the screen's sizes and the player's own (known once the
@@ -1689,7 +1830,7 @@ bool intel_compiler_row() {
 }
 bool row_shown(int i) {
     const int* v = rows[i].value;
-    return ((rows[i].cheat < 0 && v != &opts.damage_taken) || cheats_on()) && (v != &opts.reflex || reflex_available()) &&
+    return vr_row_shown(rows[i]) && ((rows[i].cheat < 0 && v != &opts.damage_taken) || cheats_on()) && (v != &opts.reflex || reflex_available()) &&
            (v != &opts.antilag || antilag_available()) && (v != &opts.intel_compiles || intel_compiler_row()) &&
            (v != &opts.dlss || ur::upscaler_shown(upscalers_available())) &&
            (v != &opts.dlss_model || ur::model_shown(dlss_why() == DLSS_OK)) &&
@@ -1728,7 +1869,7 @@ int drag_row = -1;
 bool mouse_read = false;   // (the menu has read the mouse since it opened)
 bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
-bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool stops_at_ends(const Row& r) { return (r.tab == TAB_VR && r.hi - r.lo > 2) || r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
 // (longshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
@@ -1906,7 +2047,7 @@ void save() {
             // (and the Mesh shaders row's line, no longer read (gpu/vk/mesh_mode.h): dropped, not kept for nothing)
             mine |= key == "mesh_shaders";
             for (const Row& r : rows)
-                if (!mine && r.value && key == ini_key(r)) mine = true;
+                if (!mine && r.value && !r.apply && key == ini_key(r)) mine = true;
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
         }
         fclose(f);
@@ -1922,7 +2063,7 @@ void save() {
                 // ultrawide= is kept, unless the row was changed in the menu)
                 const int v = saved_value(r.value);
                 fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
-            } else if (r.value && r.value != &opts.game_lang) {   // (game_lang: language.txt's)
+            } else if (r.value && !r.apply && r.value != &opts.game_lang) {   // (game_lang: language.txt's; the VR tab's: hookshot_vr.ini's, Row::apply)
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
@@ -2408,6 +2549,10 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         restart_values(now);
         restart_state.note(now);
     }
+    if (r.apply) {   // (kept elsewhere: the VR tab's rows)
+        r.apply(r);
+        return;
+    }
     if (keep) save();
 }
 
@@ -2563,7 +2708,7 @@ float scroll_at[TAB_MOTION + 2];   // (the first row shown, eased toward the sel
                                    // the Controls page: kControlsSlot)
 constexpr int kControlsSlot = TAB_MOTION + 1;
 int wheel_rows[TAB_MOTION + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
-int scrolled_to[TAB_MOTION + 2] = {-1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
+int scrolled_to[TAB_MOTION + 2] = {-1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
 float scroll_want[TAB_MOTION + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
 float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
 
@@ -3057,7 +3202,7 @@ const char* bug_report_hint() {
     return text.c_str();
 }
 
-const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Debug"};
+const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "VR", "Debug"};
 inline const char* tab_title(int t) { return t >= 0 && t < TAB_COUNT ? tab_titles[t] : "Settings"; }
 inline bool cheat_is_toggle(int c) { return c == 0 || c == 1 || c == 7; }
 
@@ -3150,7 +3295,7 @@ void draw_options(ui::Ctx& c) {
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
-    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
+    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_VR || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
     if (help_tall_w != hx1 - hx0 || help_said != share_said)
@@ -3168,7 +3313,7 @@ void draw_options(ui::Ctx& c) {
         if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
         prompt_list[prompts_n++] = {ui::kCompact, "Compact", compact_key_name};
     } else {
-        prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
+        prompt_list[prompts_n++] = {ui::kConfirm, is_vr_recenter(selr) ? "Recentre" : confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
     }
     if (cur_tab == TAB_MOTION) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls)
     else {
@@ -4123,6 +4268,7 @@ void menu_init() {
     if (done) return;
     done = true;
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
+    xr_opts_load();   // (the VR tab's rows, before restart_init notes what the game started with)
     bool has_options = false;
     bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
     bool has_vram_budget = false;   // (longshot: a file from before the VRAM budget row: its preset's, memory_budget's)
@@ -4148,7 +4294,7 @@ void menu_init() {
             // folder before the game ever started: still a first start, so Auto (this PC) chooses as it would with no file)
             has_options |= strcmp(line, "compile_shaders") != 0;
             for (Row& r : rows) {
-                if (!r.value || r.value == &opts.game_lang || strcmp(line, ini_key(r))) continue;
+                if (!r.value || r.apply || r.value == &opts.game_lang || strcmp(line, ini_key(r))) continue;
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
@@ -4461,7 +4607,7 @@ void menu_option_set(int id, int value) {
 // its own thread: menu_mu keeps them apart from menu_tick (the present's thread) and from menu_option_set (the game's)
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
-    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "debug", "motion", "controls"};
+    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "vr", "debug", "motion", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -4786,7 +4932,7 @@ void menu_tick() {
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
     if (fg) GetWindowThreadProcessId(fg, &pid);
-    const bool mine = pid == GetCurrentProcessId();
+    const bool mine = pid == GetCurrentProcessId() || xr_running();   // (hookshot-quest: the headset shows it)
     bool press[K_N] = {};
     for (int i = 0; i < K_N; i++) {
         const bool down = mine && (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
@@ -5198,6 +5344,7 @@ void menu_tick() {
             }
         } else if (r.cheat >= 0) cheat_press(r.cheat, press, changed);   // (a debug tool: on the Debug tab itself)
         else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
+        else if (press[7] && is_vr_recenter(r)) xr_recenter(), press[7] = false, changed = true;
         else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;

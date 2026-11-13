@@ -42,6 +42,9 @@ struct VkImageSubresourceRange { int aspect, mip, levels, layer, layers; };
 struct { struct { uint32_t width, height; } swap_extent; bool hdr = false; } dev;
 std::atomic<bool> present_native_pq{false};
 struct { int hdr_contrast = 100; } opts;
+std::atomic<uint32_t> present_kind{0};
+// (no headset: the window is drawn as usual, vk_xr.cpp)
+bool xr_mirror(int, VkImage, uint32_t, uint32_t, uint32_t, uint32_t, VkImage, uint32_t, uint32_t) { return false; }
 struct Host { float (*aspect_ratio)(); };
 Host* host;
 float logical_aspect;

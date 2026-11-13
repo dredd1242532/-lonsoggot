@@ -35,6 +35,30 @@ def _ratio(vreg, base=None):
             % (vreg, vreg, store))
 
 
+def _vr_ratio(vreg):
+    """(hookshot-quest) The camera's ratio just loaded into s<vreg>, on its way to the projection: the headset's while stereo runs
+    (host/hos_main.c hos_vr_ratio, 0 otherwise), for the 16:9 cameras as the window's ratio above."""
+    return ("{ extern volatile float hos_vr_ratio; const float _a = hos_vr_ratio; if (_a > 0.0f) { float _r; "
+            "memcpy(&_r, c->vreg[%d], 4); const float _d = _r - (16.0f / 9.0f); if (_d <= 0.01f && _d >= -0.01f) { "
+            "uint32_t _u; memcpy(&_u, &_a, 4); a64_vset64(c->vreg[%d], _u); } } }   /* (nx2/oot_wide.py: the headset's ratio) */"
+            % (vreg, vreg))
+
+
+def _vr_fov(vreg, base):
+    """(hookshot-quest) sead's perspective projection's matrix update, which has just loaded the tangent of half the field of
+    view into s0 (+0xac) and the ratio into s<vreg> (+0xb0): while stereo runs, the headset's in their place, in the registers
+    and in the projection (its angle, sine, cosine and tangent at +0xa0 to +0xac, the ratio at +0xb0: culling reads them), for a
+    projection whose ratio is the game's 16:9, the window's, or the headset's already."""
+    return ("{ extern volatile float hos_vr_tan, hos_vr_ratio, hos_vr_fovy, hos_vr_sin, hos_vr_cos, hos_wide_ratio; "
+            "const float _t = hos_vr_tan, _a = hos_vr_ratio; if (_t > 0.0f && _a > 0.0f) { float _r; memcpy(&_r, c->vreg[%d], 4); "
+            "const float _d = _r - (16.0f / 9.0f), _e = _r - _a, _f = _r - hos_wide_ratio; "
+            "if ((_d <= 0.01f && _d >= -0.01f) || (_e <= 0.01f && _e >= -0.01f) || (_f <= 0.01f && _f >= -0.01f)) { "
+            "const float _v[5] = {hos_vr_fovy, hos_vr_sin, hos_vr_cos, _t, _a}; uint32_t _u[5]; memcpy(_u, _v, 20); "
+            "for (int _k = 0; _k < 5; _k++) recomp_store32(c, c->x[%d] + 0xa0 + 4 * _k, _u[_k]); "
+            "a64_vset64(c->vreg[0], _u[3]); a64_vset64(c->vreg[%d], _u[4]); } } }   /* (nx2/oot_wide.py: the headset's field of view) */"
+            % (vreg, base, vreg))
+
+
 def _size(name):
     return ("{ extern volatile uint64_t %s; const uint64_t _s = %s; if (_s) c->x[8] = _s; }   /* (nx2/oot_wide.py: %s) */"
             % (name, name, name))
@@ -76,12 +100,12 @@ SITES = (
     # the scene the game's upscaler takes in, {1920, 1080}
     (0x31f3a04, 0xf2c08708, _size("hos_wide_scene")),
     # the camera update copies the camera's ratio (ldr s0, [x19, #0x140]) into the projection the renderer reads
-    (0x4c5334, 0xbd414260, _ratio(0)),
+    (0x4c5334, 0xbd414260, _ratio(0) + "\n    " + _vr_ratio(0)),
     # sead's perspective projection's matrix update (ldp s0, s1, [x0, #0xac]) and its three inlined copies
-    (0x3485cc0, 0x2d558400, _ratio(1, 0)),
-    (0x4f1e8, 0x2d558ea0, _ratio(3, 21)),
-    (0x23b9a8, 0x2d558c00, _ratio(3, 0)),
-    (0x33b82c, 0x2d558440, _ratio(1, 2)),
+    (0x3485cc0, 0x2d558400, _ratio(1, 0) + "\n    " + _vr_fov(1, 0)),
+    (0x4f1e8, 0x2d558ea0, _ratio(3, 21) + "\n    " + _vr_fov(3, 21)),
+    (0x23b9a8, 0x2d558c00, _ratio(3, 0) + "\n    " + _vr_fov(3, 0)),
+    (0x33b82c, 0x2d558440, _ratio(1, 2) + "\n    " + _vr_fov(1, 2)),
     # the 2D canvas setup: the layout's projection rows (ldp q1, q4, [x2]); the canvas is x0, its screen 0x1b8 before it
     (0x774368, 0xad401041, HUD),
     # the movie layer's draw: its viewport (min x at x29 - 32, max x at x29 - 24) after ldp x9, x8, [x19, #0x18]

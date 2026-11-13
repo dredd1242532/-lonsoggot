@@ -385,10 +385,10 @@ STEP_SITES = (("void f_80706be0(Ctx *__restrict A64_NOESC c) {\n", 8, "\n    hos
 STEP_OLD = "    _v=a64_fpx_div32_div32(c,_a,_b);\n    a64_vset64(c->vreg[%d],_v);}"
 STEP_HOOK = ("    _v=a64_fpx_div32_div32(c,_a,_b);\n"
              "    { const uint32_t _hs = hos_frame_seconds_bits; if (_hs) { float _base, _secs; uint32_t _w; memcpy(&_base,&_a,4); "
-             "memcpy(&_secs,&_hs,4); _base *= _secs; memcpy(&_w,&_base,4); _v = _w; } }   /* (base * the frame's seconds: nx2/oot_patches.py) */\n"
+             "memcpy(&_secs,&_hs,4); _base *= _secs; memcpy(&_w,&_base,4); _v = _w; } hos_step_read_bits = _hs; }   /* (base * the frame's seconds: nx2/oot_patches.py) */\n"
              "    a64_vset64(c->vreg[%d],_v);}")
 STEP_MARK = "hos_frame_seconds_bits; if (_hs)"   # (once per divide with the hook)
-STEP_DECL = "extern volatile uint32_t hos_frame_seconds_bits;\nextern volatile uint64_t hos_step_probe;\n"
+STEP_DECL = "extern volatile uint32_t hos_frame_seconds_bits, hos_step_read_bits;\nextern volatile uint64_t hos_step_probe;\n"
 
 
 def patch_frame_seconds(s):

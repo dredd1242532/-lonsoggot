@@ -261,6 +261,10 @@ volatile int hos_scene_rgba16f = 0;   /* (the scene buffer RGBA16F, not R11G11B1
 volatile uint64_t hos_step_probe = 0;   /* (f_80706be0's object, set by the lifted code when the frame-time hook is in this build; its
                                             +0xd58 is the game clock in 1/60 s: nx2/oot_patches.py) */
 volatile uint32_t hos_frame_seconds_bits = 0;   /* (the frame's seconds as a float's bits for that hook, 0: the game's own step) */
+/* (hookshot-quest) stereo draws one eye a frame: so that the two eyes of a pair show one moment, the frames' time comes in
+   pairs, a step of two frames' time and then one of next to none (hos_vr_tiny_bits, 0 while not). hos_step_read_bits: the step
+   the game's frame read last (the lifted hook writes it), by which hos_oot_free_view knows the second frame of a pair */
+volatile uint32_t hos_step_read_bits = 0, hos_vr_tiny_bits = 0;
 /* A movie's frame count while the frames' time is given (a Frame rate cap above 60): how many 60ths of a second this update of
    that movie player is worth, the rest carried to its next one, so the count the cutscene's cues are placed by keeps the clock
    as the movie's picture does (issue 1742: the narration ran ahead above 60 fps). 1, the game's own step, otherwise, and with
@@ -448,10 +452,27 @@ static void realtime_step(int64_t now) {
        HOS_FPS_STEP=0, or a lift without the hook (hos_step_probe unset): the rate up to the cap, as before */
     static int timed_step = -1;
     if (timed_step < 0) timed_step = !(getenv("HOS_FPS_STEP") && !atoi(getenv("HOS_FPS_STEP")));
-    const int timed = fps_max() > 60 && timed_step && hos_step_probe;
+    int rx_xr_sync(void);
+    const int pair_us = timed_step && hos_step_probe ? rx_xr_sync() : 0;   /* (the second frame's step, microseconds; 0: no pairs) */
+    const int timed = (fps_max() > 60 || pair_us > 0) && timed_step && hos_step_probe;
+    if (!pair_us) __atomic_store_n(&hos_vr_tiny_bits, 0, __ATOMIC_RELAXED);
     if (timed) {
         const double secs = sum / count, shortest = 1.0 / (fps_max() > 240 ? fps_max() : 240);
-        const float f = (float)(secs > 4.0 / 60.0 ? 4.0 / 60.0 : secs < shortest ? shortest : secs);
+        float f = (float)(secs > 4.0 / 60.0 ? 4.0 / 60.0 : secs < shortest ? shortest : secs);
+        if (pair_us > 0) {   /* (stereo: two frames' time, then next to none) */
+            static int second;
+            const float tiny = (float)pair_us * 1e-6f;
+            uint32_t tiny_bits;
+            memcpy(&tiny_bits, &tiny, 4);
+            __atomic_store_n(&hos_vr_tiny_bits, tiny_bits, __ATOMIC_RELAXED);
+            second ^= 1;
+            if (second) {
+                f = tiny;
+            } else {
+                f = 2.0f * f - tiny;
+                if (f > 4.0f / 60.0f) f = 4.0f / 60.0f;
+            }
+        }
         uint32_t bits;
         memcpy(&bits, &f, 4);
         __atomic_store_n(&hos_frame_seconds_bits, bits, __ATOMIC_RELAXED);   /* (read by the game's threads) */

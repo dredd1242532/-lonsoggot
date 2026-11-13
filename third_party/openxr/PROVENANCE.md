@@ -1,0 +1,20 @@
+# OpenXR
+
+The Khronos OpenXR headers, used by `gpu/vk/vk_xr.cpp` (the game in a PC VR headset). Unmodified upstream copy.
+
+- Upstream: https://github.com/KhronosGroup/OpenXR-SDK-Source
+- Version: release-1.1.65 (`include/openxr/` of `openxr_loader_windows-1.1.65.zip`, the release's own package)
+- License: Apache-2.0 (the headers are dual-licensed Apache-2.0 OR MIT), in `LICENSE`. Keep it with any distribution.
+
+What is here and why:
+
+| | |
+|---|---|
+| `include/openxr/` | The API's headers. `vk_xr.cpp` is built with `XR_NO_PROTOTYPES` and asks the loader for every function by name, so nothing of OpenXR is linked |
+| `LICENSE` | The Apache-2.0 text |
+
+The loader, `openxr_loader.dll`, is not here and is never committed: it comes from the same release's package
+(`x64/bin/openxr_loader.dll`) and sits beside `hookshot_vk.dll` in the game folder's `bin`. Without it VR stays off and
+the game plays on the desktop as before (`quest/README.md`).
+
+Nothing in this folder is edited. A change belongs in a new folder with its own note, per `CONTRIBUTING.md`.
