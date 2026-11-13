@@ -11,7 +11,7 @@ His guide and checks are retained in the import history, changed only by the pro
 The command-line client works without MCP. The scenario runner and contributor-process proposals from that original work
 are separate, not requirements of this server.
 This server is part 2 of 3, stacked on [Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47);
-review only commits after `23cc17be6ac3bf11e5553f0c3008b05325b3249c`. It becomes reviewable on its own once 47 is merged.
+review only commits after `311efa39e9772745a237a69cfcee42cfface027c`. It becomes reviewable on its own once 47 is merged.
 The third part is the separate scenario runner.
 
 ## Install
@@ -243,6 +243,7 @@ calls, cancellation, output bounds, failed launch cleanup and explicit force. Ge
 The documentation checker excludes the dedicated `tests/pr_description/` data directory, whose sample PRs intentionally
 name fictional files. Ordinary Markdown guides, including guides under `tests/`, keep their link and command checks.
 `RUN_ALL_MODULES = ["fastmcp"]` lets the runner skip only the SDK checks without the package; `--strict` fails a
-missing dependency. The retained GitHub workflow installs it separately on Linux and Windows; Forgejo has no CI runner,
-so install the optional environment and run the checks locally. Game-free checks are not proof of Windows gameplay,
-a visible window, WebGPU capture or save-safe shutdown. The dependency exception is still a proposal for maintainer review.
+missing dependency. `.forgejo/workflows/ci.yml` installs the optional SDK in a separate step before the game-free
+tests on Linux and Windows. For local SDK checks, install the separate optional environment. Game-free checks are
+not proof of Windows gameplay, a visible window, WebGPU capture or save-safe shutdown. The narrow dependency
+exception remains a question for maintainer review.

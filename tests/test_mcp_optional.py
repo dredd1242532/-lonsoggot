@@ -25,6 +25,18 @@ class OptionalMcp(unittest.TestCase):
         self.assertEqual((ROOT / "scripts" / "mcp_requirements.txt").read_text().splitlines()[-1], "fastmcp==4.1.3")
         self.assertNotIn("fastmcp", (ROOT / "requirements.txt").read_text().lower())
 
+    def test_forgejo_ci_installs_optional_sdk_before_source_checks(self):
+        workflow = (ROOT / ".forgejo" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        source_job = workflow.split("\n  python:\n", 1)[1].split("\n  spirv-fixtures:\n", 1)[0]
+        install = "python -m pip install --disable-pip-version-check -r scripts/mcp_requirements.txt"
+        self.assertEqual(source_job.count(install), 1)
+        step = source_job.split("- name: Python package for MCP protocol tests", 1)[1].split("\n      - ", 1)[0]
+        self.assertNotIn("if:", step)
+        self.assertLess(source_job.index(install), source_job.index("name: Every test"))
+        self.assertIn("os: ubuntu-24.04", source_job)
+        self.assertIn("os: windows-2022", source_job)
+        self.assertFalse((ROOT / ".github" / "workflows" / "source-regressions.yml").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
