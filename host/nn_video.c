@@ -549,6 +549,7 @@ static void decode_next(Dec *d) {
         }
         const int64_t ns = hos_now_ns() - t0;
         d->decode_ns += ns;
+        __atomic_add_fetch(&movie_totals[3], ns, __ATOMIC_RELAXED);   /* (the performance summary's: hos_movie_stats) */
         if (ns > d->decode_worst_ns) d->decode_worst_ns = ns;
         free(n);
     }
@@ -557,17 +558,14 @@ static void decode_next(Dec *d) {
    between the movie's pictures, and the pictures the catch-up skipped. A decoder slower than the movie leaves the picture
    behind the sound, whatever the catch-up does: the line says which it was in a report's longshot_log.txt */
 /* (longshot) every movie's totals this session, for the performance summary (hos_perf_info, gpu/vk/perf_report.cpp): pictures
-   shown, skipped to keep up with the sound (and dropped for want of memory), shown late (over 50 ms after the one before),
-   decoding time in ns, decoders that did not start. Added as each movie stops (movie_totals: above) */
+   shown (taken by the game), skipped to keep up with the sound (and dropped for want of memory), shown late (50 ms or more
+   after the one before), decoding time in ns, decoders that did not start. Added as each happens, so a movie still playing
+   at a summary counts too (movie_totals: above) */
 void hos_movie_stats(int64_t out[5]) {
     for (int i = 0; i < 5; i++) out[i] = __atomic_load_n(&movie_totals[i], __ATOMIC_RELAXED);
 }
 void hos_movie_fallback(void) { __atomic_add_fetch(&movie_totals[4], 1, __ATOMIC_RELAXED); }
 static void movie_report(Dec *d) {
-    __atomic_add_fetch(&movie_totals[0], d->decoded > d->skipped ? d->decoded - d->skipped : 0, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&movie_totals[1], d->skipped, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&movie_totals[2], d->gaps[0][2] + d->gaps[0][3] + d->gaps[1][2] + d->gaps[1][3], __ATOMIC_RELAXED);
-    __atomic_add_fetch(&movie_totals[3], d->decode_ns, __ATOMIC_RELAXED);
     if (d->decoded > 1) {
         const double each = (double)d->decode_ns / d->decoded / 1e6,
                      every = (double)(d->end_pts - d->first_pts) / (d->decoded - 1) / 1e6;   /* (pts in ns) */
@@ -824,6 +822,7 @@ static void dec_acquire(Ctx *c) {
             skipped++;
         }
         d->skipped += skipped;
+        __atomic_add_fetch(&movie_totals[1], skipped, __ATOMIC_RELAXED);
         if (skipped && video_log()) hos_log("video: %d pictures skipped to catch up with the movie's clock", skipped);
     }
     Picture *p = &d->queue[d->qhead];
@@ -862,6 +861,8 @@ static void dec_acquire(Ctx *c) {
         if (gap > d->gap_worst_ns) d->gap_worst_ns = gap;
         if (d->out_ns) d->gaps[now - d->clock_ns >= 5000000000ll][gap < 20000000 ? 0 : gap < 50000000 ? 1 : gap < 90000000 ? 2 : 3]++;
         d->out_ns = now;
+        __atomic_add_fetch(&movie_totals[0], 1, __ATOMIC_RELAXED);   /* (shown: a picture the game took) */
+        if (gap >= 50000000) __atomic_add_fetch(&movie_totals[2], 1, __ATOMIC_RELAXED);   /* (and late) */
     }
     {   /* (longshot) HOS_VIDEO_LOG: the picture's time against this decoder's movie clock, to see it fall behind the sound */
         if (video_log() && d->acquires % 60 == 0) {

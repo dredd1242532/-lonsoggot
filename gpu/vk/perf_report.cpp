@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <mutex>
 #include <thread>
 
@@ -44,7 +45,8 @@ namespace fs = fps_stats;
 
 constexpr double kPeriod = 300;      // (seconds of play between summaries)
 constexpr double kMapEvery = 1;      // (seconds between asking the host where Link is)
-constexpr int kMaxPending = 48;      // (summaries kept for the launcher, about four hours: an offline player's disk is not filled)
+constexpr int kMaxPending = 48;      // (summaries waiting in perf_pending at most, about four hours of play: a player who never
+                                     // starts the launcher, or is offline, doesn't fill the disk; the newest go unwritten)
 
 std::mutex mu;   // (the presenting thread's frames, against the exit's and a lost device's last summary)
 std::map<std::string, pr::MapTotals> maps;
@@ -58,6 +60,8 @@ int64_t started_ns = 0, last_movie[5] = {};
 double since_map = 0, since_summary = 0, avg_ms = 0, last_ms = 0;
 bool first = true;
 int seq = 0;
+int64_t l_failed = 0;   // (the renderer's counts at the summary before: at the start, perf_report_init)
+uint64_t l_swap = 0;
 
 std::string game_folder() {
     char exe[MAX_PATH];
@@ -165,6 +169,13 @@ void where_now() {
 
 void write_summary(const std::string& dir, const std::string& name, const std::string& json) {
     const std::string pending = dir + "perf_pending";
+    {
+        std::error_code ec;
+        int waiting = 0;
+        for (std::filesystem::directory_iterator it(pending, ec), end; !ec && it != end; it.increment(ec))
+            waiting += it->path().extension() == ".json";
+        if (waiting >= kMaxPending) return;
+    }
 #ifdef _WIN32
     _mkdir(pending.c_str());
 #else
@@ -182,21 +193,25 @@ void write_summary(const std::string& dir, const std::string& name, const std::s
 /// lost device: the process ends next)
 void summarize(bool now) {
     if (!current) return;
+    if (!ticked(folder)) {   // (unticked in the launcher while the game ran: nothing more measured or written)
+        perf_measure.store(false, std::memory_order_relaxed);
+        maps.clear(), current = nullptr;
+        logf("vk: performance statistics off (unticked in the launcher): nothing more is written");
+        return;
+    }
     where_now();
     read_settings();
     {   // (the renderer's events, onto the map they ended on: there are few)
-        static int64_t l_failed = 0;
-        static uint64_t l_swap = 0;
         int64_t translated = 0, failed = 0;
         shader_stats(&translated, &failed);
         current->event[pr::kProgramFailed] += failed - l_failed, l_failed = failed;
         const uint64_t swap = dev.swapchain_generation;
-        if (l_swap) current->event[pr::kSwapchainRecreated] += (int64_t)(swap - l_swap);
+        current->event[pr::kSwapchainRecreated] += (int64_t)(swap - l_swap);
         l_swap = swap;
         for (int e = 0; e < pr::kEvents; e++) current->event[e] += events[e].exchange(0);
     }
     bool any = false;
-    for (const auto& [n, t] : maps) any = any || t.any() || std::any_of(t.event, t.event + pr::kEvents, [](int64_t v) { return v > 0; });
+    for (const auto& [n, t] : maps) any = any || t.any();
     if (!any) return;   // (nothing since the last: the exit right after a lost device's summary)
     pr::Memory mem;
     uint64_t used = 0, allowed = 0;
@@ -212,7 +227,6 @@ void summarize(bool now) {
     current = &maps[current_map];
     current->fresh = false;
     first = false;
-    if (seq > kMaxPending) return;   // (the launcher hasn't been back for hours: this session's first ones are kept)
     if (now) return write_summary(folder, name, json);
     std::thread([dir = folder, n = std::string(name), j = std::move(json)] { write_summary(dir, n, j); }).detach();
 }
@@ -230,6 +244,9 @@ bool perf_report_init() {
     folder = game_folder();
     if (!ticked(folder)) return false;
     started_ns = fps_clock();
+    int64_t translated = 0;
+    shader_stats(&translated, &l_failed);   // (the renderer's counts so far: only what comes after is counted)
+    l_swap = dev.swapchain_generation;
     std::atexit(at_exit);
     logf("vk: performance statistics on (the launcher's Send performance statistics): a summary every %.0f s into perf_pending",
          kPeriod);
@@ -243,8 +260,10 @@ void perf_event(int e) {
 
 void perf_frame(const fs::Frame& f) {
     // (the renderer's counters since the frame before: what the slow frames waited on)
-    static int64_t l_prof[PROF_COUNT], l_waits, l_readback;
+    if (!perf_measure.load(std::memory_order_relaxed)) return;   // (unticked while the game ran: summarize)
+    static int64_t l_prof[PROF_COUNT], l_readback;
     static double l_wait_ms, l_translate;
+    static bool primed = false;   // (the first frame only takes the counters: they hold everything since the game started)
     int64_t skips = 0, waits = 0;
     double wait_ms = 0;
     draw_stats3(&skips, &waits, &wait_ms);
@@ -258,13 +277,15 @@ void perf_frame(const fs::Frame& f) {
     w.memsync = dp(PROF_MEMSYNC);
     w.readback = (readback - l_readback) / 1e6;
     memcpy(l_prof, prof_ns, sizeof l_prof);
-    l_waits = waits, l_wait_ms = wait_ms, l_translate = translate, l_readback = readback;
+    l_wait_ms = wait_ms, l_translate = translate, l_readback = readback;
+    if (!primed) w = pr::Waits{}, primed = true;
 
     std::lock_guard lk(mu);
     if (!current || since_map >= kMapEvery) where_now(), since_map = 0;
     // (the target: the cap's, else uncapped the recent average, so that a frame twice the usual is still a hitch)
     avg_ms = avg_ms ? avg_ms * 0.98 + f.ms * 0.02 : f.ms;
-    const double target = menu_target_ms() > 0 ? menu_target_ms() : avg_ms;
+    const double cap_ms = menu_target_ms();
+    const double target = cap_ms > 0 ? cap_ms : avg_ms;
     pr::add_frame(*current, f, w, target, last_ms);
     last_ms = f.ms;
     since_map += f.ms / 1000.0, since_summary += f.ms / 1000.0;

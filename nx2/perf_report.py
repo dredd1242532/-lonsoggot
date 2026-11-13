@@ -4,18 +4,19 @@ the game left in the game folder's perf_pending/.
   - The launcher's "Send performance statistics" tick is send=1 in the game folder's longshot_perf.ini, off by default.
     The game reads it at its start: off, it measures nothing and writes nothing.
   - On, the game writes a summary (JSON, the relay's version 1) every 5 minutes and at exit into perf_pending/. The
-    launcher sends them at its next start, on a thread, to perf_reports in nx2/addresses.ini (Bean-Ops' perf relay),
+    launcher sends them at its next start, in a process of its own (start_sending), to perf_reports in nx2/addresses.ini (Bean-Ops' perf relay),
     oldest first, and deletes each one the relay took or refused; one it couldn't reach stays for next time.
   - The sender fills in version and release (the release flag as the crash report has it: a release's version, built
     from the release's own sources), which the game can't know.
   - Turning the tick off deletes what is waiting: the player said no.
 
 python -I nx2/perf_report.py <game folder>            what would be sent, sends nothing
-python -I nx2/perf_report.py <game folder> --send     sends it (a test: the launcher is the way players send)
+python -I nx2/perf_report.py <game folder> --send     sends it (what the launchers start: start_sending)
 """
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -137,7 +138,7 @@ def send_waiting(folder, url=None, timeout=10):
     for i, name in enumerate(names):
         path = os.path.join(folder, PENDING, name)
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:   # (a bad byte: one field's text, not the summary)
                 summary = json.load(f)
             if not isinstance(summary, dict):
                 raise ValueError
@@ -157,6 +158,23 @@ def send_waiting(folder, url=None, timeout=10):
         except OSError:
             pass
     return counts
+
+
+def start_sending(folder, python=None, python_args=()):
+    """send_waiting in a process of its own, left running: Play closes the launcher at once, and a summary the relay took
+    must still be deleted after (or it would be sent, and counted, again). Nothing when the tick is off or nothing waits"""
+    if not folder or not sending(folder) or not waiting(folder):
+        return None
+    cmd = [python or sys.executable, *python_args, "-I", os.path.abspath(__file__), folder, "--send"]
+    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "close_fds": True}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+    else:
+        kw["start_new_session"] = True
+    try:
+        return subprocess.Popen(cmd, **kw)
+    except OSError:
+        return None
 
 
 def main():

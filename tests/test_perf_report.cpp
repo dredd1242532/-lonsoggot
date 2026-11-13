@@ -21,6 +21,7 @@ static fs::Frame frame(float ms, float game, float render, float gpu_wait, float
 int main() {
     // the buckets: the relay's lists, an upper bound each, +Inf last
     CHECK("counts", pr::kFrameBucketCount == 13 && pr::kGpuBucketCount == 11);
+    CHECK("a cut never splits a character", pr::json_text("ab\xc3\xa9", 3) == "\"ab\"" && pr::json_text("ab\xc3\xa9", 4) == "\"ab\xc3\xa9\"");
     CHECK("a 60 fps frame", pr::bucket_of(16.6, pr::kFrameBuckets) == 4);
     CHECK("on the bound", pr::bucket_of(16.7, pr::kFrameBuckets) == 4);
     CHECK("past every bound", pr::bucket_of(5000, pr::kFrameBuckets) == pr::kFrameBucketCount - 1);

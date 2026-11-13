@@ -3276,9 +3276,11 @@ uint64_t vk_retirement_value() {
 /// closed (issue 1275: captures kept 25 -> 6527, staging 256 -> 1408 MB). Now the report once (a thread that sees the loss
 /// too waits for it, instead of ending the process before it is written), then the process ends as replay_fatal does
 [[noreturn]] void device_lost(const char* why) {
-    perf_report_final(perf_report::kDeviceLost);   // (the performance summary's last, before the process ends)
     static std::once_flag once;
-    std::call_once(once, checkpoints_report);
+    std::call_once(once, [] {
+        perf_report_final(perf_report::kDeviceLost);   // (the performance summary's last, once, before the process ends)
+        checkpoints_report();
+    });
     replay_fatal(why ? why
                      : "the GPU device was lost (VK_ERROR_DEVICE_LOST): the driver stopped or reset the GPU, and nothing sent "
                        "to it runs any more (on Linux, dmesg or journalctl -k around this time names the reset)");

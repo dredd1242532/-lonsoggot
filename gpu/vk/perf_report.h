@@ -93,7 +93,8 @@ struct MapTotals {
     int64_t movie_shown = 0, movie_dropped = 0, movie_late = 0, movie_fallbacks = 0;
     double movie_decode_ms = 0;
     bool any() const {
-        return seconds > 0 || movie_shown || movie_dropped || std::any_of(event, event + kEvents, [](int64_t v) { return v > 0; });
+        return seconds > 0 || movie_shown || movie_dropped || movie_late || movie_fallbacks || movie_decode_ms > 0 ||
+               std::any_of(event, event + kEvents, [](int64_t v) { return v > 0; });
     }
 };
 
@@ -120,10 +121,13 @@ struct Memory {
     double vram_used_gb = 0, vram_allowed_gb = 0, ram_used_gb = 0;
 };
 
-/// A string as JSON: quotes, backslashes and control characters escaped, cut at `limit` bytes (the relay's limits)
+/// A string as JSON: quotes, backslashes and control characters escaped, cut at `limit` bytes (the relay's limits), never
+/// inside a UTF-8 character (half of one would make the whole file unreadable)
 inline std::string json_text(const std::string& s, size_t limit = 120) {
+    size_t n = std::min(s.size(), limit);
+    while (n > 0 && n < s.size() && ((unsigned char)s[n] & 0xC0) == 0x80) n--;
     std::string out = "\"";
-    for (size_t i = 0; i < s.size() && i < limit; i++) {
+    for (size_t i = 0; i < n; i++) {
         const unsigned char ch = (unsigned char)s[i];
         if (ch == '"' || ch == '\\') out += '\\', out += (char)ch;
         else if (ch < 0x20) out += ' ';

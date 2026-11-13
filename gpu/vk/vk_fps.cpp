@@ -56,7 +56,8 @@ FpsRender::~FpsRender() {
 }
 
 void fps_presented() {
-    static const bool perf = perf_report_init();   // (the launcher's tick, read at the first present)
+    static const bool perf_ticked = perf_report_init();   // (the launcher's tick, read at the first present)
+    const bool perf = perf_ticked && perf_measure.load(std::memory_order_relaxed);   // (off again if unticked in play)
     const int level = fps_level_now.load(std::memory_order_relaxed);
     // (the last frame's state, for the next one: on the presenting thread only)
     static int64_t last_at = 0, last_render = 0, last_wait[fs::kParts] = {}, last_slept[2] = {}, last_gpu = 0, last_pipes = 0,

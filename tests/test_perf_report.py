@@ -120,6 +120,27 @@ def launcher_side(tmp):
     finally:
         relay.close()
 
+    f8 = game_folder(tmp, "bad bytes", summaries=1)
+    (f8 / pr.PENDING / "1700000000-0.json").write_bytes(b'{"v": 1, "version": "x", "n": 0, "os": "Linu\xc3"}')
+    relay2 = Relay()
+    try:
+        got = pr.send_waiting(str(f8), url=relay2.url)
+    finally:
+        relay2.close()
+    check(got["sent"] == 1, "a summary with a broken character is still sent (%s)" % got)
+
+    f9 = game_folder(tmp, "detached", summaries=1)
+    stub = Path(tmp, "stub.py")
+    stub.write_text("import sys, pathlib\npathlib.Path(sys.argv[-2], 'started.txt').write_text(' '.join(sys.argv[1:]))\n")
+    p = pr.start_sending(str(f9), python=sys.executable, python_args=[str(stub)])
+    p.wait(20)
+    started = (f9 / "started.txt").read_text() if (f9 / "started.txt").exists() else ""
+    check(started.endswith(" %s --send" % f9) and "perf_report.py" in started,
+          "start_sending runs nx2/perf_report.py <folder> --send in a process of its own")
+    check(pr.start_sending(str(game_folder(tmp, "nothing waits", summaries=0))) is None and
+          pr.start_sending(str(game_folder(tmp, "off again", tick=False))) is None,
+          "nothing started when nothing waits or the tick is off")
+
     f7 = game_folder(tmp, "unreachable")
     got = pr.send_waiting(str(f7), url="http://127.0.0.1:9/perf", timeout=2)
     check(got["left"] == 3 and len(list((f7 / pr.PENDING).glob("*.json"))) == 3, "not reached: everything stays")
@@ -155,10 +176,23 @@ def wiring():
     tk = (ROOT / "builder" / "linux" / "longshot_builder.py").read_text(encoding="utf-8")
     launch = tk[tk.index("    def show_launch("):tk.index("    def older_ok(")]
     check('"Send performance statistics"' in launch and "perf_report.set_sending" in launch and
-          "perf_report.send_waiting" in launch, "the Linux launcher page has the tick and sends at its start")
+          "perf_report.start_sending(folder)" in launch, "the Linux launcher page has the tick and sends at its start")
     qt = (ROOT / "builder" / "py" / "longshot_builder" / "window.py").read_text(encoding="utf-8")
     check('Tick("Send performance statistics")' in qt and "perf.send_waiting(folder)" in qt,
           "the Qt launcher page has the tick and sends at its start")
+    check("start_sending" in (ROOT / "builder" / "py" / "longshot_builder" / "perf.py").read_text(encoding="utf-8"),
+          "the Qt builder sends in a process of its own")
+    wpf = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml").read_text(encoding="utf-8")
+    cs = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+    shown = cs[cs.index("void ShowLauncher("):]
+    check('x:Name="PerfTick"' in wpf and 'Content="Send performance statistics"' in wpf and 'Click="PerfTickClick"' in wpf
+          and "PerfTick.IsChecked = PerfSending(folder);" in shown and "StartPerfSending(folder);" in shown,
+          "the Windows launcher page has the tick and sends at its start")
+    check('"longshot_perf.ini"' in cs and '"send=1\\n"' in cs and '"perf_pending"' in cs and '"--send"' in cs,
+          "the Windows launcher writes the tick as the game reads it, and runs nx2/perf_report.py --send")
+    check("call_once(once, [] {\n        perf_report_final(perf_report::kDeviceLost);" in
+          (vk / "vk_replay.cpp").read_text(encoding="utf-8"), "a lost device's summary is written once")
+    check("if (!ticked(folder))" in cpp[cpp.index("void summarize("):], "unticked while the game runs: it stops")
 
 
 def unit(cxx):
