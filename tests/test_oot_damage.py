@@ -110,6 +110,11 @@ int main(void) {
     lethal.x[12] = 4; site(&lethal, 0); assert(lethal.x[12] == 4); /* Heal ignores x9. */
     protection = 1; lethal.x[12] = 0; site(&lethal, 1); assert(lethal.x[12] == 2);
     protection = 0;
+    /* A failed CAS can supply a different old life, but must not shrink the hit. */
+    lethal.x[9] = 4; lethal.x[11] = 6; lethal.x[12] = 2;
+    site(&lethal, 1); assert(lethal.x[12] == 4 && lethal.x[9] == 4);
+    lethal.x[11] = 2; lethal.x[12] = 0;
+    site(&lethal, 1); assert(lethal.x[12] == 0 && lethal.x[9] == 4);
     setting = -1; assert(hos_oot_damage(12, 8, 4) == 8);
     setting = 4; assert(hos_oot_damage(12, 8, 4) == 8);
     puts("PASS: damage arithmetic, lethal/quarter hits, healing, protection, both player guards and option wiring");
