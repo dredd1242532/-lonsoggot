@@ -380,7 +380,9 @@ HLE(_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci) {
         const char *ov = __atomic_load_n(&overlay, __ATOMIC_RELAXED);
         if (ov && !*ov) {
             ov = getenv("HOS_FS_OVERLAY");
-            if (ov && !*ov) ov = NULL;   /* (set but empty: no overlay, as before) */
+            /* (set but empty: no overlay. This changed: before, an empty one (only Linux can set it; Windows'
+               _putenv("HOS_FS_OVERLAY=") unsets it) made alt "/<path>", each file looked up at the filesystem root) */
+            if (ov && !*ov) ov = NULL;
             __atomic_store_n(&overlay, ov, __ATOMIC_RELAXED);
         }
         const char *rel = !want_write && ov ? strstr(g, ":/") : NULL;
