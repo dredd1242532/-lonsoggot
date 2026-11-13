@@ -34,7 +34,7 @@ static class BuilderHome
         if (portableRequested)
             throw new IOException("The portable Builder home was not passed to this process.");
 
-        // Setup versions/<tag>/LongshotBuilder and ZIP fallback builders/<tag>/LongshotBuilder have the same depth.
+        // (the setup installs the builder as versions/<tag>/LongshotBuilder: its home is up to three folders above it)
         DirectoryInfo? directory = new(Path.GetFullPath(appDirectory));
         for (var depth = 0; depth <= 3 && directory != null; depth++, directory = directory.Parent)
             if (IsMarked(directory.FullName)) return new(Absolute(directory.FullName), true);

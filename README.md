@@ -224,7 +224,7 @@ version from the **Stable** channel.
 Each version also ships the files [RecompLauncher](https://recomplauncher.com) installs (`recomplauncher.json`, in
 `LongshotBuilder-<version>-windows-x64.zip` and in the Linux AppImage). RecompLauncher only finds releases on GitHub, and
 Longshot's are on git.magicbean.dev, so for now add a downloaded file to it by hand
-([docs/releases.md](docs/releases.md#recomplauncher)).
+([docs/releases.md](docs/releases.md#recomplauncher-longshot)).
 
 ### Where the files go
 

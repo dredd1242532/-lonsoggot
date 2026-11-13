@@ -292,8 +292,6 @@ static int init_home(int portable) {
     if (!n || n >= MAX_PATH || GetEnvironmentVariableW(L"LONGSHOT_SETUP_BASE", requested, MAX_PATH) >= MAX_PATH) return 0;
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, profile) == S_OK)
         hb_home_join(standard, MAX_PATH, profile, L"LongshotBuilder");   /* an explicit/portable home needs no AppData */
-    const wchar_t *name = wcsrchr(self, L'\\');
-    name = name ? name + 1 : self;
     if (portable) {
         if (*requested) {
             if (!hb_home_full(g_home.root, requested)) return 0;
