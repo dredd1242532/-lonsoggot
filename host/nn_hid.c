@@ -874,10 +874,11 @@ static int pad_sprint_down(void) {
    while their A is down and for SPRINT_ROLL_GAP_MS after the gap, so a tap shorter than the gap still counts.
    HOS_SPRINT_STILL_MS=<ms> (a game without the patch): the stick let go for that long as Sprint starts, so A goes down
    with Link standing, the earlier way round the roll (0, the default, none).
-   held: SPRINT_KEY | SPRINT_PAD as read now; steered: the left stick pushed; now: hos_now_ns. Only while the menu is shut. */
+   held: SPRINT_KEY | SPRINT_PAD as read now; steered: the left stick pushed; paused: the menu open, or the ocarina waiting
+   for a note (A is a note there and the stick bends its pitch), where Sprint holds nothing; now: hos_now_ns. */
 volatile uint32_t hos_sprint_press_mask;
 #define SPRINT_ROLL_GAP_MS 50   /* (A let go as the player's own A goes down mid-sprint: a frame at 20 fps) */
-static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steered, int menu_open, int64_t now) {
+static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steered, int paused, int64_t now) {
     static int was_pad, latched, running, still_ms = -1, own_was;
     static int64_t started, gap_until, owed_until;
     if (still_ms < 0) {
@@ -886,10 +887,10 @@ static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steer
         if (still_ms < 0 || still_ms > 2000) still_ms = 0;
     }
     const int pad = !!(held & SPRINT_PAD);
-    if (!steered || menu_open) latched = 0;
+    if (!steered || paused) latched = 0;
     else if (pad && !was_pad) latched = 1;   /* (pressed while he moves) */
     was_pad = pad;
-    const int want = steered && !menu_open && (latched || (held & SPRINT_KEY));
+    const int want = steered && !paused && (latched || (held & SPRINT_KEY));
     const int own = (int)(*buttons >> B_A & 1);   /* (the player's own A: the pads', the keys', a script's) */
     const int own_down = own && !own_was;
     own_was = own;
@@ -1179,7 +1180,8 @@ static void npad_states(Ctx *c) {
            only while the left stick is pushed (standing still, A would talk, open, pick up), started without the roll
            (sprint_step). The row off (the default): its key and button do nothing */
         const int sprint_held = rx_option(HOS_OPT_SPRINT, 0) ? sprint_now : 0;
-        sprint_step(&buttons, stick, sprint_held, steered, menu_open, hos_now_ns());
+        /* (the ocarina's note wait, as oc_notes left it this read: Sprint lets go, and its toggle ends) */
+        sprint_step(&buttons, stick, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns());
         __atomic_store_n(&free_camera_axes, axes, __ATOMIC_RELAXED);
         __atomic_store_n(&free_camera_height, height, __ATOMIC_RELAXED);
     }

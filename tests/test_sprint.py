@@ -127,7 +127,7 @@ class SprintTests(unittest.TestCase):
         npad = test_bound_keys.block(hid, "static void npad_states(")
         self.assertIn("const int sprint_held = rx_option(HOS_OPT_SPRINT, 0) ? sprint_now : 0;", npad,
                       "Sprint runs without the Controls tab's Sprint row on")
-        self.assertIn("sprint_step(&buttons, stick, sprint_held, steered, menu_open, hos_now_ns());", npad,
+        self.assertIn("sprint_step(&buttons, stick, sprint_held, steered, menu_open || hos_oc_wait == 1, hos_now_ns());", npad,
                       "npad_states does not give Sprint the stick as the game will get it")
         self.assertLess(npad.index("const int steered ="), npad.index("sprint_step("),
                         "Sprint must see the stick before it lets it go")
