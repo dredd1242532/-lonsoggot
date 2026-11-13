@@ -59,6 +59,12 @@ completion percentages or affected-player totals. The current-version watch inte
 reports and reports updated only in comments; source links remain essential. Editorial summaries are reviewed
 against reports, not claims of independent reproduction.
 
+Issue-search links (including front-page queries) move the complete search panel
+ahead of the development overview and version watch, then focus and position the
+input after layout. Feed updates stay below search and cannot push it down the page.
+Opening Progress normally retains its overview-first order; background refreshes
+do not repeat the focus/scroll action.
+
 ## Validation
 
 Run `npm run build:preview` to build, check links and source guards, and run the

@@ -9,3 +9,16 @@ export function readProblemSearchHash(hash) {
   const params = new URLSearchParams(rest.join('?'));
   return { query: params.has('q') ? params.get('q').slice(0, 300) : null };
 }
+
+export function prioritizeProblemSearch(board, window) {
+  // Move the whole search experience, not just the input. Overview/watch updates
+  // must stay below it so asynchronous feed rendering cannot push results away.
+  const panel = board.querySelector('[data-search-panel]');
+  if (board.firstElementChild !== panel) board.prepend(panel);
+  const input = panel.querySelector('input[name="query"]');
+  window.requestAnimationFrame(() => {
+    if (!board.isConnected) return;
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: 'start', behavior: 'instant' });
+  });
+}

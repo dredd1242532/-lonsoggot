@@ -12,13 +12,14 @@ const endpoint = feedEndpoint(process.env.DOCS_PROGRESS_FEED_URL, base);
     <div data-watch><p>Loading the latest stable version and its reported problems…</p></div>
     <p class="progress-note">Based on exact versions in report forms. Counts describe reports, not confirmed bugs or affected players. Older reports and unknown versions are kept separate.</p>
   </section>
+  <section data-search-panel aria-labelledby="problem-search-title">
   <div class="progress-toolbar">
     <p data-freshness role="status">Loading progress data…</p>
     <button type="button" data-refresh>Check for updates</button>
   </div>
   <p data-warning class="progress-warning" role="status" hidden></p>
   <p data-coverage class="progress-note">Includes open reports and proposed changes, recent closed items, and published releases.</p>
-  <h2>Search for your problem</h2>
+  <h2 id="problem-search-title">Search for your problem</h2>
   <p class="progress-note" id="problem-search-help">Describe what went wrong to find similar reports and any reviewed workarounds. You can also browse features, changes and releases below.</p>
   <form role="search" aria-label="Search project progress">
     <label class="progress-search">Search problems, features and updates
@@ -43,6 +44,7 @@ const endpoint = feedEndpoint(process.env.DOCS_PROGRESS_FEED_URL, base);
   <button type="button" data-more hidden>Show more results</button>
   <noscript><p>Enable JavaScript to search and refresh this overview, or use the Forgejo links below.</p></noscript>
   <p class="progress-note">Can’t find it? Search the complete <a href="https://git.magicbean.dev/MagicBeanDev/Longshot/issues">issue tracker</a>, <a href="https://git.magicbean.dev/MagicBeanDev/Longshot/pulls">proposed changes</a> or <a href="https://git.magicbean.dev/MagicBeanDev/Longshot/releases">release history</a>.</p>
+  </section>
 </progress-board>
 
 <script>

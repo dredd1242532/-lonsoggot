@@ -1,7 +1,7 @@
 import { STATUSES, REFRESH_MS, filterItems, validateFeed } from './progress.mjs';
 import { currentVersionWatch } from './progress-watch.mjs';
 import { progressOverview } from './progress-overview.mjs';
-import { readProblemSearchHash } from './problem-search.mjs';
+import { readProblemSearchHash, prioritizeProblemSearch } from './problem-search.mjs';
 
 function element(tag: string, text = '', className = '') {
   const node = document.createElement(tag);
@@ -62,9 +62,7 @@ export class ProgressBoard extends HTMLElement {
     }
     this.limit = 20;
     this.renderResults();
-    const input = this.form.elements.namedItem('query') as HTMLInputElement;
-    input.focus({ preventScroll: true });
-    input.scrollIntoView({ block: 'center' });
+    prioritizeProblemSearch(this, window);
   }
   disconnectedCallback() {
     this.events?.abort(); this.controller?.abort(); clearInterval(this.timer);
