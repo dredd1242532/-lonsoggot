@@ -740,6 +740,8 @@ std::unordered_map<uint32_t, uint32_t> gpu_pages;   // page -> the generation of
 thread_local bool gpu_write_recording = false;
 thread_local bool gpu_write_recording_all = false;
 thread_local std::vector<std::pair<uint64_t, uint64_t>> gpu_write_recording_ranges;
+thread_local uint64_t gpu_write_recording_view = 0;
+thread_local uint32_t gpu_write_recording_gen = 0;
 int64_t st_sync_gpu_pages, st_sync_gpu_live;
 bool gpu_pages_on() {
     static const bool v = env_on("RX_VK_GPU_PAGES");
@@ -749,7 +751,11 @@ void memory_gpu_write_recording_begin(bool track) {
     gpu_write_recording = track;
     gpu_write_recording_all = false;
     gpu_write_recording_ranges.clear();
-    if (track) gpu_write_recording_ranges.reserve(32);
+    if (track) {
+        gpu_write_recording_ranges.reserve(32);
+        gpu_write_recording_view = memory_capture_view();
+        gpu_write_recording_gen = memory_generation();
+    }
 }
 bool memory_gpu_written_in_recording(uint64_t guest, uint64_t size) {
     if (!guest || !size || !gpu_write_recording) return false;
@@ -757,7 +763,9 @@ bool memory_gpu_written_in_recording(uint64_t guest, uint64_t size) {
     const uint64_t end = guest + size;
     for (const auto& [lo, hi] : gpu_write_recording_ranges)
         if (guest < hi && lo < end) return true;
-    return false;
+    // (a parallel recording may have changed the page; its write is in this submission but not in this thread's ranges)
+    return gpu_write_recording_view != memory_capture_view() &&
+           memory_written_since(guest, size, gpu_write_recording_gen);
 }
 void memory_gpu_write_recording_note(uint64_t guest, uint64_t size) {
     if (!gpu_write_recording || !guest || !size) return;

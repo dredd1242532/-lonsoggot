@@ -126,6 +126,9 @@ def main():
     cpu_write = block(memory, "void guest_cpu_wrote(")
     if "memory_gpu_written_in_recording(guest, n)" not in uniform:
         raise SystemExit("a range written by the GPU earlier in this recording is still copied from stale CPU bytes")
+    written = block(memory, "bool memory_gpu_written_in_recording(")
+    if "memory_written_since(guest, size, gpu_write_recording_gen)" not in written:
+        raise SystemExit("a GPU write from another parallel recording can still leave a stale uniform snapshot")
     if "memory_replay_cpu_view()" not in uniform or "it->second.cpu_view == cpu_view" not in uniform:
         raise SystemExit("a replay CPU write does not invalidate the snapshot reuse")
     if "memory_read_as_submitted(u.addr, cur->mapped + at, n) && view &&" not in uniform:
