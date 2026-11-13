@@ -94,7 +94,7 @@ def check_longshot_names(cc, main_c, tmp):
     for folder in ("host", "gpu"):
         for f in (ROOT / folder).rglob("*"):
             if f.suffix in (".c", ".cpp", ".h") and "third_party" not in f.parts:
-                game.update(re.findall(r'getenv\("(LONGSHOT_[A-Z0-9_]+)"\)', f.read_text(encoding="utf-8", errors="replace")))
+                game.update(re.findall(r'(?:getenv|env_on)\("(LONGSHOT_[A-Z0-9_]+)"\)', f.read_text(encoding="utf-8", errors="replace")))
     builder = set()
     for folder in ("builder", "nx2", "scripts"):
         for f in (ROOT / folder).rglob("*"):

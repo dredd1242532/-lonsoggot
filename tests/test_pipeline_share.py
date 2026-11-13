@@ -79,9 +79,11 @@ int main(int argc, char** argv) {
 
 
 def record(i, size=share.pipeline_states.SIZE2):
-    r = struct.pack("<Q", i + 1) + bytes((i * 7 + k) & 0xFF for k in range(size - 8))
-    # (a version 2 record's last two words: its kind, 0 for a pipeline, and padding)
-    return r[:-8] + bytes(8) if size == share.pipeline_states.SIZE2 else r
+    """A record of a pipeline the game can make: its key, one sample, the rest 0 (a version 2 record's kind 0: a pipeline)"""
+    r = bytearray(size)
+    struct.pack_into("<Q", r, 0, i + 1)
+    struct.pack_into("<I", r, 52, 1)
+    return bytes(r)
 
 
 def v2_list(n):

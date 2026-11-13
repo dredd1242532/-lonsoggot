@@ -434,7 +434,7 @@ static int env_line_allowed(const char *name, const char *value) {
     for (size_t i = 0; i < sizeof prefixes / sizeof *prefixes; i++) ok |= !strncmp(name, prefixes[i], strlen(prefixes[i]));
     if (!ok || !strcmp(name, "HOS_ENV_FILE") || !strcmp(name, "SDL_DYNAMIC_API")) return 0;
     /* (longshot) of the LONGSHOT_ names, only the game's own: the others are the builder's (LONGSHOT_MEM_LIMIT_GB,
-       LONGSHOT_LATEST_TAG, LONGSHOT_JOBS...). LONGSHOT_PREPARE_ONLY is the game's but set by --prepare-shaders alone (from the file, the game would never play) */
+       LONGSHOT_JOBS...). LONGSHOT_PREPARE_ONLY is the game's but set by --prepare-shaders alone (from the file, the game would never play) */
     if (!strncmp(name, "LONGSHOT_", 9) && strcmp(name, "LONGSHOT_NO_AV1_NOTICE") &&
         strcmp(name, "LONGSHOT_OCCLUSION_OFF"))
         return 0;

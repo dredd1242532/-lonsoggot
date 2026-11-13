@@ -113,8 +113,10 @@ void prepare_left_workers_note() { left_noted = true; }
 void prepare_progress_log(const char*, size_t, size_t, std::chrono::steady_clock::time_point, std::chrono::steady_clock::time_point&) {}
 void ub_thread_off() {}
 void Sleep(unsigned ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
-// (host/hos_fopen_write.h's no-link write: plain fopen here, as its windows.h would clash with this Sleep)
+// (host/hos_fopen_write.h's no-link write and hos_fopen_read.h's regular-file read: plain fopen here, as their windows.h would
+// clash with this Sleep)
 static FILE* hos_fopen_write(const char* path, const char* mode) { return fopen(path, mode); }
+static FILE* hos_fopen_read_binary(const char* path) { return fopen(path, "rb"); }
 std::vector<std::unique_ptr<PipeNote>> pipe_notes_read() {
     std::vector<std::unique_ptr<PipeNote>> v;
     v.push_back(std::make_unique<PipeNote>(PipeNote{1, 1, 0, 3, {}}));
