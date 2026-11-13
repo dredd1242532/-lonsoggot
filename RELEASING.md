@@ -226,7 +226,7 @@ for Linux. A bump is a pull request that changes its line:
      `build-linux/tools`, and `check_player_build.sh` starts a build from the image with them), then the pull request
      (`build(linux): LLVM 23.1.6`).
 
-  The AppImage itself carries Python with `requirements.txt`'s packages and Tk (`deps.sh` without `tools`); a change to
+  The AppImage itself carries Python with `requirements.txt`'s packages (`deps.sh` without `tools`); a change to
   those is an ordinary pull request.
 
 Uploads over 100 MB (llvm-mingw, both emsdk) go to the address without Cloudflare: `FORGEJO_UPLOAD_API=<it>/api/v1` (One-time
