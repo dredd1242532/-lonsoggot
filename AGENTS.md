@@ -50,6 +50,8 @@ What CONTRIBUTING.md doesn't spell out, and agents trip on:
   (`python -I scripts/check_third_party.py`); a fix goes outside them, not into them (CONTRIBUTING.md).
 - **Two platforms.** Windows builds with llvm-mingw, Linux with clang/gcc. Keep host code portable, and paths UTF-8
   (no `CP_ACP`; `tests/test_utf8_paths.py`).
+- **The game's functions are mapped.** [docs/oot/](docs/oot/README.md) says what the lifted `f_<address>` functions
+  we have looked at do: search it for an address before reading lifted code, and add a row when you learn what one does.
 - **No CI, and no game in the checks.** Forgejo runs no checks yet: run `python -I -B tests/run_all.py` yourself
   and say so in the PR. The checks run without a dump; a run in the game is yours to do locally and report.
 
