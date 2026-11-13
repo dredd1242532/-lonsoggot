@@ -102,3 +102,33 @@ With the bundled Python dependencies and llvm-mingw selected explicitly, the ref
 The earlier runtime measurements remain identified by their actual renderer/host versions above. No temporal-chain,
 view-binding or renderer-API changes intervened on main; its DLSS change settles preset-row selection, whereas these
 runs held preset K fixed. The player subsequently confirmed that the isolated HDR build worked well visually.
+
+### Review follow-up verification, 2026-11-13
+
+The renderer was measured again after rebasing onto main `dd02c6cc`: main source `cb01b5a3`, PR renderer
+`6b8bc562`, source `cdee3127`. Both were built with NGX, 207 translation units and zero failures. The host stayed
+`7afe6ae1` (source `7cfff061`) and the runtime files, copied save and settings were unchanged between arms. This
+isolates the renderer change; it does not test newer host changes.
+
+Nine cold starts used the same Hyrule Field child viewpoint, 2560x1440 output (2560x1421 window), preset K,
+sharpness 0, NVIDIA FG 2x, and 40 seconds standing after settling. DLSS Quality was 1707x960; the separate DLAA
+start was 2560x1440. HDR white/peak were 200/400 nits. Hardware remained the RTX 4070, driver 621.01,
+i7-13700F, 32 GB, Windows 11 Home 26300.
+
+Vanilla DLSS with the opt-in unset, in both Native HDR and SDR, sustains 600/600 engine evaluations and NVIDIA FG
+on main and the PR. Neither PR Vanilla run logs a PsychoV35 diagnostic. PsychoV35 DLSS was interleaved PR/main/main/PR
+(with the Vanilla checks between the middle runs): both main runs have 0/600 NVIDIA FG and 600 missing-input fallbacks;
+both PR runs have 600/600 evaluations and NVIDIA FG, with zero missing-input fallbacks. Those are also the medians
+across each pair. The separate PR DLAA cold start likewise sustains 600/600 evaluations and NVIDIA FG. These results
+repeat in the last two complete 600-frame reporting intervals of each run, excluding loading and partial intervals.
+The PR Psycho runs report `RGBA16F linear route; scene format 122, network input 97, output 97` and an HDR feature.
+These are correctness counts, not performance measurements. Each run is recorded in tested-configurations.md.
+
+The log now reports the actual packed/RGBA route only for Psycho-related transitions. The production-block fixture
+covers initial Vanilla silence and route changes; the redundant Python square-root loop was removed while the actual
+shader decode and specialization checks remain. The four focused checks pass. The complete suite gives 484 passed,
+6 failed, 33 skipped with local sockets available (`--jobs 6 --timeout 180`). All six failures reproduce on unchanged
+`dd02c6cc`: texture_staging_publication, nup_paths, check_third_party, display_pointer, finish_output and release.
+No checks were weakened. Builds, suites and game runs held the shared machine lock and finished before the other
+chat's next scheduled build. Linux runtime/full renderer build, other NVIDIA GPUs/drivers, FSR 4 runtime,
+reactive-mask runtime and live DLSS/DLAA switching remain untested; the feature stays opt-in.
