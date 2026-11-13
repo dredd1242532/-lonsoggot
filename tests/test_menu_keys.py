@@ -229,7 +229,7 @@ static int input_option(int id) {
 
 static void test_saved() {
     CHECK(Options{}.hold_toggle == 0);
-    loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_zl=0\ntoggle_a=9\ntoggle_move_up=1\n");
+    loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_zl=0\ntoggle_a=9\ntoggle_move_up=1\ntoggle_plus=1\ntoggle_minus=1\n");
     CHECK(opts.hold_toggle == (1 << HOS_SW_R));
     CHECK(input_option(HOS_OPT_HOLD_TOGGLE) == opts.hold_toggle);
     loaded_as(2, SAVED_VERSION, "toggle_r=1\ntoggle_r=0\n");
@@ -306,6 +306,10 @@ def main():
 
     need(menu, r'\{TAB_CONTROLS, "Menu shortcut", &opts\.menu_shortcut, 0, 2, 1, tx_menu_shortcut,[^}]*nullptr, false, true\}',
          "the shortcut choice must be saved in Controls and exempt from presets")
+    need(menu, r"const bool disabled = .*ctl.button == HOS_SW_PLUS.*ctl.button == HOS_SW_MINUS",
+         "Plus and Minus must have disabled Toggle cells")
+    need(tick, r"const int columns = .*?controls\[i\].button != HOS_SW_PLUS && controls\[i\].button != HOS_SW_MINUS",
+         "keyboard navigation must skip Plus and Minus Toggle cells")
     # (Insert, F1 or Esc: Esc on a closed menu opens it, and that press does not also go back a page)
     need(tick, r"const bool esc_opens = opts\.menu_shortcut == 2 && press\[5\] && !open_now\.load\(\);\s*"
                r"if \(esc_opens\) press\[5\] = false;", "Esc does not open a closed menu with the Esc shortcut")

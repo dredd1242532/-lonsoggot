@@ -531,6 +531,7 @@ static const unsigned char key_default[HOS_KEY_N][2] = {
     {VK_TAB, VK_RETURN}, {'M'}, {'1'}, {'2'}, {'3'}, {'4'}, {'W'}, {'S'}, {'A'}, {'D'}, {VK_UP, 'I'}, {VK_DOWN, 'K'},
     {VK_LEFT, 'J'}, {VK_RIGHT, 'L'}, {0}, {0}, {0}, {0}, {0}};   /* (the five note rows start unset: oc_pad_word) */
 static volatile LONG toggle_reset;
+static HoldToggle toggles;
 void hos_input_clear_toggles(void) { InterlockedExchange(&toggle_reset, 1); }
 static SRWLOCK pad_bind_lock = SRWLOCK_INIT;
 static int pad_bind[HOS_KEY_N][2];
@@ -1031,12 +1032,12 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
     if (native) {
         mouse_setup();
         mouse_sens_keys();
-        hos_mouse_native_free(!(*buttons & game_stick));
+        hos_mouse_native_free(!((*buttons | toggles.latched) & game_stick));
         captured = hos_mouse_native();
         if (captured < 0) captured = 0, as_stick = 1;
     }
     if (as_stick) {
-        captured = mouse_stick(&mouse[2], &mouse[3], (int)(*buttons >> B_L & 1));
+        captured = mouse_stick(&mouse[2], &mouse[3], (int)((*buttons | toggles.latched) >> B_L & 1));
         if (captured) stick_max(stick, mouse);
     }
     mouse_buttons_arm(captured);
@@ -1092,14 +1093,13 @@ static void npad_states(Ctx *c) {
         uint64_t flight = 0;
         int height = 0;
         const int menu_open = rx_option(1, 0);
-        static HoldToggle toggles;
-        const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0);
-        const int reset = InterlockedExchange(&toggle_reset, 0) || menu_open || (enabled && !game_in_front());
+        const uint64_t enabled = (uint32_t)rx_option(HOS_OPT_HOLD_TOGGLE, 0) &
+                                 ~((1ULL << B_PLUS) | (1ULL << B_MINUS));
+        const int reset = InterlockedExchange(&toggle_reset, 0) || menu_open || (enabled && !game_in_front() &&
+                          !pads_in_background(getenv("HOS_INPUT_BACKGROUND"), rx_option(4, 0)));
         /* Pause/map must release shield/aim before the game's menu reads input. */
         const uint64_t pause = buttons & ~toggles.previous & ((1ULL << B_PLUS) | (1ULL << B_MINUS));
         buttons = hold_toggle_apply(&toggles, buttons, enabled, reset || pause);
-        /* Even a toggled pause button must deliver its opening press. */
-        if (pause && !menu_open) buttons |= pause;
         const int free_camera = rx_option(HOS_OPT_CHEAT_CAMERA, 0);
         const int flying = flight_jump_shortcut(&buttons, rx_option(HOS_OPT_CHEAT_FLIGHT, -1), menu_open, free_camera);
         if (free_camera && !menu_open) {

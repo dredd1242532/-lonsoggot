@@ -8,6 +8,8 @@
 #include "input_constants.inc"
 #include "../host/hold_toggle.h"
 static int toggle_flags, toggle_reset;
+static int controls_case, mouse_mode, native_free = 1, mouse_pointing;
+static uint64_t physical_buttons;
 static int InterlockedExchange(int *p, int v) { int old = *p; *p = v; return old; }
 /* API spies must not collide with Windows SDK/import-library names. */
 #define GetCurrentProcessId fixture_GetCurrentProcessId
@@ -58,7 +60,7 @@ static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + a
 #define ARG(n) (c->x[n])
 #define RET(value) (c->x[0] = (uint64_t)(value))
 
-int rx_option(int id, int otherwise) { return id == HOS_OPT_HOLD_TOGGLE ? toggle_flags : id == 4 ? menu_background : id == 1 ? menu_open : otherwise; }
+int rx_option(int id, int otherwise) { return id == HOS_OPT_HOLD_TOGGLE ? toggle_flags : id == 6 ? mouse_mode : id == 4 ? menu_background : id == 1 ? menu_open : otherwise; }
 int64_t hos_now_ns(void) { return now_ns; }
 void hos_prompts_live(void) {}   /* (host/prompts.c: the button prompts follow the controls) */
 volatile int hos_prompts_row = -1;   /* (host/prompts.c: "!prompts" in the live input) */
@@ -84,12 +86,13 @@ DWORD GetWindowThreadProcessId(HWND window, DWORD *pid) { *pid = window == (HWND
 DWORD GetCurrentProcessId(void) { return 10; }
 LONG_PTR GetWindowLongPtrA(HWND window, int index) { (void)window; (void)index; return 0; }
 int GetClassNameA(HWND window, char *text, int size) { (void)window; return snprintf(text, (size_t)size, "fixture"); }
-short GetAsyncKeyState(int key) { key_queries++; return key == 'P' || key == 'D' ? (short)-32768 : 0; }
+short GetAsyncKeyState(int key) { key_queries++; return !controls_case && (key == 'P' || key == 'D') ? (short)-32768 : 0; }
 int hos_sdl_pads(uint64_t *buttons, int32_t stick[4]) {
     bootstrap_polls++; *buttons = 1ULL << B_Y; stick[0] = -31000; return 1;
 }
 void pads_read(uint64_t *buttons, int32_t stick[4]) {
     /* The physical backend boundary is a spy; actual routing merges its result with the script below. */
+    if (controls_case) { *buttons |= physical_buttons; return; }
     pad_merges++; *buttons |= 1ULL << B_B; stick[0] = -12000; stick[2] = 8000;
 }
 void binds_load(void) {
@@ -101,12 +104,12 @@ void binds_load(void) {
 }
 /* the native mouse look (no camera found: the motion goes to mouse_stick) and the mouse's sensitivity, which
    read_input calls */
-int hos_mouse_native(void) { return -1; }
-void hos_mouse_native_free(int free) { (void)free; }
+int hos_mouse_native(void) { return controls_case ? (native_free ? 1 : -1) : -1; }
+void hos_mouse_native_free(int free) { native_free = free; }
 void hos_mouse_native_stick(int held) { (void)held; }
 static void mouse_setup(void) {}
 static void mouse_sens_keys(void) {}
-int mouse_stick(int32_t *x, int32_t *y, int held) { (void)x; (void)y; (void)held; mouse_queries++; return 0; }
+int mouse_stick(int32_t *x, int32_t *y, int held) { (void)x; (void)y; mouse_pointing = held; mouse_queries++; return 0; }
 void rx_request_frame_dump(void) { commands++; }
 void rx_set_screenshot_ms(int64_t ms) { (void)ms; commands++; }
 void rx_request_rdoc_capture(int frames) { (void)frames; commands++; }
@@ -166,7 +169,36 @@ static void hold_toggle_case(void) {
     bridge_buttons = 0; packet(0, 0, 0, 0);
     toggle_flags |= 1 << B_PLUS;
     bridge_buttons = plus; packet(plus, 0, 0, 0);   /* pause itself remains usable */
+    packet(plus, 0, 0, 0); /* Plus stays an ordinary hold, even with a hand-written flag. */
     bridge_buttons = 0; packet(0, 0, 0, 0);
+}
+
+/* Real read_input and Npad serialization: physical release must retain mouse routing. */
+static void hold_mouse_case(void) {
+    front = controls_case = 1;
+    for (int mode = 0; mode <= 2; mode++) {
+        mouse_mode = mode;
+        for (int b = B_L; b <= B_ZR; b++) {
+            toggle_flags = 1 << b;
+            physical_buttons = 0; packet(0, 0, 0, 0);
+            physical_buttons = 1ULL << b; packet(physical_buttons, 0, 0, 0);
+            physical_buttons = 0; packet(1ULL << b, 0, 0, 0);
+            if (mode == 1) CHECK(native_free == (b == B_ZL));
+            if (mode == 0 || (mode == 1 && b != B_ZL)) CHECK(mouse_pointing == (b == B_L));
+            physical_buttons = 1ULL << b; packet(0, 0, 0, 0);
+            physical_buttons = 0; packet(0, 0, 0, 0);
+        }
+    }
+}
+
+static void hold_background_case(void) {
+    controls_case = 1;
+    front = 0; menu_background = 1;
+    toggle_flags = 1 << B_ZL;
+    physical_buttons = 1ULL << B_ZL; packet(physical_buttons, 0, 0, 0);
+    physical_buttons = 0; packet(1ULL << B_ZL, 0, 0, 0);
+    physical_buttons = 1ULL << B_ZL; packet(0, 0, 0, 0);
+    physical_buttons = 0; packet(0, 0, 0, 0);
 }
 
 static void append_live(const char *text) {
@@ -241,6 +273,12 @@ int main(int argc, char **argv) {
     CHECK(!pads_in_background("0", 1));    /* HOS_INPUT_BACKGROUND=0 wins over the menu */
     memory = calloc(512, 1); CHECK(memory);
     const char *name = argv[1];
+    if (!strcmp(name, "hold-mouse") || !strcmp(name, "hold-background")) {
+        if (!strcmp(name, "hold-mouse")) hold_mouse_case();
+        else hold_background_case();
+        puts("PASS: latch mouse/background routing");
+        free(memory); return 0;
+    }
     if (!strcmp(name, "hold-toggle")) {
         hold_toggle_case();
         puts("PASS: actual Npad hold-to-toggle, menu, focus, binding reset and pause");

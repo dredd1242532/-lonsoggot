@@ -3231,9 +3231,10 @@ void draw_controls(ui::Ctx& c) {
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
-                       : sel_i < kControls && controls[sel_i].button < HOS_SW_N && ccol == kCtlToggle
+                       : sel_i < kControls && controls[sel_i].button < HOS_SW_N && controls[sel_i].button != HOS_SW_PLUS &&
+                         controls[sel_i].button != HOS_SW_MINUS && ccol == kCtlToggle
                            ? "Hold-to-toggle: press once to hold this Switch button, again to release it. Either gamepad input or a "
-                             "bound key works. Opening the menu, pause, focus loss or rebinding releases it. Off by default."
+                             "bound key works. Opening Insert, pressing Plus or Minus, focus loss or rebinding releases it. Off by default."
                            : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
                              "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
                              "another's empty Input 2. The game's button icons follow after a restart.";
@@ -3290,7 +3291,7 @@ void draw_controls(ui::Ctx& c) {
         const bool keys = keys_only(i);
         for (int col = kCtlPrimary; col < kCtlColumns; col++) {
             const bool keyboard = col == kCtlKeyboard, toggle = col == kCtlToggle;
-            const bool disabled = (keys && !keyboard) || (toggle && ctl.button >= HOS_SW_N);
+            const bool disabled = (keys && !keyboard) || (toggle && (ctl.button >= HOS_SW_N || ctl.button == HOS_SW_PLUS || ctl.button == HOS_SW_MINUS));
             const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (toggle ? 0 : 3 * s);
             const std::string v = disabled ? "-" : keyboard ? keys_text(ctl.button) : toggle
                 ? tx_onoff((opts.hold_toggle >> ctl.button) & 1) : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
@@ -4078,7 +4079,7 @@ void menu_init() {
             }
             if (!strncmp(line, "toggle_", 7))
                 for (int i = 0; i < HOS_SW_N; i++)
-                    if (!strcmp(line + 7, bind_names[i])) {
+                    if (i != HOS_SW_PLUS && i != HOS_SW_MINUS && !strcmp(line + 7, bind_names[i])) {
                         const int bit = 1 << i;
                         opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
                     }
@@ -4930,8 +4931,9 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
-                const int columns = i < kControls && controls[i].button < HOS_SW_N ? kCtlColumns : kCtlToggle;
-                if (ccol >= columns) ccol = kCtlKeyboard;   // (no toggle on stick directions or ocarina notes)
+                const int columns = i < kControls && controls[i].button < HOS_SW_N &&
+                                    controls[i].button != HOS_SW_PLUS && controls[i].button != HOS_SW_MINUS ? kCtlColumns : kCtlToggle;
+                if (ccol >= columns) ccol = kCtlKeyboard;   // (no toggle on pause, map, stick directions or ocarina notes)
                 if ((press[3] || press[4]) && i < kControls && !keys_only(i)) {
                     ccol = (ccol + columns + (press[3] ? -1 : 1)) % columns;
                     changed = true;
