@@ -1,5 +1,5 @@
 // Authored API spies around functions inserted from vk_framegen.cpp by test_upscale_independent.py.
-#ifndef _CRT_SECURE_NO_WARNINGS
+#ifdef _WIN32
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 #include <algorithm>

@@ -42,7 +42,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="framegen-resources-") as temp:
         unit, exe = Path(temp) / "fixture.cpp", Path(temp) / "fixture.exe"
         unit.write_text(fixture, encoding="utf-8")
-        subprocess.run([a.cxx, "-D_CRT_SECURE_NO_WARNINGS", "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
+        subprocess.run([a.cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
                         "-pthread", "-I" + str(a.headers), str(unit), "-o", str(exe)], check=True)
         subprocess.run([str(exe), a.phase], check=True, timeout=30)
 

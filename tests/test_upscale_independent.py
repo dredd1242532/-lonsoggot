@@ -54,7 +54,7 @@ def main():
         assert owned.parent == Path(tempfile.gettempdir()).resolve() and owned.name.startswith("upscale-independent-")
         cpp, exe = Path(tmp) / "fixture.cpp", Path(tmp) / "fixture.exe"
         cpp.write_text(fixture, encoding="utf-8")
-        subprocess.run([a.cxx, "-D_CRT_SECURE_NO_WARNINGS", "-std=c++20", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "gpu/vk"),
+        subprocess.run([a.cxx, "-std=c++20", "-include", ENV_ON_H, "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "gpu/vk"),
                         str(cpp), "-o", str(exe)], check=True)
         for allow in ("0", "1"):
             env = os.environ.copy()
