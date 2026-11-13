@@ -719,7 +719,8 @@ inline void boundary(Bound k) {
         drain();
     } else if (m == THREAD) {
         if (k == B_vkDestroyDevice || k == B_vkDestroyInstance) g_rec.stop();
-        else if (unordered(k) || (t_own_slot && own_slot_call(k))) return;
+        else if (unordered(k)) return;
+        else if (t_own_slot && own_slot_call(k)) return;   // (RX_VK_RECORDER_OWN: a slot's own resets, OwnSlot)
         else if (Recorder* g = t_prod) g->wait_idle(k);
     }
 }
