@@ -17,10 +17,20 @@ const guides = [
 ];
 ---
 <div class="studio-home not-content">
-  <aside class="studio-release-bar" aria-label="Source release information">
-    <div><span class="studio-tag">LONGSHOT RELEASES</span><strong>{stable ? `Longshot ${stable.tag}` : feed ? 'No stable release in this snapshot' : 'Release information unavailable'}</strong><span class="studio-release-date">{stable ? date(stable.publishedAt) : 'Follow development for updates'}</span></div>
-    <a href={stable?.url || 'https://git.magicbean.dev/MagicBeanDev/Longshot/releases'}>View releases <span aria-hidden="true">↗</span></a>
-  </aside>
+  <section class="studio-release-card" id="releases" aria-labelledby="release-title">
+    <img class="studio-release-icon" src={`${base}branding/longshot.png`} alt="" width="512" height="512" loading="lazy" />
+    <div class="studio-release-copy">
+      <p class="studio-eyebrow">BUILDS & RELEASE NOTES</p>
+      <h2 id="release-title">Longshot releases</h2>
+      <p class="studio-release-status"><strong>{stable ? `Longshot ${stable.tag}` : feed ? 'No stable release in this snapshot' : 'Release information unavailable'}</strong>{stable && <span> · {date(stable.publishedAt)}</span>}</p>
+      <p class="studio-release-description">{stable ? 'Get the build, read what changed, and check the installation notes.' : 'Check the official releases page for available builds and release notes.'}</p>
+      {feed && <p class="studio-release-date">Snapshot checked {date(feed.generatedAt)}.</p>}
+    </div>
+    <div class="studio-release-actions">
+      <a class="studio-button primary" href={stable?.url || 'https://git.magicbean.dev/MagicBeanDev/Longshot/releases'}>{stable ? 'View latest release' : 'View releases'} <span aria-hidden="true">↗</span></a>
+      <a class="studio-release-guide" href={`${base}guides/getting-started/`}>Installation guide <span aria-hidden="true">→</span></a>
+    </div>
+  </section>
   <section id="guides" class="studio-section">
     <div class="studio-section-heading"><div><p class="studio-eyebrow">01 / THE ESSENTIALS</p><h2>Less wandering.<br />More adventure.</h2></div><a class="studio-text-link" href={`${base}reference/manual/`}>Full documentation <span aria-hidden="true">↗</span></a></div>
     <div class="studio-guides">{guides.map(g => <article><span class="studio-card-number" aria-hidden="true">{g.n}</span><p class="studio-eyebrow">{g.note}</p><h3>{g.title}</h3><p>{g.text}</p><a href={`${base}${g.link}`}>{g.label}<span aria-hidden="true">↗</span></a></article>)}</div>
