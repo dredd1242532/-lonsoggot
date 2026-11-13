@@ -21,7 +21,19 @@
           "App/Views/HomeView.axaml": "44275c0cf1543ca02cecd36e2906c2ce101688278b123fce759d3a611cad1010",
           "App/ViewModels/HomeViewModel.cs": "fc5da43439a9afe3ca089e9398da26835130ae02a46bb9e65fd47613215de094",
           "Core/ReleaseManifest.cs": "09d76c0c285c97571aaa801f0ebcc0dd470c42622d924fd90a8b0faaad2cc7a0",
-          "App/App.axaml": "2a5d0a1956c9351158f60f4465787b44389ed6977e03e83c83f410b682b4ffc0"
+          "App/App.axaml": "2a5d0a1956c9351158f60f4465787b44389ed6977e03e83c83f410b682b4ffc0",
+          "App/ViewModels/MainViewModel.cs": "909573f2971a26fdbad129a7b5fb8decdf1f35db26875940feaf2e47e75b213c",
+          "App/LauncherService.cs": "87c3d8d46a34445fc5ad2c56190a5f1b7d897bbd98c29974c87ea8df5f7b92e8",
+          "App/LongshotLauncher.csproj": "61fc5ee7c7874a55c3a0c3a1f026a1779f0fd310c114f5e344f6c854943b6237",
+          "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
+          "Core/Platform.cs": "15cb8596a6a5091982da24d465d9a793b221548d6990a87e2d3b576ec4d83be2",
+          "Core/BuildRegistry.cs": "c9e5af110e3f8b41e7315fc46ac56361e79a5255ab801990f033908607f848ee",
+          "Core/UpdatePolicy.cs": "66ba972e524885543d1e3937177452361f3c9fd1ad31e8329d4862de2ce9ed40",
+          "App/Assets/Fonts/Inter-SemiBold.ttf": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3",
+          "App/Assets/Fonts/Inter-Regular.ttf": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+          "App/Assets/Fonts/Inter-Medium.ttf": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872",
+          "App/Assets/Fonts/Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+          "App/Assets/Fonts/Inter-Bold.ttf": "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f"
         }
       },
       "capture": {
@@ -37,7 +49,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
-        "notes": "Application-owned branding and UI only. The selected build version is a release-list value, not a running game version."
+        "notes": "Application-owned branding and UI only. The selected build version is a release-list value, not a running game version. Source coverage includes navigation, platform/version state and bundled font inputs."
       }
     },
     {
@@ -63,7 +75,23 @@
           "App/Views/SavePickView.axaml": "2e8df885f98e723fb589f22ed86aa52eb36102af33655077db67653e3f9b9178",
           "App/ViewModels/SavesViewModel.cs": "1a59d62ed6d1af476f829586acf9681f547fd82a1d18b7838894850832bd588a",
           "App/Views/HookshotImportView.axaml": "c8e91e2cd13859ce5b4607329f0115e0eebb589f0bdeff76752b2720c868c502",
-          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7"
+          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7",
+          "App/ViewModels/MainViewModel.cs": "909573f2971a26fdbad129a7b5fb8decdf1f35db26875940feaf2e47e75b213c",
+          "App/LauncherService.cs": "87c3d8d46a34445fc5ad2c56190a5f1b7d897bbd98c29974c87ea8df5f7b92e8",
+          "App/LongshotLauncher.csproj": "61fc5ee7c7874a55c3a0c3a1f026a1779f0fd310c114f5e344f6c854943b6237",
+          "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
+          "Core/Platform.cs": "15cb8596a6a5091982da24d465d9a793b221548d6990a87e2d3b576ec4d83be2",
+          "Core/BuildRegistry.cs": "c9e5af110e3f8b41e7315fc46ac56361e79a5255ab801990f033908607f848ee",
+          "Core/UpdatePolicy.cs": "66ba972e524885543d1e3937177452361f3c9fd1ad31e8329d4862de2ce9ed40",
+          "App/Assets/Fonts/Inter-SemiBold.ttf": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3",
+          "App/Assets/Fonts/Inter-Regular.ttf": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+          "App/Assets/Fonts/Inter-Medium.ttf": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872",
+          "App/Assets/Fonts/Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+          "App/Assets/Fonts/Inter-Bold.ttf": "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f",
+          "Core/Saves.cs": "cf88b0f7eb1e0d47386e287852e25a80c35b977ec018072614e249391418bbde",
+          "Core/HookshotSaves.cs": "dd85a31786e51babba09c3e5b491ff342d76b18e0ca1a59acad2a63330f04188",
+          "Core/SaveText.cs": "dd327c65f2e26cc3adc3e3662128cc43ffb1f97bcdc527e258ccad4384b9987b",
+          "Core/LauncherHome.cs": "ca417a3669d3042aafd2bc3b19338481d18c3b04ec90e864c8bbeccf33b64c6e"
         }
       },
       "capture": {
@@ -80,7 +108,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
-        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build."
+        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build. Source coverage includes navigation, platform/version state and bundled font inputs plus save discovery/transfer behavior."
       }
     },
     {
@@ -106,7 +134,23 @@
           "App/Views/SavePickView.axaml": "2e8df885f98e723fb589f22ed86aa52eb36102af33655077db67653e3f9b9178",
           "App/ViewModels/SavesViewModel.cs": "1a59d62ed6d1af476f829586acf9681f547fd82a1d18b7838894850832bd588a",
           "App/Views/HookshotImportView.axaml": "c8e91e2cd13859ce5b4607329f0115e0eebb589f0bdeff76752b2720c868c502",
-          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7"
+          "App/ViewModels/HookshotImportViewModel.cs": "e0249c9a9e63db280ebda2b594a1579ff9073ba91edc8b1dd3c90186a07f6ef7",
+          "App/ViewModels/MainViewModel.cs": "909573f2971a26fdbad129a7b5fb8decdf1f35db26875940feaf2e47e75b213c",
+          "App/LauncherService.cs": "87c3d8d46a34445fc5ad2c56190a5f1b7d897bbd98c29974c87ea8df5f7b92e8",
+          "App/LongshotLauncher.csproj": "61fc5ee7c7874a55c3a0c3a1f026a1779f0fd310c114f5e344f6c854943b6237",
+          "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
+          "Core/Platform.cs": "15cb8596a6a5091982da24d465d9a793b221548d6990a87e2d3b576ec4d83be2",
+          "Core/BuildRegistry.cs": "c9e5af110e3f8b41e7315fc46ac56361e79a5255ab801990f033908607f848ee",
+          "Core/UpdatePolicy.cs": "66ba972e524885543d1e3937177452361f3c9fd1ad31e8329d4862de2ce9ed40",
+          "App/Assets/Fonts/Inter-SemiBold.ttf": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3",
+          "App/Assets/Fonts/Inter-Regular.ttf": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+          "App/Assets/Fonts/Inter-Medium.ttf": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872",
+          "App/Assets/Fonts/Inter-LICENSE.txt": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+          "App/Assets/Fonts/Inter-Bold.ttf": "288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f",
+          "Core/Saves.cs": "cf88b0f7eb1e0d47386e287852e25a80c35b977ec018072614e249391418bbde",
+          "Core/HookshotSaves.cs": "dd85a31786e51babba09c3e5b491ff342d76b18e0ca1a59acad2a63330f04188",
+          "Core/SaveText.cs": "dd327c65f2e26cc3adc3e3662128cc43ffb1f97bcdc527e258ccad4384b9987b",
+          "Core/LauncherHome.cs": "ca417a3669d3042aafd2bc3b19338481d18c3b04ec90e864c8bbeccf33b64c6e"
         }
       },
       "capture": {
@@ -123,7 +167,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter fonts (App/Assets/Fonts/Inter-LICENSE.txt).",
-        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build."
+        "notes": "Actual Linux UI with synthetic build-registration metadata only. No fabricated save slots or personal paths. The shared-save wording applies to Linux; this launcher release keeps Windows saves per build. Source coverage includes navigation, platform/version state and bundled font inputs plus save discovery/transfer behavior."
       }
     },
     {
