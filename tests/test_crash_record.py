@@ -64,7 +64,6 @@ def source_contract():
         "hos_relaunch.c": ["ExitProcess(0);"],
         "hos_svc.c": ["ExitProcess(0);"],
         "hos_thread.c": ["ExitProcess(3);"],  # fatal: record, not a clean end
-        "hos_update.c": ["ExitProcess(0);", "_exit(127);", "_exit(127);", "_exit(0);"],
         "posix/display_sdl.c": ["ExitProcess(1);"],
         "posix/win32_posix.c": ["_exit((int)code);", "ExitProcess(code);"],  # platform implementations
     }
@@ -79,18 +78,14 @@ def source_contract():
                 continue
             calls.append(match.group())
             rel = path.relative_to(ROOT / "host").as_posix()
-            exempt = (rel == "hos_thread.c" or rel == "posix/win32_posix.c" or
-                      (rel == "hos_update.c" and match.group() == "_exit(127);"))
+            exempt = rel == "hos_thread.c" or rel == "posix/win32_posix.c"
             if not exempt:
                 assert "hos_crash_clean_end();" in text[max(0, match.start() - 180):match.start()], rel
         if calls:
             observed[path.relative_to(ROOT / "host").as_posix()] = calls
     assert observed == expected, (observed, expected)
-    updater = (ROOT / "host/hos_update.c").read_text(encoding="utf-8")
-    assert "hos_crash_clean_end" not in block(updater, "        if (fork() == 0) {")
-    assert "hos_crash_clean_end" not in block(updater, "    if (pid == 0) {")
-    assert "hos_crash_clean_end();" in block(updater, "    if (pid > 0) {")
-    print("PASS: every host process exit classified; control/restart/update parents mark, children do not")
+    assert not (ROOT / "host/hos_update.c").exists(), "the removed in-game updater must not return"
+    print("PASS: every remaining host process exit classified; normal exits mark, fatal exits do not")
     return glue, threads, main
 
 

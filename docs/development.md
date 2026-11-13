@@ -220,8 +220,8 @@ skipped, even when two games use one folder; process-id liveness is not the test
 SIGTERM, SIGINT and SIGHUP are deliberately not crash signals here. Logout,
 Ctrl-C or a test timeout can therefore leave an unclean-end record. Its fixed
 note says: "ended from outside or lost power, not necessarily a crash".
-Normal returns, control quit, window close/restart and updater exits remove only
-their own marker and empty staging file, never earlier reports. A read-only
+Normal returns, control quit and window close/restart remove only their own
+marker and empty staging file, never earlier reports. A read-only
 folder disables recording without preventing play. Disk errors or an exhausted
 faulting stack can still prevent a record; this is not a crash-recovery facility.
 
