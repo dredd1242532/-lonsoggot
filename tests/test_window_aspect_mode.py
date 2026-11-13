@@ -42,7 +42,12 @@ int main(int argc, char **argv) {
     const int window = atoi(argv[1]), fixed = atoi(argv[2]);
     start(); assert(hos_wide_window == window);
     const uint64_t before = hos_wide_out;
-    if (window) assert(hos_wide_aspect() == hos_aspect_ratio); /* headless fallback */
+    if (window) { /* no window was created: headless uses the boot picture */
+        assert(hos_wide_aspect() == hos_aspect_ratio);
+        float tangent = 0.5f, aspect = 16.0f/9.0f;
+        assert(hos_wide_projection(0x1234, &tangent, &aspect));
+        assert(aspect == hos_aspect_ratio);
+    }
     hos_wide_start(1600, 1200);
     if (window) {
         assert((unsigned)hos_wide_out == 2560 && (hos_wide_out >> 32) == 1920);
