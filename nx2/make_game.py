@@ -2234,9 +2234,14 @@ def main(a=None):
         refuse_dump_links(a.romfs)
         shutil.copytree(a.exefs, exefs)   # (unpacked in place: the user's copy stays as it is)
         run(PY + ["nx2/unpack.py", exefs])
+        # (before the folder's copies are touched: a dump of another version, refused, used to replace .longshot_exefs first, and
+        # the next build from the .nup those were read from took them as its own and was refused too)
+        check_supported_build(exefs)
         link_or_copy(a.romfs, romfs)
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
+        with contextlib.suppress(FileNotFoundError):   # (the copies are this dump's now, not the .nup's that stamp names)
+            os.remove(os.path.join(out, ".longshot_romfs"))
     check_supported_build(exefs)
 
     # (made once on the development PC: lists of addresses and counts, no game code)
