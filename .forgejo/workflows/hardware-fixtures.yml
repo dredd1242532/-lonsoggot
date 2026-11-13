@@ -1,0 +1,77 @@
+# Owner-controlled pilot only; labels route jobs, they do not isolate runners.
+# Read docs/forgejo-runners.md before registering anything. No pull-request event,
+# PR ref, arbitrary checkout, game dump, release secret, or raw-output upload.
+name: Opt-in hardware fixtures
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_sha:
+        description: Full reviewed SHA of this owner's main (must still be current)
+        required: true
+        type: string
+      device_name:
+        description: Unique GPU name substring (one hardware device, not a software ICD)
+        required: true
+        type: string
+
+concurrency:
+  group: hardware-fixtures-${{ github.repository }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  hardware:
+    # This is NOT an allocation boundary. Only an owner's control repository may
+    # register this label; all its workflows and writers must be trusted.
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.repository != 'MagicBeanDev/Longshot' &&
+      vars.HARDWARE_TESTS_ENABLED == 'true' && inputs.approved_sha == github.sha
+    runs-on: longshot-hardware-linux
+    timeout-minutes: 10
+    steps:
+      - name: Check out the approved owner-controlled main
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # Same Vulkan headers and checkout pin as ci.yml; tools.lock supplies the
+      # Windows builder, not this Linux fixture environment. No tool downloads in
+      # the payload: the owner supplies an already present, digest-pinned image.
+      - name: Check out pinned Vulkan headers
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          github-server-url: https://github.com
+          repository: KhronosGroup/Vulkan-Headers
+          ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
+          path: _deps/vulkan-headers
+          persist-credentials: false
+      - name: Recheck approval and run the bounded fixtures
+        id: fixtures
+        env:
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          DEVICE_NAME: ${{ inputs.device_name }}
+          FIXTURE_IMAGE: ${{ vars.HARDWARE_TEST_IMAGE }}
+          GPU_DEVICE: ${{ vars.HARDWARE_TEST_DEVICE }}
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          current=$(git ls-remote --exit-code "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" refs/heads/main)
+          test "${current%%$'\t'*}" = "$APPROVED_SHA"
+          result_dir=$(mktemp -d "$RUNNER_TEMP/hardware-fixtures.XXXXXXXX")
+          echo "report=$result_dir/results.md" >> "$GITHUB_OUTPUT"
+          python3 -I -B scripts/hardware_fixtures.py --run --commit "$APPROVED_SHA" \
+            --image "$FIXTURE_IMAGE" --gpu-device "$GPU_DEVICE" --device-name "$DEVICE_NAME" \
+            --headers "$GITHUB_WORKSPACE/_deps/vulkan-headers/include" --output "$result_dir/results.md"
+      - name: Upload only the bounded configuration rows
+        if: ${{ !cancelled() && steps.fixtures.outputs.report != '' }}
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e # Forgejo v4
+        with:
+          name: hardware-fixtures-${{ github.sha }}
+          path: ${{ steps.fixtures.outputs.report }}
+          if-no-files-found: error
+          retention-days: 7
