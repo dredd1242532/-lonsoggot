@@ -158,7 +158,8 @@ its line:
   1. Edit the line: version, `sha256` and `size` (from the upstream release page, or download it and run `sha256sum`),
      `prefix` (the folder in the archive), and the upstream URL.
   2. `RELEASE_TOKEN=<token> python -I scripts/tools.py mirror llvm-mingw`: it downloads the archive, checks it against the
-     line, uploads the copy to the `tools` release, and adds its URL to the line.
+     line, uploads the copy to the `tools` release, and makes its URL the line's first (the upstream URL stays as the
+     fallback).
   3. `python -I scripts/tools.py check --require`, and open the pull request (`build(windows): llvm-mingw 20261201`).
 - **An archive Longshot makes** (Python with new pins, the CPM cache with a new package, the `third_party` prebuilt files,
   the profile):
@@ -215,9 +216,11 @@ None of this is done yet. In order (the org secrets are shared by both repositor
    (Longshot needs Linux and Windows, the launcher Linux only).
 6. **Longshot's `tools` release and `tools.lock`.** Assemble and add the three tools the lock lacks: `cpm` with dav1d (from
    build-windows.yml's dav1d artifact), `third-party` (the prebuilt files, from Hookshot v2.1.0's third_party part or a
-   Windows build), and `profile` (the play profile). Then `tools.py mirror` each upstream tool, so every line has a
-   fallback. The first `mirror` or `add` creates the `tools` release. `python -I scripts/tools.py check --require` must pass:
-   `release.yml` refuses to publish until it does.
+   Windows build), and `profile` (the play profile). Then `tools.py mirror` each of the others (llvm-mingw, python, emsdk,
+   wgpu-native), so its first URL, the `tools` release, exists; its upstream or NotRexed/Hookshot URL stays the fallback.
+   The first `mirror` or `add` creates the `tools` release. **The `tools` release must be filled before the first
+   release:** `python -I scripts/tools.py check --require` must pass, and `release.yml` stops in its first job, before
+   any build, until it does ("the tools release is missing: …").
 7. **Try it** on a fork, or with a throwaway key first: `LONGSHOT_LAUNCHER_TRUST=<test .pub.pem>` makes a launcher accept a
    release signed with it.
 8. **The first releases.** The launcher `v1.0.0-rc.1` and Longshot `v3.0.0-rc.1`, then their stables.
@@ -232,7 +235,7 @@ None of this is done yet. In order (the org secrets are shared by both repositor
 | *Publish* fails with HTTP 400/422 on an upload | the attachment size or type limits | One-time setup, step 4 |
 | *Publish* fails with HTTP 401/403 | `RELEASE_TOKEN` missing, expired, or without write access | a new token for the bot (step 2) |
 | "is already published" | a run for a version that is out (a re-run of an old run) | nothing: a version's files never change |
-| *The files* fails at `tools.py check --require` | `tools.lock` lacks a tool the builder needs | One-time setup, step 6 |
+| *The version* fails: "the tools release is missing: …" | `tools.lock` lacks a tool the builder needs | One-time setup, step 6 |
 | A draft is left after a failed run | the run stopped before *Publish* | re-run it (the draft is reused), or delete the draft |
 | The launcher: "not signed by a key this launcher trusts" | a release signed with a key the launcher does not have (a new key, or a test key) | release the launcher with the key first (Rotate the key) |
 | The launcher offers nothing on a channel | no published release on it, or its newest was refused (the home says why) | `release.py channels`, then check that release's files |

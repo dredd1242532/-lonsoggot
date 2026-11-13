@@ -185,7 +185,7 @@ jobs:
           grep -q "with AMD FSR 4" "$RUNNER_TEMP/vk-fsr.log"
           test -f "$RUNNER_TEMP/vk-fsr/sa/build/longshot_vk.so"
 
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@v4   # (Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: Longshot-linux-x86_64
           path: build-linux/*.AppImage

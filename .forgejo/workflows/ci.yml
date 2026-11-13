@@ -43,13 +43,13 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
         run: |
           python3 -I - <<'PY'
-          import importlib.util, os, re, sys
+          import importlib.util, os, sys
           spec = importlib.util.spec_from_file_location("forge", "scripts/forge.py")
           forge = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(forge)
-          title = os.environ["TITLE"]
-          # (Forgejo's work-in-progress prefixes, WORK_IN_PROGRESS_PREFIXES' default: WIP: and [WIP], any case)
-          title = re.sub(r"^\s*(?:wip:|\[wip\])\s*", "", title, flags=re.I)
+          # (without Forgejo's work-in-progress prefixes, as forge.py and the description check take them off: forge.desc is
+          # scripts/check_pr_description.py, in the sparse checkout with forge.py)
+          title = forge.desc.strip_wip(os.environ["TITLE"])
           if not forge.TITLE.match(title):
               print("::error::the title must be a Conventional Commit, type(scope): description, with the type one of %s "
                     "(CONTRIBUTING.md, Pull request titles): %r" % (", ".join(forge.TITLE_TYPES), title))

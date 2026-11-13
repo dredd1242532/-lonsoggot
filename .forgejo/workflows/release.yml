@@ -5,8 +5,9 @@
 #   a tag vX.Y.Z-rc.N    a release candidate, a pre-release (the rc channel)
 #   a tag vX.Y.Z         a stable (the stable channel, and rc too). Longshot's first is v3.0.0
 #
-# 1. version: the version's name; a tag is checked first (scripts/release.py check-tag: its form, on main, above every
-#    release, and as high as the commits since the last stable call for). A refused tag builds nothing.
+# 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool a Windows builder needs is in the
+#    tools release), then the version's name; a tag is checked too (scripts/release.py check-tag: its form, on main, above
+#    every release, and as high as the commits since the last stable call for). Either refused builds nothing.
 # 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
 # 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
 #    then a draft release with every file, published last: until then no launcher sees it. A nightly also prunes the
@@ -42,6 +43,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: The tools
+        run: |
+          # (every tool the Windows builder needs is in tools.lock, so the tools release: before any build, not after both)
+          if ! python3 -I scripts/tools.py check --require; then
+            echo "::error::the tools release is missing a tool the Windows builder needs; RELEASING.md, One-time setup"
+            exit 1
+          fi
       - id: name
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -90,19 +98,17 @@ jobs:
           ref: ${{ needs.version.outputs.ref }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: https://data.forgejo.org/forgejo/download-artifact@v4
+      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: Longshot-linux-x86_64
           path: files
-      - uses: https://data.forgejo.org/forgejo/download-artifact@v4
+      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: LongshotBuilder-windows
           path: files
       - name: The files
         run: |
           git fetch -q --tags origin
-          # (every tool the Windows builder needs is in tools.lock: RELEASING.md, One-time setup)
-          python3 -I scripts/tools.py check --require
           cp tools.lock files/
           ls -l files
           test -f "files/Longshot-$TAG-x86_64.AppImage" && test -f "files/LongshotBuilder-$TAG-windows-x64.zip"

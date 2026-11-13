@@ -10,8 +10,8 @@ tool"). Python's standard library only.
         every tool (or the ones named) unpacked into a builder install, as the setup and the launcher do: <prefix> of the
         archive becomes <dest>
     python -I scripts/tools.py mirror <name>
-        puts the tool's archive, fetched from its upstream URL, in Longshot's "tools" release as <sha256>-<name>.zip, and
-        adds that copy to its line as the fallback URL ($RELEASE_TOKEN)
+        puts the tool's archive, fetched from its URLs, in Longshot's "tools" release as <sha256>-<name>.zip, and makes
+        that copy its line's first URL, the others the fallback ($RELEASE_TOKEN)
     python -I scripts/tools.py add <name> <version> <archive> --dest <folder> [--prefix <folder in the archive>]
         an archive Longshot made, uploaded to the "tools" release and written into tools.lock in place of the tool's line
     python -I scripts/tools.py assemble python --requirements nx2/prompt_requirements.txt --out <zip>
@@ -395,8 +395,8 @@ def main(argv=None):
         for t in tools:
             print("%-12s %-22s %s %6d MB  %s" % (t.name, t.version, t.system, t.size >> 20, t.urls[0]))
         if missing:
-            print("error: tools.lock has no %s: a Windows builder needs them (RELEASING.md, \"One-time setup\")"
-                  % ", ".join(missing), file=sys.stderr)
+            print("error: the tools release is missing: %s (tools.lock has no line for them, and a Windows builder needs "
+                  "them); RELEASING.md, One-time setup" % ", ".join(missing), file=sys.stderr)
             return 1
     elif a.cmd == "fetch":
         print(fetch(named(tools, a.name), a.cache))
@@ -406,8 +406,8 @@ def main(argv=None):
         t = named(tools, a.name)
         name = "%s-%s.zip" % (t.sha256, t.name)
         url = upload(fetch(t, a.cache), name)
-        if url not in t.urls:
-            t.urls.append(url)
+        if t.urls[0] != url:
+            t.urls = [url] + [u for u in t.urls if u != url]
             write_line(t, a.lock)
         print("%s: %s" % (t.name, " ".join(t.urls)))
     elif a.cmd == "add":

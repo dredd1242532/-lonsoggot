@@ -49,7 +49,9 @@ class Lock(unittest.TestCase):
             self.assertTrue(all(u.startswith("https://") for u in t.urls), t.name)
             self.assertEqual(t.system, "windows-x64")
             self.assertTrue(t.dest.startswith("LongshotBuilder/tools/"), t.name)
-            self.assertTrue(any(u.startswith(tools.MIRROR) for u in t.urls), "%s has no copy in the tools release" % t.name)
+            # (the forge's copy first, where it came from as the fallback: never a repository we do not control alone)
+            self.assertTrue(t.urls[0].startswith(tools.MIRROR), "%s: its copy in the tools release is not its first URL" % t.name)
+            self.assertEqual(t.urls[0], "%s%s-%s.zip" % (tools.MIRROR, t.sha256, t.name), t.name)
         self.assertEqual(tools.named(lock, "llvm-mingw").prefix, "llvm-mingw-20261104-ucrt-x86_64")
         # (the release workflow requires every tool; what is still to assemble is listed in RELEASING.md)
         with self.assertRaises(SystemExit):

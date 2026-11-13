@@ -98,20 +98,21 @@ the CPM cache (FFmpeg, Vulkan and SPIR-V headers, VMA, dav1d), wgpu-native, the 
 
 ```
 tool <name> <version> <system> <sha256> <size> <dest> <prefix> <url> [<url> ...]
-tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/llvm-mingw llvm-mingw-20261104-ucrt-x86_64 https://github.com/mstorsjo/… https://git.magicbean.dev/MagicBeanDev/Longshot/releases/download/tools/5521…-llvm-mingw.zip
+tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/llvm-mingw llvm-mingw-20261104-ucrt-x86_64 https://git.magicbean.dev/MagicBeanDev/Longshot/releases/download/tools/5521…-llvm-mingw.zip https://github.com/mstorsjo/…
 ```
 
 - **Installing.** The builder's setup (`builder/setup/setup.c`) and the launcher (`Core/ToolsLock.cs`, `Toolchains`) download
   each tool from the first URL that answers with the right bytes. They check its size and SHA-256 and unpack the archive's
   `<prefix>` folder as `<dest>` in the install. A tool another installed version has, with the same SHA-256 and unpacked
   the same way, is taken from it and not downloaded again. `scripts/tools.py install` does the same, for CI and developers.
-- **Where the archives are.** A plain upstream archive (llvm-mingw) is downloaded from upstream first. Its copy in
-  Longshot's long-lived **`tools` release** (assets named `<sha256>-<name>.zip`) is the fallback. An archive Longshot
+- **Where the archives are.** Every tool is downloaded first from Longshot's long-lived **`tools` release** (assets named
+  `<sha256>-<name>.zip`). Where an archive came from (upstream for llvm-mingw, NotRexed/Hookshot's `builder-parts` release
+  for the four taken from Hookshot) is its fallback URL, so no install depends on a repository we do not control alone. An archive Longshot
   makes itself (Python with our packages, the CPM cache with dav1d, the prebuilt `third_party` files, the play profile) is
   only in the `tools` release, put there by `scripts/tools.py`. The `tools` release is never pruned and is on no channel.
 - **Bumping a tool** is a pull request that edits `tools.lock`, with the archive uploaded by `scripts/tools.py mirror`,
   `add` or `assemble` (RELEASING.md, "Bump a tool"). The release workflow refuses a `tools.lock` that lacks a tool the
-  builder needs (`tools.py check --require`).
+  builder needs (`tools.py check --require`), in its first job, before anything is built.
 - **Today's lock.** Python, emsdk, the CPM cache and wgpu-native are taken as they are from Hookshot v2.1.0's Windows
   builder (NotRexed/Hookshot's `builder-parts` release), with their SHA-256. Llvm-mingw is upstream's. Three are still to
   make before the first release: the CPM cache with dav1d, the `third_party` prebuilt files and the play profile

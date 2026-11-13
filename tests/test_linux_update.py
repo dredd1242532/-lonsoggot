@@ -654,7 +654,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_the_folder_launcher_finds_the_builder_under_the_builder_home(self):
         # LONGSHOT_BUILDER_HOME is the data directory, as XDG_DATA_HOME is: linux_update installs to
-        # <home>/longshot/builder and host/hos_update.c looks there, so the launcher must too
+        # <home>/longshot/builder, so the folder launcher must look there
         with tempfile.TemporaryDirectory(prefix="longshot-folder-") as tmp:
             root = Path(tmp)
             game = root / "game"

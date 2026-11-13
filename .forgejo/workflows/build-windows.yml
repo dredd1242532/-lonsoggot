@@ -121,7 +121,7 @@ jobs:
             --out "dist/LongshotBuilder-$TAG-windows-x64.zip"
           ls -l dist
 
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@v4   # (Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: LongshotBuilder-windows
           path: dist/
@@ -228,7 +228,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/vk-work/objcache
           key: ${{ steps.objkey.outputs.key }}
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@v4   # (Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: longshot_vk-windows
           path: ${{ runner.temp }}/vk-work/sa/build/longshot_vk.dll
@@ -268,7 +268,7 @@ jobs:
           export WINEPREFIX="$RUNNER_TEMP/wine" WINEDEBUG=-all
           python3 -I -B tests/test_dav1d_av1.py --cross "$LONGSHOT_MINGW/bin/x86_64-w64-mingw32-clang" --run "$wine" \
             --dav1d "$(ls -d "$RUNNER_TEMP"/cpm/dav1d/*)"
-      - uses: https://data.forgejo.org/forgejo/upload-artifact@v4   # (Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
+      - uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e   # v4 (4.3.1 with the GHES check off; Forgejo's: GitHub's v4 and later refuse a server that is not github.com)
         with:
           name: dav1d-windows
           path: ${{ runner.temp }}/cpm
