@@ -28,6 +28,30 @@ class DocumentationScope(unittest.TestCase):
                 self.assertEqual(len(docs.check_links([guide])), 1)
                 self.assertEqual(len(docs.check_commands([guide])), 1)
 
+    def test_website_pages_link_by_site_route_and_keep_relative_link_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            page = root / "website" / "src" / "content" / "docs" / "help.md"
+            page.parent.mkdir(parents=True)
+            page.write_text("[Install](/install/) [Search](/progress/#search?q=x) [Missing](missing.md)\n",
+                            encoding="utf-8")
+            guide = root / "guide.md"
+            guide.write_text("[Install](/install/)\n", encoding="utf-8")
+            with mock.patch.object(docs, "ROOT", root):
+                self.assertEqual([problem.split(": ", 1)[1] for problem in docs.check_links([page])],
+                                 ["link does not resolve: missing.md"])
+                self.assertEqual(len(docs.check_links([guide])), 1)
+
+    def test_links_with_a_scheme_are_not_repository_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            guide = root / "guide.md"
+            guide.write_text("![shot](attach:main.png) ![any](attach:<file>) [mail](mailto:a@example.org) "
+                             "[site](https://example.org/x.md) [Missing](missing.md)\n", encoding="utf-8")
+            with mock.patch.object(docs, "ROOT", root):
+                self.assertEqual([problem.split(": ", 1)[1] for problem in docs.check_links([guide])],
+                                 ["link does not resolve: missing.md"])
+
 
 if __name__ == "__main__":
     unittest.main()

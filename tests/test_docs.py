@@ -13,6 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 PYTHON_COMMAND = re.compile(r"\bpython(?:3)?\s+(?:-I\s+)?(?:-B\s+)?([A-Za-z0-9_./\\-]+\.py)\b")
 POWERSHELL_COMMAND = re.compile(r"\bpowershell\s+-File\s+([A-Za-z0-9_./\\-]+\.ps1)\b")
+# A link with a scheme ("https:", "mailto:", forge.py's "attach:") is not a path in this repository. Two characters
+# at least before the colon, so a Windows drive letter stays a path.
+SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:")
+# The website's pages link to each other by site route ("/install/"), which is not a path in this
+# repository and cannot be resolved here. Their relative links are checked like any other.
+SITE_PAGES = "website/src/content/"
 
 
 def tracked_markdown():
@@ -47,10 +53,12 @@ def check_links(files):
         for number, line in without_fences(text):
             for raw in LINK.findall(line):
                 target = raw.strip().split(" ", 1)[0].strip("<>")
-                if not target or target.startswith(("#", "http://", "https://", "mailto:", "data:")):
+                if not target or target.startswith("#") or SCHEME.match(target):
                     continue
                 target = target.split("#", 1)[0]
                 if not target:
+                    continue
+                if target.startswith("/") and file.relative_to(ROOT).as_posix().startswith(SITE_PAGES):
                     continue
                 resolved = (file.parent / target.replace("\\", "/")).resolve()
                 if not resolved.exists():
