@@ -262,7 +262,7 @@ everything it does on the network or with other programs:
   from `github.com/NVIDIA/DLSS`. The game itself checks for nothing when it starts.
 - **Your Discord status, through the Discord app on this PC.** While Discord runs, it shows "Playing Longshot" with the
   time played, through the Discord app's own local connection (a named pipe on Windows; the socket `discord-ipc-0` in
-  `$XDG_RUNTIME_DIR`, `$TMPDIR` or `/tmp` on Linux). It sends "Ocarina of Time", the Longshot version, the start time and
+  `$XDG_RUNTIME_DIR`, `$TMPDIR` or `/tmp` on Linux). It sends "Longshot", the Longshot version, the start time and
   the icon's name. Turn it off with **Gameplay → Discord status** in the in-game menu.
 - **Files outside the game folder:** the builder's folder, the settings and the saves (above), and shortcuts if you ask
   for them. **Bug report** (Gameplay tab) writes a folder in `bug-reports` in the game folder, with your home folder and
