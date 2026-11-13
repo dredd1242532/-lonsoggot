@@ -4,6 +4,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { editUrl, siteUrl } from '../src/site.ts';
 import { readProblemSearchHash } from '../src/lib/problem-search.ts';
+import { validateFeed } from '../src/lib/progress.ts';
 
 const dist = path.resolve('dist');
 const editBase = editUrl('');
@@ -44,10 +45,14 @@ for (const [file, text] of html) {
     if (tag === 'a' && anchor && ids.has(target) && !ids.get(target)!.has(anchor)) errors.push(`${route}: missing anchor: ${raw}`);
   }
 }
-const feed = JSON.parse(await readFile(path.join(dist, 'progress-feed.json'), 'utf8'));
-for (const item of feed.items || []) {
-  if ([item.title, item.originalTitle, item.summary, item.workaround, ...(item.labels || [])]
-    .some(value => gameBranding.test(value || ''))) errors.push(`Progress ${item.id}: game branding remains in public copy`);
+try {
+  const feed = validateFeed(JSON.parse(await readFile(path.join(dist, 'progress-feed.json'), 'utf8')));
+  for (const item of feed.items) {
+    if ([item.title, item.originalTitle, item.summary, item.workaround, ...item.labels]
+      .some(value => gameBranding.test(value))) errors.push(`Progress ${item.id}: game branding remains in public copy`);
+  }
+} catch (error) {
+  errors.push(`Progress feed is not publishable: ${error.message} Check the collection log and rebuild before deploying.`);
 }
 if (!pages.length) errors.push('No pages in dist/: run the build first.');
 if (errors.length) {

@@ -17,7 +17,7 @@ export const BADGES = [
   { test: /shown only on AMD GPUs/i, label: 'AMD GPUs only', shown: true },
   { test: /shown where DLSS runs/i, label: 'Where DLSS runs', shown: true },
   { test: /while HDR is on/i, label: 'While HDR is on', shown: true },
-  { test: /shown only with HDR set to Native/i, label: 'With HDR on Native', shown: true },
+  { test: /\bwith HDR set to Native\b/i, label: 'With HDR on Native', shown: true },
   { test: /only in builds with/i, label: 'Depends on GPU and build', shown: true },
   { test: /(?:quality )?preset (?:sets|turns) it/i, label: 'Set by quality presets', both: true },
   { test: /on the Controls page/i, label: 'On the Controls page' },

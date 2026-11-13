@@ -128,7 +128,7 @@ test('collector paginates open items, stops old closed history and keeps PRs sep
 });
 
 test('failed or truncated collection never returns a partial feed', async () => {
-  await assert.rejects(collectFeed({ fetcher: async url => url.endsWith('/latest') ? response(release) : response({}, 503) }));
+  await assert.rejects(collectFeed({ wait: async () => {}, fetcher: async url => url.endsWith('/latest') ? response(release) : response({}, 503) }));
   await assert.rejects(collectFeed({ maxPages: 1, now: Date.parse(time), fetcher: async url => url.endsWith(REPOSITORY) ? response(repository) : url.endsWith('/latest') ? response(release) : response(Array.from({ length: 100 }, (_, i) => raw(i + 1)), 200,
     { link: '<https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/issues?state=closed&after=cursor>; rel="next"' }) }), /pagination limit/);
 });
