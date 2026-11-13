@@ -304,6 +304,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_NAN_GUARD=0` | No NaN guard on float colour outputs (on by default on every card: one NaN texel spreads through bloom into glowing blocks) |
 | `RX_VK_FIFO=1`, `RX_VK_IMMEDIATE=1` | V-Sync On (FIFO) or Off (immediate) for one run, over the menu's V-Sync row |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
+| `HOS_NATIVE_ZSTD=1/2`, `HOS_NATIVE_ZSTD_FRAMES` (set) | The game's zstd decodes on the host's libzstd 1.5.7 (`host/hos_zstd.c`), both off by default: `HOS_NATIVE_ZSTD` the stream decode (ParallelDecompThread; 1 gives the virtual core up while it decodes, 2 keeps it), `HOS_NATIVE_ZSTD_FRAMES` the resource loaders' whole-buffer decode (the ARes_Loading threads). The log names each switch that is on, and each kind of decode that still runs lifted, once |
 
 ### Building
 
