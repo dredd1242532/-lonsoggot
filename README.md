@@ -9,12 +9,13 @@
   <br>
 </h1>
 
-<h4 align="center">The Legend of Zelda: Ocarina of Time (Nintendo Switch 2) running natively on Windows & Linux, without emulation.
+<h4 align="center">A supported console game running natively on Windows & Linux, without emulation.
 </h4>
 
 <p align="center">
   <a href="https://longshot.magicbean.dev/"><b>Website</b></a> |
   <a href="https://longshot.magicbean.dev/download"><b>Download</b></a> |
+  <a href="https://discord.gg/KX99srmQTe"><b>Discord</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#build-from-source">Build from source</a> |
@@ -23,7 +24,9 @@
   <a href="#license">License + Credits</a>
 </p>
 
-Longshot is a static recompilation of Ocarina of Time for the Switch 2. The game's code is translated to C and compiled into a Windows or Linux program, rebuilding the graphics on Vulkan, with the console's system software reimplemented. All of this happens **on your PC, from your own copy of the game**.
+<p align="center">This website is our Git hosting, similar to GitHub.</p>
+
+Longshot is a static recompilation of a supported console game. The game's code is translated to C and compiled into a Windows or Linux program, rebuilding the graphics on Vulkan, with the console's system software reimplemented. All of this happens **on your PC, from your own copy of the game**.
 
 Longshot is a continuation of [Hookshot](https://github.com/NotRexed/Hookshot). The top maintainers have moved to this project.
 
