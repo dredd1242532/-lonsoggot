@@ -4,9 +4,12 @@
 //   newest       the range's writer is the newest submission handed out: the game reads it right after submitting the work
 //                that fills it, so it cannot count on that work being done;
 //   <hex size>   every range of exactly that many bytes, whoever wrote it.
-// OoT on a Steam Deck: one pair of 0x3980-byte ranges is 94% of the readbacks' wait (camilobt's finding, Hookshot issue
-// 1000); RX_VK_LOG_READBACK_RANGES=1 logs the ranges, to find them on other hardware. Not a rule for every range: the
-// exposure meter read late is the white flashes the wait is there for (invalidate's comment).
+// OoT on a Steam Deck OLED, main fbd42024: with no rule a readback that waits takes 2.4 ms on a heavy view and 4.5 to 4.9 in
+// Hyrule Field. Two 0x3980-byte ranges are 40 to 45% of that wait, six ranges of 0x8b040 and 0x9b040 bytes most of the rest.
+// `newest` alone brings it to 0.01 ms (24.3 to 30.1 fps on the heavy view), `3980` alone to 1.6 ms (24.9 fps). The 0x3980
+// pair is camilobt's finding (Hookshot issue 1000): 94% of the wait there. RX_VK_LOG_READBACK_RANGES=1 logs the ranges, to
+// find them on other hardware. Not a rule for every range: the exposure meter read late is the white flashes the wait is
+// there for (invalidate's comment).
 #pragma once
 #include <cstdint>
 #include <cstdlib>
