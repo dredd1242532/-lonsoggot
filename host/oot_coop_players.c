@@ -48,7 +48,7 @@
    is off, gpu/vk/compat/longshot_env.h): the other players are shown. Off, a game on the known build still says its
    map and state only with signed permission and accepted context. Without that permission or with co-op off, a
    never-active update returns before guest reads; an active adapter only retires its own existing actors.
-   HOS_COOP_PLAYERS_ACTOR=<child>[,<adult>] is a local diagnostic override; this family uses only the child name.
+   HOS_COOP_PLAYERS_ACTOR=<child> is a local diagnostic override for this child-only family.
    Without animation assets it uses the standing PouchPlayer_Child model, not a walking/full-pose fallback.
    HOS_COOP_TRACE adds a line per request, take and removal. For
    tests from the environment only (longshot_env.txt sets no HOS_COOP name: host/hos_main.c env_line_allowed):
@@ -154,7 +154,7 @@ static struct {
     int show;               /* the switch: the other players are shown, and this game's place is sent at the full rate */
     int trace;
     int anim;               /* HOS_COOP_PLAYERS_ANIM: Link's animation is sent and played on the others' actors */
-    char actor_name[2][NAME_MAX_LEN + 1];   /* shown for a child, an adult */
+    char actor_name[NAME_MAX_LEN + 1];   /* the supported child actor */
 
     SRWLOCK lock;           /* around store, last_me and me_ms (the co-op thread takes positions; the game's threads only try it) */
     CoopPlayers store;
@@ -467,7 +467,7 @@ static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t 
         hos_log("coop: puppet: member %d is in %s at %.2f %.2f %.2f, %s Link%s", id, at->area, at->pos[0], at->pos[1], at->pos[2],
                 at->flags & COOP_POS_ADULT ? "adult" : "child", reason == COOP_PLAYER_SHOWN ? "" : " (another map than this game's: not shown)");
     }
-    const char *name = P.actor_name[reason == COOP_PLAYER_SHOWN && (at->flags & COOP_POS_ADULT) ? 1 : 0];
+    const char *name = P.actor_name;
     if (p->state != PP_NONE && (reason != COOP_PLAYER_SHOWN || strcmp(p->name, name)))
         puppet_remove(c, id, reason != COOP_PLAYER_SHOWN ? coop_players_why(reason) : "another actor is shown for it", now);
     if (reason != COOP_PLAYER_SHOWN) return;
@@ -581,8 +581,7 @@ static void test_feed(const CoopPos *me, uint64_t now) {
     for (; P.at < P.nsteps && P.step[P.at].t <= t; P.at++) {
         const TestStep *s = &P.step[P.at];
         if (s->kind == T_ACTOR) {
-            text_copy(P.actor_name[0], sizeof P.actor_name[0], s->text);
-            text_copy(P.actor_name[1], sizeof P.actor_name[1], s->text);
+            text_copy(P.actor_name, sizeof P.actor_name, s->text);
             hos_log("coop: players: test: the actor shown is %s from %.1f s", s->text, t);
         } else {
             P.mode = s->kind, P.seg = P.at, P.side = s->v[0];
@@ -800,12 +799,9 @@ void hos_oot_coop_players_start(void) {
         P.anim = env_on("HOS_COOP_PLAYERS_ANIM") && hos_coop_players_assets();
         if (env_on("HOS_COOP_PLAYERS_ANIM") && !P.anim && !(names && *names))
             hos_log("coop: players: animation unavailable: rebuild this game to make its local actor assets (or remove the conflicting mod)");
-        text_copy(P.actor_name[0], sizeof P.actor_name[0], P.anim ? "CoopPuppet_Child" : "PouchPlayer_Child");
-        text_copy(P.actor_name[1], sizeof P.actor_name[1], P.anim ? "CoopPuppet_Adult" : "PouchPlayer_Adult");
+        text_copy(P.actor_name, sizeof P.actor_name, P.anim ? "CoopPuppet_Child" : "PouchPlayer_Child");
         if (names && *names) {
-            char a[NAME_MAX_LEN + 1] = "", b[NAME_MAX_LEN + 1] = "";
-            sscanf(names, "%63[^,],%63s", a, b);
-            if (a[0]) text_copy(P.actor_name[0], sizeof P.actor_name[0], a), text_copy(P.actor_name[1], sizeof P.actor_name[1], b[0] ? b : a);
+            text_copy(P.actor_name, sizeof P.actor_name, names);
             P.anim = env_on("HOS_COOP_PLAYERS_ANIM");   /* explicit test actors may bring their own animation set */
         }
         if (test && *test) test_read(test);
@@ -823,7 +819,7 @@ void hos_oot_coop_players_start(void) {
         on_view(&v, NULL);
     }
     if (show)
-        hos_log("coop: players: the other players are shown in the world as %s (child) and %s (adult)", P.actor_name[0], P.actor_name[1]);
+        hos_log("coop: players: child bodies configured as %s; waiting for signed presence permission", P.actor_name);
     else
         hos_log("coop: players: the other players are not shown (coop_players is off): a room hears only this game's map and whether a save "
                 "is played, every 2 s and at each change");

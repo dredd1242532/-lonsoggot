@@ -643,7 +643,7 @@ static void game_side(const char *steps_path) {
     ini_players = 1;
     room(3);
     hos_oot_coop_players_start();
-    CHECK(P.on && P.show && pos_fn && view_fn && P.store.others == 1 && logged("shown in the world as PouchPlayer_Child (child) and PouchPlayer_Adult (adult)"));
+    CHECK(P.on && P.show && pos_fn && view_fn && P.store.others == 1 && logged("child bodies configured as PouchPlayer_Child"));
     their_pseq = 0;
 
     /* this game's own place goes out: map, place, facing, child; at most 15 a second */
@@ -852,10 +852,10 @@ static void game_side(const char *steps_path) {
     /* a pointer of the game that leads nowhere: nothing is read past it, nothing is done */
     fresh();
     setenv("HOS_COOP_PLAYERS", "1", 1);
-    setenv("HOS_COOP_PLAYERS_ACTOR", "Thing_Child,Thing_Adult", 1);
+    setenv("HOS_COOP_PLAYERS_ACTOR", "Thing_Child", 1);
     room(1);
     hos_oot_coop_players_start();
-    CHECK(P.on && !strcmp(P.actor_name[0], "Thing_Child") && !strcmp(P.actor_name[1], "Thing_Adult"));
+    CHECK(P.on && !strcmp(P.actor_name, "Thing_Child"));
     accepted = 1u << 2;
     const uint64_t holder = ld(0x84c9e180ull, 8);
     st(0x84c9e180ull, 0x7000000000ull, 8);   /* GameDataMgr's holder outside the guest: no map, so nothing */
@@ -903,7 +903,7 @@ static void game_side(const char *steps_path) {
     setenv("HOS_COOP_PLAYERS_ANIM", "1", 1);
     room(1);
     hos_oot_coop_players_start();
-    CHECK(P.anim && !strcmp(P.actor_name[0], "CoopPuppet_Child") && !strcmp(P.actor_name[1], "CoopPuppet_Adult"));
+    CHECK(P.anim && !strcmp(P.actor_name, "CoopPuppet_Child"));
     frame(16);
     CHECK(sends == 1 && coop_pos_parse(sent, sent_n, &mine) && mine.nslots == 2 && !strcmp(mine.slot[0].node, "Wait") && mine.slot[0].frame == 12.5f &&
           !mine.slot[1].node[0] && calls[FN_FRAME_GET] == 1);
@@ -953,14 +953,14 @@ static void game_side(const char *steps_path) {
     setenv("HOS_COOP_PLAYERS", "1", 1);
     setenv("HOS_COOP_PLAYERS_ANIM", "1", 1);
     hos_oot_coop_players_start();
-    CHECK(!P.anim && !strcmp(P.actor_name[0], "PouchPlayer_Child") && logged("animation unavailable"));
+    CHECK(!P.anim && !strcmp(P.actor_name, "PouchPlayer_Child") && logged("animation unavailable"));
     fresh();
     assets_ready = 0;
     setenv("HOS_COOP_PLAYERS", "1", 1);
     setenv("HOS_COOP_PLAYERS_ANIM", "1", 1);
-    setenv("HOS_COOP_PLAYERS_ACTOR", "LocalChild,LocalAdult", 1);
+    setenv("HOS_COOP_PLAYERS_ACTOR", "LocalChild", 1);
     hos_oot_coop_players_start();
-    CHECK(P.anim && !strcmp(P.actor_name[0], "LocalChild") && !strcmp(P.actor_name[1], "LocalAdult"));
+    CHECK(P.anim && !strcmp(P.actor_name, "LocalChild"));
 
     /* the test's made-up member: its places come from the file through the same message path (its lines of places carry
        no animation, whatever Link plays) */
