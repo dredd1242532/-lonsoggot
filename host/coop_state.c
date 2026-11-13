@@ -342,6 +342,8 @@ static const CoopFeatureRule feature_rules[] = {
     // Room setup only. PvP is not playable until its separate readiness, kit and collision capabilities exist.
     {COOP_RULE_ROOM_MODE, "coop_room_mode", -1, 1, COOP_ROOM_COOP, "Mode",
      "Co-op, or PvP room setup. This build cannot start a fight. Off refuses acceptance."},
+    {30, "coop_hit_events", 0, 1, 0, "Native hit observations",
+        "Share committed native life-loss observations. Diagnostics only; never hurts another player."},
     // Child presence family. Higher presentation bits require a later supported adapter.
     {COOP_RULE_PRESENCE, "coop_presence_permissions", 0, COOP_PRESENCE_CHILD_BODY, 0, "Child bodies",
      "On: accepted players may share child Link positions and show their bodies. Off: no body or position disclosure."},

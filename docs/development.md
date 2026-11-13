@@ -283,6 +283,7 @@ even the dedicated worker can fail or stall after heap/loader corruption.
 | `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR`, the pad's face buttons `PADS`, `PADE`, `PADW`, `PADN`; and for a text field, `TYPE:<text>` (typed as the keyboard would, up to the next comma) and, while it has the keyboard, `HOME`, `END`, `BACK`, `DEL` besides `LEFT`, `RIGHT`, `ENTER`, `ESC`; `ROW:<name>` selects the shown tab's row of that name if it shows (rows come and go with the GPU and the Co-op tab's room, so a script need not count them) |
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a controller or the keys, whatever was used last (screenshots) |
 | `HOS_COOP_DEMO=1` | The Insert menu's Co-op tab on a made-up room (`host/coop_menu.c`), for screenshots and trying the tab without a relay: Make a room connects in a second; two other players come in, one not identified for three seconds; the room is offered for acceptance and one player is away for a while; Join a room (any valid secret) puts you third in another room; Accept and Leave work. The co-op session never starts and nothing is sent |
+| `HOS_COOP_HITS_TRACE=1` | Local native combat diagnostics, off by default: attack setup/instance renewal/sensor-off and committed life with its pre-clamp aggregate. No damage is applied; dropped records are reported. See [co-op](coop.md#native-combat-observations-not-playable-pvp) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |
 
 The presses are `<seconds>:<button>[+<button>...][/<ms>]`, separated by commas, for example `2:A,5.5:LUP/1500,9:ZL+R`.
@@ -768,6 +769,9 @@ its Room rules page's Co-op at start, and the menu keeps `coop_port` as it keeps
 ([coop.md](coop.md)). The page's other rows are a room's rules, `coop_progress`, `coop_items`, `coop_songs`,
 `coop_quest` (0 Per player, 1 Shared) and `coop_keys`, `coop_rupees`, `coop_ammo` (0 Per player, 2 One pool), which
 `host/oot_coop.c` reads from the file when the room's maker signs its rules.
+`coop_hit_events` (0 Off, 1 On, default Off) adds **Native hit observations** on Room rules. Explicit signed rule 30
+permits accepted peers to receive committed native loss diagnostics, never a damage command. The local trace switch
+is independent of this disclosure permission.
 
 These named keys, including `walk_mode` and `walk_speed`, are independent of the internal host/renderer option IDs in
 `gpu/vk/vk_api.h`; renumbering an option does not require changing a player's saved options file.

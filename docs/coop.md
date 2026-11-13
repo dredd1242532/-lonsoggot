@@ -633,7 +633,7 @@ them or require migrating a player's saved settings.
 Feature rules use a separate, stable number registry in `host/coop_state.c`: each entry names its options-file key,
 range and default. They are not flag categories or numeric menu-option IDs. The maker signs their values with the
 category modes, and changing any value (including one this build does not understand) requires accepting the room
-again. The registry starts empty; features add their definitions there.
+again. Features add definitions there; native hit observations use rule 30, off by default.
 
 An entry may append `name` and `help`, borrowed pointers to immutable strings owned by that static registry entry.
 They are presentation metadata, not part of the signed bytes. A missing or empty name keeps the rule off the menu;
@@ -865,3 +865,43 @@ One approved disposable checkpoint measured 120572 + 39447 = 160019 bytes:
 forwarding-inclusive budget, data alone needs more than 26 seconds; headers,
 ACKs, receipt delays, loss and competing work add time. This is a size/budget
 calculation, not a measured internet rate or an ETA.
+
+## Native combat observations (not playable PvP)
+
+The Room rules page's **Native hit observations** (`coop_hit_events`, signed rule 30, default Off) shares only
+committed native life losses. The room must explicitly contain this permission with value 1; a registry default
+is not consent. Accepted current member sessions receive HIT 8 through the existing EVENT delivery helper.
+COMBAT_CONTROL 9 and ATTACK 10 remain reserved: no duel, projectile, collision adjudicator or remote damage is enabled.
+The original save's health, inventory and progression are never changed by receiving an observation.
+
+`HOS_COOP_HITS_TRACE=1` enables a separate local diagnostic trace on the supported game build. It works without a
+room and defaults Off. It records native attack setup completion, explicit attack-ID renewal and sensor-off
+completion, not a controller press or an animation name. Setup records carry the native instance IDs and power
+inputs. Repeated setup can keep the same IDs; a setup record is not a collision and is not automatically a new swing.
+An off record reports completion of that native request, not a separately verified physical sensor state.
+The held weapon may own the sensor rather than Link; the observer does not guess that attribution.
+
+Life records distinguish the signed **pre-clamp aggregate delta**, the native requested health and the committed
+health. A lethal request can exceed the remaining life. Protect hearts can preserve life while the trace still
+reports the request. The native aggregate can include several sources: it is not a weapon-versus-Link damage table.
+The actual committed loss remains the only amount sent in a version-1 HIT observation; pre-clamp samples stay local.
+
+Native worker hooks only validate and copy bounded scalar records. They do not wait on the observer lock, log,
+allocate, send packets or retain a guest pointer. The present-thread drain prints the trace and submits diagnostic
+observations. Busy/full queues report dropped records; such a trace cannot establish complete attack counts.
+The fixed local queue and recipient-charged send budget do not replace EVENT's shared transport limits or ACKs.
+
+`oot_coop_hit_admit` retains the wire-independent receiver admission gate: accepted current session, explicit signed
+permission, local and session-bound peer consent, safe context, bounded age/class/amount/rate and replay checks.
+A rejected accepted-sender event stays consumed. Its success is **not** proof of contact: the caller still owns the
+target, area/round context, native weapon amount, collision/occlusion, shield and grace decisions. No such caller
+applies damage here. The optional native life policy remains unbound; this slice installs no life-changing policy.
+
+The planned duel uses normal weapon damage on separate hearts (10 child, 20 adult initially), native shields and
+best-of-three rounds, with no native death, healing or real-save writes. Arena clearance, verified spawns, temporary
+kit readiness, receiver collision and the duel ledger are separate work. No numeric per-weapon balance table is
+shipped by these observations.
+
+The game-free `tests/test_oot_coop_hits.py` executes the production observer and generated hook code on synthetic
+memory: native setup/renewal/off, overkill, protected loss, successful/failed CAS, ownership, bounded queues,
+consent and replay. Its old-patch and mutation modes must fail behaviorally; they do not require game files.

@@ -86,19 +86,74 @@ def patch_life(source):
         return None
     if "hos_oot_damage(" in source[start:end]:
         return source
-    # x19 is the actor. Confirm its type and life pointer before scaling this write.
-    guard = ("    if ((uint32_t)c->x[12] < (uint32_t)c->x[11] &&\n"
-             "        hos_oot_is_player(c, c->x[19]) &&\n"
-             "        c->x[13] == recomp_load64(c,c->x[19] + 7184) + 8)\n"
-             "        c->x[12] = hos_oot_damage((uint32_t)c->x[11], (uint32_t)c->x[12], {hit});\n")
+    # Capture the native request before the player's local Damage taken policy.
+    guard = ("        if ((uint32_t)c->x[12] < (uint32_t)c->x[11] &&\n"
+             "            hos_oot_is_player(c, c->x[19]) &&\n"
+             "            c->x[13] == recomp_load64(c,c->x[19] + 7184) + 8)\n"
+             "            c->x[12] = hos_oot_damage((uint32_t)c->x[11], (uint32_t)c->x[12], {hit});\n")
+    parts = source[start:end].split(LIFE_CAS)
+    body = parts[0].replace(
+        LIFE_HEAD, LIFE_HEAD + "    const uint64_t _hit_invocation = __atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED) ? hos_oot_hits_begin() : 0;\n", 1)
     # The first CAS is damage: x9 still holds the full hit, before life was clamped.
     # The second is healing: x9 has another meaning there; keep its guarded delta.
-    sites = source[start:end].split(LIFE_CAS)
-    body = (sites[0] + guard.replace("{hit}", "(uint32_t)c->x[9]") + LIFE_CAS + sites[1] +
-            guard.replace("{hit}", "(uint32_t)c->x[11] - (uint32_t)c->x[12]") + LIFE_CAS + sites[2])
+    for path, rest in enumerate(parts[1:]):
+        body += ("    {\n"
+                 "        const uint32_t _hit_before = (uint32_t)c->x[11], _hit_requested = (uint32_t)c->x[12];\n"
+                 "        const int _hit_attempt = _hit_requested != _hit_before || (uint32_t)c->x[9] != 0;\n"
+                 + guard.replace("{hit}", "(uint32_t)c->x[9]" if path == 0 else "(uint32_t)c->x[11] - (uint32_t)c->x[12]") +
+                 "        if (_hit_invocation && _hit_attempt)\n"
+                 f"            c->x[12] = hos_oot_hits_before(c, _hit_invocation, {path});\n"
+                 + LIFE_CAS + "\n"
+                 "        if (_hit_invocation && _hit_attempt && (uint32_t)c->x[11] == _hit_before)\n"
+                 f"            hos_oot_hits_committed(c, _hit_invocation, {path}, _hit_requested);\n"
+                 "    }" + rest)
     return (source[:start] + body + source[end:]).replace(
         '#include "a64.h"\n', '#include "a64.h"\nextern uint32_t hos_oot_damage(uint32_t old, uint32_t next, uint32_t hit);\n'
-        'extern int hos_oot_is_player(Ctx *c, uint64_t actor);\n', 1)
+        'extern int hos_oot_is_player(Ctx *c, uint64_t actor);\n'
+        'extern int hos_oot_hits_active;\n'
+        'extern uint64_t hos_oot_hits_begin(void);\n'
+        'extern uint32_t hos_oot_hits_before(Ctx *c, uint64_t token, unsigned path);\n'
+        'extern void hos_oot_hits_committed(Ctx *c, uint64_t token, unsigned path, uint32_t requested);\n', 1)
+
+
+# Native attack installation, explicit instance renewal and sensor-off, not animation/controller guesses.
+# Labels are after the native operation. All three observers are read-only, and build-gated with patch_life.
+ATTACK_SITES = (
+    ("void f_82ec53d0(Ctx *__restrict A64_NOESC c) {\n", "L_82ec5980:;\n",
+     "hos_oot_hits_attack(c, c->x[19], c->x[25]);"),
+    ("void f_82ec6680(Ctx *__restrict A64_NOESC c) {\n", "L_82ec66f0:;\n",
+     "hos_oot_hits_attack_id(c, c->x[0]);"),
+)
+ATTACK_OFF_HEAD = "void f_808f56f0(Ctx *__restrict A64_NOESC c) {\n"
+ATTACK_OFF_ANCHOR = "L_808f575c:;\n"
+ATTACK_DECL = ("extern int hos_oot_attack_observe;\n"
+               "extern void hos_oot_hits_attack(Ctx *c, uint64_t sensor, uint64_t record);\n"
+               "extern void hos_oot_hits_attack_id(Ctx *c, uint64_t record);\n"
+               "extern void hos_oot_hits_attack_off(Ctx *c, uint64_t sensor, unsigned layer);\n")
+
+
+def patch_attacks(source):
+    """Observe completed native setup/renewal/shutoff; missing or duplicate anchors are left untouched."""
+    count = 0
+    for head, anchor, call in ATTACK_SITES + (
+            (ATTACK_OFF_HEAD, ATTACK_OFF_ANCHOR, "hos_oot_hits_attack_off(c, c->x[19], (unsigned)c->x[21]);"),):
+        start = source.find(head)
+        if start < 0:
+            continue
+        end = source.find("\n}", start)
+        if end < 0:
+            continue
+        body = source[start:end]
+        mark = "    if (__atomic_load_n(&hos_oot_attack_observe, __ATOMIC_RELAXED)) " + call + "\n"
+        if body.count(anchor) != 1:
+            continue
+        if mark not in body:
+            body = body.replace(anchor, anchor + mark, 1)
+            source = source[:start] + body + source[end:]
+        count += 1
+    if count and ATTACK_DECL not in source:
+        source = source.replace('#include "a64.h"\n', '#include "a64.h"\n' + ATTACK_DECL, 1)
+    return source, count
 
 
 def patch_movement(source):
@@ -891,6 +946,11 @@ def patch_file(s, name, protect_hearts=False):
         out = life
         counts["player heart protection"] += 1
         lines.append("oot_patches: player heart protection in " + name)
+    if protect_hearts:
+        out, attacks = patch_attacks(out)
+        counts["attack observation sites"] += attacks
+        if attacks:
+            lines.append("oot_patches: native attack observation at %d sites in %s" % (attacks, name))
     move = patch_movement(out) if protect_hearts else None
     if move is not None:
         out = move
@@ -995,6 +1055,9 @@ def report(paths, counts, protect_hearts=False):
     speed_hooks = total["speed hooks"]   # (SPEED_PLACES', in one file or several)
     camera_speed = total["camera speed"]   # (the turn-speed functions that scale by hos_camera_scale: patch_camera_speed)
     heap_sites = [total["heap GPU sites"], total["heap CPU sites"]]   # (patch_heap_retry, the supported build only)
+    if protect_hearts and total["attack observation sites"] != len(ATTACK_SITES) + 1:
+        print("oot_patches: WARNING: native attack observation found %d of %d sites" %
+              (total["attack observation sites"], len(ATTACK_SITES) + 1))
     if protect_hearts and heap_sites != [len(GPU_ALLOC_SITES), len(HEAP_ALLOC_SITES)]:   # (the supported build's functions)
         print("oot_patches: WARNING: the OptimizeChangeBank allocations were found %s times, not once each: a full heap is "
               "not tried again" % heap_sites)

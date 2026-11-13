@@ -53,7 +53,8 @@ enum { COOP_FLAG_AWAY = 1, COOP_FLAG_MAKER = 2 };   // roster flags: not heard f
 // The kinds of player messages (the first byte of a sealed message). The session carries application kinds and owns
 // EVENT / EVENT_ACK for reliable delivery. A kind of 0xF0 and above is free for tests, not production layers.
 enum { COOP_K_HELLO = 1, COOP_K_POS = 2, COOP_K_DIGEST = 3, COOP_K_SECTION = 4, COOP_K_SYNC_NEED = 5, COOP_K_NOTICE = 6,
-       COOP_K_BYE = 7, COOP_K_EVENT = 16, COOP_K_EVENT_ACK = 17,
+       COOP_K_BYE = 7, COOP_K_HIT = 8, COOP_K_COMBAT_CONTROL = 9, COOP_K_ATTACK = 10,
+       COOP_K_EVENT = 16, COOP_K_EVENT_ACK = 17,
        COOP_K_SAVE_OFFER = 18, COOP_K_SAVE_CONTROL = 19, COOP_K_SAVE_CHUNK = 20, COOP_K_TEST = 0xF0 };
 
 typedef struct {

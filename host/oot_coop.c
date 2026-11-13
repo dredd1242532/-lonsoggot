@@ -64,6 +64,7 @@
 #include "coop_state.h"
 #include "coop_gameplay.h"
 #include "oot_coop.h"
+#include "oot_coop_hits.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -826,6 +827,7 @@ static void publish(const CoopOffer *o, int has, uint64_t now) {
     G.pub = *o, G.pub_has = has, G.pub_maker = maker;
     if (fresh) memcpy(G.pub_contrib, k, sizeof *k * (size_t)n), G.pub_ncontrib = n, G.pub_contrib_at = now;
     ReleaseSRWLockExclusive(&G.pub_lock);
+    hos_oot_hits_room(&o->rules, has && o->accepted && o->copy == 1 && !o->disagree && !o->unidentified);
 }
 
 uint32_t hos_oot_coop_shown(void) { return __atomic_load_n(&G.pub_shown, __ATOMIC_ACQUIRE); }
@@ -869,6 +871,7 @@ static void publish_none(void) {
     if (G.pub_has || G.pub.n || G.pub_ncontrib || G.pub_maker)
         memset(&G.pub, 0, sizeof G.pub), G.pub_has = G.pub_maker = G.pub_ncontrib = 0, G.pub_contrib_at = 0;
     ReleaseSRWLockExclusive(&G.pub_lock);
+    hos_oot_hits_room(NULL, 0);
 }
 
 /* The offer of the room (the co-op thread, G.lock held): accepted by the menu or the switch, logged when it changed and
@@ -1549,35 +1552,43 @@ static int start(void) {
        registered like the ones above, whether co-op is on or not; it does nothing in the game until "being played" is
        published, which needs co-op on (gate) */
     hos_oot_coop_players_start();
+    hos_oot_hits_start();
     if (want) sync_on();
     return __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
 }
 
 void hos_oot_coop_present(Ctx *c) {
     int s = __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
-    if (s == ST_OFF) return;
+    if (s == ST_OFF) { hos_oot_hits_frame(NULL, 0); return; }
     if (s == ST_UNSEEN) {
         int unseen = ST_UNSEEN;
         if (!__atomic_compare_exchange_n(&G.state, &unseen, ST_STARTING, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
         s = start();
-        if (s == ST_OFF) return;
+        if (s == ST_OFF) { hos_oot_hits_frame(NULL, 0); return; }
     }
     if (s != ST_ON) return;   /* (another thread is starting) */
     const int on = __atomic_load_n(&G.on, __ATOMIC_ACQUIRE);
-    if (on && !G.eng && !ensure_engine()) return;
-    if (coop_profile_active()) return;   /* keep identities alive, never scan/apply a temporary save */
+    if (on && !G.eng && !ensure_engine()) { hos_oot_hits_frame(NULL, 0); return; }
+    if (coop_profile_active()) { hos_oot_hits_frame(NULL, 0); return; }   /* identities only; no temporary progress */
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
         hos_oot_coop_players_tick(0, 0);   /* (no save: the title screen as far as the room is told) */
+        hos_oot_hits_frame(NULL, 0);
         return;
     }
     if (G.bound && (mgr != G.mgr || recomp_load64(c, mgr + C_BOOL + CN_ENTRIES) != G.bool_entries ||
                     recomp_load64(c, mgr + C_INT + CN_ENTRIES) != G.int_entries))
         unbind("the game made its flags anew");
     const int open = gate(c, mgr);
-    hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
+    hos_oot_coop_players_tick(G.loaded, open);
+    if (__atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED)) {
+        char area[COOP_POS_TEXT + 1] = {0};
+        int hos_oot_current_map(char *out, size_t cap);
+        if (open) hos_oot_current_map(area, sizeof area);
+        hos_oot_hits_frame(area, open);
+    }
     if (!open) return;
     if (!G.bound) bind_tables(c, mgr);
     if (!G.bound) return;
