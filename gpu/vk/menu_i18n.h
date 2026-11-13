@@ -408,6 +408,8 @@ inline constexpr Entry kpt_BR[] = {
     {"Quantity %d", "Quantidade %d"},
     {"Quit", "Sair"},
     {"R stick press", "Clique analóg. dir."},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leia as regras assinadas da sala e pressione duas vezes. Apenas diagnóstico: esta versão não pode iniciar uma luta."},
+    {"Ready for duel", "Pronto para o duelo"},
     {"Real time", "Tempo real"},
     {"Relock", "Bloquear"},
     {"Remember Link's position for this loaded scene.", "Guarda a posição de Link nesta cena carregada."},
@@ -587,8 +589,6 @@ inline constexpr Entry kpt_BR[] = {
     {"adult only", "só adulto"},
     {"the game folder", "do jogo"},
     {"your home folder", "pessoal"},
-    {"Ready for duel", "Pronto para o duelo"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leia as regras assinadas da sala e pressione duas vezes. Apenas diagnóstico: esta versão não pode iniciar uma luta."},
 };
 inline constexpr Entry kes_419[] = {
     {" (native)", " (nativa)"},
@@ -986,6 +986,8 @@ inline constexpr Entry kes_419[] = {
     {"Quantity %d", "Cantidad %d"},
     {"Quit", "Salir"},
     {"R stick press", "Presionar palanca der."},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y presiona dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
+    {"Ready for duel", "Listo para el duelo"},
     {"Real time", "Tiempo real"},
     {"Relock", "Bloquear"},
     {"Remember Link's position for this loaded scene.", "Guarda la posición de Link en esta escena cargada."},
@@ -1168,8 +1170,6 @@ inline constexpr Entry kes_419[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "la carpeta del juego"},
     {"your home folder", "tu carpeta personal"},
-    {"Ready for duel", "Listo para el duelo"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y presiona dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
 };
 inline constexpr Entry kes[] = {
     {" (native)", " (nativa)"},
@@ -1569,6 +1569,8 @@ inline constexpr Entry kes[] = {
     {"Quantity %d", "Cantidad %d"},
     {"Quit", "Salir"},
     {"R stick press", "Pulsar joystick der."},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y pulsa dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
+    {"Ready for duel", "Listo para el duelo"},
     {"Real time", "Tiempo real"},
     {"Relock", "Bloquear"},
     {"Remember Link's position for this loaded scene.", "Guarda la posición de Link en esta escena cargada."},
@@ -1751,8 +1753,6 @@ inline constexpr Entry kes[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "la carpeta del juego"},
     {"your home folder", "tu carpeta personal"},
-    {"Ready for duel", "Listo para el duelo"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lee las reglas firmadas de la sala y pulsa dos veces. Solo diagnóstico: esta versión no puede iniciar un combate."},
 };
 inline constexpr Entry kfr[] = {
     {" (native)", " (native)"},
@@ -2150,6 +2150,8 @@ inline constexpr Entry kfr[] = {
     {"Quantity %d", "Quantité %d"},
     {"Quit", "Quitter"},
     {"R stick press", "Clic stick droit"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lisez les règles signées du salon, puis appuyez deux fois. Diagnostic uniquement : cette version ne peut pas lancer de combat."},
+    {"Ready for duel", "Prêt pour le duel"},
     {"Real time", "Temps réel"},
     {"Relock", "Rebloquer"},
     {"Remember Link's position for this loaded scene.", "Mémorise la position de Link pour cette scène chargée."},
@@ -2329,8 +2331,6 @@ inline constexpr Entry kfr[] = {
     {"adult only", "adulte seul"},
     {"the game folder", "le dossier du jeu"},
     {"your home folder", "votre dossier personnel"},
-    {"Ready for duel", "Prêt pour le duel"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lisez les règles signées du salon, puis appuyez deux fois. Diagnostic uniquement : cette version ne peut pas lancer de combat."},
 };
 inline constexpr Entry kde[] = {
     {" (native)", " (nativ)"},
@@ -2724,6 +2724,8 @@ inline constexpr Entry kde[] = {
     {"Quantity %d", "Menge %d"},
     {"Quit", "Beenden"},
     {"R stick press", "R-Stick drücken"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lies die signierten Raumregeln und drücke zweimal. Nur Diagnose: Diese Version kann keinen Kampf starten."},
+    {"Ready for duel", "Bereit zum Duell"},
     {"Real time", "Echtzeit"},
     {"Relock", "Sperren"},
     {"Remember Link's position for this loaded scene.", "Merkt sich Links Position für diese geladene Szene."},
@@ -2902,8 +2904,6 @@ inline constexpr Entry kde[] = {
     {"adult only", "nur erwachsen"},
     {"the game folder", "dem Spielordner"},
     {"your home folder", "dem Benutzerordner"},
-    {"Ready for duel", "Bereit zum Duell"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lies die signierten Raumregeln und drücke zweimal. Nur Diagnose: Diese Version kann keinen Kampf starten."},
 };
 inline constexpr Entry kit[] = {
     {" (native)", " (nativa)"},
@@ -3299,6 +3299,8 @@ inline constexpr Entry kit[] = {
     {"Quantity %d", "Quantità %d"},
     {"Quit", "Esci"},
     {"R stick press", "Premi levetta des."},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leggi le regole firmate della stanza, poi premi due volte. Solo diagnostica: questa versione non può avviare un combattimento."},
+    {"Ready for duel", "Pronto al duello"},
     {"Real time", "Tempo reale"},
     {"Relock", "Blocca"},
     {"Remember Link's position for this loaded scene.", "Memorizza la posizione di Link per questa scena caricata."},
@@ -3478,8 +3480,6 @@ inline constexpr Entry kit[] = {
     {"adult only", "solo adulto"},
     {"the game folder", "del gioco"},
     {"your home folder", "home"},
-    {"Ready for duel", "Pronto al duello"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Leggi le regole firmate della stanza, poi premi due volte. Solo diagnostica: questa versione non può avviare un combattimento."},
 };
 inline constexpr Entry knl[] = {
     {" (native)", " (native)"},
@@ -3868,6 +3868,8 @@ inline constexpr Entry knl[] = {
     {"Quantity %d", "Aantal %d"},
     {"Quit", "Afsluiten"},
     {"R stick press", "Klik rechterstick"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lees de ondertekende kamerregels en druk tweemaal. Alleen diagnose: deze versie kan geen gevecht starten."},
+    {"Ready for duel", "Klaar voor duel"},
     {"Real time", "Echte tijd"},
     {"Relock", "Vergrendelen"},
     {"Remember Link's position for this loaded scene.", "Onthoudt de positie van Link voor deze geladen scène."},
@@ -4045,8 +4047,6 @@ inline constexpr Entry knl[] = {
     {"adult only", "alleen volwassen"},
     {"the game folder", "de spelmap"},
     {"your home folder", "je thuismap"},
-    {"Ready for duel", "Klaar voor duel"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Lees de ondertekende kamerregels en druk tweemaal. Alleen diagnose: deze versie kan geen gevecht starten."},
 };
 inline constexpr Entry kpl[] = {
     {" (native)", " (natywna)"},
@@ -4445,6 +4445,8 @@ inline constexpr Entry kpl[] = {
     {"Quantity %d", "Ilość %d"},
     {"Quit", "Wyjdź"},
     {"R stick press", "Wciśn. gałki R"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Przeczytaj podpisane zasady pokoju, potem naciśnij dwa razy. Tylko diagnostyka: ta wersja nie może rozpocząć walki."},
+    {"Ready for duel", "Gotowość do pojedynku"},
     {"Real time", "Czas rzeczywisty"},
     {"Relock", "Zablokuj"},
     {"Remember Link's position for this loaded scene.", "Zapamiętuje pozycję Linka w tej wczytanej scenie."},
@@ -4621,8 +4623,6 @@ inline constexpr Entry kpl[] = {
     {"adult only", "tylko dorosły"},
     {"the game folder", "folderze gry"},
     {"your home folder", "folderze domowym"},
-    {"Ready for duel", "Gotowość do pojedynku"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Przeczytaj podpisane zasady pokoju, potem naciśnij dwa razy. Tylko diagnostyka: ta wersja nie może rozpocząć walki."},
 };
 inline constexpr Entry kru[] = {
     {" (native)", " (нативное)"},
@@ -5027,6 +5027,8 @@ inline constexpr Entry kru[] = {
     {"Quantity %d", "Кол-во: %d"},
     {"Quit", "Выход"},
     {"R stick press", "Нажатие стика R"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Прочитайте подписанные правила комнаты, затем нажмите дважды. Только диагностика: эта версия не может начать бой."},
+    {"Ready for duel", "Готовность к дуэли"},
     {"Real time", "Реальное время"},
     {"Relock", "Закрыть"},
     {"Remember Link's position for this loaded scene.", "Запоминает позицию Линка в загруженной сцене."},
@@ -5211,8 +5213,6 @@ inline constexpr Entry kru[] = {
     {"adult only", "только взрослый"},
     {"the game folder", "папке игры"},
     {"your home folder", "домашней папке"},
-    {"Ready for duel", "Готовность к дуэли"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "Прочитайте подписанные правила комнаты, затем нажмите дважды. Только диагностика: эта версия не может начать бой."},
 };
 inline constexpr Entry kja[] = {
     {" (native)", " (ネイティブ)"},
@@ -5613,6 +5613,8 @@ inline constexpr Entry kja[] = {
     {"Quantity %d", "数 %d"},
     {"Quit", "終了"},
     {"R stick press", "Rスティック押し込み"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "署名済みのルームルールを読み、2回押してください。診断専用です。このビルドでは戦闘を開始できません。"},
+    {"Ready for duel", "決闘の準備"},
     {"Real time", "リアルタイム"},
     {"Relock", "取り消し"},
     {"Remember Link's position for this loaded scene.", "いま読み込まれているシーンでの、リンクの位置を記録します。"},
@@ -5794,8 +5796,6 @@ inline constexpr Entry kja[] = {
     {"adult only", "大人のみ"},
     {"the game folder", "ゲームフォルダー"},
     {"your home folder", "ホームフォルダー"},
-    {"Ready for duel", "決闘の準備"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "署名済みのルームルールを読み、2回押してください。診断専用です。このビルドでは戦闘を開始できません。"},
 };
 inline constexpr Entry kko[] = {
     {" (native)", " (네이티브)"},
@@ -6199,6 +6199,8 @@ inline constexpr Entry kko[] = {
     {"Quantity %d", "수량 %d"},
     {"Quit", "종료"},
     {"R stick press", "R 스틱 누르기"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "서명된 방 규칙을 읽고 두 번 누르세요. 진단 전용이며, 이 빌드에서는 전투를 시작할 수 없습니다."},
+    {"Ready for duel", "결투 준비"},
     {"Real time", "실시간"},
     {"Relock", "다시 잠금"},
     {"Remember Link's position for this loaded scene.", "현재 불러온 장면에서 링크의 위치를 기억합니다."},
@@ -6382,8 +6384,6 @@ inline constexpr Entry kko[] = {
     {"adult only", "어른 전용"},
     {"the game folder", "게임 폴더"},
     {"your home folder", "홈 폴더"},
-    {"Ready for duel", "결투 준비"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "서명된 방 규칙을 읽고 두 번 누르세요. 진단 전용이며, 이 빌드에서는 전투를 시작할 수 없습니다."},
 };
 inline constexpr Entry kzh_Hans[] = {
     {" (native)", " (原生)"},
@@ -6784,6 +6784,8 @@ inline constexpr Entry kzh_Hans[] = {
     {"Quantity %d", "数量 %d"},
     {"Quit", "退出"},
     {"R stick press", "按下R摇杆"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "阅读已签名的房间规则，然后按两次。仅用于诊断：此版本无法开始战斗。"},
+    {"Ready for duel", "准备决斗"},
     {"Real time", "实时"},
     {"Relock", "重新锁定"},
     {"Remember Link's position for this loaded scene.", "记住林克在当前已载入场景中的位置。"},
@@ -6965,8 +6967,6 @@ inline constexpr Entry kzh_Hans[] = {
     {"adult only", "仅限成年"},
     {"the game folder", "游戏文件夹"},
     {"your home folder", "用户主文件夹"},
-    {"Ready for duel", "准备决斗"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "阅读已签名的房间规则，然后按两次。仅用于诊断：此版本无法开始战斗。"},
 };
 inline constexpr Entry kzh_Hant[] = {
     {" (native)", " (原生)"},
@@ -7367,6 +7367,8 @@ inline constexpr Entry kzh_Hant[] = {
     {"Quantity %d", "數量 %d"},
     {"Quit", "結束"},
     {"R stick press", "按下R搖桿"},
+    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "閱讀已簽署的房間規則，然後按兩次。僅供診斷：此版本無法開始戰鬥。"},
+    {"Ready for duel", "準備決鬥"},
     {"Real time", "即時"},
     {"Relock", "重新鎖定"},
     {"Remember Link's position for this loaded scene.", "記住林克在目前已載入場景中的位置。"},
@@ -7548,8 +7550,6 @@ inline constexpr Entry kzh_Hant[] = {
     {"adult only", "僅限成年"},
     {"the game folder", "遊戲資料夾"},
     {"your home folder", "使用者主資料夾"},
-    {"Ready for duel", "準備決鬥"},
-    {"Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight.", "閱讀已簽署的房間規則，然後按兩次。僅供診斷：此版本無法開始戰鬥。"},
 };
 inline constexpr Lang kLangs[] = {
     {"en", "English", nullptr, 0},
