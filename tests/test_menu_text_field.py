@@ -70,6 +70,7 @@ enum { HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_WEST, HOS_PAD_NORTH, HOS_PAD_BACK, H
        HOS_PAD_RIGHT };
 enum { HOS_MOUSE_LEFT = 1, HOS_MOUSE_RIGHT = 2 };
 @@TEXT_ENUMS@@
+@@CHAT_ENUMS@@
 struct { int output_res, preset, ultrawide, handheld, audio_output; } opts;
 struct Row { int* value; int hi; bool restart; };
 Row rows[] = {{&opts.ultrawide, 0, true}, {&opts.output_res, 0, true}, {&opts.audio_output, 3, true}};
@@ -93,6 +94,14 @@ static int saves = 0;
 void save() { saves++; }
 static const int* released = nullptr;   // (main's env_release: the row the player set is theirs, over HOS_OUTPUT_RES)
 void env_release(const int* value) { released = value; }
+int64_t prof_now();
+int text_releases = 0;
+int release_text(int focus, uint32_t* out, int max) {
+    CHECK(focus == HOS_TEXT_OFF && out == nullptr && max == 0);
+    ++text_releases;
+    return 0;
+}
+struct { int (*take_text)(int, uint32_t*, int); } text_host{release_text}, *host = &text_host;
 @@CUT@@
 static const uint32_t K = HOS_TEXT_KEY;
 static void type(TextField& f, const char* s) {
@@ -303,6 +312,43 @@ void test_full_width() {
     CHECK(is(digits, "1", 1));   // the converted character must still pass allow()
     std::puts("PASS: test_full_width: all ten digits and x folded before the allow check");
 }
+int chat_commits = 0;
+std::string chat_sent;
+const char* apply_chat() { ++chat_commits; chat_sent = chat_field.text; return nullptr; }
+void test_chat_coexistence() {
+    startup("1920x800");
+    CHECK(chat_field.unicode && !chat_field.pad_chars && chat_field.max == HOS_COOP_CHAT_BYTES);
+    CHECK(!output_field.unicode && output_field.pad_chars);
+    const int before = saves, released_before = text_releases;
+    open_now = false;
+    text_set(chat_field, "");
+    edit_start(chat_field, apply_chat);
+    typed[0] = 0xff11, typed[1] = 0xe9, typed_n = 2;
+    focused_tick();
+    typed_n = 0;
+    CHECK(is(chat_field, "\xEF\xBC\x91\xC3\xA9", 5)); // Chat preserves full-width Unicode; output folds it.
+    tap(HOS_PAD_UP), tap(HOS_PAD_DOWN), tap(HOS_PAD_RSHOULDER);
+    CHECK(is(chat_field, "\xEF\xBC\x91\xC3\xA9", 5)); // The numeric pad picker belongs only to the output field.
+    tap(HOS_PAD_LEFT), tap(HOS_PAD_LSHOULDER);
+    CHECK(is(chat_field, "\xEF\xBC\x91", 3));
+    tap(HOS_PAD_LSHOULDER);
+    CHECK(is(chat_field, "", 0));
+    text_set(chat_field, "hello");
+    mouse = true, ptr.pressed = HOS_MOUSE_LEFT, tab_selected[0] = 1; // The hit is outside the field.
+    focused_tick();
+    CHECK(editing == &chat_field && chat_commits == 0 && !open_now);
+    mouse = false, ptr.pressed = 0, tab_selected[0] = 0;
+    tap(pad_confirm);
+    CHECK(!editing && chat_commits == 1 && chat_sent == "hello" && !chat_field.len);
+    CHECK(text_releases == released_before + 1 && chat_release_at == prof_now() + 50000000LL);
+    edit_start(chat_field, apply_chat);
+    text_set(chat_field, "cancel");
+    tap(pad_back);
+    CHECK(!editing && chat_commits == 1 && !chat_field.len && text_releases == released_before + 2);
+    CHECK(saves == before && !std::strcmp(output_field.text, "1920x800"));
+    open_now = true;
+    std::puts("PASS: chat and numeric fields share one text owner without sharing Unicode/pad policies or click-to-send");
+}
 void test_monitor_shape() {
     for (const auto screen : {display_modes::Size{2560, 1080}, display_modes::Size{5120, 1440}}) {
         screen_w = screen.w, screen_h = screen.h;
@@ -357,6 +403,7 @@ int main() {
     test_pad_character_limits();
     test_edit_wheel();
     test_full_width();
+    test_chat_coexistence();
     test_monitor_shape();
     test_audio_restart_with_custom_size();
     TextField f;
@@ -606,17 +653,20 @@ def main():
                      block(menu, "int restart_slot_of("), block(menu, "bool restart_changed("),
                      block(menu, "void restart_values("),
                      between(menu, "bool output_size_char(", "struct FieldRow {"),
+                     between(menu, "TextField chat_field", "std::atomic<bool> chat_capture"),
+                     between(menu, "int64_t chat_release_at =", "\n"),
                      between(menu, "TextField* editing =", "void edit_start("),
                      block(menu, "void edit_start("), block(menu, "void edit_end(")])
     host_cut = between(backend, "enum { TEXT_QUEUE", "static const MkwVkHost vk_host")
-    focused = block(menu, "if (open_now.load() && editing) {")
+    focused = block(menu, "if (editing && (open_now.load() || editing == &chat_field)) {")
     win = (ROOT / "host/display.c").read_text(encoding="utf-8")
     win_keys = block(win[win.index("case WM_KEYDOWN: {"):], "if (hos_text_focus()) {")
     pad_poll = between(menu, "    static uint32_t pad_held = 0;", "#ifndef VK_RSHIFT")
     pad_edge = between(menu, "    auto pad = ", "\n")
     pad_repeat = block(menu, "    {   // holding an arrow or the D-pad repeats it:")
     with tempfile.TemporaryDirectory(prefix="menu-text-") as tmp:
-        compile_run(a.cxx, "c++", "c++20", MENU_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", cut)
+        compile_run(a.cxx, "c++", "c++20", MENU_FIXTURE.replace("@@TEXT_ENUMS@@", enums)
+                    .replace("@@CHAT_ENUMS@@", between(api, "enum { HOS_COOP_CHAT_BYTES", "\n")).replace("@@CUT@@", cut)
                     .replace("@@PAD_RAW@@", block(hid, "uint32_t hos_pad_raw("))
                     .replace("@@GAME_KEY@@", block(hid, "static int key("))
                     .replace("@@PAD_POLL@@", pad_poll).replace("@@PAD_EDGE@@", pad_edge)

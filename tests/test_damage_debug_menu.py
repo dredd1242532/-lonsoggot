@@ -33,7 +33,7 @@ def main():
     assert len(entries) >= 18
     assert '{TAB_GAMEPLAY, "Damage taken"' not in table
     assert sum('"Damage taken"' in entry for entry in entries) == 1
-    source = '#include <cassert>\n#include <cstring>\n#include <iterator>\n'
+    source = '#include "vk_api.h"\n#include <cassert>\n#include <cstring>\n#include <iterator>\n'
     source += block(header, "struct Options {") + ';\nOptions opts;\n'
     source += block(menu, "enum MenuTab {") + ';\n'
     source += block(menu, "struct Row {") + ';\n'
@@ -45,6 +45,9 @@ def main():
     source += 'const char* hn_intel_compiles(int, int) { return nullptr; }\n'
     source += 'Row rows[] = {' + ',\n'.join(entries) + '};\n'
     source += 'constexpr int kRows = sizeof rows / sizeof rows[0];\n'
+    source += menu[menu.index("struct CoopTermRow {"):menu.index("bool coop_term_fixed(")]
+    source += menu[menu.index("struct CoopFeatureRow {"):menu.index("const char* tx_feature(")]
+    source += block(menu, "int menu_row_count(") + '\n' + block(menu, "Row& menu_row(") + '\n'
     source += '''
 bool cheats_env = false;
 bool reflex_available() { return false; }
@@ -73,7 +76,13 @@ int main() {
     const char* expected[] = {"Debug tools", "Heart protection", "Damage taken", "No-clip flight",
         "Movement speed", "Switch age", "Inventory", "Teleport", "Mark position", "Return to mark",
         "Free camera", "Set time"};
-    for (int env = 0; env < 2; ++env) for (int enabled = 0; enabled < 2; ++enabled) {
+    for (int dynamic = 0; dynamic < 2; ++dynamic) for (int readonly = 0; readonly < 2; ++readonly)
+        for (int env = 0; env < 2; ++env) for (int enabled = 0; enabled < 2; ++enabled) {
+        // Dynamic Room rules rows, editable or signed/read-only, must never alter Debug's traversal.
+        coop_feature_count = coop_terms_count = dynamic;
+        coop_rules_readonly = readonly != 0;
+        coop_feature_rows[0].def.id = 80;
+        std::strcpy(coop_terms[0].key, "coop_room_mode");
         cheats_env = env;
         opts.debug_tools = enabled;
         opts.damage_taken = 3;
@@ -82,7 +91,7 @@ int main() {
         assert(dev == (env || enabled ? (int)std::size(expected) : 1));
         assert(n == dev + 5); // Only the existing Developer rows follow.
         for (int i = 0; i < dev; ++i) {
-            const Row& row = rows[tab_row_to_global(TAB_DEBUG, order[i])];
+            const Row& row = menu_row(tab_row_to_global(TAB_DEBUG, order[i]));
             assert(!std::strcmp(row.name, expected[i]));
             assert(debug_step(order[i], 1) == order[i + 1]);
             assert(debug_step(order[i + 1], -1) == order[i]);
@@ -110,7 +119,8 @@ int main() {
         cpp = Path(tmp) / "menu.cpp"
         exe = Path(tmp) / "menu.exe"
         cpp.write_text(source, encoding="utf-8")
-        subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(exe)], check=True)
+        subprocess.run([args.cxx, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I" + str(ROOT / "gpu/vk"),
+                        str(cpp), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     print("PASS: Debug Player order, visibility, choices, default and keyboard traversal")
 

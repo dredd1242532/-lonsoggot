@@ -65,6 +65,7 @@ typedef struct { uint64_t x[32]; } Ctx;
 #define G64(a) (*(uint64_t *)GP(a))
 #define HOS_FS_PATH 1024
 #define R_PATH_NOT_FOUND 0x202
+#define R_NOT_MOUNTED 0xCA02
 static int hos_trace;
 static int fs_trace(void) { return 0; }
 static void hos_log(const char *f, ...) { (void)f; }
@@ -75,8 +76,13 @@ static int held, takes;
 int hos_vcore_away(void) { if (!held) return 0; held = 0; return 1; }
 void hos_vcore_back(void) { if (!held) held = 1, takes++; }
 /* Co-op's blocking save bookkeeping; RomFS observation is off in this core-ownership fixture. */
-static int held_in_save, save_active;
-static int save_writer_open(const char *path) { (void)path; held_in_save = held; save_active++; return 1; }
+static int held_in_save, save_active, save_refused, temporary_profile;
+static int coop_profile_active(void) { return temporary_profile; }
+static int save_writer_open(const char *path) {
+    (void)path; held_in_save = held;
+    if (save_refused) return -1;
+    save_active++; return 1;
+}
 static void save_writer_close(void) { save_active--; }
 static void hos_oot_coop_rom_open(const char *path) { (void)path; }
 
@@ -161,6 +167,14 @@ int main(void) {
     r = open_file("save:/missing.bin", 2, 1);
     check(r == R_PATH_NOT_FOUND && held_in_save == 0 && save_active == 0 && held == 1,
           "a failed save open balances its writer registration and restores the core");
+    save_refused = 1;
+    r = open_file("save:/unmounted.bin", 2, 1);
+    check(r == R_NOT_MOUNTED && held_in_save == 0 && held_in_create == -1 && save_active == 0 && held == 1 && takes == 1,
+          "a refused temporary save mount opens no host file and restores the core without registering a writer");
+    r = open_file("save:/unmounted.bin", 2, 0);
+    check(r == R_NOT_MOUNTED && held_in_save == 0 && held_in_create == -1 && save_active == 0 && held == 0 && takes == 0,
+          "a refused mount does not take a core from a caller that held none");
+    save_refused = 0;
     create_ok = 1, path_writable = 0;
 
     r = open_file("rom:/a.bin", 1, 0);

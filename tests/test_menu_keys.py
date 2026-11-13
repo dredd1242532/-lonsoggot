@@ -133,6 +133,8 @@ static std::atomic<bool> open_now;
 static int page, ask_sel, listening;
 static bool changed, tune_mode;   // (tune_mode: the compact bar, open; it opens when its key is held as the menu opens)
 static bool compact_key_held;     // (menu_tick's tune_down: Right Shift, or Right Ctrl, held)
+static bool chat_focused;
+static bool menu_chat_focus() { return chat_focused; }
 static bool restart_ask() { return false; }
 static int detect_pad_layout() { return 0; }
 static void dlss_probe() {}
@@ -197,6 +199,9 @@ static void test_esc() {
         compact_key_held = true;   // (the compact menu key held: Esc opens the compact bar, tick_key checks tune_mode)
         CHECK(esc(fresh, queued, false, &back) && !back);
         compact_key_held = false;
+        chat_focused = true;
+        CHECK(!esc(fresh, queued, false, &back) && back); // Chat owns Esc; it must not open the Insert menu.
+        chat_focused = false;
     }
     std::puts("PASS: out of the box, Esc opens the closed menu (Insert, F1 or Esc); Insert or F1 and F1 only leave it closed");
 }
@@ -285,7 +290,7 @@ def main():
     key_poll = tick[tick.index("    enum { K_N ="):tick.index("    // (longshot) the gamepads")]
     esc_at = tick.index("    const bool esc_opens")
     # (the Esc block ends where the keys' branches begin: the text field's first, as the Insert menu's text fields have it)
-    esc_block = tick[esc_at:tick.index("    if (open_now.load() && editing) {", esc_at)]
+    esc_block = tick[esc_at:tick.index("    if (editing && (open_now.load() || editing == &chat_field)) {", esc_at)]
     tx_at = menu.index("const char* tx_menu_shortcut(int v) {")
     tx = menu[tx_at:menu.index("\n}\n", tx_at) + 3]
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
@@ -330,8 +335,8 @@ def main():
     need(tick, r"const int columns = .*?controls\[i\].button != HOS_SW_PLUS && controls\[i\].button != HOS_SW_MINUS",
          "keyboard navigation must skip Plus and Minus Toggle cells")
     # (Insert, F1 or Esc: Esc on a closed menu opens it, and that press does not also go back a page)
-    need(tick, r"const bool esc_opens = opts\.menu_shortcut == 2 && press\[5\] && !open_now\.load\(\);\s*"
-               r"if \(esc_opens\) press\[5\] = false;", "Esc does not open a closed menu with the Esc shortcut")
+    need(tick, r"const bool esc_opens = !menu_chat_focus\(\) && opts\.menu_shortcut == 2 && press\[5\] && !open_now\.load\(\);\s*"
+               r"if \(esc_opens\) press\[5\] = false;", "Esc does not open a closed menu with the Esc shortcut outside chat")
     need(tick, r"\} else if \(press\[0\] \|\| press\[6\] \|\| esc_opens\) \{\s*open_now = !open_now\.load\(\)",
          "the Esc shortcut's press does not open the menu")
     # (the pad: confirm and back from A's and B's bindings, every tick, not fixed positions)

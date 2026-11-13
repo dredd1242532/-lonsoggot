@@ -27,7 +27,9 @@ def main():
     # Hidden means Normal: with the Debug tools off the host is told Normal, whatever the saved choice.
     assert "if (id == HOS_OPT_DAMAGE_TAKEN) return menu_damage_taken();" in replay
     assert "int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }" in menu
-    source = '#include "a64.h"\n' + patches.LIFE_HEAD + patches.LIFE_CAS + '\n' + patches.LIFE_CAS + '\n}\n'
+    # Two authored paths through the full life function, with the exact native CAS anchors.
+    source = ('#include "a64.h"\n' + patches.LIFE_HEAD + '    if (c->x[0]) {\n' +
+              patches.LIFE_CAS + '\n        return;\n    }\n' + patches.LIFE_CAS + '\n}\n')
     made = patches.patch_life(source)
     assert made and made != source
     assert patches.patch_life(made) == made, "Applying the patch twice must not scale twice"
@@ -35,22 +37,43 @@ def main():
     assert patches.patch_life(source.replace(patches.LIFE_HEAD, 'void unrelated(void) {\n')) is None
     assert patches.patch_file(source, 'authored.c', protect_hearts=False)[0] == source
     assert patches.patch_file(source, 'authored.c', protect_hearts=True)[0] == made
-    # Compile the guard from each injected site, not a reimplementation of it.
-    body = made.split(patches.LIFE_HEAD)[1].rsplit('\n}', 1)[0]
-    guards = body.split(patches.LIFE_CAS)[:2]
+    # Keep the complete injected scopes: the observer now wraps each CAS and shares an invocation token.
+    # test_oot_coop_hits covers active observer/policy interactions; here any observer call is a failure.
     host = (ROOT / 'host/oot_damage.c').read_text(encoding='utf-8')
     host = '\n'.join(line for line in host.splitlines() if not line.startswith('#include'))
     head = r'''
 #include <stdint.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
+#define A64_NOESC
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
 static int setting = 1, protection, player = 1;
 int rx_option(int id, int otherwise) { assert(id == 55 && otherwise == 1); return setting; }
 int hos_oot_hearts_enabled(void) { return protection; }
 typedef struct { uint64_t x[32]; } Ctx;
-static int hos_oot_is_player(Ctx *c, uint64_t actor) { (void)c; return player && actor == 100; }
+int hos_oot_is_player(Ctx *c, uint64_t actor) { (void)c; return player && actor == 100; }
 static uint64_t recomp_load64(Ctx *c, uint64_t address) { (void)c; assert(address == 100 + 7184); return 200; }
+static uint32_t life_words[2];
+static unsigned marks;
+static uint32_t *fixture_ptr(uint64_t address) {
+    assert(address == 208 || address == 209);
+    return &life_words[address - 208];
+}
+static void fixture_mark(uint64_t address, unsigned bytes) {
+    assert((address == 208 || address == 209) && bytes == 4);
+    marks++;
+}
+#define A64_PTR(address) fixture_ptr(address)
+#define A64_MARK(address, bytes) fixture_mark(address, bytes)
+int hos_oot_hits_active = 0;
+uint64_t hos_oot_hits_begin(void) { abort(); }
+uint32_t hos_oot_hits_before(Ctx *c, uint64_t token, unsigned path) {
+    (void)c; (void)token; (void)path; abort();
+}
+void hos_oot_hits_committed(Ctx *c, uint64_t token, unsigned path, uint32_t requested) {
+    (void)c; (void)token; (void)path; (void)requested; abort();
+}
 '''
     main_c = r'''
 int main(void) {
@@ -120,11 +143,21 @@ int main(void) {
     puts("PASS: damage arithmetic, lethal/quarter hits, healing, protection, both player guards and option wiring");
 }
 '''
-    site = 'static void site(Ctx *c, int which) { if (which) {\n' + guards[0] + '\n} else {\n' + guards[1] + '\n} }\n'
+    site = r'''
+static void site(Ctx *c, int which) {
+    c->x[0] = (uint64_t)which;
+    uint32_t *life = fixture_ptr(c->x[13]);
+    *life = (uint32_t)c->x[11];
+    const unsigned before = marks;
+    f_804bd8c0(c);
+    assert(marks == before + 1); /* exactly the chosen native path commits once */
+    assert(*life == (uint32_t)c->x[12]); /* the real CAS writes the policy result */
+}
+'''
     with tempfile.TemporaryDirectory(prefix='oot-damage-') as temporary:
         c = Path(temporary) / 'damage.c'
         exe = Path(temporary) / 'damage.exe'
-        c.write_text(head + host + site + main_c, encoding='utf-8')
+        c.write_text(head + host + '\n' + made.replace('#include "a64.h"\n', '', 1) + site + main_c, encoding='utf-8')
         subprocess.run([args.cc, '-std=c11', '-Wall', '-Wextra', '-Werror', '-O2', str(c), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
 

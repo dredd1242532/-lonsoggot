@@ -92,6 +92,9 @@ const char* tx_preset(int) { return ""; }
 const char* hn_preset(int, int) { return ""; }
 Row rows[] = {/* UPSCALER_ROW */, /* RESOLUTION_ROW */, /* MODEL_ROW */, /* PRESET_ROW */};
 constexpr int kRows = sizeof rows / sizeof rows[0];
+// Only these four graphics rows are registered; dynamic room rows are covered by test_menu_feature_rules.
+int menu_row_count() { return kRows; }
+Row& menu_row(int i) { return rows[i]; }
 /* OVERRIDES */
 /* INI_KEY */
 std::string ini_file, mic_want;
@@ -103,7 +106,13 @@ int rumble_step(int v) { return v; }
 constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_SW_PLUS = 10, HOS_SW_MINUS = 11, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1;
 constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;
 const char* bind_names[1] = {"a"};
-struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); } *host = nullptr;
+enum { HOS_COOP_CMD_RULES_CHANGED = 9, HOS_COOP_CHAT_NOTICES = 3 };
+struct Host {
+    int (*binding)(int, int, int);
+    float (*aspect_ratio)();
+    int (*coop_command)(int, const char*, uint32_t);
+    int (*coop_chat)(int, const char*, uint32_t);
+} *host = nullptr;
 bool can_bind() { return false; }
 // No hardware profile or measured tuning owns the manual round trips.
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
@@ -121,6 +130,9 @@ void text_set(TextField& f, const char* t) {
 bool coop_relay_whole = true;
 const char* row_key(const Row&, const char* named) { return named; }
 bool coop_option_line(const char*, const char*) { return false; }
+bool coop_feature_saved_key(const char*) { return false; }
+void coop_feature_save(FILE*) {}
+void coop_refresh(bool*) {}
 /* SAVE */
 void restart() {
     opts = Options{};

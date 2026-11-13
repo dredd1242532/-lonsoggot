@@ -52,12 +52,23 @@ int main() {
         if (mark) CHECK("the mouse's choice stays under the cursor", under_cursor == kUpscaler);
         else CHECK("unmarked: the list slides down a row, the Output resolution under the cursor", under_cursor == kOutput);
     }
-    for (int height : {240, 480, 720}) for (int members : {1, 8}) for (int sel = 0; sel < 13; sel++) {
+    for (int height : {240, 480, 720}) for (int members : {0, 1, 8}) for (int sel = 0; sel < 13; sel++) {
         const float top = 20, bottom = (float)height, s = 1, pitch = 48, box_h = 70;
         const struct { int n; } v = {members};
         %(coop_scroll)s
-        CHECK("every co-op action is reachable above the reserved member list",
-              sel >= first && sel < first + shown && rows_bottom >= rows_top + pitch);
+        CHECK("actions and members share one scroll extent", list_rows == 13 + (members ? members + 2 : 0));
+        CHECK("every co-op action is reachable in the unified list",
+              sel >= first && sel < first + shown && bottom >= top + box_h + 16 * s + pitch);
+        // Wheel through the same list to its last member, without moving the selected action.
+        // Let the first unchanged draw observe a changed viewport before applying the wheel.
+        scroll_rows(TAB_COOP, list_rows, sel, top + box_h + 16 * s, bottom, pitch, &shown);
+        wheel_rows[TAB_COOP] = -100;
+        const float last = scroll_rows(TAB_COOP, list_rows, sel, top + box_h + 16 * s, bottom, pitch, &shown);
+        CHECK("the last member remains reachable", last + shown >= list_rows && scrolled_to[TAB_COOP] == sel);
+        // A subsequent key/pad selection brings even the first action back from the member list.
+        scrolled_to[TAB_COOP] = -1;
+        const float back = scroll_rows(TAB_COOP, list_rows, sel, top + box_h + 16 * s, bottom, pitch, &shown);
+        CHECK("actions remain reachable after scrolling through members", sel >= back && sel < back + shown);
     }
     std::puts("PASS: a row chosen by the mouse stays under the cursor");
     return 0;
@@ -86,8 +97,8 @@ def main():
         raise SystemExit("draw_menu: the options' rows do not scroll by the tab's slot (scrolled_to[cur_tab] would not match)")
     coop = function(menu, "void draw_coop_rows(")
     coop_scroll = coop[coop.index("    const int count = tab_row_count(TAB_COOP);"):coop.index("    scroll_bar(")]
-    if "scroll_rows(TAB_COOP, count, sel," not in coop_scroll:
-        raise SystemExit("the added Chat/Mute rows must scroll, not disappear below the member list")
+    if "scroll_rows(TAB_COOP, list_rows, sel," not in coop_scroll:
+        raise SystemExit("the co-op actions and member rows must use their one unified scroller")
     with tempfile.TemporaryDirectory(prefix="menu-mouse-scroll-") as tmp:
         src, exe = Path(tmp) / "fixture.cpp", Path(tmp) / "fixture"
         src.write_text(FIXTURE % {"scroll_rows": function(menu, "float scroll_rows("), "coop_scroll": coop_scroll}, encoding="utf-8")

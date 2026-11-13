@@ -28,21 +28,28 @@ FIXTURE = r'''
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 #include "dlss_checks.h"
+#include "upscaler_rows.h"
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL:%d %s\n",__LINE__,#x); std::exit(1); } } while (0)
 using VkCommandBuffer = int;
 using VkImageView = int;
-constexpr int VK_FORMAT_UNDEFINED = 0, VK_FORMAT_B10G11R11_UFLOAT_PACK32 = 1;
+using VkFormat = int;
+constexpr VkFormat VK_FORMAT_UNDEFINED = 0, VK_FORMAT_B10G11R11_UFLOAT_PACK32 = 1, VK_FORMAT_R16G16B16A16_SFLOAT = 3;
 constexpr int VK_IMAGE_VIEW_TYPE_2D = 2, VK_NULL_HANDLE = 0;
 namespace ViewUse { enum Value { Sample, Storage }; }
-namespace ur { enum { GAME, OTHER }; }
+namespace ur = mkwvk::upscaler_rows;
 int mode = ur::GAME;
 bool off = false, labels = false;
 int temporal_mode() { return mode; }
 bool temporal_wanted() { return mode != ur::GAME; }
 bool temporal_off() { return off; }
 bool coop_overlay_wants_camera() { return labels; }
+bool tonemap = false;
+bool scene_tonemap_on() { return tonemap; }
+int env_switch(const char* name) { CHECK(!std::strcmp(name, "RX_VK_PSYCHOV35_DLSS")); return 1; }
+@@COLOUR@@
 struct Texture { int format; uint32_t width, height; };
 Texture input{VK_FORMAT_B10G11R11_UFLOAT_PACK32,1536,864}, output{VK_FORMAT_B10G11R11_UFLOAT_PACK32,2048,1152};
 struct State { std::atomic<uint32_t> out_w{0}, out_h{0}; } state;
@@ -64,8 +71,13 @@ Draw& dw() { return draw; }
 bool gameplay_network(uint64_t key) { return key == 42; }
 uint32_t handle_of(const NvnState&, const Stage&, const Desc& d, int) { return d.handle; }
 int image_format(int x) { return x; }
-void texture_view_of(uint32_t handle, int, ViewUse::Value, int, Texture** out, uint32_t* level = nullptr) {
-    ++lookups; *out = handle == 1 ? &input : &output; if (level) *level = 0;
+int rgba_views = 0;
+VkImageView texture_view_of(uint32_t handle, int, ViewUse::Value, int format, Texture** out = nullptr, uint32_t* level = nullptr) {
+    ++lookups;
+    if (out) *out = handle == 1 ? &input : &output;
+    if (level) *level = 0;
+    if (format == VK_FORMAT_R16G16B16A16_SFLOAT) ++rgba_views;
+    return (VkImageView)handle;
 }
 bool last_dyn_valid = true, last_desc_valid = true, last_vb_valid = true;
 int last_pipeline = 7;
@@ -92,6 +104,21 @@ int main() {
     output.format = 9;
     CHECK(!temporal_upscale(1,42,true,&input,1,&output,2,0) && state.out_w == 0);
     output.format = 1;
+    // Preserve the parent's opt-in temporal colour-pair path as well as the default packed scene.
+    const VkFormat packed = VK_FORMAT_B10G11R11_UFLOAT_PACK32, rgba = VK_FORMAT_R16G16B16A16_SFLOAT;
+    CHECK(temporal_colour_pair(packed, packed));
+    CHECK(!temporal_colour_pair(packed, rgba) && !temporal_colour_pair(rgba, packed));
+    CHECK(!temporal_colour_pair(rgba, rgba)); // GAME never opts into the temporal HDR route.
+    mode = ur::DLSS;
+    CHECK(!temporal_colour_pair(rgba, rgba)); // Native HDR/scene tonemap is also required.
+    tonemap = true;
+    CHECK(temporal_colour_pair(rgba, rgba));
+    input.format = output.format = rgba; p.key = 42; lookups = 0;
+    CHECK(!temporal_stand_in(1,s,p)); // Only the GAME-mode entry is retained in this fixture.
+    CHECK(lookups == 4 && rgba_views == 2 && stretches == 0);
+    mode = ur::GAME; input.format = output.format = packed;
+    last_dyn_valid = last_desc_valid = last_vb_valid = true; last_pipeline = 7;
+    vertex_set.on = last_ib.on = true;
     // Existing explicit Upscaler Off remains a replacement and invalidates its touched GPU state.
     p.key = 42; off = true;
     CHECK(temporal_stand_in(1,s,p) && stretches == 1);
@@ -114,6 +141,8 @@ def main():
     # Only the GAME-mode entry is exercised here. Other engines are outside this regression's scope.
     entry = temporal[begin:end] + '    return false;\n}\n'
     source = FIXTURE.replace('@@NOTE@@',function(temporal,'void note_output('))
+    source = source.replace('@@COLOUR@@', function(temporal,'bool temporal_scene_format(') + '\n' +
+                            function(temporal,'bool temporal_colour_pair('))
     source = source.replace('@@UPSCALE@@',entry).replace('@@GATE@@',function(draw,'bool temporal_stand_in('))
     with tempfile.TemporaryDirectory(prefix='coop-overlay-camera-') as d:
         p = Path(d); cpp,exe = p/'fixture.cpp',p/'fixture'
