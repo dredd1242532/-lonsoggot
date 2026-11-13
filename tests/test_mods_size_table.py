@@ -229,6 +229,7 @@ void hos_sdl_pad_first_name(char *out, size_t cap) { if (cap) *out = 0; }
 int hos_regions(uint64_t (*out)[2], int cap) { (void)out; (void)cap; return 0; }
 int64_t hos_now_ns(void) { return 0; }
 int rx_option(int id, int otherwise) { (void)id; return otherwise; }
+int hos_ini_option(const char *key, int otherwise) { (void)key; return otherwise; }
 void hos_mods_init(const char *image_path);
 int hos_mods_romfs(const char *rel, char *out, size_t cap);
 const char *hos_romfs_dir;
