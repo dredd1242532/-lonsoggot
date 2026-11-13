@@ -13,7 +13,8 @@ param(
     [int]$Jobs = [Environment]::ProcessorCount
 )
 $ErrorActionPreference = "Stop"
-$bin = Join-Path $Game "bin"
+$bin = Join-Path $Game "bin"   # (a Builder's game folder: the launcher at its root, the game in bin; a make_game.py one: the game at its root)
+if (-not (Test-Path (Join-Path $bin "longshot_vk.dll"))) { $bin = $Game }
 if (Get-Process longshot -ErrorAction SilentlyContinue) { if ($Install -or $Uninstall) { throw "Longshot is running: close it first" } }
 if ($Uninstall) {
     $orig = Join-Path $bin "longshot_vk.dll.orig"
