@@ -565,11 +565,13 @@ class PromptSkipTests(unittest.TestCase):
         self.assertEqual(self.calls, 2)
         self.assertIn("regenerated (forced)", self.log.getvalue())
 
-    def test_packaged_build_always_regenerates(self):
+    def test_packaged_build_keeps_unchanged_prompts(self):
+        # (a packaged builder, the launcher's: players' builds keep them too, #2698 had them drawn every time)
         self.build(packaged=True)
         self.build(packaged=True)
-        self.assertEqual(self.calls, 2)
-        self.assertFalse(self.stamp().exists())
+        self.assertEqual(self.calls, 1)
+        self.assertTrue(self.stamp().exists())
+        self.assertIn("prompts: unchanged, kept", self.log.getvalue())
 
     def test_malformed_and_empty_manifest(self):
         self.build()

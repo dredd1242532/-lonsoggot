@@ -304,12 +304,12 @@ memory and are not always faster. **Build memory**: Automatic keeps the free-mem
 `LONGSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free now (the ones that always run,
 up to 4 on Windows, still run under a smaller number). The builders' `--cli` passes both on as it finds them.
 
-Source-checkout builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
+Builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
 size and content hash. The inputs are checked before and after generation; changed or unreadable inputs leave no reusable
-stamp. The log says `prompts: unchanged, kept` or why it regenerated. Packaged builders (the finish stage's launcher
-path) still regenerate every time; `RX_RELEASE` does not distinguish them from source builds. Generation uses a fresh
-directory and publishes only a complete set. A failed generator still removes the prompts, so the game shows its own
+stamp. The log says `prompts: unchanged, kept` or why it regenerated. Packaged builders keep them too: a builder update
+changes `nx2/prompt_assets.py` or the packages, which the stamp covers, so the first build after it draws them again.
+Generation uses a fresh directory and publishes only a complete set. A failed generator still removes the prompts, so the game shows its own
 icons, as before. An interrupted builder can leave the old set without a stamp; the next build regenerates it.
 The files the game derives at run time are still cleared by every build, including a cache hit; they are not part of
 the stamp. If those files cannot be cleared, the build regenerates rather than trusting them.

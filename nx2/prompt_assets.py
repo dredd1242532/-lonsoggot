@@ -1327,7 +1327,7 @@ def main():
     ap.add_argument("--no-textures", action="store_true")
     ap.add_argument("--dump", help="also write every face's images as PNG into <dir>/<face>/ (the names nx2/prompt_faces/<face>/ "
                     "takes in their place), and the game's textures they go into into <dir>/game/")
-    ap.add_argument("--incremental", action="store_true", help="keep complete, unchanged output (source-checkout builds)")
+    ap.add_argument("--incremental", action="store_true", help="keep complete, unchanged output (make_game.py's builds)")
     a = ap.parse_args()
     make_prompts(a, a.incremental and not a.dump)   # a layer dump is requested output too: always draw it
 
