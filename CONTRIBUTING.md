@@ -213,9 +213,11 @@ Forgejo doesn't run these on pull requests or on `main` for now: CI runs only th
 description, workflow lint, the third-party notes), and a maintainer can start the full checks by hand (*Actions* >
 *CI* > *Run workflow*). So run them before you open a pull request and put their results in it.
 
-The optional [Vulkan fixture workflow](.forgejo/workflows/vulkan-fixtures.yml) is prepared for Forgejo, but does not
-enable Actions or register a runner. It needs an isolated runner labelled `ubuntu-24.04`, with Ubuntu 24.04, Bash,
-Git, Python 3, Node.js 24 for the pinned checkout action, passwordless `sudo` for apt, and package-network access.
+The optional [Vulkan fixture workflow](.forgejo/workflows/vulkan-fixtures.yml) adds a software-Vulkan lane beside the
+existing [CI workflow](.forgejo/workflows/ci.yml). Setup and labels are described in the
+[Forgejo runner guide](docs/forgejo-runners.md); this job uses its isolated `ubuntu-24.04` environment, needs Node.js 24
+for the pinned checkout action, and installs Mesa's software driver, Vulkan loader/headers/tools and Khronos validation.
+It does not enable Actions or register a runner.
 Its first completed Forgejo run is still required before calling this CI coverage. The job has no configured secrets
 or uploads, does not persist checkout credentials, and removes the forge tokens from the fixture command. Forgejo
 does not enforce GitHub's `permissions` key; this is not a substitute for disposable-runner isolation.
