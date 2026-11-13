@@ -354,6 +354,37 @@ static void test_reaccept_between_steps(void) {
     puts("PASS events: revoke/reaccept between steps still discards the old assembly");
 }
 
+static void test_save_scope(void) {
+    uint8_t id[16] = {1}, other[16] = {2};
+    CoopView av, bv;
+    coop_sess_view(a, &av); coop_sess_view(b, &bv);
+    grant(a, 0); grant(b, 0);
+    coop_sess_download_members(a, &av, 1u << 2);
+    coop_sess_download_members(b, &bv, 1u << 1);
+    assert(!coop_sess_member_accepted(a, 2) && !coop_sess_member_accepted(b, 1));
+    assert(coop_sess_send_event(a, 2, COOP_K_TEST, NULL, 0) == COOP_EVENT_UNAVAILABLE);
+    assert(coop_sess_send_event(a, 2, COOP_K_SAVE_CHUNK, NULL, 0) == COOP_EVENT_INVALID);
+    assert(!coop_sess_on_save_event(b, COOP_K_TEST, receive_event, NULL));
+    assert(coop_sess_on_save_event(b, COOP_K_SAVE_CHUNK, receive_event, NULL));
+    assert(coop_sess_send_save_event(a, 0, COOP_K_SAVE_CHUNK, id, clock_ms + 1000, NULL, 0) == COOP_EVENT_INVALID);
+    assert(coop_sess_send_save_event(a, 2, COOP_K_SAVE_CHUNK, id, clock_ms + 1, expected, sizeof expected) == 1);
+    pump(16, 0, 0);
+    assert(!queued() && !received); /* expired work is retired before any fragment */
+    assert(coop_sess_send_save_event(a, 2, COOP_K_SAVE_CHUNK, id, clock_ms + 10000, expected, sizeof expected) == 1);
+    assert(coop_sess_send_save_event(a, 2, COOP_K_SAVE_CHUNK, other, clock_ms + 10000, expected, sizeof expected) == COOP_EVENT_FULL);
+    pump(80, 0, 0); /* leave a partial assembly at the receiver */
+    assert(!received);
+    grant(a, 1u << 2); grant(b, 1u << 1);
+    assert(coop_sess_send_event(a, 2, COOP_K_TEST, NULL, 0) == 1);
+    coop_sess_cancel_save_events(a, other); assert(queued() == 2);
+    coop_sess_cancel_save_events(a, id); assert(queued() == 1);
+    pump(1000, 0, 0);
+    assert(received == 1 && !queued()); /* later ordinary FIFO survives scoped cancellation */
+    coop_sess_download_members(a, NULL, 0);
+    assert(coop_sess_member_accepted(a, 2)); /* revoking downloads cannot revoke gameplay consent */
+    puts("PASS events: isolated download scope, chunk quota, deadline, scoped cancellation and surviving FIFO");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     setup();
@@ -371,6 +402,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "reset-ack")) test_receiver_reset(0);
     else if (!strcmp(argv[1], "delayed-ack")) test_receiver_reset(1);
     else if (!strcmp(argv[1], "reaccept-step")) test_reaccept_between_steps();
+    else if (!strcmp(argv[1], "save-scope")) test_save_scope();
     else assert(0);
     coop_sess_free(a), coop_sess_free(b), coop_udp_close(relay);
     return 0;

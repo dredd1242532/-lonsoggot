@@ -3464,6 +3464,11 @@ static void check_member_acceptance(void) {
     CHECK(!coop_sync_member_accepted(a.eng, 2, b.session), "member acceptance: roster and identity alone do not accept a member");
     CoopOffer offer;
     coop_sync_offer(a.eng, &offer, now);
+    CHECK(!coop_sync_download_accept(a.eng, offer.token + 1), "download consent refuses a stale preview");
+    CHECK(coop_sync_download_accept(a.eng, offer.token), "download consent accepts verified identities");
+    CHECK(coop_sync_download_members(a.eng) == (1u << 2), "download has its own member mask");
+    CHECK(!coop_sync_member_accepted(a.eng, 2, b.session) && !coop_sync_open(a.eng) && !coop_sync_copy_wanted(a.eng),
+          "download acceptance cannot open progress, pool or native-copy gates");
     CHECK(coop_sync_accept(a.eng, offer.token), "member acceptance: accept the offered identity");
     CHECK(coop_sync_member_accepted(a.eng, 2, b.session), "member acceptance: accepted current identity");
     CHECK(!coop_sync_member_accepted(a.eng, 2, b.session + 1), "member acceptance: another session does not inherit consent");
@@ -3472,6 +3477,7 @@ static void check_member_acceptance(void) {
     b.session ^= 0x77;
     net_roster(&net, "ACCEPT", now);
     CHECK(!coop_sync_member_accepted(a.eng, 2, b.session), "member acceptance: a changed roster session needs a signed identity");
+    CHECK(!coop_sync_download_members(a.eng), "a replaced session cannot inherit download consent");
     now = run(&net, now, 4000);
     CHECK(coop_sync_member_accepted(a.eng, 2, b.session), "member acceptance: the accepted key can prove its new session");
     CHECK(coop_sync_remove(a.eng, 2), "member acceptance: maker removes the member");

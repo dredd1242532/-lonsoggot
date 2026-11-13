@@ -136,6 +136,14 @@ int coop_member_accepted(int member);
 // cannot grant acceptance, and a different member session never inherits a binding. No game code is called here.
 void coop_accept_members(const CoopView *view, uint32_t members);
 
+// Download consent is a distinct binding, never progress/gameplay acceptance.
+// Only SAVE_OFFER/CONTROL/CHUNK use it. The identity owner supplies the exact
+// current view after local acceptance of its verified identities and charter.
+void coop_download_members(const CoopView *view, uint32_t members);
+int coop_on_save_event(uint8_t kind, CoopEventFn fn, void *user);
+int coop_send_save_event(int member, uint8_t kind, const uint8_t transfer[16], uint64_t deadline_ms, const void *bytes, size_t n);
+void coop_cancel_save_events(const uint8_t transfer[16]);
+
 // "host", "host:port", "[v6]:port" or a bare IPv6 address into host (cap bytes) and port (default 24680). 0 when text is
 // empty or does not fit.
 int coop_server_parse(const char *text, char *host, size_t cap, uint16_t *port);
@@ -169,6 +177,10 @@ int coop_sess_send_event(CoopSess *s, int member, uint8_t kind, const void *byte
 int coop_sess_on_event(CoopSess *s, uint8_t kind, CoopEventFn fn, void *user);
 int coop_sess_member_accepted(CoopSess *s, int member);
 void coop_sess_accept_members(CoopSess *s, const CoopView *view, uint32_t members);
+void coop_sess_download_members(CoopSess *s, const CoopView *view, uint32_t members);
+int coop_sess_on_save_event(CoopSess *s, uint8_t kind, CoopEventFn fn, void *user);
+int coop_sess_send_save_event(CoopSess *s, int member, uint8_t kind, const uint8_t transfer[16], uint64_t deadline_ms, const void *bytes, size_t n);
+void coop_sess_cancel_save_events(CoopSess *s, const uint8_t transfer[16]);
 void coop_sess_view(CoopSess *s, CoopView *out);
 // Replaces the settings the session reads with those of p (the timings stay as they were made); the stepping thread
 // applies them, on or off included. A new server ends the room; a new name, once the room is joined, joins it again under the new name a

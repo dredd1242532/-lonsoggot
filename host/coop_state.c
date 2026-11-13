@@ -30,6 +30,7 @@
 
 #include "coop_proto.h"
 #include "coop_state.h"
+#include "coop_save.h"
 
 enum {
     MAX_REGS = 1 << 16,          // a hostile peer cannot grow the state past this; the game has about 12000 flags
@@ -224,6 +225,8 @@ struct CoopSync {
     uint64_t pin_kid;
     uint32_t save_gen, acc_save_gen, copy_gen;
     int bound_once, copy, copy_wanted;
+    uint32_t download_token, download_epoch;
+    uint64_t download_self, download_session[COOP_MAX_MEMBERS + 1];
 
     Push push[PUSH_SLOTS];
     unsigned push_head, push_tail;
@@ -1437,6 +1440,32 @@ int coop_sync_member_accepted(const CoopSync *s, int member, uint64_t session) {
     if (p->session != session || !peer_counts(s, p)) return 0;
     int accepted = acc_index(s, p->kid);
     return accepted >= 0 && !strcmp(s->acc_name[accepted], p->raw);
+}
+
+int coop_sync_download_accept(CoopSync *s, uint32_t token) {
+    CoopOffer o;
+    if (!s || !token || !coop_sync_offer(s, &o, s->now) || o.token != token || o.unidentified || o.disagree) return 0;
+    s->download_token = token;
+    s->download_epoch = s->room.epoch;
+    s->download_self = s->self_session;
+    for (int i = 1; i <= COOP_MAX_MEMBERS; i++) s->download_session[i] = s->peer[i].session;
+    return 1;
+}
+uint32_t coop_sync_download_members(CoopSync *s) {
+    CoopOffer o;
+    if (!s || !s->download_token || !coop_sync_offer(s, &o, s->now) || o.token != s->download_token ||
+        o.unidentified || o.disagree || s->download_epoch != s->room.epoch || s->download_self != s->self_session) return 0;
+    uint32_t mask = 0;
+    for (int i = 1; i <= COOP_MAX_MEMBERS; i++)
+        if (i != s->self && peer_counts(s, &s->peer[i]) && s->download_session[i] == s->peer[i].session) mask |= 1u << i;
+    return mask;
+}
+int coop_sync_save_binding(CoopSync *s, int member, struct CoopSaveBinding *out) {
+    if (!out || member < 1 || member > COOP_MAX_MEMBERS || !(coop_sync_download_members(s) & (1u << member))) return 0;
+    memcpy(out->own, s->pk, 32); memcpy(out->peer, s->peer[member].pk, 32); memcpy(out->sk, s->sk, 64);
+    memcpy(out->room, s->ctx, 16);
+    out->own_session = s->self_session; out->peer_session = s->peer[member].session; out->epoch = s->room.epoch;
+    return 1;
 }
 
 int coop_sync_copy_wanted(const CoopSync *s) { return s->copy_wanted; }

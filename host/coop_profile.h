@@ -32,3 +32,9 @@ int coop_profile_chunk(const char *id, unsigned file, uint32_t offset, const voi
 int coop_profile_read(const char *id, unsigned file, uint32_t offset, void *bytes, size_t n);
 int coop_profile_publish(const char *id);
 void coop_profile_abandon(const char *id);
+struct CoopSaveSource;
+/* Locally selected slot, captured under nn_fs.c's save barrier. Only progress.sav
+   and caption.sav travel; the save's local account/options never do. */
+int coop_profile_export(const char *save_root, unsigned slot, uint64_t generation, struct CoopSaveSource *out);
+int coop_profile_export_read(const char *id, unsigned file, uint32_t offset, void *out, size_t n);
+int coop_profile_seal(const char *id, const uint8_t manifest[352]);

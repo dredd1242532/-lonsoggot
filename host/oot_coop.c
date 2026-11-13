@@ -70,6 +70,7 @@
 
 extern const char *hos_user_dir;                     /* (nn_fs.c) */
 #include "coop_profile.h"
+#include "coop_save.h"
 int hos_ini_option(const char *key, int otherwise);  /* (nn_applet.c: the options file) */
 
 #define GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr's holder (host/hos_main.c OOT_GAMEDATA_SLOT), dereferenced twice */
@@ -652,11 +653,12 @@ static void publish_members(void) {
             members |= 1u << v.member[i].id;
     coop_accept_members(&v, members);
     gameplay_revoke_locked(&v);
+    coop_download_members(&v, G.eng ? coop_sync_download_members(G.eng) : 0);
 }
 
 static void on_message(int from, const uint8_t *bytes, size_t n, void *user) {
     const uint8_t kind = (uint8_t)(uintptr_t)user;
-    if (coop_profile_active()) return;   /* no temporary progress enters the real-save merge domain */
+    if (coop_profile_active() && kind == COOP_K_SECTION) return;   /* identity/charter only, no temporary progress */
     AcquireSRWLockExclusive(&G.lock);
     if (G.eng) coop_sync_receive(G.eng, from, kind, bytes, n, coop_now_ms());
     publish_members();   /* revocations take effect before the next event in this receive batch */
@@ -862,6 +864,7 @@ static void publish_none(void) {
     __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
     ReleaseSRWLockExclusive(&G.lock);
     __atomic_store_n(&G.pub_shown, 0, __ATOMIC_RELEASE);
+    coop_download_members(NULL, 0);
     AcquireSRWLockExclusive(&G.pub_lock);
     if (G.pub_has || G.pub.n || G.pub_ncontrib || G.pub_maker)
         memset(&G.pub, 0, sizeof G.pub), G.pub_has = G.pub_maker = G.pub_ncontrib = 0, G.pub_contrib_at = 0;
@@ -874,7 +877,7 @@ static void offer_update(uint64_t now) {
     CoopOffer o;
     const uint32_t menu = __atomic_exchange_n(&G.want_accept, 0, __ATOMIC_ACQ_REL);   /* of the offer the menu showed */
     int has = offer_of(&o, now);
-    const char *how = !has || o.accepted ? NULL : menu == o.token ? "in the menu" : accept_always() ? "HOS_COOP_ACCEPT=always" : NULL;
+    const char *how = coop_profile_active() || !has || o.accepted ? NULL : menu == o.token ? "in the menu" : accept_always() ? "HOS_COOP_ACCEPT=always" : NULL;
     if (how && coop_sync_accept(G.eng, o.token)) {
         int mode = COOP_ROOM_OFF;
         coop_feature_present(&o.rules, COOP_RULE_ROOM_MODE, &mode);
@@ -928,8 +931,31 @@ int hos_oot_coop_offer(CoopOffer *out) {
     ReleaseSRWLockShared(&G.pub_lock);
     return has;
 }
+/* Download consent is separate from the native in-play/copy/apply gate. */
+int hos_oot_coop_save_accept(uint32_t token) {
+    AcquireSRWLockExclusive(&G.lock);
+    int ok = G.eng && coop_sync_download_accept(G.eng, token);
+    publish_members();
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+int hos_oot_coop_save_binding(int member, CoopSaveBinding *out) {
+    CoopView v;
+    coop_view_get(&v);
+    if (v.state != COOP_JOINED) return 0;
+    AcquireSRWLockExclusive(&G.lock);
+    int ok = G.eng && coop_sync_save_binding(G.eng, member, out) && out->own_session == v.session;
+    if (ok) {
+        int present = 0;
+        for (int i = 0; i < v.n; i++) present |= v.member[i].id == member && v.member[i].session == out->peer_session;
+        ok = present;
+    }
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
 
 int hos_oot_coop_accept(uint32_t token) {
+    if (coop_profile_active()) return 0;   /* downloading is not permission to return borrowed progress */
     AcquireSRWLockShared(&G.pub_lock);
     const int same = token && G.pub_has && token == G.pub.token, done = same && G.pub.accepted;
     const int ok = same && !G.pub.accepted && !G.pub.unidentified && !G.pub.refusal[0];
@@ -1528,7 +1554,6 @@ static int start(void) {
 }
 
 void hos_oot_coop_present(Ctx *c) {
-    if (coop_profile_active()) return;   /* S11 must explicitly authorize any borrowed progress return */
     int s = __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
     if (s == ST_OFF) return;
     if (s == ST_UNSEEN) {
@@ -1540,6 +1565,7 @@ void hos_oot_coop_present(Ctx *c) {
     if (s != ST_ON) return;   /* (another thread is starting) */
     const int on = __atomic_load_n(&G.on, __ATOMIC_ACQUIRE);
     if (on && !G.eng && !ensure_engine()) return;
+    if (coop_profile_active()) return;   /* keep identities alive, never scan/apply a temporary save */
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");

@@ -278,7 +278,8 @@ int main(int argc, char **argv) {
     char other[PATH_MAX];
     snprintf(other, sizeof other, "%s-other\\x", save);   /* (a folder whose name starts like the save's is not in it) */
     CHECK(!save_change_begin(other));
-    /* A late autosave after a successful copy cannot rewrite the normal root. */
+    /* Once a restart copy is complete, a late autosave cannot change the original
+       in the gap before the old process exits. No writable handle was open. */
     InterlockedExchange(&save_transition, 1);
     CHECK(save_change_begin(in_path) == -1 && save_writer_open(in_path) == -1);
     CHECK(!save_change_begin(other) && !InterlockedCompareExchange(&save_writers, 0, 0));

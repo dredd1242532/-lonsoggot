@@ -233,6 +233,18 @@ static void fake_teleport_cancel(int ticket) {
     if (tp_ticket == ticket) __atomic_store_n(&teleport_asked, -1, __ATOMIC_RELAXED);
     log_unlock();
 }
+static int save_calls;
+static int fake_save_exchange(const char *action, int member, unsigned slot, uint32_t token, const uint8_t hash[32],
+                              CoopSaveView *out, CoopOffer *preview) {
+    __atomic_add_fetch(&save_calls, 1, __ATOMIC_RELEASE);
+    memset(out, 0, sizeof *out); memset(preview, 0, sizeof *preview);
+    preview->token = 77; preview->rules.epoch = 3;
+    if (!strcmp(action, "status")) return 1;
+    if (!strcmp(action, "offer")) return member == 2 && slot == 5;
+    if (!strcmp(action, "identity")) return token == 77;
+    if (!strcmp(action, "accept")) return hash[0] == 0xab;
+    return !strcmp(action, "cancel");
+}
 static HosControlGame game = {
     .frame = fake_frame, .frame_info = fake_frame_info, .shot = fake_shot, .setting = fake_setting,
     .setting_set = fake_setting_set, .mem_region = fake_mem_region, .mem_read = fake_mem_read,
@@ -240,7 +252,7 @@ static HosControlGame game = {
     .renderer = fake_renderer, .version = "test", .map = fake_map, .destination = fake_destination,
     .teleport = fake_teleport, .teleport_result = fake_teleport_result, .teleport_cancel = fake_teleport_cancel,
     .age = fake_age, .oot_state = fake_state, .oot_sample_ask = fake_sample_ask,
-    .oot_sample_cancel = fake_sample_cancel, .oot_sample = fake_sample};
+    .oot_sample_cancel = fake_sample_cancel, .oot_sample = fake_sample, .save_exchange = fake_save_exchange};
 
 static void *game_thread(void *unused) {
     (void)unused;
@@ -1050,6 +1062,23 @@ int main(int argc, char **argv) {
         CHECK(strstr(line, "\"map\":\"KokiriForest_Child\"") && strstr(line, "\"age\":\"child\""));
         hangup(sub);
         puts("PASS: (OoT) the map in status, events and waits; the teleport by index or map, and its list; the age switch");
+    }
+
+    {
+        ask(c, "{\"id\":810,\"cmd\":\"coop_save\",\"action\":\"status\"}\n", "810", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"room_offer\":77") && strstr(line, "\"mounted\":false") && strstr(line, "\"progress_return\":false"));
+        const int calls = __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE);
+        ask(c, "{\"id\":811,\"cmd\":\"coop_save\",\"action\":\"offer\",\"member\":2}\n", "811", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"error\":\"bad_request\"") && __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE) == calls);
+        ask(c, "{\"id\":812,\"cmd\":\"coop_save\",\"action\":\"offer\",\"member\":2.5,\"slot\":5}\n", "812", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"error\":\"bad_request\"") && __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE) == calls);
+        ask(c, "{\"id\":813,\"cmd\":\"coop_save\",\"action\":\"accept\",\"manifest\":\"../path\"}\n", "813", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"error\":\"bad_request\"") && __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE) == calls);
+        ask(c, "{\"id\":814,\"cmd\":\"coop_save\",\"action\":\"identity\",\"token\":76}\n", "814", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"error\":\"refused\""));
+        ask(c, "{\"id\":815,\"cmd\":\"coop_save\",\"action\":\"offer\",\"member\":2,\"slot\":5}\n", "815", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"ok\":true"));
+        puts("PASS: checkpoint bridge requires explicit bounded slot/member, exact manifest and current consent");
     }
 
     /* a client gone in the middle of a press: its input is let go */

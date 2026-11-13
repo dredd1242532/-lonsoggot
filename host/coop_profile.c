@@ -6,6 +6,7 @@
 #include "coop_profile.h"
 #include "coop_proto.h"
 #include "coop_net.h"
+#include "coop_save.h"
 #include "../third_party/monocypher/monocypher.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,10 @@
 
 static char normal_root[COOP_PROFILE_PATH], selected_root[COOP_PROFILE_PATH];
 static char store[COOP_PROFILE_PATH], pending[33], active_id[33], note[160];
+static CoopOnce profile_once = COOP_ONCE_INIT;
+static CoopLock profile_lock;
+static void profile_lock_init(void *u) { (void)u; coop_lock_init(&profile_lock); }
+static void storage_lock(void) { coop_once(&profile_once, profile_lock_init, NULL); coop_lock(&profile_lock); }
 #ifdef _WIN32
 static HANDLE lease = INVALID_HANDLE_VALUE;
 static const wchar_t *wide(const char *s, wchar_t w[COOP_PROFILE_PATH + 8]) {
@@ -287,7 +292,7 @@ int coop_profile_init(const char *normal, const char *token) {
     return 1;
 }
 
-int coop_profile_prepare(void) {
+static int prepare_copy(void) {
     if (coop_profile_active() || pending[0] || !store_ready()) return 0;
     char id[33], dir[COOP_PROFILE_PATH], src[COOP_PROFILE_PATH], original[COOP_PROFILE_PATH], user[COOP_PROFILE_PATH], dst[COOP_PROFILE_PATH], req[COOP_PROFILE_PATH];
     uint8_t digest[32], verify[32];
@@ -308,6 +313,12 @@ int coop_profile_prepare(void) {
     snprintf(note, sizeof note, "Copy ready. Restarting selects it; the normal save folder is not replaced.");
     return 1;
 }
+int coop_profile_prepare(void) {
+    storage_lock();
+    int ok = prepare_copy();
+    coop_unlock(&profile_lock);
+    return ok;
+}
 int coop_profile_return(void) {
     if (!coop_profile_active()) return 0;
     pending[0] = 0; /* No token: restart/ordinary launch selects the unchanged normal root. */
@@ -326,11 +337,20 @@ static int transfer_path(char out[COOP_PROFILE_PATH], const char *id, const char
     char dir[COOP_PROFILE_PATH];
     return id_ok(id) && path(dir, store, id) && path(out, dir, name) && coop_profile_path_safe(out);
 }
-int coop_profile_stage(char id[33]) {
+static int stage_copy(char id[33]) {
     char dir[COOP_PROFILE_PATH], p[COOP_PROFILE_PATH];
     if (!store_ready() || !quota(1048576) || !random_id(id) || !path(dir, store, id) || !mkdir_one(dir) ||
         !transfer_path(p, id, ".partial") || !mkdir_one(p)) return 0;
-    return 1;
+    uint8_t zero = 0;
+    /* Reserve the maximum package in quota accounting before releasing the lock.
+       Sparse on Linux; no downloaded bytes can consume another transfer's quota. */
+    return transfer_path(p, id, "reservation") && io(p, 1, 1, 1048575, &zero, 1);
+}
+int coop_profile_stage(char id[33]) {
+    storage_lock();
+    int ok = stage_copy(id);
+    coop_unlock(&profile_lock);
+    return ok;
 }
 static int part_io(const char *id, unsigned file, uint32_t off, void *data, size_t n, int write) {
     char p[COOP_PROFILE_PATH];
@@ -340,12 +360,79 @@ static int part_io(const char *id, unsigned file, uint32_t off, void *data, size
 int coop_profile_chunk(const char *id, unsigned f, uint32_t off, const void *data, size_t n) { return part_io(id, f, off, (void *)data, n, 1); }
 int coop_profile_read(const char *id, unsigned f, uint32_t off, void *data, size_t n) { return part_io(id, f, off, data, n, 0); }
 int coop_profile_publish(const char *id) {
+    storage_lock();
     char a[COOP_PROFILE_PATH], b[COOP_PROFILE_PATH];
-    return transfer_path(a, id, ".partial") && transfer_path(b, id, "verified") && kind(a) == 2 && move_new(a, b);
+    int ok = transfer_path(a, id, ".partial") && transfer_path(b, id, "verified") && kind(a) == 2 && move_new(a, b);
+    if (ok && transfer_path(a, id, "reservation")) unlink_one(a);
+    coop_unlock(&profile_lock);
+    return ok;
 }
 void coop_profile_abandon(const char *id) {
+    storage_lock();
     char p[COOP_PROFILE_PATH];
     if (transfer_path(p, id, ".partial/progress.sav")) unlink_one(p);
     if (transfer_path(p, id, ".partial/caption.sav")) unlink_one(p);
+    if (transfer_path(p, id, "reservation")) unlink_one(p);
+    coop_unlock(&profile_lock);
     /* Keep the directory as a recovery record. It has no restart ticket. */
+}
+
+int coop_profile_export(const char *root, unsigned slot, uint64_t generation, struct CoopSaveSource *out) {
+    if (!root || !out || slot > 99 || !generation) return 0;
+    char name[16], base[COOP_PROFILE_PATH];
+    snprintf(name, sizeof name, "slot_%02u", slot);
+    if (!path(base, root, name)) return 0;
+    Inventory *v = calloc(1, sizeof *v);
+    if (!v) return 0;
+    int ok = inventory(v, base, "", 0) && v->n == 2;
+    CoopSaveSource src = {0};
+    for (unsigned i = 0; ok && i < v->n; i++) {
+        int f = !strcmp(v->e[i].rel, "progress.sav") ? 0 : !strcmp(v->e[i].rel, "caption.sav") ? 1 : -1;
+        if (f < 0 || !v->e[i].size || v->e[i].size > COOP_SAVE_MAX) ok = 0;
+        else src.size[f] = v->e[i].size;
+    }
+    free(v);
+    if (!ok || src.size[0] > COOP_SAVE_MAX - src.size[1] ||
+        (src.size[0] + 8191) / 8192 + (src.size[1] + 8191) / 8192 > COOP_SAVE_CHUNKS || !coop_profile_stage(src.local_id)) return 0;
+    crypto_blake2b_ctx all;
+    crypto_blake2b_init(&all, 32);
+    uint8_t lengths[8], bytes[8192];
+    for (unsigned i = 0; i < 8; i++) lengths[i] = (uint8_t)(src.size[i / 4] >> (8 * (i % 4)));
+    crypto_blake2b_update(&all, lengths, 8);
+    for (unsigned file = 0; ok && file < 2; file++) {
+        char from[COOP_PROFILE_PATH];
+        ok = path(from, base, file ? "caption.sav" : "progress.sav");
+        crypto_blake2b_ctx one;
+        crypto_blake2b_init(&one, 32);
+        for (uint32_t off = 0; ok && off < src.size[file];) {
+            size_t n = src.size[file] - off; if (n > sizeof bytes) n = sizeof bytes;
+            ok = io(from, 0, 0, off, bytes, n) && coop_profile_chunk(src.local_id, file, off, bytes, n);
+            if (ok) { crypto_blake2b_update(&one, bytes, n); crypto_blake2b_update(&all, bytes, n); }
+            off += (uint32_t)n;
+        }
+        crypto_blake2b_final(&one, src.hash[file]);
+    }
+    crypto_blake2b_final(&all, src.package);
+    char from[COOP_PROFILE_PATH], to[COOP_PROFILE_PATH];
+    storage_lock();
+    int complete = ok && transfer_path(from, src.local_id, ".partial") && transfer_path(to, src.local_id, "export") && move_new(from, to);
+    if (complete && transfer_path(from, src.local_id, "reservation")) unlink_one(from);
+    coop_unlock(&profile_lock);
+    if (!complete) {
+        coop_profile_abandon(src.local_id); return 0;
+    }
+    src.generation = generation; *out = src;
+    return 1;
+}
+int coop_profile_export_read(const char *id, unsigned file, uint32_t offset, void *out, size_t n) {
+    char p[COOP_PROFILE_PATH];
+    if (file > 1 || offset > COOP_SAVE_MAX || n > COOP_SAVE_MAX - offset ||
+        !transfer_path(p, id, file ? "export/caption.sav" : "export/progress.sav")) return 0;
+    return io(p, 0, 0, offset, out, n);
+}
+
+int coop_profile_seal(const char *id, const uint8_t manifest[352]) {
+    _Static_assert(COOP_SAVE_OFFER_BYTES == 352, "the retained manifest uses the signed offer format");
+    char p[COOP_PROFILE_PATH];
+    return manifest && transfer_path(p, id, ".partial/manifest.bin") && io(p, 1, 1, 0, (void *)manifest, 352);
 }

@@ -445,6 +445,17 @@ int hos_save_profile_ask(int returning) {
     return ok;
 }
 
+struct CoopSaveSource;
+int hos_save_export(unsigned slot, struct CoopSaveSource *out) {
+    AcquireSRWLockExclusive(&save_lock);
+    const int64_t changed = InterlockedCompareExchange64(&save_changed_ms, 0, 0);
+    const int64_t quiet = hos_now_ns() / 1000000 - changed;
+    int ok = save_root[0] && !InterlockedCompareExchange(&save_writers, 0, 0) && quiet >= SAVE_QUIET_MS;
+    if (ok) ok = coop_profile_export(save_root, slot, changed > 0 ? (uint64_t)changed : 1, out);
+    ReleaseSRWLockExclusive(&save_lock);
+    return ok;
+}
+
 /* ---- mounts --------------------------------------------------------------------------------------------------- */
 HLE(_ZN2nn2fs22QueryMountRomCacheSizeEPm) { G64(ARG(0)) = 0x10000; RET(0); }
 HLE(_ZN2nn2fs8MountRomEPKcPvm) {

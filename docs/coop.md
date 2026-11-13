@@ -818,3 +818,50 @@ uses UTF-8 to wide paths, exclusive file access and non-replacing renames; Linux
 uses no-follow file opens, a process lease and non-replacing rename. This is not
 a sandbox against another process running as the same operating-system user.
 Local file-locking, durability and junction behavior still need Windows execution.
+
+## Signed checkpoint transfers
+
+The local control bridge's `coop_save` actions exercise this layer without a
+whose-save picker. Any member whose verified identity was explicitly accepted
+for downloading may offer a locally selected saved slot. Neither role requires
+being the maker. Download consent has its own session-bound mask; it cannot
+open progress, pools, hits or any other event handler.
+
+Only `progress.sav` and `caption.sav` leave the owner's captured checkpoint.
+The owner signature binds both identities and sessions, the room context and
+charter epoch, generation, supported game/version, lengths, per-file and package
+BLAKE2b-256 hashes, expiry and copy-only/no-return policy. Acceptance and written
+receipts are signed too. The recipient accepts the exact manifest hash locally.
+An ordinary reliable-event ACK means dispatch only, not verified bytes or a load.
+
+The wire uses inner kinds 18 (352-byte offer), 19 (160-byte control) and 20
+(64-byte header plus at most 8192 data bytes), through EVENT16/ACK17.
+The package is at most 1 MiB and 128 chunks, with exactly two nonempty files.
+There is no archive, decompression, remote path, account file or settings file.
+An 8256-byte chunk event uses nine of the existing 1024-byte fragments, each
+below the 1146-byte payload cap and the 16 KiB assembly cap.
+
+One incoming and one outgoing transfer are allowed. At most two of the eight
+event slots belong to saves and at most one data chunk waits for each recipient.
+New data waits behind ordinary queued work; the current chunk is not preempted,
+so FIFO among surviving events is unchanged. Scoped cancellation/deadlines
+retire only that signed manifest's work, never combat or another application.
+Save packets and ACKs, including retransmissions and the relay's forwarded copy,
+are paced at at most 12 KiB/s per sending process. Transfers are unicast: eight
+members do not turn a snapshot into an unbudgeted seven-way broadcast.
+
+The socket thread enqueues bounded bytes. An opt-in disk worker writes exclusive
+partial files, checks duplicate bytes and exact chunk geometry, rereads hashes,
+flushes and retains the signed manifest, rechecks the live identity and deadlines
+after disk I/O, then publishes a new verified folder without replacing an existing one.
+A cancelled/partial/expired download has no restart ticket and cannot be mounted.
+Inactivity is limited to 15 seconds, total lifetime to 240 seconds. Revocation or
+changed identity/session/charter cancels, and a receipt cannot reopen cancelled work.
+Disk-write failures leave normal saves untouched. A checksum does not validate the
+native save parser against a malicious trusted owner.
+
+One approved disposable checkpoint measured 120572 + 39447 = 160019 bytes:
+20 chunks, not a 16 KiB event pretending to hold a whole save. At the conservative
+forwarding-inclusive budget, data alone needs more than 26 seconds; headers,
+ACKs, receipt delays, loss and competing work add time. This is a size/budget
+calculation, not a measured internet rate or an ETA.

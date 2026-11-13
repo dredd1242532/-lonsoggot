@@ -47,7 +47,9 @@ it. The default waits until the bridge answers, then prints the socket's path. S
   `HOS_CONTROL_MEM=ro` allows reads, `rw` allows reads and writes (aliases: `r`/`read` for `ro`, `readwrite` for `rw`;
   case does not matter; any other value logs once and leaves it off). See [Guest memory](#guest-memory).
 - **What a client can do.** Anything the player can do with a controller and the Insert menu's settings (not its debug
-  tools). It can also write a PNG to any path the game's user can write, list the save folder, and end the game.
+  tools). It can also write a PNG to any path the game's user can write, list the save folder, end the game, and
+  explicitly offer/download a checkpoint with `coop_save`. That last action discloses full progress to trusted
+  room-secret holders; it never mounts a download or overwrites a normal save.
 - **Bounded messages.** A request line is at most 64 KB (longer: `too_long`, and the rest of the line is skipped); an
   `id` at most 200 characters as JSON; at most 8 clients, 64 requests waiting, 256 inputs queued, 8 memory requests of
   1 MB each. Replies a client does not read are dropped with the client once 8 MB wait.
@@ -673,3 +675,30 @@ another checkout's client for negative checks; `LONGSHOT_CTL_SOURCE` selects a c
 per-connection watches/changes, cadence, nulls, table limits, hashes, subscription lifecycle and wiring.
 
 What is not tested is under Known limits.
+
+## Checkpoint exchange
+
+`coop_save` is a local, explicit opt-in API for the bounded transfer layer. It is
+not a whose-save picker and has no load, import or progress-return command.
+
+- `{"cmd":"coop_save","action":"status"}` returns the verified room preview's
+  `room_offer`, `rules_epoch`, member names/key fingerprints, transfer state,
+  actual byte counts and exact `manifest` hash. State values: 0 idle, 1 offered,
+  2 transferring, 3 verified on disk, 4 cancelled. `mounted` is always false.
+- After checking the preview, each side explicitly sends
+  `{"cmd":"coop_save","action":"identity","token":77}` with its current offer
+  number. This accepts identities for downloading only, never room progress.
+- The owner sends `{"cmd":"coop_save","action":"offer","member":2,"slot":0}`.
+  This is approval to disclose exactly the named saved slot to that member.
+  There is no default/newest slot. A busy save barrier refuses; save and retry
+  later. The owner keeps a separate immutable export copy.
+- The recipient reads status and sends `action:"accept"` with `manifest` set to
+  the exact 64 lowercase hexadecimal digits shown. Only then is data staged.
+- `{"cmd":"coop_save","action":"cancel"}` cancels unfinished incoming/outgoing
+  work. A verified copy cannot be retracted, and no command loads it.
+
+The two slot files only are sent, never accounts, options, keys or paths.
+Room encryption hides them from the relay, not from another room-secret holder.
+A correct signature proves who offered the bytes, not that the native save
+parser can safely load a malicious friend's save. Only trusted people should
+exchange full checkpoints. See [co-op storage and limits](coop.md).

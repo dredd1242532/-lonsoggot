@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "coop_save.h"
+#include "coop_state.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,6 +94,9 @@ typedef struct HosControlGame {
     void (*oot_watch)(int slot, const HosControlOotWatch *watch);
     /* Consume the latest pending sample for that connection, 0 when none. No guest reads or socket I/O. */
     int (*oot_poll)(int slot, char *out, size_t cap);
+    /* Local-only checkpoint operations; never a mount or progress acceptance. */
+    int (*save_exchange)(const char *action, int member, unsigned slot, uint32_t token, const uint8_t hash[32],
+                         CoopSaveView *out, CoopOffer *preview);
 } HosControlGame;
 
 /* Listens on path and serves on a thread of its own. 0 when it could not (logged) */

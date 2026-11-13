@@ -127,6 +127,7 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
 void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
 /* (the same layer's tick: each present that read the flags, with the gate's answer) */
 void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
+void coop_download_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
 static int temporary_profile;
 int coop_profile_active(void) { return temporary_profile; }
 static int rules_said, views, scans, applies, probes;

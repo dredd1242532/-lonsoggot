@@ -1839,6 +1839,56 @@ static void cmd_saves(int ci, const char *id) {
     reply_end(c, &b);
 }
 
+static void cmd_coop_save(int ci, const JDoc *d, int req, const char *id) {
+    Conn *c = &G.conns[ci];
+    if (!G.game->save_exchange) return reply_error(c, id, "unavailable", "checkpoint exchange is not available");
+    const char *action = str_arg(d, req, "action");
+    if (!action || (strcmp(action, "status") && strcmp(action, "identity") && strcmp(action, "offer") &&
+                    strcmp(action, "accept") && strcmp(action, "cancel")))
+        return reply_error(c, id, "bad_request", "action: status, identity, offer, accept or cancel");
+    uint32_t values[3] = {0};
+    const char *keys[3] = {"member", "slot", "token"};
+    const uint32_t maximum[3] = {8, 99, UINT32_MAX};
+    for (int i = 0; i < 3; i++) {
+        const JNode *n = j_get(d, req, keys[i]);
+        int required = !strcmp(action, "offer") ? i < 2 : !strcmp(action, "identity") && i == 2;
+        if (!n && !required) continue;
+        if (!n || n->type != J_NUM || n->num < 0 || n->num > maximum[i] || n->num != (double)(uint32_t)n->num)
+            return reply_error(c, id, "bad_request", "%s: an explicit bounded integer", keys[i]);
+        values[i] = (uint32_t)n->num;
+    }
+    if ((!strcmp(action, "offer") && !values[0]) || (!strcmp(action, "identity") && !values[2]))
+        return reply_error(c, id, "bad_request", "member and identity token cannot be zero");
+    uint8_t hash[32] = {0};
+    if (!strcmp(action, "accept")) {
+        const char *text = str_arg(d, req, "manifest");
+        if (!text || strlen(text) != 64) return reply_error(c, id, "bad_request", "manifest: exact 64-digit hash from status");
+        for (int i = 0; i < 64; i++) {
+            unsigned char ch = (unsigned char)text[i];
+            int k = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;
+            if (k < 0) return reply_error(c, id, "bad_request", "manifest: lowercase hexadecimal");
+            hash[i / 2] |= (uint8_t)(k << (i % 2 ? 0 : 4));
+        }
+    }
+    CoopSaveView v; CoopOffer preview;
+    if (!G.game->save_exchange(action, (int)values[0], values[1], values[2], hash, &v, &preview))
+        return reply_error(c, id, "refused", "checkpoint action refused: inspect the current preview, save barrier and transfer state");
+    Buf b = {0};
+    reply_start(&b, id, 1);
+    buf_printf(&b, ",\"incoming\":%d,\"outgoing\":%d,\"owner\":%d,\"recipient\":%d,\"received\":%u,\"sent\":%u,\"bytes\":%u,\"manifest\":\"",
+               v.incoming, v.outgoing, v.owner, v.recipient, v.received_bytes, v.sent_bytes, v.total_bytes);
+    for (int i = 0; i < 32; i++) buf_printf(&b, "%02x", v.manifest_hash[i]);
+    buf_puts(&b, "\",\"verified_id\":"); buf_str(&b, v.verified_id);
+    buf_printf(&b, ",\"room_offer\":%u,\"rules_epoch\":%u,\"members\":[", preview.token, preview.rules.epoch);
+    for (int i = 0; i < preview.n; i++) {
+        buf_printf(&b, "%s{\"member\":%d,\"name\":", i ? "," : "", preview.member[i].id);
+        buf_str(&b, preview.member[i].name); buf_puts(&b, ",\"key\":"); buf_str(&b, preview.member[i].key); buf_puts(&b, "}");
+    }
+    buf_puts(&b, "],\"copy_only\":true,\"progress_return\":false,\"mounted\":false,"
+                  "\"privacy\":\"Room-secret holders can read a full snapshot; a received copy cannot be retracted.\"");
+    reply_end(c, &b);
+}
+
 /* ---- one request line ---- */
 static void request(int ci, const char *line, size_t len) {
     Conn *c = &G.conns[ci];
@@ -1869,6 +1919,7 @@ static void request(int ci, const char *line, size_t len) {
     else if (!strcmp(cmd, "press") || !strcmp(cmd, "stick") || !strcmp(cmd, "sequence")) cmd_input(ci, &d, req, id, cmd);
     else if (!strcmp(cmd, "release")) cmd_release(ci, &d, req, id);
     else if (!strcmp(cmd, "saves")) cmd_saves(ci, id);
+    else if (!strcmp(cmd, "coop_save")) cmd_coop_save(ci, &d, req, id);
     else if (!strcmp(cmd, "teleport")) cmd_teleport(ci, &d, req, id);
     else if (!strcmp(cmd, "age")) cmd_age(ci, &d, req, id);
     else if (!strcmp(cmd, "shot")) cmd_shot(ci, &d, req, id);
@@ -2418,6 +2469,7 @@ void hos_oot_sample_cancel(uint64_t ticket);
 int hos_oot_sample(uint64_t ticket, char *out, size_t cap);
 void hos_oot_watch(int slot, const HosControlOotWatch *watch);
 int hos_oot_poll(int slot, char *out, size_t cap);
+int hos_coop_save_exchange(const char *, int, unsigned, uint32_t, const uint8_t[32], CoopSaveView *, CoopOffer *);
 static HosControlGame game = {
     .frame = game_frame, .frame_info = rx_control_frame_info, .shot = rx_control_shot, .setting = rx_control_setting,
     .setting_set = rx_control_setting_set, .mem_region = game_mem_region, .mem_read = game_mem_read,
@@ -2426,7 +2478,8 @@ static HosControlGame game = {
     .teleport = hos_oot_teleport_ask, .teleport_result = hos_oot_teleport_result,
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
     .oot_sample_ask = hos_oot_sample_ask, .oot_sample_cancel = hos_oot_sample_cancel,
-    .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll};
+    .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll,
+    .save_exchange = hos_coop_save_exchange};
 
 void hos_control_start(const char *version) {
     const char *path = getenv("HOS_CONTROL");
