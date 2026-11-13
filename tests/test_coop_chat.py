@@ -7,7 +7,7 @@ import re
 import subprocess
 import tempfile
 
-RUN_ALL_ARGS = ["--cc", "{cc}", "--cxx", "{cxx}"]
+RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -127,10 +127,12 @@ def run(command, expect_fail=False):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--cc', default='gcc'); p.add_argument('--cxx',default='g++')
+    p.add_argument('--cc'); p.add_argument('--cxx',default='g++')
     p.add_argument('--source-root',type=Path,default=ROOT); p.add_argument('--mutations',action='store_true')
     p.add_argument('--part', choices=['all','core','progress','menu','mutations'], default='all')
     a=p.parse_args(); root=a.source_root.resolve(); host=root/'host'
+    if not a.cc:
+        a.cc = a.cxx[:-2] if a.cxx.endswith('clang++') else a.cxx[:-3] + 'gcc' if a.cxx.endswith('g++') else 'gcc'
     with tempfile.TemporaryDirectory(prefix='longshot-chat-') as td:
         tmp=Path(td)
         flags=['-D_GNU_SOURCE','-D_CRT_SECURE_NO_WARNINGS','-Wall','-Wextra','-Werror','-O1','-I'+str(host),'-I'+str(root)]
