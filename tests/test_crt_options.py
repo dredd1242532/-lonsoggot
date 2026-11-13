@@ -126,8 +126,9 @@ bool can_bind() { return false; }
 bool load_options() {
     opts = Options{};
     mic_want.clear();
-    bool has_options = false, has_vram_budget = false, has_memory_budget = false;
+    bool has_options = false, has_output = false, has_vram_budget = false, has_memory_budget = false;
 /* LOAD_OPTIONS */
+    (void)has_output;
     (void)has_vram_budget;
     (void)has_memory_budget;
     return has_options;
@@ -232,6 +233,8 @@ void test_hdr_hints() {
 void test_persistence() {
     CHECK(!load_options());   // No options file: production defaults.
     CHECK(opts.crt_filter == 0 && opts.crt_lines == 0);
+    write_ini("compile_shaders=0\n");
+    CHECK(!load_options() && opts.crt_filter == 0 && opts.crt_lines == 0);
     write_ini("options_version=4\nupscaling=2\n");
     CHECK(load_options() && opts.crt_filter == 0 && opts.crt_lines == 0);
     write_ini("crt_filter=4\n");
@@ -278,13 +281,16 @@ void test_presets_and_live_changes() {
             for (int tier = 1; tier <= 5; tier++) {
                 auto_choice = {};
                 auto_choice.tier = tier;
-                auto_choice.output_w = 1920, auto_choice.output_h = 1080;
+                // Auto no longer chooses the output size; keep the player's chosen mode.
                 opts = Options{};
                 opts.crt_filter = filter, opts.crt_lines = lines;
+                opts.output_res = 1;
                 apply_preset(kAutoPreset);   // The production Auto path, not a no-op stand-in.
                 CHECK(opts.preset == kAutoPreset && opts.crt_filter == filter && opts.crt_lines == lines);
+                CHECK(opts.output_res == 1);
                 apply_auto(true);           // Choosing again after the hardware changes also preserves CRT.
                 CHECK(opts.crt_filter == filter && opts.crt_lines == lines);
+                CHECK(opts.output_res == 1);
             }
         }
     }

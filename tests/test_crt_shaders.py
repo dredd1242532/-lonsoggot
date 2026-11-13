@@ -70,6 +70,9 @@ def check_imports():
     require(manifest == expected, "SHA256SUMS does not name exactly the four pinned originals")
     provenance = (IMPORTS / "PROVENANCE.md").read_text(encoding="utf-8")
     require(COMMIT in provenance and "libretro/slang-shaders" in provenance, "provenance lost its upstream commit")
+    policy = runpy.run_path(str(ROOT / "scripts/check_third_party.py"))
+    require(policy["recorded"](provenance) == policy["tree_hash"](str(ROOT), "crt_shaders"),
+            "CRT import tree differs from its provenance under the repository's third-party rule")
     for text in ("Timothy Lottes", "PUBLIC DOMAIN", "Hyllian", "cgwg", "DariusG", "hunterk", "MIT",
                  "Greg Hogan", "SoltanGris42", "GPL-2.0-or-later", "Inigo Quilez", ".gitattributes"):
         require(text in provenance, f"provenance missing {text}")

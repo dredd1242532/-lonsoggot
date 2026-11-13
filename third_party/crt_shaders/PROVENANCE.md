@@ -76,3 +76,5 @@ and glslang's output. Headers are checked in, so player builds need no shader co
 source hash/notice; it recompiles when glslang is available (required if explicitly supplied). It compares SPIR-V words
 with the same compiler version, and reports a different-version mismatch as not byte-comparable, not as a source mismatch.
 Source checks and compiler checks are not GPU execution or visual-fidelity evidence.
+
+tree-sha256: ebf3121502f455fa4e14fe60e46ee5ce34e823bcc0e92ee1d83381e6382ae772
