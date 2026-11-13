@@ -79,7 +79,8 @@ Longshot doesn't come ready to play: it is built on your PC, from your own copy 
 1. Check that your PC and your copy of the game match [what you need](#what-you-need).
 2. Download the launcher for [Windows](#on-windows) or [Linux](#on-linux) and start it.
 3. Point it at your game and press **Build**. It downloads this version's Longshot Builder, checks it against the
-   release's signed checksums, and builds the game: about 10 to 45 minutes.
+   release's signed checksums, and builds the game: about 15 minutes on a 12-core desktop, longer on a slower PC
+   ([build times](docs/development.md#build-times)).
 4. Press **Play**. From then on the launcher keeps the game, and itself, [up to date](#updating).
 
 Longshot's first version will be **v3.0.0**; the launcher's first will be **v1.0.0** (its numbers are its own).
