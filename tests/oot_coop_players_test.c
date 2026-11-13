@@ -242,6 +242,21 @@ static void slow(void) {
            "last message kept for the Co-op tab\n");
 }
 
+static void clock_bounds(void) {
+    CoopPlayers p = {0};
+    const int ids[] = {1, 2};
+    const uint64_t sessions[] = {11, 22};
+    coop_players_roster(&p, 1, ids, sessions, 2);
+    uint8_t bytes[COOP_MAX_MESSAGE];
+    for (uint32_t seq = 1; seq <= 2; seq++) {
+        const size_t n = pos_bytes(bytes, seq, 1000u - (uint32_t)INT32_MAX, "Clock", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+        CHECK(coop_players_receive(&p, 2, bytes, n, 1000));
+        CHECK(p.r[2].offset == INT32_MAX);
+    }
+    const size_t n = pos_bytes(bytes, 3, 1000u - (uint32_t)(INT32_MAX - 1), "Clock", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    CHECK(coop_players_receive(&p, 2, bytes, n, 1000) && p.r[2].offset == INT32_MAX - 1);
+}
+
 /* ---- part 2: the fake guest */
 typedef struct { uint64_t x[32]; uint64_t pc; uint64_t vreg[32][2]; } Ctx;
 typedef void (*A64Fn)(Ctx *);
@@ -1040,6 +1055,7 @@ static void game_side(const char *steps_path) {
 int main(int argc, char **argv) {
     messages();
     slow();
+    clock_bounds();
     if (argc < 2) { fprintf(stderr, "usage: %s <steps file>\n", argv[0]); return 2; }
     game_side(argv[1]);
     if (failures) { fprintf(stderr, "%d checks failed\n", failures); return 1; }

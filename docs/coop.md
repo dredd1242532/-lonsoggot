@@ -722,6 +722,7 @@ The native adapter is build-guarded and range-checks guest pointers. Missing ani
 counts, malformed strings, non-finite poses and stale actor identities are refused or left untouched. Loading,
 title screens and events do not create or move a body. This is cosmetic presence, not a collision body, equipment
 replication, full skeletal-pose replication, shared enemies or PvP.
+The receiver's clock offset saturates at the signed-integer limit rather than overflowing on a peer timestamp.
 
 `nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
 only from that player's own game. No model, animation, extracted allocation value or table ships in the repository

@@ -40,7 +40,7 @@ int coop_players_receive(CoopPlayers *p, int from, const uint8_t *bytes, size_t 
     // seconds apart): not places to move between now
     if (fresh == 2 || (r->n && ((r->pose[r->head].flags ^ pos.flags) & COOP_POS_SLOW))) r->n = 0;
     const int32_t off = (int32_t)((uint32_t)now_ms - pos.t_ms);
-    r->offset = !r->n || off < r->offset ? off : r->offset + 1;
+    r->offset = !r->n || off < r->offset ? off : r->offset == INT32_MAX ? INT32_MAX : r->offset + 1;
     r->head = (r->head + 1) % COOP_PLAYERS_HIST;
     r->pose[r->head] = pos, r->recv_ms[r->head] = now_ms;
     if (r->n < COOP_PLAYERS_HIST) r->n++;
