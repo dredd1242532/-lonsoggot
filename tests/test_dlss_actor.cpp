@@ -49,6 +49,16 @@ int main() {
     // (two of one model passing each other, drawn in the other order than the frame before)
     const std::vector<P> walkers_then = {{{0.1f, 0, 0}, 0}, {{0.4f, 0, 0}, 1}}, walkers_now = {{{0.5f, 0, 0}, 0}, {{0.0f, 0, 0}, 1}};
     CHECK("two passing each other: each itself", same(da::pair_by_place(walkers_now, walkers_then, 1.0f), {1, 0}));
+    // (two of one model 0.6 apart, both moving 0.35 and drawn in the same order: the first's new place is nearest the
+    // second's old one, and nearest first alone would swap them. By draw order 0.35 each, against 0.25 and 0.95)
+    const std::vector<P> pair_then = {{{0.0f, 0, 0}, 0}, {{0.6f, 0, 0}, 1}}, pair_now = {{{0.35f, 0, 0}, 0}, {{0.95f, 0, 0}, 1}};
+    CHECK("two moving fast for their spacing, in draw order: each itself",
+          same(da::pair_by_place(pair_now, pair_then, 1.0f), {0, 1}));
+    // (0.9 apart, both moving 0.5: nearest first pairs only one, the first's new place with the second's old one at 0.4,
+    // and leaves the other 1.4 away, past the reach. Draw order pairs both at 0.5: more pairs win over a smaller total)
+    const std::vector<P> wide_then = {{{0.0f, 0, 0}, 0}, {{0.9f, 0, 0}, 1}}, wide_now = {{{0.5f, 0, 0}, 0}, {{1.4f, 0, 0}, 1}};
+    CHECK("draw order pairing more copies wins over nearest first's smaller total",
+          same(da::pair_by_place(wide_now, wide_then, 1.0f), {0, 1}));
     // (the same geometry drawn twice for one object: both copies at one place, each keeps its own n-th)
     const std::vector<P> twice = {{{5, 5, 5}, 0}, {{5, 5, 5}, 1}}, twice_swapped = {{{5, 5, 5}, 1}, {{5, 5, 5}, 0}};
     CHECK("a tie at one place: the same n-th", same(da::pair_by_place(twice, twice, 1.0f), {0, 1}) &&
