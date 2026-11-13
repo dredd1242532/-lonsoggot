@@ -3,6 +3,7 @@
    (longshot_vk.so) beside the executable. Decided at rx_start, before any other rx_* call; a DLL that is missing or finds no usable Vulkan
    device leaves the WebGPU renderer in place (logged). */
 #include "hos.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +11,7 @@
 
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
+#include "../gpu/vk/compat/longshot_env.h"   /* (env_on: HOS_DEV_DLL_SWAP) */
 #include "control.h"
 
 /* the WebGPU renderer (gpu/render, renamed) */
@@ -284,6 +286,27 @@ static void flush_early(void) {
     ReleaseSRWLockExclusive(&early_lock);
 }
 
+/* (longshot) HOS_DEV_DLL_SWAP=1, for development: a renderer staged beside the game as <its name>.new
+   (scripts/stage_renderer.py: longshot_vk.dll.new, longshot_vk.so.new on Linux) takes the old one's place before it is
+   loaded, so the game started again (scripts/longshot_ctl.py relaunch) runs the renderer built since, without a whole
+   build of the game. The old process has ended by then (a restart waits for it: HOS_RESTART_OF), so nothing holds the
+   old file. Off, nothing is looked for: a release never swaps */
+static void dev_dll_swap(const char *path) {
+    if (!env_on("HOS_DEV_DLL_SWAP")) return;
+    char real[MAX_PATH + 8], staged[MAX_PATH + 16];
+    snprintf(real, sizeof real, "%s", path);
+#ifndef _WIN32
+    const size_t n = strlen(real);   /* (the file LoadLibraryA's shim opens: host/posix/win32_posix.c) */
+    if (n > 4 && !_stricmp(real + n - 4, ".dll")) memcpy(real + n - 4, ".so", 4);
+#endif
+    snprintf(staged, sizeof staged, "%s.new", real);
+    if (GetFileAttributesA(staged) == INVALID_FILE_ATTRIBUTES) return;
+    if (MoveFileExA(staged, real, MOVEFILE_REPLACE_EXISTING))
+        hos_log("rx: HOS_DEV_DLL_SWAP: %s took the old renderer's place", staged);
+    else
+        hos_log("rx: HOS_DEV_DLL_SWAP: %s could not replace %s (%lu): the old renderer loads", staged, real, GetLastError());
+}
+
 /* dll: longshot_vk.dll (longshot_vk.so on Linux), the Vulkan back end: one export */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
     char path[MAX_PATH];
@@ -291,6 +314,7 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     char *slash = n ? (strrchr(path, '\\') ? strrchr(path, '\\') : strrchr(path, '/')) : NULL;   /* (linux: '/') */
     if (!slash || (size_t)(slash + 1 - path) + strlen(dll) >= sizeof path) return NULL;   /* (a path near MAX_PATH) */
     memcpy(slash + 1, dll, strlen(dll) + 1);
+    dev_dll_swap(path);
     HMODULE m = LoadLibraryA(path);
     if (!m) {
         hos_log("rx: RX_BACKEND=vulkan, but %s did not load (%lu): WebGPU", path, GetLastError());
