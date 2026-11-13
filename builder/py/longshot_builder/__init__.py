@@ -4,5 +4,5 @@ Qt's DLLs (both signed by their makers), with no executable of Longshot's own to
 into %LOCALAPPDATA%\\LongshotBuilder\\versions\\<tag>. It looks for no release itself: the Longshot Launcher installs and updates
 the builder (docs/releases.md)."""
 APP_ID = "MagicBean.Longshot.Builder"   # (Windows' AppUserModelID: the taskbar groups and shows the window as Longshot, not Python)
-# (where players get the launcher, which installs and updates the builder)
-LAUNCHER_RELEASES = "https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases"
+# (where players get the launcher, which installs and updates the builder: the website's download page)
+LAUNCHER_DOWNLOAD = "https://longshot.magicbean.dev/download"

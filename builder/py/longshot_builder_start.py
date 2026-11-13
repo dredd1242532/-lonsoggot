@@ -1,4 +1,4 @@
-"""Starts Longshot Builder: python.exe -I longshot_builder_start.py [--update <game folder> --tag <release> [--fetched]] [--launch
+"""Starts Longshot Builder: python.exe -I longshot_builder_start.py [--update <game folder>] [--launch
 <game folder>] [--repair]. Qt for Python is the "qt" folder beside this file's (the package), or LONGSHOT_QT (development)."""
 import argparse
 import ctypes
@@ -48,8 +48,6 @@ def settle():
 def main():
     p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--update")
-    p.add_argument("--tag")
-    p.add_argument("--fetched", action="store_true")
     p.add_argument("--launch")
     p.add_argument("--repair", action="store_true")
     args, _ = p.parse_known_args()

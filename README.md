@@ -727,7 +727,7 @@ You need:
 ./Longshot-<version>-x86_64.AppImage --cli --nup ~/your-game.nup --out ~/Games/Longshot   # make_game.py's options
 ./Longshot-<version>-x86_64.AppImage --play                    # the game the builder built last, without the window
 ./Longshot-<version>-x86_64.AppImage --play ~/Games/Longshot   # the game in that folder
-./Longshot-<version>-x86_64.AppImage --update ~/Games/Longshot # the new release, and that folder built again
+./Longshot-<version>-x86_64.AppImage --update ~/Games/Longshot # that folder built again with this version
 ```
 
 `LONGSHOT_JOBS=<n>` (or `--jobs <n>` with `--cli`) limits how many files compile at once.

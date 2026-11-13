@@ -89,9 +89,8 @@ You need your own supported dump: program `0400486024DEC000`, update v131072, bu
 work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free and a run about
 10 GB of RAM. Build on an SSD if you can: a hard drive works but takes much longer.
 
-Longshot has no releases of its own yet. Where a step below needs files from the Builder, use the newest
-[Hookshot release](https://github.com/NotRexed/Hookshot/releases/latest), which installs the same tools under the name
-Hookshot Builder.
+Where a step below needs files from the Builder, use the Windows builder of the newest
+[Longshot release](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
 
 ### Windows
 
@@ -107,7 +106,7 @@ Hookshot Builder.
    Windows SDK (`LONGSHOT_MSVC=1` forces that route).
 
 3. Copy what a clone doesn't carry from the Builder's `tools` folder. Run the Builder once; the folder is
-   `%LOCALAPPDATA%\HookshotBuilder\versions\<version>\HookshotBuilder\tools`.
+   `%LOCALAPPDATA%\LongshotBuilder\versions\<version>\LongshotBuilder\tools`.
 
    | From `tools` | To | Variable |
    |---|---|---|
