@@ -639,7 +639,7 @@ def main():
         (temp / "replayed_trace.c").write_text(replay_source(args.replay_log), encoding="utf-8")
         (temp / "test.c").write_text(FIXTURE, encoding="utf-8")
         exe = temp / "hits-test.exe"
-        cmd = [args.cc, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
+        cmd = [args.cc, "-std=gnu11", "-D_CRT_SECURE_NO_WARNINGS", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
                "-I" + str(temp), "-I" + str(ROOT / "host"), str(temp / "test.c"), str(ROOT / "host/coop_proto.c"),
                str(ROOT / "host/oot_damage.c"), str(ROOT / "third_party/monocypher/monocypher.c"), "-lm", "-o", str(exe)]
         if os.name != "nt":
