@@ -790,6 +790,12 @@ only the movement-key stick, so it never receives a latched Switch button as ano
 not accepted; choose `walk_mode` instead. Walk's Toggle selection survives Insert, focus loss and Switch-button latch
 resets; a key held across Insert/focus return must be released before it can switch walking again.
 
+Temporary sword-practice kits use signed `coop_loadout_version=1`, `coop_loadout_age=0|1` and
+`coop_loadout_bits_0=3|12` in the maker's options file, with the remaining kit masks/counts zero. Default version0
+is off. No new environment switch bypasses consent or the temporary mount check; `HOS_COOP_ACCEPT=always` remains
+an explicit test aid only. See [temporary kits](coop.md#temporary-sword-practice-kit) for the full numbered contract,
+per-entry logs and unsupported families. There is no ordinary-save grant or item-palette UI.
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`
 as its client. `status.game` holds Link's position/facing, the camera's yaw, event/loading/age, life, maximum life,

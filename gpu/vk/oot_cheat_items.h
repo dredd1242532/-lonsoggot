@@ -4,14 +4,18 @@
    Pouch names come from the game's own event flows and actor packs (work/oot-teleport-research.md, "Inventory").
    The names marked (guess) are the likeliest of two spellings; the log's "inventory probe" line shows both. */
 #ifndef OOT_CHEAT_ITEMS
+#define OOT_KOKIRI_SWORD "Weapon_Sword_Kokiri"
+#define OOT_MASTER_SWORD "Weapon_Sword_Master"
+#define OOT_DEKU_SHIELD "Weapon_Shield_Deku"
+#define OOT_HYLIAN_SHIELD "Weapon_Shield_Hylian"
 #define OOT_CHEAT_ITEMS(OOT_SECTION, OOT_ITEM) \
     OOT_SECTION("Equipment") \
-    OOT_ITEM("Kokiri Sword", "Weapon_Sword_Kokiri", 0) \
-    OOT_ITEM("Master Sword", "Weapon_Sword_Master", 0) \
+    OOT_ITEM("Kokiri Sword", OOT_KOKIRI_SWORD, 0) \
+    OOT_ITEM("Master Sword", OOT_MASTER_SWORD, 0) \
     OOT_ITEM("Giant's Knife", "Weapon_Sword_Giant", 0) \
     OOT_ITEM("Biggoron's Sword", "Weapon_Sword_Biggoron", 0) \
-    OOT_ITEM("Deku Shield", "Weapon_Shield_Deku", 0) \
-    OOT_ITEM("Hylian Shield", "Weapon_Shield_Hylian", 0) \
+    OOT_ITEM("Deku Shield", OOT_DEKU_SHIELD, 0) \
+    OOT_ITEM("Hylian Shield", OOT_HYLIAN_SHIELD, 0) \
     OOT_ITEM("Mirror Shield", "Weapon_Shield_Mirror", 0) \
     OOT_ITEM("Goron Tunic", "Armor_Adult_Goron", 0) \
     OOT_ITEM("Zora Tunic", "Armor_Adult_Zora", 0) \

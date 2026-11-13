@@ -14,6 +14,7 @@
 #include "coop.h"
 #include "coop_state.h"
 #include "coop_gameplay.h"
+#include "oot_coop_kit.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* (env_on, env_value_off: the switches' rule, as host/oot_coop.c has it) */
 
 static int failures;
@@ -126,6 +127,7 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
 }
 void coop_download_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
 static int temporary_profile;
+static volatile int hos_oot_coop_kit_active;
 int coop_profile_active(void) { return temporary_profile; }
 static int hos_oot_hits_active;
 static void hos_oot_hits_start(void) {}
@@ -148,6 +150,7 @@ static void on_message(int from, const uint8_t *bytes, size_t n, void *user) { (
 static void on_tick(uint64_t now, void *user) { (void)now, (void)user; }
 static int on_remove(int member, void *user) { (void)member, (void)user; return 0; }
 static int ensure_engine(void) { return 1; }
+static void temporary_kit_present(Ctx *c, uint64_t mgr, int open) { (void)c; (void)mgr; (void)open; }
 static void run_test_aid(Ctx *c, uint64_t m) { (void)c, (void)m; }
 static void probe(Ctx *c, uint64_t m) { (void)c, (void)m; probes++; }
 static void scan(Ctx *c, uint64_t m, uint64_t now) { (void)c, (void)m, (void)now; scans++; }

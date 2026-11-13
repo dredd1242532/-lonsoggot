@@ -9,6 +9,7 @@
 #include "coop_state.h"
 #include "coop_proto.h"   /* (COOP_POS_TEXT, the POS flags: hos_oot_coop_players_last) */
 #include "coop_gameplay.h"
+#include "oot_coop_kit.h"
 
 /* nvnQueuePresentTexture's end (host/nvn_native.c), between frames on the presenting game thread with its core held.
    With co-op off it reads one value and returns. */
@@ -36,6 +37,11 @@ int hos_oot_coop_presence(void);   /* accepted signed COOP_PRESENCE_* mask; 0 wh
 int hos_oot_coop_gameplay_register(const CoopGameplayWriter *writer);
 int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTicket *ticket);
 int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game);
+/* Temporary-kit readback, never a duel permission. Current accepted context only. */
+int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch);
+int oot_coop_kit_step(Ctx *c, OotCoopKitRun *run, const OotCoopKitWork *work);
+extern volatile int hos_oot_coop_kit_active;
+void hos_oot_coop_kit_update(Ctx *c);
 
 /* The other players in the world (host/oot_coop_players.c; docs/coop.md). _start: once, from co-op's start, whether
    co-op is on or not (the Co-op tab may switch it on later): registers the sole body writer on the supported build.

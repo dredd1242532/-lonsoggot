@@ -182,6 +182,8 @@ static struct {
     uint64_t self_id;
     CoopGameplay gameplay;  /* one writer per native state domain; serialized by lock */
     uint64_t save_generation, area_generation;
+    OotCoopKitRun kit;       /* game-thread setup, retained after cancellation; lock */
+    OotCoopKitWork kit_work;
 
     /* the game thread's */
     uint64_t mgr, bool_entries, int_entries;
@@ -628,6 +630,7 @@ static int ensure_engine(void) {
 
 static int send_fn(int member, uint8_t kind, const uint8_t *bytes, size_t n, void *user) {
     (void)user;
+    if (coop_profile_active() && kind != COOP_K_DIGEST) return 0; /* no borrowed progress can leave */
     return member ? coop_send_to(member, kind, bytes, n) : coop_send(kind, bytes, n);
 }
 
@@ -638,12 +641,15 @@ static void gameplay_revoke_locked(const CoopView *v) {
     if (!c->capabilities) return;
     CoopOffer o;
     int valid = G.eng && v->state == COOP_JOINED && v->session == c->room_session &&
-                coop_sync_offer(G.eng, &o, coop_now_ms()) && o.accepted && coop_sync_open(G.eng) &&
+                coop_sync_offer(G.eng, &o, coop_now_ms()) && o.accepted &&
+                (coop_profile_active() ? (c->capabilities == COOP_GAMEPLAY_TEMPORARY) : coop_sync_open(G.eng)) &&
                 o.token == c->offer && o.rules.epoch == c->rules_epoch;
     for (int id = 1; valid && id <= COOP_GAMEPLAY_MEMBERS; id++)
         if (c->accepted_session[id] && !coop_sync_member_accepted(G.eng, id, c->accepted_session[id])) valid = 0;
     if (!valid) {
         coop_gameplay_publish(&G.gameplay, NULL);
+        __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
+        if (G.kit.state == OOT_KIT_APPLYING || G.kit.state == OOT_KIT_READY) G.kit.state = OOT_KIT_CANCELLED;
         __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
     }
 }
@@ -750,6 +756,10 @@ static void view_changed(const CoopView *v) {
         G.has_room_key = room_key(v->code, v->made, G.room_key);
     }
     AcquireSRWLockExclusive(&G.lock);
+    if (G.kit.state && (v->state != COOP_JOINED || v->session != G.view.session || strcmp(v->code, G.view.code))) {
+        G.kit.state = OOT_KIT_CANCELLED;
+        __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
+    }
     G.view = *v;
     if (G.eng) {
         coop_sync_name(G.eng, v->name);   /* the player's own name, signed: the relay's roster may say another */
@@ -776,6 +786,7 @@ static void sync_on(void) {
 static void on_view(const CoopView *v, void *user) {
     (void)user;
     if (v->state == COOP_OFF) {
+        __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
         view_changed(v);
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&G.on, 0, __ATOMIC_RELEASE);
@@ -797,6 +808,16 @@ static int accept_always(void) {
 /* The engine's offer, with the relay's names for members not identified yet (G.lock held). */
 static int offer_of(CoopOffer *o, uint64_t now) {
     const int has = coop_sync_offer(G.eng, o, now);
+    OotCoopKit kit;
+    const int status = oot_coop_kit_parse(&o->rules, &kit);
+    if (has && (status < 0 || (status == OOT_KIT_VALID && !coop_profile_active()) ||
+                (status == OOT_KIT_OFF && coop_profile_active()))) {
+        snprintf(o->refusal, sizeof o->refusal, "%s", status < 0 ? "Unsupported or incompatible temporary kit." :
+                 status == OOT_KIT_VALID ? "This kit needs Temporary save. Leave, make a copy, then join again." :
+                 "This copy has no supported kit to accept. Download consent remains separate.");
+        o->accepted = 0;
+        return 0;
+    }
     for (int i = 0; i < o->n; i++)
         for (int k = 0; !o->member[i].name[0] && k < G.view.n; k++)
             if (G.view.member[k].id == o->member[i].id) snprintf(o->member[i].name, sizeof o->member[i].name, "%s", G.view.member[k].name);
@@ -833,7 +854,7 @@ static void publish(const CoopOffer *o, int has, uint64_t now) {
     G.pub = *o, G.pub_has = has, G.pub_maker = maker;
     if (fresh) memcpy(G.pub_contrib, k, sizeof *k * (size_t)n), G.pub_ncontrib = n, G.pub_contrib_at = now;
     ReleaseSRWLockExclusive(&G.pub_lock);
-    hos_oot_hits_room(&o->rules, has && o->accepted && o->copy == 1 && !o->disagree && !o->unidentified);
+    hos_oot_hits_room(&o->rules, !coop_profile_active() && has && o->accepted && o->copy == 1 && !o->disagree && !o->unidentified);
 }
 
 uint32_t hos_oot_coop_shown(void) { return __atomic_load_n(&G.pub_shown, __ATOMIC_ACQUIRE); }
@@ -871,6 +892,7 @@ static void publish_none(void) {
     hos_coop_chat_scene(0);
     AcquireSRWLockExclusive(&G.lock);
     coop_gameplay_publish(&G.gameplay, NULL);
+    __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
     ReleaseSRWLockExclusive(&G.lock);
     coop_download_members(NULL, 0);
@@ -888,11 +910,11 @@ static void offer_update(uint64_t now) {
     CoopOffer o;
     const uint32_t menu = __atomic_exchange_n(&G.want_accept, 0, __ATOMIC_ACQ_REL);   /* of the offer the menu showed */
     int has = offer_of(&o, now);
-    const char *how = coop_profile_active() || !has || o.accepted ? NULL : menu == o.token ? "in the menu" : accept_always() ? "HOS_COOP_ACCEPT=always" : NULL;
+    const char *how = !has || o.accepted ? NULL : menu == o.token ? "in the menu" : accept_always() ? "HOS_COOP_ACCEPT=always" : NULL;
     if (how && coop_sync_accept(G.eng, o.token)) {
         int mode = COOP_ROOM_OFF;
         coop_feature_present(&o.rules, COOP_RULE_ROOM_MODE, &mode);
-        hos_log("coop: sync: room accepted (%s); %s", how, mode == COOP_ROOM_PVP_SETUP ? "PvP setup only; no progress is shared" :
+        hos_log("coop: sync: room accepted (%s); %s", how, coop_profile_active() ? "temporary kit only; no progress return" : mode == COOP_ROOM_PVP_SETUP ? "PvP setup only; no progress is shared" :
                 coop_sync_copy_wanted(G.eng) ? "the save is copied first" : "values from it are applied");
         has = offer_of(&o, now);
     }
@@ -931,7 +953,7 @@ static void offer_update(uint64_t now) {
         hos_log("coop: sync: the members carry rules signed by different keys, so this game takes no rules and applies nothing; ask the "
                 "room's maker which key is theirs");
     G.said_disagree = !o.token && o.disagree;
-    __atomic_store_n(&G.open, coop_sync_open(G.eng), __ATOMIC_RELEASE);
+    __atomic_store_n(&G.open, !coop_profile_active() && coop_sync_open(G.eng), __ATOMIC_RELEASE);
     publish(&o, has, now);
 }
 
@@ -966,7 +988,6 @@ int hos_oot_coop_save_binding(int member, CoopSaveBinding *out) {
 }
 
 int hos_oot_coop_accept(uint32_t token) {
-    if (coop_profile_active()) return 0;   /* downloading is not permission to return borrowed progress */
     AcquireSRWLockShared(&G.pub_lock);
     const int same = token && G.pub_has && token == G.pub.token, done = same && G.pub.accepted;
     const int ok = same && !G.pub.accepted && !G.pub.unidentified && !G.pub.refusal[0];
@@ -1169,11 +1190,19 @@ static void say_stats(uint64_t now) {
 static void on_tick(uint64_t now, void *user) {
     (void)user;
     sync_on();
-    if (coop_profile_active()) { publish_none(); return; }
     {   /* a room joined before these hooks were registered, or a view hook that came and went: the view as it is */
         CoopView v;
         coop_view_get(&v);
         if (!G.view_any || v.version != G.view_seen) G.view_seen = v.version, G.view_any = 1, view_changed(&v);
+    }
+    if (coop_profile_active()) {
+        AcquireSRWLockExclusive(&G.lock);
+        if (G.eng) {
+            coop_sync_tick(G.eng, now, send_fn, NULL); /* signatures/charter only: no native scan, section send or backup */
+            offer_update(now);
+        }
+        ReleaseSRWLockExclusive(&G.lock);
+        return;
     }
     make_snapshot();
     char asked[sizeof G.want_remove];
@@ -1544,6 +1573,90 @@ static void probe(Ctx *c, uint64_t mgr) {
             (unsigned long long)G.clock_entry);
 }
 
+volatile int hos_oot_coop_kit_active;
+
+/* The isolated profile uses the existing native load gate, but never binds or
+   scans progress. The central owner is the only way into its bounded writer. */
+static int kit_write(void *game, const void *payload) {
+    return oot_coop_kit_step(game, &G.kit, payload);
+}
+
+static void temporary_kit_present(Ctx *c, uint64_t mgr, int open) {
+    if (!TryAcquireSRWLockExclusive(&G.lock)) return;
+    const uint64_t eh = recomp_load64(c, 0x84c9e090ULL);
+    const uint64_t events = rd_ok(eh, 8) ? recomp_load64(c, eh) : 0;
+    open = open && rd_ok(events, 112) && !recomp_load64(c, events + 104);
+    if (open && !G.bound) {
+        G.mgr = mgr, G.bound = 1;
+        G.save_generation++;
+        G.bool_entries = recomp_load64(c, mgr + C_BOOL + CN_ENTRIES);
+        G.int_entries = recomp_load64(c, mgr + C_INT + CN_ENTRIES);
+        if (G.eng) coop_sync_rebind(G.eng);
+        publish_members();
+    }
+    CoopGameplayContext context = {0};
+    CoopOffer offer;
+    CoopView view;
+    OotCoopKit kit;
+    coop_view_get(&view);
+    if (open && G.eng && view.state == COOP_JOINED && coop_sync_offer(G.eng, &offer, coop_now_ms()) &&
+        offer.accepted && oot_coop_kit_parse(&offer.rules, &kit) == OOT_KIT_VALID) {
+        context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
+        context.capabilities = COOP_GAMEPLAY_TEMPORARY;
+        context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
+        context.room_session = view.session;
+        context.save_generation = G.save_generation, context.area_generation = G.area_generation;
+        for (int i = 0; i < view.n; i++) {
+            const int id = view.member[i].id;
+            if (id > 0 && id <= COOP_GAMEPLAY_MEMBERS && coop_sync_member_accepted(G.eng, id, view.member[i].session))
+                context.accepted_session[id] = view.member[i].session;
+        }
+    }
+    coop_gameplay_publish(&G.gameplay, &context);
+    __atomic_store_n(&hos_oot_coop_kit_active, context.capabilities &&
+                     (G.kit.state == OOT_KIT_IDLE || G.kit.state == OOT_KIT_APPLYING), __ATOMIC_RELEASE);
+    if (!context.capabilities) {
+        if (G.kit.state == OOT_KIT_APPLYING) G.kit.state = OOT_KIT_CANCELLED;
+        ReleaseSRWLockExclusive(&G.lock);
+        return;
+    }
+    if (!G.gameplay.writer[COOP_GAMEPLAY_KIT].write) {
+        const CoopGameplayWriter writer = {COOP_GAMEPLAY_VERSION, sizeof writer, COOP_GAMEPLAY_KIT,
+                                          COOP_GAMEPLAY_TEMPORARY, sizeof(OotCoopKitWork), kit_write};
+        if (!coop_gameplay_register(&G.gameplay, &writer)) {
+            ReleaseSRWLockExclusive(&G.lock);
+            return;
+        }
+    }
+    G.kit_work = (OotCoopKitWork){kit, offer.token, offer.rules.epoch, G.save_generation};
+    ReleaseSRWLockExclusive(&G.lock);
+}
+
+/* Native actor/equipment requests run on Link's update worker, like the debug
+   inventory and body adapter, never on the renderer or network thread. */
+void hos_oot_coop_kit_update(Ctx *c) {
+    if (!__atomic_load_n(&G.on, __ATOMIC_ACQUIRE) || !__atomic_load_n(&hos_oot_coop_kit_active, __ATOMIC_ACQUIRE) ||
+        !TryAcquireSRWLockExclusive(&G.lock)) return;
+    CoopView view;
+    coop_view_get(&view);
+    gameplay_revoke_locked(&view);
+    CoopGameplayTicket ticket;
+    if (coop_gameplay_ticket(&G.gameplay, COOP_GAMEPLAY_KIT, 0, view.session, &ticket))
+        coop_gameplay_dispatch(&G.gameplay, &ticket, &G.kit_work, sizeof G.kit_work, c);
+    ReleaseSRWLockExclusive(&G.lock);
+}
+
+int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch) {
+    if (!TryAcquireSRWLockExclusive(&G.lock)) return 0;
+    const CoopGameplayContext *context = &G.gameplay.context;
+    const int ready = G.kit.state == OOT_KIT_READY && context->capabilities == COOP_GAMEPLAY_TEMPORARY &&
+                      offer && offer == G.kit.offer && offer == context->offer &&
+                      epoch == G.kit.epoch && epoch == context->rules_epoch &&
+                      G.kit.generation == context->save_generation;
+    ReleaseSRWLockExclusive(&G.lock);
+    return ready;
+}
+
 /* The switches, once, at the first present, and the session's hooks: registered whether co-op is on or not, since the
    Co-op tab may switch it on later (they are called only while the session's thread runs). */
 static int start(void) {
@@ -1581,7 +1694,7 @@ void hos_oot_coop_present(Ctx *c) {
     if (s != ST_ON) return;   /* (another thread is starting) */
     const int on = __atomic_load_n(&G.on, __ATOMIC_ACQUIRE);
     if (on && !G.eng && !ensure_engine()) { hos_oot_hits_frame(NULL, 0); return; }
-    if (coop_profile_active()) { hos_coop_chat_scene(0); hos_oot_hits_frame(NULL, 0); return; }   /* identities only; no temporary progress */
+    if (!on && coop_profile_active()) { hos_coop_chat_scene(0); hos_oot_hits_frame(NULL, 0); return; }
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");
@@ -1601,6 +1714,11 @@ void hos_oot_coop_present(Ctx *c) {
         const uint64_t holder = recomp_load64(c, 0x84c9e090ULL);
         const uint64_t events = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
         hos_coop_chat_scene(open && rd_ok(events, 112) && !recomp_load64(c, events + 104));
+    }
+    if (coop_profile_active()) {
+        temporary_kit_present(c, mgr, open);
+        hos_oot_hits_frame(NULL, 0);
+        return; /* no bind_tables, scan, test-set aid, pool or durable writer in a temporary profile */
     }
     hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
     hos_oot_coop_warp_present(c);   /* pending travel only; no native effect from the present */

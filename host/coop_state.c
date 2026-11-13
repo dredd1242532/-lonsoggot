@@ -354,6 +354,33 @@ static const CoopFeatureRule feature_rules[] = {
      "Allow confirmed travel to an accepted friend's shared position. Unsupported places refuse; no forced travel."},
     {COOP_RULE_SOCIAL, "coop_social_permissions", 0, COOP_SOCIAL_CHAT, 0, "Room chat",
      "On: accepted players may exchange short text messages. Each player can mute a member locally."},
+    // S10: a signed temporary kit. Hidden draft keys retain the generic received-rules preview;
+    // the item-palette UI is separate. Defaults grant nothing.
+    {32, "coop_loadout_age", 0, 1, 0},
+    {33, "coop_loadout_magic", 0, 2, 0},
+    {40, "coop_loadout_bits_0", 0, 32767, 0},
+    {41, "coop_loadout_bits_1", 0, 32767, 0},
+    {42, "coop_loadout_bits_2", 0, 32767, 0},
+    {43, "coop_loadout_bits_3", 0, 32767, 0},
+    {44, "coop_loadout_bits_4", 0, 32767, 0},
+    {45, "coop_loadout_bits_5", 0, 32767, 0},
+    {46, "coop_loadout_bits_6", 0, 32767, 0},
+    {47, "coop_loadout_bits_7", 0, 32767, 0},
+    {83, "coop_loadout_version", 0, 1, 0},
+    {84, "coop_loadout_seeds", 0, 50, 0},
+    {85, "coop_loadout_arrows", 0, 50, 0},
+    {86, "coop_loadout_bombs", 0, 40, 0},
+    {87, "coop_loadout_bombchus", 0, 50, 0},
+    {88, "coop_loadout_nuts", 0, 40, 0},
+    {89, "coop_loadout_sticks", 0, 30, 0},
+    {90, "coop_loadout_magic_start", 0, 100, 0},
+    {91, "coop_loadout_bottles", 0, 5, 0},
+    {92, "coop_loadout_bottle_0", 0, 11, 0},
+    {93, "coop_loadout_bottle_1", 0, 11, 0},
+    {94, "coop_loadout_bottle_2", 0, 11, 0},
+    {95, "coop_loadout_bottle_3", 0, 11, 0},
+    {96, "coop_loadout_bottle_4", 0, 11, 0},
+    {98, "coop_loadout_preset", 0, 4, 0},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop

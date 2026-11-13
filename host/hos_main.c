@@ -9,6 +9,7 @@
    Environment: HOS_TRACE=1 (log HLE calls), HOS_MEMORY_MB (memory the game is told it has),
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
+#include "oot_inventory.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -583,19 +584,20 @@ void hos_oot_cct_speed(Ctx *c, uint64_t controller, int per_second) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
 /* OneShotAddOrRemovePouchContent (f_828d4a70) for one pouch content by actor name: delta > 0 adds, < 0 removes.
    Returns the event status (top bits of the result word), or -1 when the pouch is not ready. */
-static int oot_pouch_change(Ctx *c, const char *name, int delta) {
+int oot_pouch_change(Ctx *c, const char *name, int delta) {
     const uint64_t pouch_singleton = recomp_load64(c, 0x84c9e0d0ULL);
     const uint64_t state_singleton = recomp_load64(c, 0x84c9e2a8ULL);
     const uint64_t actor_db = recomp_load64(c, 0x84eb6888ULL);
     const uint64_t actor_info = recomp_load64(c, 0x84e8c060ULL);
     A64Fn edit = a64_lookup(0x828d4a70ULL);
-    if (!edit || !pouch_singleton || !recomp_load64(c, pouch_singleton) ||
-        !state_singleton || !recomp_load64(c, state_singleton) || !actor_db || !actor_info || !delta ||
-        strlen(name) >= 0x60) return -1;
+    if (!edit || !hos_guest_range(pouch_singleton, 8) || !recomp_load64(c, pouch_singleton) ||
+        !hos_guest_range(state_singleton, 8) || !recomp_load64(c, state_singleton) || !actor_db || !actor_info || !delta ||
+        !name || strlen(name) >= 0x60) return -1;
 
     // OneShotAddOrRemovePouchContent reads the event parameters through pointers.
     const Ctx saved = *c;
     const uint64_t event = (c->x[31] - 0xe0) & ~0xfULL;
+    if (!hos_guest_range(event, 0xe0)) return -1;
     memset(A64_PTR(event), 0, 0xe0);
     memcpy(A64_PTR(event + 0x80), name, strlen(name) + 1);
     recomp_store64_sp(c, event + 0x20, event + 0x60);
@@ -615,12 +617,13 @@ static int oot_pouch_change(Ctx *c, const char *name, int delta) {
 }
 
 /* QueryGetPouchContentNumByActorName (f_82a3c260): f_805b63e0(pouch manager, &name, 0, 0) counts one content. */
-static int oot_pouch_count(Ctx *c, const char *name) {
+int oot_pouch_count(Ctx *c, const char *name) {
     const uint64_t manager = recomp_load64(c, 0x84e98e28ULL);
     A64Fn count = a64_lookup(0x805b63e0ULL);
-    if (!manager || !count || strlen(name) >= 0x60) return -1;
+    if (!hos_guest_range(manager, 0x3bd0) || !count || !name || strlen(name) >= 0x60) return -1;
     const Ctx saved = *c;
     const uint64_t frame = (c->x[31] - 0x80) & ~0xfULL;
+    if (!hos_guest_range(frame, 0x80)) return -1;
     memcpy(A64_PTR(frame + 0x10), name, strlen(name) + 1);
     recomp_store64_sp(c, frame, frame + 0x10);
     c->x[31] = frame;
@@ -1639,6 +1642,9 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     {
         void hos_oot_coop_players_update(Ctx *c, uint64_t actor);   /* (oot_coop_players.c: co-op's other players; off: one read) */
         hos_oot_coop_players_update(c, actor);
+        extern volatile int hos_oot_coop_kit_active;
+        void hos_oot_coop_kit_update(Ctx *c);
+        if (__atomic_load_n(&hos_oot_coop_kit_active, __ATOMIC_ACQUIRE)) hos_oot_coop_kit_update(c);
     }
 
     // Link can be updated by different guest workers on successive frames.

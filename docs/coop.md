@@ -1095,3 +1095,49 @@ Renderer API27 adds bounded `coop_feed` and `coop_chat` callbacks. Input option6
 `tests/test_coop_chat.py` exercises the production core, runtime callbacks, signed progress
 observer and menu/input entry without a game; `--mutations` requires broken copies to fail.
 Actual two-game rendering, physical typing/paste, Windows and controller input remain runtime proofs.
+## Temporary sword-practice kit
+
+This first usable-kit family gives and equips **Kokiri Sword and Deku Shield for a child**, or **Master Sword and
+Hylian Shield for an adult**. It uses the game's item-give event, checks native ownership capacity, requests the game's
+equipment slots, and waits for the actual equipped actors. An inventory icon or a successful request is not enough.
+This is kit setup, not a playable duel, an exclusive inventory filter, or a complete preset/palette.
+
+First use **Temporary save** outside a room, restart into the copy, and load a checkpoint of the intended age. The
+adapter never changes age or touches a normal save. Make or join the room in that copy, read its signed rules, then
+confirm **Accept the room**. Acceptance there permits only this supported kit, not borrowed-progress return.
+Normal saves refuse an active kit offer; copies without a supported kit remain download-only.
+
+The maker's draft is read from `longshot_options.ini` when making a room. There is no new environment switch,
+menu callback or item-palette UI. These keys stay intact when the menu saves other settings:
+
+| Key (signed rule) | Sword-practice value |
+|---|---|
+| `coop_loadout_version` (83) | `1` enables this catalog; `0` (default), or absent, grants nothing |
+| `coop_loadout_age` (32) | Explicit `0` child or `1` adult; must match the loaded player |
+| `coop_loadout_bits_0` (40) | `3` for child, `12` for adult |
+| `coop_loadout_bits_1` through `_7` (41–47) | `0`; every unknown set bit refuses |
+| `coop_loadout_magic` (33), `coop_loadout_seeds` through `_sticks` (84–89), `coop_loadout_magic_start` (90) | `0`; these families are not supported yet |
+| `coop_loadout_bottles` (91), `coop_loadout_bottle_0` through `_4` (92–96) | `0`; bottles are not supported |
+| `coop_loadout_preset` (98) | `0` custom label or `1` sword practice; the label never substitutes for the signed bits |
+
+Catalog 1's first mask has bit 0 Kokiri Sword, bit 1 Deku Shield, bit 2 Master Sword and bit 3 Hylian Shield.
+Only the complete age-compatible pair is supported. Each of the eight masks has 15 bits; no network value is a
+native actor name, address, file or debug-menu item number. Maximum life, magic, seeds/slingshot and bombs are not
+granted by this family. Unselected possessions already in the copied save are not removed; a later duel must enforce
+its allowed attacks separately. Ordinary single-player use is unchanged.
+
+`coop: kit:` reports each entry as already owned, given, equipment requested, usable, or refused with a reason.
+Native writes happen on Link's game-update worker under the current accepted owner ticket, one give/equip request
+per update with queue headroom. Setup has at most 300 safe updates. Missing capacity, a wrong age, unavailable
+native support, a non-temporary mount or failed readback prevents readiness; an uncertain give is never retried.
+The actual mount must be under the active copy's `user/save`, not merely contain the word `coop-sessions`.
+
+Leaving, revocation, a new session/save or changed rules cancels setup. Accepting again does not refill or reapply
+it: restart a temporary baseline for another kit. Already completed native operations may remain in that isolated
+copy, which is kept for recovery; they are not rolled back into a real save. Temporary sessions neither scan nor
+send ordinary progress sections. Returning uses **Temporary save** again and never imports the copy.
+
+`hos_oot_coop_kit_ready(offer, epoch)` exposes completed setup readback only while that accepted temporary context
+is current. It is not permission to fight or an ongoing anti-cheat/equipment monitor. Game-free tests exercise the
+native boundary and deliberate guard removals; a two-game proof must still show each sword swinging and shield
+working after load, not just icons. This slice adds no game, Windows-runtime or PvP proof.

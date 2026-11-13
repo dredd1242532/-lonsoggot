@@ -15,7 +15,7 @@ SOURCE = ROOT / "host/hos_main.c"
 
 # The debug tools' definitions, and the line that reads the hearts switch.
 TOOLS = [
-    r"static int oot_pouch_change\(",
+    r"int oot_pouch_change\(",
     r"static void oot_update_player_cheats\(",
     r"int hos_oot_flight_shortcut_ready\(void\) \{",
     r"static void oot_write_flight_rotation\(",
