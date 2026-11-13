@@ -489,7 +489,10 @@ WHOLE_SITES = (
     ("void f_832b32b0(Ctx *__restrict A64_NOESC c) {@",
      "    c->x[8]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,0,3,c->fpcr,&c->fpsr);@",
      "c->x[19] + 0x265fc"),
-    # (the unsigned cut with the x10 addition: the other recording mode uses the same cut followed by an x12 addition)
+    # (the unsigned cut with the x10 addition: the other recording mode uses the same cut followed by an x12 addition.
+    #  x9 is the elapsed counter's address here, x0 + 0x265fc: both ways into this cut set it from x0 + 0x26000 just
+    #  before, and the store right after the cut writes through it. It is the field the other two sites reach as
+    #  x19 + 0x265fc, so the three share one remainder)
     ("void f_832b6840(Ctx *__restrict A64_NOESC c) {@",
      "    c->x[8]=recomp_fp_to_int(c->vreg[0][0]&UINT64_C(0xffffffff),32,32,0,3,c->fpcr,&c->fpsr);@"
      "    { uint64_t _a=c->x[10],_b=((uint64_t)(uint32_t)(((uint32_t)(c->x[8])) << 0)),_r=_a+_b; _r&=0xFFFFFFFFULL; c->x[8]=_r; }@",
