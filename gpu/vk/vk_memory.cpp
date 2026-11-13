@@ -1945,16 +1945,28 @@ void note_in_place_read(bool outside = false) {
 void memory_recording_part(uint64_t part) { mem_rec_part.store(part); }
 uint64_t memory_in_place_part() { return mem_in_place_part.load(); }
 
-// ---- (longshot, diagnostics) RX_VK_LOG_RB_WRITERS=1: what wrote the pages a readback waits for (vk_internal.h) ----
-// The writer the replay is recording now (its thread's: memory_writer_note), its draws and dispatches counted, and each noted
-// page's first and last writer in its newest submission (under wb_pages_mu, through wb_pages_note's hook)
+// ---- (longshot) Who wrote a page the CPU reads back, as the replay records: RX_VK_READBACK_EARLY and RX_VK_LOG_RB_WRITERS ----
+// (vk_internal.h) The writer the replay is recording now (its thread's: memory_writer_note) and its draws and dispatches counted.
+//  - RX_VK_READBACK_EARLY: the guest ranges whose reads waited for a write-back (memory_rb_waited, at most kEarlyRanges, the
+//    oldest let go first), and for each of their pages the last write in place (no mirror: the Steam Deck's every page): its
+//    submission and the part it was recorded in (early_in_place_write, from note_direct_write, whatever its size). A read of
+//    such a range then waits for that part (memory_in_place_writer_part), and a write to it by a draw, a dispatch, a copy or a
+//    clear asks for its part to end right after it (memory_split_wanted).
+//  - RX_VK_LOG_RB_WRITERS (diagnostics, through wb_pages_note's hook): each page's first and last writer in its newest
+//    submission (memory_rb_writers).
 namespace {
 thread_local uint32_t wr_what = 0;
 thread_local uint64_t wr_key = 0;
 std::atomic<uint64_t> wr_work{0};
 struct PageWriters { RbWriter first, last; };
 std::unordered_map<uint64_t, PageWriters> page_writers;
+constexpr size_t kEarlyRanges = 64;
+struct EarlyPage { uint64_t value = 0, part = 0; };
+std::deque<std::pair<uint64_t, uint64_t>> early_ranges;   // (wb_pages_mu)
+std::unordered_map<uint64_t, EarlyPage> early_pages;       // (wb_pages_mu)
+std::atomic<bool> early_any{false}, split_wanted{false};
 void rb_page_note(uint64_t lo, uint64_t hi, uint64_t value, uint64_t part) {   // (wb_pages_mu held)
+    if (!rb_writers_on()) return;
     RbWriter w;
     w.value = value, w.part = part ? part : mem_rec_part.load(std::memory_order_relaxed);
     w.work = wr_work.load(std::memory_order_relaxed), w.key = wr_key, w.what = wr_what;
@@ -1971,10 +1983,28 @@ bool rb_writers_on() {
     static const bool on = env_on("RX_VK_LOG_RB_WRITERS");
     return on;
 }
+/// RX_VK_READBACK_EARLY=1 (opt-in; vk_replay.cpp's invalidate): a read of pages written in place waits for their writer's part.
+/// Not with a parallel replay (RX_VK_PARALLEL=2 or more): its segments' recordings are numbered as parts but never put on the
+/// recordings' timeline (vk_replay.cpp begin_segment_recording), so a read of a page a segment wrote would wait for a part that
+/// never comes (250 ms); and the part a command buffer's segments follow had its write-back late there (ballotstomper, the team
+/// room). The reads then wait for their whole submission, as without the switch
+bool readback_early_on() {
+    static const bool on = [] {
+        if (!env_on("RX_VK_READBACK_EARLY")) return false;
+        const char* par = getenv("RX_VK_PARALLEL");
+        if (par && atoi(par) >= 2) {
+            logf("vk: RX_VK_READBACK_EARLY left off: RX_VK_PARALLEL=%s records segments whose parts a read cannot wait for", par);
+            return false;
+        }
+        return true;
+    }();
+    return on;
+}
 void memory_writer_note(uint32_t what, uint64_t key) {
-    if (!rb_writers_on()) return;
+    if (!rb_writers_on() && !readback_early_on()) return;
     wr_what = what, wr_key = key;
     static const bool hooked = [] {
+        if (!rb_writers_on()) return false;
         std::lock_guard lk(wb_pages_mu);
         wb_writers_hook = rb_page_note;
         return true;
@@ -1988,6 +2018,64 @@ void memory_count_work() {
     if (rb_writers_on()) wr_work.fetch_add(1, std::memory_order_relaxed);
 }
 uint64_t memory_work_count() { return wr_work.load(std::memory_order_relaxed); }
+/// (RX_VK_READBACK_EARLY) a GPU write in place of [lo, hi) in the submission value, recorded now: each page of it in a range
+/// whose read waited keeps it, and a write by anything but the uniform updates (written at their part's end already) asks for
+/// its part to end after it
+void early_in_place_write(uint64_t lo, uint64_t hi, uint64_t value) {
+    if (!readback_early_on() || hi <= lo || !early_any.load(std::memory_order_relaxed)) return;
+    const uint64_t part = mem_rec_part.load(std::memory_order_relaxed);
+    bool hit = false;
+    {
+        std::lock_guard lk(wb_pages_mu);
+        for (const auto& [a, b] : early_ranges) {
+            const uint64_t x = std::max(a, lo), y = std::min(b, hi);
+            if (x >= y) continue;
+            hit = true;
+            for (uint64_t pg = x >> kPageShift; pg <= (y - 1) >> kPageShift; pg++) early_pages[pg] = {value, part};
+        }
+    }
+    if (hit && wr_what != kRbWriterUb) split_wanted.store(true, std::memory_order_relaxed);
+}
+uint64_t memory_in_place_writer_part(uint64_t guest, uint64_t size, uint64_t whole) {
+    if (!size || !whole || !readback_early_on()) return 0;
+    std::lock_guard lk(wb_pages_mu);
+    uint64_t newest = 0, part = 0;
+    for (uint64_t pg = guest >> kPageShift; pg <= (guest + size - 1) >> kPageShift; pg++) {
+        auto it = early_pages.find(pg);
+        if (it == early_pages.end()) continue;
+        if (it->second.value > newest) newest = it->second.value, part = it->second.part;
+        else if (it->second.value == newest) part = std::max(part, it->second.part);
+    }
+    // (only when the newest write in place it knows is the range's newest: one it did not see (a range not yet waited for when
+    // it was written) leaves the read waiting for the whole submission, as before)
+    return newest == whole ? part : 0;
+}
+void memory_rb_waited(uint64_t guest, uint64_t size) {
+    if (!size || !readback_early_on()) return;
+    const uint64_t lo = guest, hi = guest + size;
+    std::lock_guard lk(wb_pages_mu);
+    for (const auto& [a, b] : early_ranges)
+        if (a <= lo && hi <= b) return;
+    early_ranges.push_back({lo, hi});
+    if (early_ranges.size() > kEarlyRanges) {
+        const auto [a, b] = early_ranges.front();
+        early_ranges.pop_front();
+        for (uint64_t pg = a >> kPageShift; pg <= (b - 1) >> kPageShift; pg++) {
+            bool kept = false;
+            for (const auto& [c, d] : early_ranges) kept = kept || (pg >= (c >> kPageShift) && pg <= ((d - 1) >> kPageShift));
+            if (!kept) early_pages.erase(pg);
+        }
+    }
+    early_any.store(true, std::memory_order_relaxed);
+}
+bool memory_rb_waited_range(uint64_t guest, uint64_t size) {
+    if (!size || !readback_early_on() || !early_any.load(std::memory_order_relaxed)) return false;
+    std::lock_guard lk(wb_pages_mu);
+    for (const auto& [a, b] : early_ranges)
+        if (a < guest + size && guest < b) return true;
+    return false;
+}
+bool memory_split_wanted() { return split_wanted.exchange(false, std::memory_order_relaxed); }
 /// (RX_VK_LOG_RB_WRITERS) the writers of a range's pages in the newest submission any of them was written in: the earliest first
 /// writer and the latest last one (by part, then by draw count), and how many of its pages that submission wrote
 bool memory_rb_writers(uint64_t guest, uint64_t size, RbWriter& first, RbWriter& last, int* pages) {
@@ -4040,6 +4128,7 @@ thread_local BindMemo bind_memo[256];
 
 void note_direct_write(Pool& p, uint64_t off, uint64_t size) {   // (pools_mu held)
     p.direct_write_epoch = mirror_epoch;
+    early_in_place_write(p.lo + off, p.lo + std::min(off + size, p.hi - p.lo), mem_rec_value);   // (RX_VK_READBACK_EARLY)
     if (size <= (1u << 20))   // (EvilBoyce: GPU results written in place; small ones: the readbacks are)
         wb_pages_note(p.lo + off, p.lo + std::min(off + size, p.hi - p.lo), mem_rec_value, 0);
 }
