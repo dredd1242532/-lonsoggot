@@ -2904,15 +2904,35 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
 }
 
 // A report cannot format Options{} as a live list index, or format a hypothetical
-// default through a callback that reads the current engine/display. Auto also
-// chooses the scaling/budget rows for this PC. Keep their current values, but do
-// not call them changes or invent a default. GPU 0 and microphone 1 stay stable.
+// default through a callback that reads the current engine/display (the Output
+// resolution, Upscaler, Render resolution, Window scaling filter). The Quality
+// preset's is Auto (this PC) at a first start. The other rows a preset sets have
+// the built-in defaults only for a Custom player Auto never chose for (auto_for 0);
+// else Auto's for this PC, which only apply_auto knows, and running it here would
+// change the live options the renderer reads. Keep their current values, but do
+// not call them changes or invent a default. GPU 0 and microphone 1 stay stable;
+// report_default has the Aspect ratio's, the Game language's and Frame generation by's.
 bool report_default_depends_on_pc(const Row& r) {
-    return r.value == &opts.ultrawide || r.value == &opts.output_res || r.value == &opts.resolution ||
-           r.value == &opts.dlss || r.value == &opts.preset || r.value == &opts.upscale ||
-           r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
-           r.value == &opts.handheld || r.value == &opts.vram_budget || r.value == &opts.framegen_by ||
-           r.value == &opts.game_lang || (r.value == &opts.dlss_model && dlss_preset_env());
+    if (r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
+        r.value == &opts.handheld || r.value == &opts.vram_budget)
+        return opts.preset != 0 || auto_for != 0;
+    return r.value == &opts.output_res || r.value == &opts.resolution || r.value == &opts.dlss ||
+           r.value == &opts.preset || r.value == &opts.upscale ||
+           (r.value == &opts.dlss_model && dlss_preset_env());
+}
+// The report's default for row r: the default options' value (fixed), or the one the
+// menu knows better. The Aspect ratio's is the monitor's shape, as outputs_sync makes
+// it from the default Output resolution and ultrawide=1; the Game language's is
+// language.txt's, else the first (README). *named: the default as the row names it,
+// where the row's own text shows the live state (Frame generation by at Auto: who
+// makes the frames now), else nullptr.
+int report_default(const Row& r, int fixed, const char** named) {
+    static const Options defaults{};
+    *named = nullptr;
+    if (r.value == &opts.ultrawide) return aspect_of_choice(defaults.output_res, defaults.ultrawide);
+    if (r.value == &opts.game_lang) return i18n::game_lang_index();
+    if (r.value == &opts.framegen_by) *named = "Auto";
+    return fixed;
 }
 // (longshot) the Gameplay tab's Bug report: the rows not at their defaults, as the menu shows them, for its "Changes from the
 // defaults"
@@ -2923,7 +2943,8 @@ std::string changed_rows_text(std::string& pc_options) {
     for (const Row& r : rows) {
         const char* at = (const char*)r.value;
         if (!r.value || !r.text || r.heading || at < (const char*)&opts || at >= (const char*)(&opts + 1)) continue;
-        const int was = *(const int*)((const char*)&defaults + (at - (const char*)&opts));
+        const char* named = nullptr;
+        const int was = report_default(r, *(const int*)((const char*)&defaults + (at - (const char*)&opts)), &named);
         const bool depends = report_default_depends_on_pc(r);
         if (!depends && *r.value == was) continue;
         std::string& to = depends ? pc_options : out;
@@ -2932,7 +2953,7 @@ std::string changed_rows_text(std::string& pc_options) {
         // (a microphone chosen by its name, not the name: a device's name can be a person's)
         to += r.value == &opts.mic && *r.value >= 2 ? "a microphone by its name" : r.text(*r.value);
         to += depends ? " (default depends on this PC" : " (default: ";
-        if (!depends) to += r.text(was);
+        if (!depends) to += named ? named : r.text(was);
         if (restart_changed(r)) to += "; takes effect after a restart";
         to += ")\n";
     }

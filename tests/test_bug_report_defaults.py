@@ -42,13 +42,24 @@ def fixture(source):
         "ultrawide": "tx_ultrawide", "output_res": "tx_output_res", "resolution": "tx_resolution",
         "dlss": "tx_upscaler", "dlss_model": "tx_dlss_model", "preset": "tx_preset", "gpu_device": "tx_gpu", "mic": "tx_mic",
     }
-    members = list(dict.fromkeys(["ultrawide", "output_res", "resolution", "dlss", *auto_members,
+    # (the rows a preset sets whose texts are fixed: the built-in defaults for a Custom player Auto never chose for)
+    preset_rows = ["sharpness", "pace", "realtime", "handheld", "vram_budget"]
+    members = list(dict.fromkeys(["ultrawide", "output_res", "resolution", "dlss", *auto_members, *preset_rows,
                                  "framegen_by", "game_lang", "dlss_model", "gpu_device", "mic", "fov"]))
     rows = "\n".join('    {TAB_GRAPHICS, "%s", &opts.%s, 0, 100, 1, %s, nullptr},' %
                      (names[member], member, text_functions.get(member, "tx_number")) for member in members)
     formatter = definition(menu, "std::string changed_rows_text")
     modern = "std::string&" in formatter.split("{")[0]
     policy = definition(menu, "bool report_default_depends_on_pc") if modern else ""
+    known = definition(menu, "int report_default") if "int report_default(" in menu else ""
+    auto_for = re.search(r"^uint64_t auto_for = 0;", menu, re.M)
+    auto_for = auto_for.group() if auto_for else "uint64_t auto_for = 0;"
+    defaults = dict((member, int(value)) for member, value in re.findall(r"\bint (\w+)\s*=\s*(-?\d+);", options))
+    # (each preset row moved off its built-in default, and the line a report gives it then)
+    moved = dict((member, 1 if defaults[member] == 0 else 0) for member in preset_rows)
+    custom_set = " ".join("opts.%s = %d;" % (member, moved[member]) for member in preset_rows)
+    custom_lines = ", ".join('"%s: %d (default: %d)"' % (names[member], moved[member], defaults[member]) for member in preset_rows)
+    custom_names = ", ".join('"%s: "' % names[member] for member in preset_rows)
     call = "changed_rows_text(pc)" if modern else "changed_rows_text()"
     source_parts = [definition(menu, signature) for signature in (
         "const char* tx_upscaler", "const char* dlss_preset_env", "const char* tx_dlss_model",
@@ -75,6 +86,11 @@ using namespace mkwvk;
 namespace ur = upscaler_rows;
 ''' + options + r'''
 Options opts;
+''' + auto_for + r'''
+namespace mkwvk::i18n {
+int lang_saved; // language.txt's language, as the stand-in reads it
+int game_lang_index() { return lang_saved; }
+}
 static uint32_t screen_w, screen_h;
 bool screen_size(uint32_t* w, uint32_t* h) {
     if (!screen_w || !screen_h) return false;
@@ -101,7 +117,7 @@ int ultrawide_read = 1;
 ''' + definition(menu, "void outputs_sync") + r'''
 static bool pending_restart;
 bool restart_changed(const Row& r) { return pending_restart && r.value == &opts.output_res; }
-''' + policy + "\n" + formatter + r'''
+''' + policy + "\n" + known + "\n" + formatter + r'''
 int failures;
 const char* case_name;
 #define CHECK(condition, why) do { if (!(condition)) { ++failures; std::printf("FAIL %s: %s\n", case_name, why); } } while (0)
@@ -109,14 +125,36 @@ int main(int argc, char** argv) {
     if (argc != 2) return 2;
     case_name = argv[1];
     const std::string which = case_name;
-    if (which == "output-context") screen_w = 3440, screen_h = 1440;
+    if (which == "output-context" || which == "aspect-changed-wide") screen_w = 3440, screen_h = 1440;
     if (which == "reordered-shapes") screen_w = 1280, screen_h = 1024;
     opts = Options{};
     outputs_sync(); // the real startup conversion, not a guessed display-list index
+    // subject: a row whose default depends on this PC; at_default: rows at their known defaults, in neither list;
+    // known: the lines a row away from its known default gives, among the changes
     std::string subject, expected_current, fresh_default;
+    std::vector<std::string> at_default, known;
     if (which == "aspect-default" || which == "reordered-shapes") {
-        subject = "Aspect ratio";
-        fresh_default = expected_current = tx_ultrawide(opts.ultrawide);
+        at_default = {"Aspect ratio: "}; // the monitor's shape, as outputs_sync made it
+    } else if (which == "aspect-changed" || which == "aspect-changed-wide") {
+        const std::string monitors = tx_ultrawide(opts.ultrawide);
+        opts.ultrawide = aspect_index("16:9");
+        const std::string now = tx_ultrawide(opts.ultrawide);
+        CHECK(now != monitors, "the authored screen's shape is 16:9");
+        known = {"Aspect ratio: " + now + " (default: " + monitors + ")"};
+    } else if (which == "custom-never-auto" || which == "custom-after-auto") {
+        // Custom, the rows a preset sets moved: their built-in defaults hold until Auto (this PC) has chosen for the file
+        ''' + custom_set + r'''
+        if (which == "custom-after-auto") auto_for = 1;
+        if (which == "custom-never-auto") known = {''' + custom_lines + r'''};
+    } else if (which == "framegen-by") {
+        opts.framegen_by = 1;
+        known = {"''' + names["framegen_by"] + r''': 1 (default: Auto)"}; // not the row's live text at Auto
+    } else if (which == "lang-saved") {
+        i18n::lang_saved = 3; opts.game_lang = 3;
+        at_default = {"''' + names["game_lang"] + r''': ", "''' + names["framegen_by"] + r''': "};
+    } else if (which == "lang-changed") {
+        i18n::lang_saved = 3; opts.game_lang = 0;
+        known = {"''' + names["game_lang"] + r''': 0 (default: 3)"};
     } else if (which == "output-context") {
         subject = "Output resolution";
         fresh_default = tx_output_res(opts.output_res);
@@ -154,6 +192,20 @@ int main(int argc, char** argv) {
         CHECK(pc.find("(default: ") == std::string::npos, "invented a numeric/context-free default");
         std::printf("CONTEXT %s: fresh=<%s> current=<%s>\n", case_name, fresh_default.c_str(), expected_current.c_str());
     }
+    for (const std::string& name : at_default)
+        CHECK(changed.find(name) == std::string::npos && pc.find(name) == std::string::npos, "a row at its known default listed");
+    for (const std::string& line : known) {
+        CHECK(changed.find(line + "\n") != std::string::npos, "a known default not reported as the change it is");
+        const std::string name = line.substr(0, line.find(": ") + 2);
+        CHECK(pc.find(name) == std::string::npos, "a row with a known default put in the PC section");
+    }
+    if (which == "custom-after-auto") {
+        for (const char* name : {''' + custom_names + r'''}) {
+            CHECK(changed.find(name) == std::string::npos, "a row Auto chose for counted as a change from the built-in default");
+            CHECK(pc.find(std::string(name) + "1 (default depends on this PC") != std::string::npos ||
+                  pc.find(std::string(name) + "0 (default depends on this PC") != std::string::npos, "a row Auto chose for missing");
+        }
+    }
     if (which == "auto-profile") {
         CHECK(changed.empty(), "Auto-controlled settings counted as fixed-default changes");
 ''' + auto_checks + r'''
@@ -186,8 +238,9 @@ def main():
     parser.add_argument("--source", type=Path, default=ROOT)
     parser.add_argument("--cxx", default="g++")
     args = parser.parse_args()
-    cases = ("aspect-default", "reordered-shapes", "output-context", "render-context", "upscaler-context",
-             "auto-profile", "stable-sentinels", "model-env", "model-fixed")
+    cases = ("aspect-default", "reordered-shapes", "aspect-changed", "aspect-changed-wide", "output-context", "render-context",
+             "upscaler-context", "auto-profile", "custom-never-auto", "custom-after-auto", "framegen-by", "lang-saved",
+             "lang-changed", "stable-sentinels", "model-env", "model-fixed")
     failed = []
     with tempfile.TemporaryDirectory(prefix="report-defaults-") as tmp:
         cpp = Path(tmp) / "defaults.cpp"
@@ -198,7 +251,7 @@ def main():
         for case in cases:
             env = {key: value for key, value in os.environ.items() if not key.startswith(("HOS_", "RX_", "LONGSHOT_"))}
             env["HOS_DISPLAY_MODES"] = "1920x1080,5120x1440"
-            if case == "output-context": env["HOS_DISPLAY_MODES"] = "1920x1080,3440x1440,3840x2160"
+            if case in ("output-context", "aspect-changed-wide"): env["HOS_DISPLAY_MODES"] = "1920x1080,3440x1440,3840x2160"
             if case == "reordered-shapes": env["HOS_DISPLAY_MODES"] = "1280x1024,1600x1200,1920x1080,3440x1440,5120x1440"
             if case == "model-env": env["RX_VK_DLSS_PRESET"] = "M"
             result = subprocess.run([str(exe), case], cwd=tmp, env=env, text=True, capture_output=True, timeout=30)

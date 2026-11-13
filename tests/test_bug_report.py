@@ -89,6 +89,11 @@ int main(int argc, char** argv) {
         if (mode == "context-count")
             for (int i = 0; i < 80; ++i) in.options += "Authored fixed row " + std::to_string(i) + ": On (default: Off)\n";
     }
+    if (mode == "context-long") {   // (the changes fit in a link, the rows that depend on this PC do not: only how many)
+        in.options = "Field of view: 110 (default: 100)\n";
+        in.pc_options.clear();
+        for (int i = 0; i < 80; ++i) in.pc_options += "Authored PC row " + std::to_string(i) + ": On (default depends on this PC)\n";
+    }
     in.game_dir = argv[2];
     in.current_log = argv[3];
     in.home = argv[4];
@@ -403,23 +408,44 @@ def main():
         said = next((ln for ln in out if "menu: bug report not written:" in ln), "")
         check(folders == [""] and ("(Windows error " if windows else "(Not a directory)") in said, "no folder: %s" % out)
 
-        # PC-dependent values have their own heading and are not fixed-default
-        # changes, including the link's count-only fallback.
-        for mode in ("context", "context-count"):
+        # PC-dependent values are not fixed-default changes, but they reach the issue: in the same answer, the form's
+        # "Changes from the defaults" (the form has no field of their own), under their own line after the changes, in the
+        # link too, as far as it takes them: their rows, else how many, before the changes go short
+        marker = "Depends on this PC (the values now, not counted as changes):"
+        for mode in ("context", "context-count", "context-long"):
             folders, _ = run(exe, mode, game, str(now_log), home, user, windows)
             report = (game_path / folders[0] / "report.txt").read_text(encoding="utf-8")
+            check("### Depends on this PC" not in report, "a heading the issue form has no field for")
             changes = hw.section(report, "Changes from the defaults")
-            context = hw.section(report, "Depends on this PC")
-            check("Aspect ratio:" not in changes and "Upscaler:" not in changes, "PC values counted as changes")
-            check("Monitor's shape (default depends on this PC)" in context and
-                  "NVIDIA DLSS (default depends on this PC)" in context, "PC values/default uncertainty lost")
-            check("Switches set" in changes and "Switches set" not in context, "switches moved into the wrong section")
+            check(marker in changes and "Switches set" in changes and
+                  changes.index(marker) < changes.index("Switches set"), "the PC rows are not under their line: " + changes)
+            fixed = changes[:changes.index(marker)] if marker in changes else changes
+            context = changes[changes.index(marker):changes.index("Switches set")] if marker in changes else ""
+            check("Aspect ratio:" not in fixed and "Upscaler:" not in fixed and "Authored PC row" not in fixed,
+                  "PC values counted as changes")
+            if mode == "context-long":
+                check("Field of view: 110 (default: 100)" in fixed and
+                      all("Authored PC row %d: On (default depends on this PC)" % i in context.splitlines() for i in range(80)),
+                      "report.txt does not list every PC row: " + changes)
+            else:
+                check("Monitor's shape (default depends on this PC)" in context and
+                      "NVIDIA DLSS (default depends on this PC)" in context, "PC values/default uncertainty lost")
             link = next(line for line in report.splitlines() if line.startswith("https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new?"))
+            check(len(link) <= 2000, "the link: %d characters" % len(link))
             settings = parse_qs(urlsplit(link).query)["field:settings"][0]
             if mode == "context":
                 check("with a fixed default" in changes and "with a fixed default" in settings, "claims every option has a known default")
+                check(marker in settings and "Monitor's shape (default depends on this PC)" in settings and
+                      "NVIDIA DLSS (default depends on this PC)" in settings and
+                      settings.index("with a fixed default") < settings.index(marker), "the link drops the PC rows: " + settings)
+            elif mode == "context-count":
+                check("80 Insert menu options with fixed defaults changed, 2 whose defaults depend on this PC and " in settings,
+                      "link counted PC-dependent rows as changes, or left them out: " + settings)
             else:
-                check("80 Insert menu options with fixed defaults changed" in settings, "link counted PC-dependent rows as changes")
+                check(settings.startswith("Field of view: 110 (default: 100)\n") and
+                      "Depends on this PC: 80, listed in the attached report.txt." in settings and
+                      "Authored PC row" not in settings and "in short" in report,
+                      "the short link does not keep the changes first and count the PC rows: " + settings)
     print("bug report: ok (report.txt as the issue form, both logs redacted, the picture, the long log, the terminal start, "
           "switch values, NUL bytes, the folder's reason)")
 
