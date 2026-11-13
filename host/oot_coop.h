@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include "a64.h"
 #include "coop_state.h"
+#include "coop_proto.h"   /* (COOP_POS_TEXT, the POS flags: hos_oot_coop_players_last) */
+#include "coop_gameplay.h"
 
 /* nvnQueuePresentTexture's end (host/nvn_native.c), between frames on the presenting game thread with its core held.
    With co-op off it reads one value and returns. */
@@ -24,6 +26,33 @@ int hos_oot_coop_is_maker(void);
 int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
 int hos_oot_coop_contributors(CoopContributor *out, int max);
+/* For the layer that shows the other players (host/oot_coop_players.c), from the game's threads, never waiting: 1 while
+   co-op is on and the game is being played (a save loaded, Link in a map, the clock running, no load and no scene
+   change, as the present last saw it); the members the player accepted, bit <member id> set (identified, not removed,
+   their key accepted), as the co-op thread last saw them. */
+int hos_oot_coop_playing(void);
+uint32_t hos_oot_coop_shown(void);
+int hos_oot_coop_presence(void);
+int hos_oot_coop_gameplay_register(const CoopGameplayWriter *writer);
+int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTicket *ticket);
+int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game);
+
+/* The other players in the world (host/oot_coop_players.c; docs/coop.md). _start: once, from co-op's start, whether
+   co-op is on or not (the Co-op tab may switch it on later): registers the sole body writer on the supported build.
+   The accepted signed presence permission gates all map/pose disclosure and native effects; no allocation happens
+   before an authorized child-body effect. _update: each update of Link (host/hos_main.c
+   hos_oot_lift_player), on the guest thread that runs it; until co-op is on and a save is played it reads two values
+   and returns. _tick: each present of hos_oot_coop_present on the presenting thread, with whether a save was loaded
+   since the title screen and whether the game is being played (gate): outside play, and in play while an event holds
+   Link, it says the map and state to the room (the title screen: no map; a load or map change: the last map), every
+   2 s and at once at a change; never waiting. _last: for the Co-op tab, any thread: 1 when member id was heard in its
+   current session, with its last area (a map's name, "" on the title screen), its flags (COOP_POS_ADULT, _IN_WORLD,
+   _LOADED, _SLOW: coop_proto.h) and the age of that message in ms; 0 when nothing was heard from it, it is no member
+   of the room, or the layer is not running (another build of the game). area, flags and age_ms may be NULL. */
+void hos_oot_coop_players_start(void);
+void hos_oot_coop_players_update(Ctx *c, uint64_t actor);
+void hos_oot_coop_players_tick(int loaded, int open);
+int hos_oot_coop_players_last(int id, char area[COOP_POS_TEXT + 1], uint8_t *flags, uint64_t *age_ms);
 
 /* host/nn_fs.c: the save folder copied, under the lock the save mount's writes take, to <user>/<folder>/<prefix><UTC
    time>/ (the newest keep copies without a prefix are kept; prefixed ones stay until the player deletes them). 1 and

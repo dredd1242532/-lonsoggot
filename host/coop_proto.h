@@ -196,7 +196,12 @@ void coop_blake2b(uint8_t *out, size_t outlen, const void *key, size_t klen, con
 #define COOP_POS_VERSION 2
 #define COOP_POS_TEXT 47
 #define COOP_POS_SLOTS 4
-enum { COOP_POS_ADULT = 1, COOP_POS_IN_WORLD = 2 };
+// flags: ADULT, Link is the adult; IN_WORLD, he stands in the map named, at the place given (a game shows him only
+// then); LOADED, a save is in play (since the title screen), also while it loads, changes map or pauses, when IN_WORLD
+// is clear and the area is the last map; neither, no save in play (the title screen; area ""); SLOW, the sender shows
+// nobody and sends only every COOP_PLAYERS_SLOW_MS and at each change of map or state (host/coop_players.h), with no
+// place: never shown. A message without IN_WORLD, or with SLOW, carries no place (zeros) and no animation
+enum { COOP_POS_ADULT = 1, COOP_POS_IN_WORLD = 2, COOP_POS_LOADED = 4, COOP_POS_SLOW = 8 };
 typedef struct {
     uint32_t pseq;
     uint32_t t_ms;

@@ -111,7 +111,7 @@ static const char *test_getenv(const char *name) {
 #define getenv test_getenv
 static int ini_coop;
 static int hos_ini_option(const char *key, int otherwise) { return !strcmp(key, "coop") ? ini_coop : otherwise; }
-static struct { int msg, view, tick, remove; CoopViewFn view_fn; } hooks;
+static struct { int msg, view, tick, remove, players, players_ticks, tick_loaded, tick_open; CoopViewFn view_fn; } hooks;
 int coop_on_message(uint8_t kind, CoopMsgFn fn, void *user) { (void)kind, (void)user; hooks.msg += fn != NULL; return 1; }
 int coop_on_view(CoopViewFn fn, void *user) { (void)user; hooks.view++, hooks.view_fn = fn; return 1; }
 int coop_on_tick(CoopTickFn fn, void *user) { (void)user; hooks.tick += fn != NULL; return 1; }
@@ -124,6 +124,9 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
     else memset(&accepted_view, 0, sizeof accepted_view);
     accepted_members = members;
 }
+void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
+/* (the same layer's tick: each present that read the flags, with the gate's answer) */
+void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
 static int rules_said, views, scans, applies, probes;
 static void read_rules(CoopRules *r, int say) { coop_rules_default(r); rules_said += say; }
 static void read_test_aid(void) {}
@@ -701,15 +704,19 @@ int main(int argc, char **argv) {
         CHECK(G.state == ST_OFF && !G.on && !G.bound && !G.looked && !rules_said && !scans);
         CHECK(hooks.msg == 2 && hooks.view == 1 && hooks.tick == 1 && hooks.remove == 1);   /* once, not per present */
         CHECK(guest_reads == off_reads && nsets == off_sets);
+        CHECK(hooks.players == 1);   /* the other players' layer too: its own switch decides, co-op may come on later */
+        CHECK(!hooks.players_ticks);   /* (co-op off: no room to tell anything) */
         /* the session's thread runs (co-op switched on in the tab) and calls back: sync is on, the settings said once */
         view.state = COOP_LEFT;
         if (hooks.view_fn) hooks.view_fn(&view, NULL), hooks.view_fn(&view, NULL);
         CHECK(G.state == ST_ON && G.on == 1 && rules_said == 1 && views == 2);
         TICK(), hos_oot_coop_present(&c);                        /* the first look: the save's clock appears */
         CHECK(!G.bound && G.loaded);
+        CHECK(hooks.players_ticks == 1 && hooks.tick_loaded == 1 && !hooks.tick_open);   /* the layer hears the gate: loaded, not in play */
         TICK(), hos_oot_coop_present(&c);
         CHECK(G.bound && scans == 1 && applies == 1);            /* the save in play is read and shared */
         CHECK(hooks.view == 1);
+        CHECK(hooks.players_ticks == 2 && hooks.tick_loaded == 1 && hooks.tick_open == 1);
         view.state = COOP_OFF;
         if (hooks.view_fn) hooks.view_fn(&view, NULL);
         const unsigned disabled_reads = guest_reads;
@@ -721,7 +728,7 @@ int main(int argc, char **argv) {
         FRESH(1);
         ini_coop = 1;
         TICK(), hos_oot_coop_present(&c);
-        CHECK(G.state == ST_ON && G.on == 1 && rules_said == 1 && hooks.view == 1 && hooks.tick == 1);
+        CHECK(G.state == ST_ON && G.on == 1 && rules_said == 1 && hooks.view == 1 && hooks.tick == 1 && hooks.players == 1);
         TICK(), hos_oot_coop_present(&c);
         CHECK(G.bound && scans == 1);
         /* the environment wins over the file, both ways */

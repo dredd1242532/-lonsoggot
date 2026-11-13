@@ -471,11 +471,14 @@ the secret) can have every one of them delivered again, in order. Someone who kn
 recorded message again under a new counter. So the envelope does not make a message arrive once; a layer for which a
 repeat matters checks a counter of its own, and signs what only one player may make.
 
-**POS** (kind 2), where a player is and what Link plays, for showing the other players in the world: the area's name,
-child or adult, position, facing, and the node and frame of Link's first four animation slots, with a counter one
-higher for each POS sent (`coop_proto.h`). A POS with a name that is not printable ASCII or a number that is not finite
-is refused. A receiver takes a pose only above the last one it took from the same member in the same session, and,
-once none was taken for 3 s, the next whatever its counter (`coop_pos_fresh`).
+**POS** (kind 2), where a player is: the map's name, flags (child or adult; Link stands in the map; a save is played;
+the sender shows nobody), position, facing, and room for the node and frame of Link's first four animation slots,
+with a counter one higher for each POS sent (`coop_proto.h`). An accepted child game with signed presentation
+permission sends it about15 times a second while displaying bodies and standing in a map, otherwise every2s and when
+its map or flags change, then with no position. A POS with a name that is not printable ASCII or a number that is not
+finite is refused. A receiver takes a position only above the last one it took from the same member in the same
+session, and, once none was taken for3s, the next whatever its counter (`coop_pos_fresh`). The child-body section
+below describes the additional accepted-identity, signed-rule and apply-time ownership checks.
 
 ## What joining a room means for your save
 
@@ -696,3 +699,49 @@ then dispatches a bounded batch through that writer under the existing engine lo
 revocation against a setter. A failed setter is not recorded as an applied value. Co-op off, including switching it
 off after use, returns before guest reads/calls (the separately requested read-only debug probe remains separate).
 PvP setup grants no gameplay capability. The native game still owns ordinary single-player state.
+
+## Child bodies in the world
+
+This first body family is opt-in twice: the maker signs `coop_presence_permissions=1` (feature99, bit0), and each
+player chooses `coop_players=1` or `HOS_COOP_PLAYERS=1` locally. The signed rule defaults to0; absent is off. No map,
+position or animation is disclosed without the accepted presentation capability. This slice supports child Link
+only. Adult pose packets do not create an adult body, and an adult local player sends no body pose.
+
+With presentation permitted and local display on, the existing POS message sends the child's map, position, facing
+and up to four animation slots about15 times a second. Same-map accepted players are shown100ms behind the latest
+sample, interpolated between recent positions. A local display switched off may still share the map/state at the
+low rate, but only under that same signed permission. It never shares a precise position or creates a body.
+
+Receive-time admission captures a ticket from the central gameplay owner. Before any creation, placement or
+animation call, the body writer checks that ticket again under the owner's lock. Leaving, identity/rules/save/area
+changes and revocation invalidate old work, even if the same terms are later accepted again. Cleanup only retires
+this adapter's existing actors; another actor occupying a reused address is never deleted or moved. Registration
+refuses a second body writer. Request storage is allocated only at the first authorized child-body effect.
+
+The native adapter is build-guarded and range-checks guest pointers. Missing animation components, excessive slot
+counts, malformed strings, non-finite poses and stale actor identities are refused or left untouched. Loading,
+title screens and events do not create or move a body. This is cosmetic presence, not a collision body, equipment
+replication, full skeletal-pose replication, shared enemies or PvP.
+
+`nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
+only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
+or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
+The animation switch loads it only with local player display enabled. Conflicting user mods disable those generated
+assets with a clear line instead of combining incompatible tables. Without animation assets the explicitly
+non-animated standing menu model remains available; it is not described as a walking/full-pose body.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `coop_presence_permissions` |0|Maker-signed permission; bit0 enables this child presence family. Unsupported higher bits refuse the charter.|
+| `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display and precise child pose sending; the environment overrides the saved local setting.|
+| `HOS_COOP_PLAYERS_ANIM` |0|Use the locally generated child actor and replay the existing four bounded animation slots. Other slots and equipment are not represented.|
+| `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic actor names; never chosen by a packet. Adult presentation remains unsupported.|
+| `HOS_COOP_PLAYERS_TEST` |unset|Diagnostic position feed for member8; it still needs that member's accepted presentation ticket, never synthetic consent.|
+| `HOS_COOP_TRACE` |0|Existing bounded position, creation, deletion and animation diagnostics.|
+
+A room-secret holder can still spoof another accepted member's ephemeral pose or delay/replay positions. Signed
+membership and receiver context limit who may cause cosmetic effects; they do not prove an invited client is honest.
+No pose authorizes a saved change or a hit. The game-free fixtures exercise codec bounds, native lifetime, admission,
+revocation, missing components and private asset generation. Current-head two-game body/pose quality remains a
+separate required proof before readiness.
+

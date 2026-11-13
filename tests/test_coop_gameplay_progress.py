@@ -22,7 +22,7 @@ static int locked, guest_calls, writes, takes, cancel_after_take, untaken;
 static int TryAcquireSRWLockExclusive(int *lock) { (void)lock; assert(!locked); locked = 1; return 1; }
 static void ReleaseSRWLockExclusive(int *lock) { (void)lock; assert(locked); locked = 0; }
 static struct {
-    int lock, open, bound, gate, loaded;
+    int lock, open, bound, gate, loaded, presence;
     CoopSync *eng;
     CoopGameplay gameplay;
     uint64_t save_generation, area_generation, applied_log_at;
@@ -38,6 +38,10 @@ void coop_view_get(CoopView *out) { *out = room; }
 int coop_sync_offer(CoopSync *engine, CoopOffer *out, uint64_t now) { (void)engine; (void)now; *out = current; return current.token != 0; }
 int coop_sync_open(CoopSync *engine) { (void)engine; return current.accepted; }
 int coop_sync_member_accepted(const CoopSync *engine, int id, uint64_t session) { (void)engine; return id == 2 && session == 202 && current.accepted; }
+static int presence_rule_present, presence_rule_value;
+int coop_feature_present(const CoopRules *rules, int id, int *value) {
+    (void)rules; assert(id == 99); *value = presence_rule_value; return presence_rule_present;
+}
 int coop_sync_take(CoopSync *engine, CoopApply *out, int max) {
     (void)engine; assert(locked && max > 0); takes++;
     out[0] = (CoopApply){0, COOP_CAT_ITEMS, 123, 1};
@@ -65,6 +69,15 @@ int main(void) {
     room.member[0].id = 2; room.member[0].session = 202;
     current.token = 9; current.accepted = 1; current.rules.epoch = 3;
     apply(&ctx, 1234); assert(takes == 1 && writes == 1 && !locked);
+    assert(!G.presence);   // missing permission is not the registry default
+    presence_rule_present = 1;
+    gameplay_context_locked(); assert(!G.presence);   // explicit off
+    presence_rule_value = 1;
+    gameplay_context_locked(); assert(G.presence);
+    G.save_generation = 0;
+    gameplay_context_locked(); assert(!G.presence);   // invalid native context fails closed
+    G.save_generation = 1, presence_rule_value = 0;
+    gameplay_context_locked(); assert(!G.presence);
     cancel_after_take = 1;
     const int before = guest_calls;
     apply(&ctx, 1234); assert(takes == 2 && writes == 1 && guest_calls == before && !locked);

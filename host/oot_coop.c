@@ -211,6 +211,9 @@ static struct {
     uint64_t checked_at, own_key_said, spent_seen, spent_at;
     int open;               /* the current offer is accepted and the copy exists: the game thread applies (atomic) */
     int copy_busy_said;
+    int playing;            /* co-op is on and the game is being played (gate): what Link's update reads (atomic) */
+    uint32_t pub_shown;     /* bit id: a member of the accepted offer whose key the player accepted (atomic) */
+    int presence;           /* signed and accepted presentation capability, atomic; absence is off */
 
     /* the maker's key for a room (the co-op thread's) */
     char key_code[COOP_SECRET_TEXT + 1];
@@ -633,7 +636,10 @@ static void gameplay_revoke_locked(const CoopView *v) {
                 o.token == c->offer && o.rules.epoch == c->rules_epoch;
     for (int id = 1; valid && id <= COOP_GAMEPLAY_MEMBERS; id++)
         if (c->accepted_session[id] && !coop_sync_member_accepted(G.eng, id, c->accepted_session[id])) valid = 0;
-    if (!valid) coop_gameplay_publish(&G.gameplay, NULL);
+    if (!valid) {
+        coop_gameplay_publish(&G.gameplay, NULL);
+        __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
+    }
 }
 
 static void publish_members(void) {
@@ -760,6 +766,7 @@ static void on_view(const CoopView *v, void *user) {
     (void)user;
     if (v->state == COOP_OFF) {
         view_changed(v);
+        __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&G.on, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&G.state, G.probe ? ST_ON : ST_OFF, __ATOMIC_RELEASE);
         return;
@@ -785,25 +792,74 @@ static int offer_of(CoopOffer *o, uint64_t now) {
     return has;
 }
 
+/* A key this player accepted, G.lock held. */
+static int key_accepted(const char *key) {
+    uint64_t kid;
+    return coop_sync_key_parse(key, &kid) && coop_sync_accepted_key(G.eng, kid);
+}
+
+/* The members the other layers may show (host/oot_coop_players.c): in the room, identified, not removed by the maker,
+   under the name their key was accepted with, and that key accepted by this player. */
+static uint32_t shown_of(const CoopOffer *o) {
+    uint32_t shown = 0;
+    for (int i = 0; i < o->n && i < COOP_MAX_MEMBERS; i++) {
+        const CoopOfferMember *m = &o->member[i];
+        if (m->id >= 1 && m->id <= COOP_MAX_MEMBERS && m->heard && !m->removed && !m->accepted_as[0] && m->key[0] && key_accepted(m->key))
+            shown |= 1u << m->id;
+    }
+    return shown;
+}
+
 /* What the menu reads (G.lock held): the offer offer_update settled on, whether this game is the maker, the
-   contributors at most every 500 ms. */
+   contributors at most every 500 ms; and the members that may be shown. */
 static void publish(const CoopOffer *o, int has, uint64_t now) {
     publish_members();
     const int maker = coop_sync_is_maker(G.eng), fresh = !G.pub_contrib_at || now - G.pub_contrib_at >= 500;
     CoopContributor k[PUB_CONTRIBUTORS];
     const int n = fresh ? coop_sync_contributors(G.eng, k, PUB_CONTRIBUTORS) : 0;
+    __atomic_store_n(&G.pub_shown, shown_of(o), __ATOMIC_RELEASE);
     AcquireSRWLockExclusive(&G.pub_lock);
     G.pub = *o, G.pub_has = has, G.pub_maker = maker;
     if (fresh) memcpy(G.pub_contrib, k, sizeof *k * (size_t)n), G.pub_ncontrib = n, G.pub_contrib_at = now;
     ReleaseSRWLockExclusive(&G.pub_lock);
 }
 
+uint32_t hos_oot_coop_shown(void) { return __atomic_load_n(&G.pub_shown, __ATOMIC_ACQUIRE); }
+int hos_oot_coop_playing(void) { return __atomic_load_n(&G.playing, __ATOMIC_ACQUIRE); }
+int hos_oot_coop_presence(void) { return __atomic_load_n(&G.presence, __ATOMIC_ACQUIRE); }
+
+int hos_oot_coop_gameplay_register(const CoopGameplayWriter *writer) {
+    AcquireSRWLockExclusive(&G.lock);
+    const int ok = coop_gameplay_register(&G.gameplay, writer);
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+
+int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTicket *ticket) {
+    if (!TryAcquireSRWLockExclusive(&G.lock)) return 0;
+    const uint64_t session = member && member <= COOP_GAMEPLAY_MEMBERS ? G.gameplay.context.accepted_session[member] :
+                             !member ? G.gameplay.context.room_session : 0;
+    const int ok = coop_gameplay_ticket(&G.gameplay, slot, member, session, ticket);
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+
+int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game) {
+    if (!TryAcquireSRWLockExclusive(&G.lock)) return -1;   /* defer, not a revocation */
+    const int ok = coop_gameplay_dispatch(&G.gameplay, ticket, payload, size, game);
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+
+
 /* No engine (co-op off, or no save played yet): nothing to read. */
 static void publish_none(void) {
     coop_accept_members(NULL, 0);
     AcquireSRWLockExclusive(&G.lock);
     coop_gameplay_publish(&G.gameplay, NULL);
+    __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
     ReleaseSRWLockExclusive(&G.lock);
+    __atomic_store_n(&G.pub_shown, 0, __ATOMIC_RELEASE);
     AcquireSRWLockExclusive(&G.pub_lock);
     if (G.pub_has || G.pub.n || G.pub_ncontrib || G.pub_maker)
         memset(&G.pub, 0, sizeof G.pub), G.pub_has = G.pub_maker = G.pub_ncontrib = 0, G.pub_contrib_at = 0;
@@ -1231,6 +1287,7 @@ static int gate(Ctx *c, uint64_t mgr) {
         hos_log("coop: sync: game %s (play clock %u, loading %d, scene change %#x)", open ? "running" : "paused", clock, loading, moving);
     if (open != G.gate) G.area_generation++;
     G.gate = open;
+    __atomic_store_n(&G.playing, open && __atomic_load_n(&G.on, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
     return open;
 }
 
@@ -1293,6 +1350,9 @@ static void gameplay_context_locked(void) {
         coop_sync_offer(G.eng, &offer, coop_now_ms()) && offer.accepted && coop_sync_open(G.eng)) {
         context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
         context.capabilities = COOP_GAMEPLAY_DURABLE;
+        int presence = 0;
+        if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && (presence & COOP_PRESENCE_CHILD_BODY))
+            context.capabilities |= COOP_GAMEPLAY_PRESENTATION;
         context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
         context.room_session = view.session;
         context.save_generation = G.save_generation, context.area_generation = G.area_generation;
@@ -1303,6 +1363,7 @@ static void gameplay_context_locked(void) {
         }
     }
     coop_gameplay_publish(&G.gameplay, &context);
+    __atomic_store_n(&G.presence, (G.gameplay.context.capabilities & COOP_GAMEPLAY_PRESENTATION) != 0, __ATOMIC_RELEASE);
 }
 
 static void apply(Ctx *c, uint64_t mgr) {
@@ -1455,6 +1516,10 @@ static int start(void) {
     coop_on_view(on_view, NULL);
     coop_on_tick(on_tick, NULL);
     coop_on_remove(on_remove, NULL);
+    /* host/oot_coop_players.c: the other players in the world, when its own switch asks for them. Its hooks are
+       registered like the ones above, whether co-op is on or not; it does nothing in the game until "being played" is
+       published, which needs co-op on (gate) */
+    hos_oot_coop_players_start();
     if (want) sync_on();
     return __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
 }
@@ -1474,12 +1539,16 @@ void hos_oot_coop_present(Ctx *c) {
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");
+        __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
+        hos_oot_coop_players_tick(0, 0);   /* (no save: the title screen as far as the room is told) */
         return;
     }
     if (G.bound && (mgr != G.mgr || recomp_load64(c, mgr + C_BOOL + CN_ENTRIES) != G.bool_entries ||
                     recomp_load64(c, mgr + C_INT + CN_ENTRIES) != G.int_entries))
         unbind("the game made its flags anew");
-    if (!gate(c, mgr)) return;
+    const int open = gate(c, mgr);
+    hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
+    if (!open) return;
     if (!G.bound) bind_tables(c, mgr);
     if (!G.bound) return;
     if (G.probe && !G.probed) G.probed = 1, probe(c, mgr);

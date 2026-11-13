@@ -45,7 +45,8 @@ def main():
             "RX_VK_DUMP_DIR=dumps\nHOS_PRESENT_TRACE=t.txt\nRX_VK_DLSS_DIR=\\\\server\\share\n"
             "HOS_AUDIO_DUMP=image.bin\nRX_VK_HANG_DUMP=longshot_options.ini\nRX_VK_SHOTS=user\n"
             "HOS_INPUT_SCRIPT=1:A,2:A\nRX_VK_MENU_SCRIPT=1:INS\n"
-            "HOS_COOP_ACCEPT=always\nHOS_COOP_TEST_SET=01c20002=1@1\nHOS_COOP_NAME=Link\n", encoding="utf-8")
+            "HOS_COOP_ACCEPT=always\nHOS_COOP_TEST_SET=01c20002=1@1\nHOS_COOP_NAME=Link\n"
+            "HOS_COOP_PLAYERS=1\nHOS_COOP_PLAYERS_TEST=steps\nHOS_COOP_PLAYERS_ACTOR=Enemy_X\n", encoding="utf-8")
         (tmp / "test_env.txt").write_text("# a test run's own switches\nHOS_T_OTHER=1\nHOS_T_SHARED=other\n"
                                           "VK_T_LAYER=/y\n", encoding="utf-8")
         (tmp / "precedence.txt").write_text("HOS_T_LAUNCH=file\nHOS_T_TWICE=first\nHOS_T_FRESH=1\nHOS_T_TWICE=second\n",
@@ -81,6 +82,7 @@ int main(int argc, char **argv) {
     (void)argc;
     unsetenv("HOS_ENV_FILE");                      /* out of the box: the file beside the game */
     unsetenv("HOS_COOP_ACCEPT"), unsetenv("HOS_COOP_TEST_SET"), unsetenv("HOS_COOP_NAME");
+    unsetenv("HOS_COOP_PLAYERS"), unsetenv("HOS_COOP_PLAYERS_TEST"), unsetenv("HOS_COOP_PLAYERS_ACTOR");
     load_longshot_env();
     CHECK(is("HOS_T_BESIDE", "1") && is("HOS_T_SHARED", "beside") && is("HOS_T_OTHER", NULL));
     CHECK(is("VK_ADD_LAYER_PATH", NULL) && is("SDL_DYNAMIC_API", NULL) && is("HOS_ENV_FILE", NULL));
@@ -90,6 +92,9 @@ int main(int argc, char **argv) {
     /* (co-op: none of its switches from a file someone handed the player, not even a name: only the player's own
        environment, the menu or longshot_options.ini) */
     CHECK(is("HOS_COOP_ACCEPT", NULL) && is("HOS_COOP_TEST_SET", NULL) && is("HOS_COOP_NAME", NULL));
+    /* (nor showing the other players, its test or the actor files it shows: HOS_COOP_PLAYERS is the menu's or the
+       options file's coop_players, the other two a test's) */
+    CHECK(is("HOS_COOP_PLAYERS", NULL) && is("HOS_COOP_PLAYERS_TEST", NULL) && is("HOS_COOP_PLAYERS_ACTOR", NULL));
     CHECK(is("RX_VK_SKIP_CODE", "2c56,ab") && is("RX_VK_DLSS_DIR", "/opt/ngx"));
     CHECK(is("SDL_VULKAN_LIBRARY", NULL) && is("SDL_VIDEO_EGL_DRIVER", NULL) && is("HOS_T_UP", NULL));
     CHECK(is("SDL_AUDIODRIVER", "pulseaudio") && is("HOS_SAMPLE_FILE", NULL) && is("RX_VK_FRAME_LOG", NULL));

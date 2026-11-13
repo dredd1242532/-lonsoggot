@@ -19,6 +19,12 @@
 #include <ctype.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "../gpu/vk/compat/longshot_env.h"
+
+int hos_ini_option(const char *key, int otherwise);
+static int coop_assets_ready;
+static char coop_assets_root[MAX_PATH];
+int hos_coop_players_assets(void) { return coop_assets_ready; }
 
 typedef struct { char *key; char *host; uint64_t size; int is_dir, logged; } Entry;   /* key: romfs path, lower case, '/' */
 static Entry *table;
@@ -62,7 +68,14 @@ static void put(const char *key, const char *host, uint64_t size, int is_dir) {
     size_t i = hash_str(key) & (table_cap - 1);
     while (table[i].key && strcmp(table[i].key, key)) i = (i + 1) & (table_cap - 1);
     if (!table[i].key) table[i].key = _strdup(key), table_n++;
-    else free(table[i].host);
+    else {
+        if (coop_assets_ready && !table[i].is_dir &&
+            !strncmp(table[i].host, coop_assets_root, strlen(coop_assets_root))) {
+            coop_assets_ready = 0;
+            hos_log("coop: players: animation assets disabled: a mod replaces %s; rebuild compatible actor tables first", key);
+        }
+        free(table[i].host);
+    }
     table[i].host = _strdup(host);
     table[i].size = size;
     table[i].is_dir = is_dir;
@@ -152,6 +165,18 @@ static int mod_cmp(const void *a, const void *b) { return _stricmp(((const Mod *
 void hos_mods_init(const char *image_path) {
     (void)image_path;
     char root[MAX_PATH];
+    /* Generated locally by make_game.py, never shipped. Index first: user mods still win.
+       A mod replacing one of these files disables animated actors rather than mixing actor tables. */
+    const char *show = getenv("HOS_COOP_PLAYERS");
+    if (env_on("HOS_COOP_PLAYERS_ANIM") && (show ? !env_value_off(show) : hos_ini_option("coop_players", 0))) {
+        hos_game_path_a(coop_assets_root, sizeof coop_assets_root);
+        char *slash = (char *)last_sep(coop_assets_root);
+        if (slash) {
+            snprintf(slash + 1, sizeof coop_assets_root - (size_t)(slash + 1 - coop_assets_root), "coop-players\\romfs");
+            coop_assets_ready = index_romfs(coop_assets_root, "", 0) == 5;
+            hos_log("coop: players: locally built animation assets %s", coop_assets_ready ? "loaded" : "missing or incomplete");
+        }
+    }
     if (getenv("HOS_MODS")) {
         snprintf(root, sizeof root, "%s", getenv("HOS_MODS"));
     } else {

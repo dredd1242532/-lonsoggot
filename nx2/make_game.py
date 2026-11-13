@@ -2499,6 +2499,9 @@ def main(a=None):
              ([] if launcher else ["--incremental"]), check=False, output=sys.stderr):
         print("the button prompts of other controllers were not made: the game shows its own", flush=True)
         shutil.rmtree(prompts, ignore_errors=True)
+    # Private co-op actors: model and animations from this user's game, loaded only with the animation switch.
+    run(PY + [os.path.join(HERE, "coop_players_assets.py"), "--romfs", romfs,
+              "--out", os.path.join(out, "coop-players", "romfs")], output=sys.stderr)
     icon = os.path.join(ROOT, "assets", "longshot.png")
     if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
         copy_writable(icon, os.path.join(out, "longshot.png"))   # (a second build overwrites the first's)

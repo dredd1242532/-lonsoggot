@@ -87,6 +87,7 @@ typedef struct {
     const char *help;
 } CoopFeatureRule;
 enum { COOP_RULE_ROOM_MODE = 80, COOP_ROOM_OFF = -1, COOP_ROOM_COOP = 0, COOP_ROOM_PVP_SETUP = 1 };
+enum { COOP_RULE_PRESENCE = 99, COOP_PRESENCE_CHILD_BODY = 1 };
 typedef struct {
     uint8_t count;
     uint8_t bytes[3 * COOP_FEATURE_MAX];   // ascending unique u8 ID, little-endian i16 value; ID 0 is reserved
