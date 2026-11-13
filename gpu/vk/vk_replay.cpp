@@ -4824,7 +4824,19 @@ void submit(const uint64_t* handles, int n) {
     submit_q(handles, n, 0);
 }
 void present(const nvn_tex* t, const int crop[4]) {
-    fps_presented();   // (the FPS counter: the game's frame ends here, on its presenting thread)
+    fps_presented();
+    // Limit on the game presentation thread, before any replay/queue locks are taken.
+    using CapClock = std::chrono::steady_clock;
+    static thread_local CapClock::time_point next30{};
+    if(opts.fps_cap == -1 && !std::getenv("HOS_FPS_MAX")) {
+        constexpr auto period = std::chrono::nanoseconds(1000000000LL / 30);
+        auto now = CapClock::now();
+        if(next30 == CapClock::time_point{} || now > next30 + period * 2)next30 = now;
+        if(next30 > now)std::this_thread::sleep_until(next30);
+        next30 += period;
+    } else next30 = {};
+
+   // (the FPS counter: the game's frame ends here, on its presenting thread)
     programs_presented();   // (the programs' life: whether the game is in a load)
     FpsRender fr;
     if (!async_on()) {
@@ -5035,9 +5047,11 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.wait_writebacks_reading = wait_writebacks_reading;
     t.nvn_finish = finish;
     t.nvn_present = present;
+    t.pc_menu_tick = pc_wheel_tick;
     t.nvn_register_texture = register_texture_queued;
     t.nvn_event_signal = event_signal_queued;
     t.option = [](int id) -> int {   // (3: the fixed path's scale in 1/10000, vk_menu.cpp; DLAA: full scale, vk_dlss.cpp)
+        if (id == HOS_OPT_PC_CONTROLS) return opts.pc_controls;
         if (id == 11) return opts.stick_dead_zone;
         if (id == HOS_OPT_CHEAT_HEARTS) return menu_heart_protection();
         if (id == HOS_OPT_CHEAT_FLIGHT) return menu_player_flight();
@@ -5058,7 +5072,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_FOV) return opts.fov;
         if (id == HOS_OPT_SKIP_OPENING) return opts.skip_opening;
         if (id == HOS_OPT_FPS_CAP) return opts.fps_cap;
-        return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
+        return id == 0 ? (opts.fps_cap == -1 && !std::getenv("HOS_FPS_MAX") ? 1 : opts.realtime) : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) : 0;
     };

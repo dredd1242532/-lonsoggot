@@ -13,6 +13,7 @@
    and hands it to the focus manager (*(screen+32)+96, its vtable +48), when the manager takes the player's input.
    HOS_MENU_TRACE=1: the focus changes, the screens and what the mouse does logged. */
 #include "hos.h"
+#include "pc_controls.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -758,8 +759,15 @@ static Seen *screen_seen(uint64_t screen, int64_t now) {
     return free_one;
 }
 
+void hos_pc_menu_focus(uint64_t screen) {
+    AcquireSRWLockExclusive(&seen_lock);
+    for(unsigned i=0;i<sizeof seen/sizeof seen[0];++i)
+        if(seen[i].screen==screen && seen[i].running) { seen[i].focus=1;break; }
+    ReleaseSRWLockExclusive(&seen_lock);
+}
 void hos_oot_menu_tick(Ctx *c, uint64_t screen) {
     if (!screen) return;
+    rx_pc_menu_tick(c,screen);
     if (trace < 0) trace = env_on("HOS_MENU_TRACE");
     const int64_t now = hos_now_ns();
     AcquireSRWLockExclusive(&seen_lock);
@@ -816,5 +824,6 @@ void hos_oot_menu_tick(Ctx *c, uint64_t screen) {
 }
 #else
 void hos_oot_menu_focus(Ctx *c, uint64_t screen, uint64_t pane, uint64_t lr) { (void)c, (void)screen, (void)pane, (void)lr; }
-void hos_oot_menu_tick(Ctx *c, uint64_t screen) { (void)c, (void)screen; }
+void hos_pc_menu_focus(uint64_t screen) { (void)screen; }
+void hos_oot_menu_tick(Ctx *c, uint64_t screen) { rx_pc_menu_tick(c,screen); }
 #endif

@@ -28,11 +28,17 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#ifndef _WIN32
+#ifdef _WIN32
+#include <winver.h>
+#else
 #include <fcntl.h>   // (wide: a folder's descriptor for NGX)
 #endif
 
 #include "dlss_checks.h"
+#include "vk_dump.h"
+#include "shaders/dlss_nr_composite_comp_spv.h"
+#include "shaders/dlss_nr_inputs_comp_spv.h"
+#include "shaders/dlss_nr_hdr_proxy_comp_spv.h"
 #include "upscaler_rows.h"
 #include "vk_menu.h"
 #include "vk_paths.h"
@@ -64,6 +70,33 @@ int env_switch(const char* name) {   // (-1: unset)
 
 // (what is known of DLSS on this device: -1 not yet, else a DlssWhy. Set once the device is made and when NGX answers)
 std::atomic<int> g_why{-1};
+std::atomic<DlssNrStatus> g_nr_status{NR_WAITING};
+std::atomic<dlss_nr::Issue> g_nr_issue{dlss_nr::Issue::none};
+std::atomic<int> g_nr_compare{-1};
+std::atomic<int> nr_stage_choice{0};
+std::atomic<int> nr_scale_choice{100};
+std::atomic<bool> nr_resources{false};
+std::mutex nr_controls_mutex;
+DlssNrControls nr_controls;
+void dlss_nr_publish(const DlssNrControls& controls) {
+    std::lock_guard lock(nr_controls_mutex);
+    nr_controls = controls;
+    nr_controls.stage = std::clamp(controls.stage, 0, 1);
+    nr_controls.scale = std::clamp(controls.scale, 25, 100);
+    nr_scale_choice.store(nr_controls.scale,std::memory_order_relaxed);
+    nr_stage_choice.store(nr_controls.stage, std::memory_order_relaxed);
+}
+int dlss_nr_scale() { return nr_scale_choice.load(std::memory_order_relaxed); }
+int dlss_nr_stage() { return nr_stage_choice.load(std::memory_order_relaxed); }
+DlssNrStatus dlss_nr_status() { return g_nr_status.load(std::memory_order_relaxed); }
+dlss_nr::Issue dlss_nr_issue() { return g_nr_issue.load(std::memory_order_relaxed); }
+void dlss_nr_compare(int value) { g_nr_compare = std::clamp(value, -1, 1); }
+void nr_issue_set(dlss_nr::Issue issue) {
+    if (g_nr_issue.exchange(issue) != issue && issue != dlss_nr::Issue::none)
+        logf("vk: DLSS 5 %s: %s", issue == dlss_nr::Issue::configuration_rejected ? "notice" : "unavailable", dlss_nr::message(issue));
+}
+
+
 
 DlssWhy dlss_why() {
     if (!dlss_built()) return DLSS_NOT_BUILT;
@@ -79,7 +112,49 @@ namespace {
 
 /// NGX and DLSS's feature. The feature is used with the temporal upscaler's lock held; NGX's start (ngx_init) also from the
 /// menu's thread (dlss_probe), under mu
+struct Image : TemporalImage { VmaAllocation memory = nullptr; };
+
 struct State {
+    DlssNrControls nr_controls;
+    TemporalImage color, depth, motion;
+    VkSampler point = VK_NULL_HANDLE;
+    // Experimental DLSS 5 Neural Rendering. It runs before or after the temporal upscaler, always before the HUD.
+    Image nr_output;
+    Image nr_composed;
+    Image nr_hdr_proxy;
+    TemporalImage nr_hdr_original;
+    bool nr_hdr_active = false;
+    bool nr_scaled = false;
+    uint32_t nr_original_w=0,nr_original_h=0;
+    VkDescriptorSetLayout nr_proxy_set = VK_NULL_HANDLE;
+    VkPipelineLayout nr_proxy_layout = VK_NULL_HANDLE;
+    VkPipeline nr_proxy_pipe = VK_NULL_HANDLE;
+    Image nr_depth, nr_motion;
+    VkDescriptorSetLayout nr_inputs_set = VK_NULL_HANDLE;
+    VkPipelineLayout nr_inputs_layout = VK_NULL_HANDLE;
+    VkPipeline nr_inputs = VK_NULL_HANDLE;
+    bool nr_stage_after = false;
+    VkDescriptorSetLayout nr_set = VK_NULL_HANDLE;
+    VkPipelineLayout nr_layout = VK_NULL_HANDLE;
+    VkPipeline nr_comp = VK_NULL_HANDLE;
+    int nr_last_debug = 0;
+    NVSDK_NGX_Parameter* nr_params = nullptr;
+    NVSDK_NGX_Handle* nr_feature = nullptr;
+    uint32_t nr_width = 0, nr_height = 0, nr_render_w = 0, nr_render_h = 0;
+    float nr_jitter[2]{};
+    bool nr_failed = false;
+    uint64_t nr_frames = 0;
+    dlss_nr::Edits nr_edits;
+    uint64_t nr_created_frame = 0;
+    bool nr_requested = false, nr_running = false;
+    bool nr_checked = false;
+    dlss_nr::Issue nr_support = dlss_nr::Issue::none;
+    std::chrono::steady_clock::time_point nr_last_check{}, nr_off_since{};
+    uint64_t nr_last_eval = 0;
+    std::string nr_version;
+    bool nr_rejected = false;
+    dlss_nr::Settings nr_rejected_value;
+
     std::mutex mu;
     bool ngx_tried = false, ngx_ok = false;
     NVSDK_NGX_Parameter* caps = nullptr;
@@ -110,6 +185,313 @@ State& st() {
 NVSDK_NGX_Resource_VK resource(const TemporalImage& im, bool write) {
     return NVSDK_NGX_Create_ImageView_Resource_VK(im.view, im.image, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}, im.format,
                                                   im.width, im.height, write);
+}
+
+void drop_image(Image& im) {
+    if (!im.image) return;
+    const Image old = im;
+    temporal_later([old] {
+        vkDestroyImageView(dev.device, old.view, nullptr);
+        destroy_image(old.image, old.memory);
+    });
+    im = {};
+}
+
+bool make_image(VkCommandBuffer cmd, Image& im, VkFormat format, uint32_t w, uint32_t h, VkImageUsageFlags extra = 0) {
+    if (im.image && im.format == format && im.width == w && im.height == h) return true;
+    drop_image(im);
+    VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ic.imageType = VK_IMAGE_TYPE_2D, ic.format = format, ic.extent = {w, h, 1}, ic.mipLevels = 1, ic.arrayLayers = 1;
+    ic.samples = VK_SAMPLE_COUNT_1_BIT, ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ic.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | extra;
+    if (!create_image(ic, im.image, im.memory)) return im = {}, false;
+    VkImageViewCreateInfo vc{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vc.image = im.image, vc.viewType = VK_IMAGE_VIEW_TYPE_2D, vc.format = format;
+    vc.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (vkCreateImageView(dev.device, &vc, nullptr, &im.view) != VK_SUCCESS) {
+        destroy_image(im.image, im.memory);
+        return im = {}, false;
+    }
+    im.format = format, im.width = w, im.height = h;
+    VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};   // (UNDEFINED -> GENERAL, once)
+    b.srcStageMask = VK_PIPELINE_STAGE_2_NONE, b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = im.image, b.subresourceRange = vc.subresourceRange;
+    VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    di.imageMemoryBarrierCount = 1, di.pImageMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &di);
+    return true;
+}
+
+// Community-documented NGX feature 18. The public SDK names this slot Reserved18; the driver
+// dispatches it to nvngx_dlssnr.dll. All calls go through NGX's normal API, with NVIDIA-signed
+// runtimes; no snippet patching or third-party injection is used. See docs/dlss5-neural-rendering.md.
+dlss_nr::Issue nr_check_locked(bool refresh);
+
+// Local opt-in bridge for the user-supplied patched runtime. The direct provider is NR-only; SR/FG keep the core NGX route.
+#ifdef _WIN32
+HMODULE nr_bridge_module=nullptr;
+using NrInit=unsigned(*)(const wchar_t*,VkInstance,VkPhysicalDevice,VkDevice);
+using NrCreate=NVSDK_NGX_Result(*)(VkCommandBuffer,int,NVSDK_NGX_Parameter*,NVSDK_NGX_Handle**);
+using NrEval=NVSDK_NGX_Result(*)(VkCommandBuffer,const NVSDK_NGX_Handle*,const NVSDK_NGX_Parameter*,void*);
+using NrRelease=NVSDK_NGX_Result(*)(NVSDK_NGX_Handle*);
+NrCreate nr_direct_create=nullptr; NrEval nr_direct_evaluate=nullptr; NrRelease nr_direct_release=nullptr;
+std::filesystem::path game_dir();
+bool nr_direct_start(const std::filesystem::path& runtime) {
+    if(nr_direct_create)return true;
+    std::filesystem::path path=game_dir()/"bin"/"longshot_nr_nvngx.dll";
+    std::error_code path_error;
+    if(!std::filesystem::is_regular_file(path,path_error))path=game_dir()/"longshot_nr_nvngx.dll";
+    if(!nr_bridge_module)nr_bridge_module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if(!nr_bridge_module)return false;
+    const auto init=reinterpret_cast<NrInit>(GetProcAddress(nr_bridge_module,"nr_init"));
+    const auto create=reinterpret_cast<NrCreate>(GetProcAddress(nr_bridge_module,"nr_create"));
+    const auto evaluate=reinterpret_cast<NrEval>(GetProcAddress(nr_bridge_module,"nr_evaluate"));
+    const auto release=reinterpret_cast<NrRelease>(GetProcAddress(nr_bridge_module,"nr_release"));
+    if(!init||!create||!evaluate||!release)return false;
+    const unsigned result=init(runtime.c_str(),dev.instance,dev.physical,dev.device);
+    logf("vk: DLSS 5 local runtime bridge: init %#x",result);
+    if(result!=1)return false;
+    nr_direct_create=create;nr_direct_evaluate=evaluate;nr_direct_release=release;
+    return true;
+}
+#endif
+NVSDK_NGX_Result nr_create_feature(VkCommandBuffer cmd,NVSDK_NGX_Parameter* params,NVSDK_NGX_Handle** feature){
+#ifdef _WIN32
+    if(nr_direct_create){::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);return nr_direct_create(cmd,18,params,feature);}
+#endif
+    ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);
+    return NVSDK_NGX_VULKAN_CreateFeature(cmd,(NVSDK_NGX_Feature)18,params,feature);
+}
+NVSDK_NGX_Result nr_evaluate_feature(VkCommandBuffer cmd,const NVSDK_NGX_Handle* feature,const NVSDK_NGX_Parameter* params){
+#ifdef _WIN32
+    if(nr_direct_evaluate){::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);return nr_direct_evaluate(cmd,feature,params,nullptr);}
+#endif
+    ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);
+    return NVSDK_NGX_VULKAN_EvaluateFeature(cmd,feature,params,nullptr);
+}
+void nr_release_feature(NVSDK_NGX_Handle* feature){
+#ifdef _WIN32
+    if(nr_direct_release){nr_direct_release(feature);return;}
+#endif
+    NVSDK_NGX_VULKAN_ReleaseFeature(feature);
+}
+
+void drop_nr() {
+    nr_resources.store(false,std::memory_order_relaxed);
+    State& s = st();
+    if (s.nr_feature || s.nr_params) {
+        NVSDK_NGX_Handle* feature = s.nr_feature;
+        NVSDK_NGX_Parameter* params = s.nr_params;
+        temporal_later([feature, params] {
+            if (feature) nr_release_feature(feature);
+            if (params) NVSDK_NGX_VULKAN_DestroyParameters(params);
+        });
+        s.nr_feature = nullptr, s.nr_params = nullptr;
+    }
+    drop_image(s.nr_hdr_proxy);
+    s.nr_hdr_original = {};
+    if (s.nr_proxy_pipe) {
+        const auto p=s.nr_proxy_pipe; const auto l=s.nr_proxy_layout; const auto d=s.nr_proxy_set;
+        temporal_later([p,l,d] { vkDestroyPipeline(dev.device,p,nullptr); vkDestroyPipelineLayout(dev.device,l,nullptr); vkDestroyDescriptorSetLayout(dev.device,d,nullptr); });
+        s.nr_proxy_pipe=VK_NULL_HANDLE; s.nr_proxy_layout=VK_NULL_HANDLE; s.nr_proxy_set=VK_NULL_HANDLE;
+    }
+    drop_image(s.nr_output);
+    drop_image(s.nr_composed);
+    drop_image(s.nr_depth); drop_image(s.nr_motion);
+    if (s.nr_inputs) {
+        const auto p=s.nr_inputs; const auto l=s.nr_inputs_layout; const auto d=s.nr_inputs_set;
+        temporal_later([p,l,d] { vkDestroyPipeline(dev.device,p,nullptr); vkDestroyPipelineLayout(dev.device,l,nullptr); vkDestroyDescriptorSetLayout(dev.device,d,nullptr); });
+        s.nr_inputs=VK_NULL_HANDLE; s.nr_inputs_layout=VK_NULL_HANDLE; s.nr_inputs_set=VK_NULL_HANDLE;
+    }
+    if (s.nr_comp || s.nr_layout || s.nr_set || s.point) {
+        const auto pipe = s.nr_comp; const auto layout = s.nr_layout; const auto set = s.nr_set; const auto sampler = s.point;
+        temporal_later([pipe, layout, set, sampler] {
+            if (pipe) vkDestroyPipeline(dev.device, pipe, nullptr);
+            if (layout) vkDestroyPipelineLayout(dev.device, layout, nullptr);
+            if (set) vkDestroyDescriptorSetLayout(dev.device, set, nullptr);
+            if (sampler) vkDestroySampler(dev.device, sampler, nullptr);
+        });
+        s.nr_comp = VK_NULL_HANDLE; s.nr_layout = VK_NULL_HANDLE; s.nr_set = VK_NULL_HANDLE; s.point = VK_NULL_HANDLE;
+    }
+    s.nr_width = s.nr_height = s.nr_render_w = s.nr_render_h = 0;
+    s.nr_running = false;
+    g_nr_status = s.nr_failed ? NR_FAILED : NR_WAITING;
+}
+
+bool neural_render(VkCommandBuffer cmd, uint32_t width, uint32_t height, bool& reset) {
+    State& s = st();
+    const int compare = g_nr_compare.load(std::memory_order_relaxed);
+    const bool requested = compare >= 0 ? compare != 0 : s.nr_controls.requested;
+    if (requested != s.nr_requested) {
+        s.nr_requested = requested;
+        logf("vk: DLSS 5 Neural Rendering: menu %s; evaluated frames %llu", s.nr_requested ? "On" : "Off", (unsigned long long)s.nr_frames);
+        reset |= s.nr_running; // An unavailable request must not disturb SR history.
+    }
+    if (!s.nr_requested) {
+        const auto off_now = std::chrono::steady_clock::now();
+        if (menu_comparing() || s.nr_off_since == std::chrono::steady_clock::time_point{}) s.nr_off_since = off_now;
+        if ((s.nr_feature || s.nr_inputs || s.nr_comp) && !menu_comparing() && off_now - s.nr_off_since >= std::chrono::seconds(2)) {
+            logf("vk: DLSS 5: releasing NR resources after two seconds Off outside Compare");
+            drop_nr();
+        }
+        s.nr_running = false;
+        g_nr_status = NR_WAITING;
+        return false; // Comparison retains the model; ordinary Off releases it after a short grace period.
+    }
+    s.nr_off_since = {};
+    if (s.nr_failed) return false;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - s.nr_last_check >= std::chrono::seconds(1)) {
+        s.nr_last_check = now;
+        if (const auto issue = nr_check_locked(false); issue != dlss_nr::Issue::none) {
+            const bool changed = issue != dlss_nr_issue();
+            reset |= s.nr_running;
+            nr_issue_set(issue);
+            if (s.nr_running || changed || s.nr_feature) drop_nr();
+            return false;
+        }
+        nr_issue_set(s.nr_rejected ? dlss_nr::Issue::configuration_rejected : dlss_nr::Issue::none);
+    }
+    if (dlss_nr::blocking(dlss_nr_issue())) {
+        reset |= s.nr_running;
+        if (s.nr_feature) drop_nr();
+        return false;
+    }
+    const int64_t ms_now = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    const dlss_nr::Settings wanted{s.nr_controls.model.intensity, s.nr_controls.model.structure, s.nr_controls.model.tone, s.nr_controls.model.skin,
+                                  s.nr_controls.model.style, s.nr_controls.model.preset, s.nr_controls.model.mask, s.nr_controls.model.ui};
+    const bool settled = s.nr_edits.observe(wanted, ms_now, menu_nr_editing());
+    if (s.nr_rejected && wanted.clamped() == s.nr_edits.applied) {
+        s.nr_rejected = false;
+        nr_issue_set(dlss_nr::Issue::none);
+    }
+    // A drag never creates features. Even discrete edits are rate-limited and leave 32 evaluations between rebuilds.
+    const bool rebuild = s.nr_feature && settled && s.nr_frames - s.nr_created_frame >= 32 &&
+        (!s.nr_rejected || !(wanted.clamped() == s.nr_rejected_value));
+    const bool pending = !(s.nr_edits.pending == s.nr_edits.applied);
+    const auto refused = [&](const char* operation, NVSDK_NGX_Result result) {
+        logf("vk: DLSS 5 Neural Rendering: %s failed (%#x); the temporal upscaler continues without NR", operation, (unsigned)result);
+        s.nr_failed = true;
+        nr_issue_set(result == NVSDK_NGX_Result_FAIL_OutOfGPUMemory ? dlss_nr::Issue::out_of_memory :
+                     result == NVSDK_NGX_Result_FAIL_FeatureNotSupported ? dlss_nr::Issue::unsupported_gpu : dlss_nr::Issue::render_failed);
+        s.nr_checked = false;
+        reset = true;
+        drop_nr();
+        return false;
+    };
+    const bool dimensions = s.color.width != s.nr_width || s.color.height != s.nr_height;
+    if (!s.nr_feature || dimensions || rebuild) {
+        // Build a candidate without releasing the last working feature. Failure cannot strand a live scene.
+        NVSDK_NGX_Parameter* candidate_params = nullptr;
+        NVSDK_NGX_Handle* candidate = nullptr;
+        NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_GetCapabilityParameters(&candidate_params);
+        const dlss_nr::Settings controls = s.nr_edits.pending;
+        const auto t0 = std::chrono::steady_clock::now();
+        if (NVSDK_NGX_SUCCEED(r) && candidate_params) {
+            const auto ui = [&](const char* key, unsigned value) { NVSDK_NGX_Parameter_SetUI(candidate_params, key, value); };
+            const auto fp = [&](const char* key, float value) { NVSDK_NGX_Parameter_SetF(candidate_params, key, value); };
+            ui("DLSSNR.Enabled", 1), ui("DLSSNR.Width", s.color.width), ui("DLSSNR.Height", s.color.height);
+            ui("CreationNodeMask", 1), ui("VisibilityNodeMask", 1);
+            ui("DLSSNR.Hint.Render.Preset", controls.preset), ui("DLSSNR.Style", controls.style);
+            ui("DLSSNR.UseAutoMask", controls.mask), ui("DLSSNR.UICorrection", controls.ui);
+            fp("DLSSNR.Intensity", controls.intensity/100.0f);
+            fp("DLSSNR.LocalStructureStrength", controls.structure/100.0f);
+            fp("DLSSNR.LocalToneStrength", controls.tone/100.0f);
+            fp("DLSSNR.SkinStructureStrength", controls.skin/100.0f);
+            full_barrier(cmd);
+            // Explicit test-only fault injection; absent in normal runs. Exercises rollback without exhausting VRAM.
+#ifdef LONGSHOT_NR_TESTING
+            static const int reject_intensity = env_switch("RX_VK_NR_TEST_REJECT_INTENSITY");
+#else
+            constexpr int reject_intensity = -1;
+#endif
+            ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);
+            r = reject_intensity >= 0 && controls.intensity == reject_intensity ? NVSDK_NGX_Result_FAIL_InvalidParameter :
+                nr_create_feature(cmd, candidate_params, &candidate);
+            note_work();
+            full_barrier(cmd);
+        }
+        if (NVSDK_NGX_FAILED(r) || !candidate) {
+            temporal_later([candidate, candidate_params] {
+                if (candidate) nr_release_feature(candidate);
+                if (candidate_params) NVSDK_NGX_VULKAN_DestroyParameters(candidate_params);
+            });
+            if (!s.nr_feature || dimensions) return refused("candidate feature creation", r);
+            s.nr_rejected = true, s.nr_rejected_value = controls;
+            s.nr_edits.applied_ms = ms_now; // Rate-limit another distinct request too.
+            nr_issue_set(dlss_nr::Issue::configuration_rejected);
+            reset = true;
+            logf("vk: NR candidate rejected (%#x), intensity %d style %d preset %d; retained last working feature",
+                 (unsigned)r, controls.intensity, controls.style, controls.preset);
+        } else {
+            const auto old = s.nr_feature;
+            const auto old_params = s.nr_params;
+            if (old || old_params) temporal_later([old, old_params] {
+                if (old) NVSDK_NGX_VULKAN_ReleaseFeature(old);
+                if (old_params) NVSDK_NGX_VULKAN_DestroyParameters(old_params);
+            });
+            s.nr_feature = candidate, s.nr_params = candidate_params;
+            nr_resources.store(true,std::memory_order_relaxed);
+            s.nr_width = s.color.width, s.nr_height = s.color.height;
+            s.nr_edits.commit(ms_now);
+            s.nr_created_frame = s.nr_frames;
+            s.nr_rejected = false;
+            nr_issue_set(dlss_nr::Issue::none);
+            reset = true;
+            const double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
+            logf("vk: DLSS 5 Neural Rendering: feature created at %ux%u, intensity %.2f, style %d, preset %d, structure %.2f, tone %.2f, skin %.2f, mask %d, UI %d (%.1f ms CPU)",
+                 width,height,controls.intensity/100.0f,controls.style,controls.preset,controls.structure/100.0f,
+                 controls.tone/100.0f,controls.skin/100.0f,controls.mask,controls.ui,ms);
+        }
+    }
+    const auto ui = [&](const char* key, unsigned value) { NVSDK_NGX_Parameter_SetUI(s.nr_params,key,value); };
+    const auto fp = [&](const char* key, float value) { NVSDK_NGX_Parameter_SetF(s.nr_params,key,value); };
+    if (!make_image(cmd, s.nr_output, VK_FORMAT_R16G16B16A16_SFLOAT, s.nr_width, s.nr_height, VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
+        return refused("output image creation", NVSDK_NGX_Result_Fail);
+    NVSDK_NGX_Resource_VK color = resource(s.color, false), depth = resource(s.depth, false),
+                          motion = resource(s.motion, false), output = resource(s.nr_output, true);
+    NVSDK_NGX_Parameter_SetVoidPointer(s.nr_params, "DLSSNR.Color", &color);
+    NVSDK_NGX_Parameter_SetVoidPointer(s.nr_params, "DLSSNR.Depth", &depth);
+    NVSDK_NGX_Parameter_SetVoidPointer(s.nr_params, "DLSSNR.MVec", &motion);
+    NVSDK_NGX_Parameter_SetVoidPointer(s.nr_params, "DLSSNR.Output", &output);
+    // No verified DLSSNR jitter-offset key exists in the 310.9.16 contract.
+    // Never accumulate history in jittered coordinates without that metadata; SR still gets its real jitter/history.
+    const bool nr_reset = reset || !s.nr_running || s.nr_controls.history || s.nr_jitter[0] != 0 || s.nr_jitter[1] != 0 ||
+        width != s.nr_render_w || height != s.nr_render_h;
+    ui("DLSSNR.DepthInverted", 0), ui("DLSSNR.Reset", nr_reset ? 1 : 0);
+    for (const char* prefix : {"Color", "Output", "Depth", "MVec"}) {
+        char key[64];
+        for (const char* axis : {"BaseX", "BaseY", "Width", "Height"}) {
+            snprintf(key, sizeof key, "DLSSNR.%sSubrect%s", prefix, axis);
+            ui(key, !strcmp(axis, "Width") ? width : !strcmp(axis, "Height") ? height : 0);
+        }
+    }
+    fp("DLSSNR.MVecScaleX", 1.0f), fp("DLSSNR.MVecScaleY", 1.0f);
+    full_barrier(cmd);
+    ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);
+    const NVSDK_NGX_Result r = nr_evaluate_feature(cmd, s.nr_feature, s.nr_params);
+    note_work();
+    full_barrier(cmd);
+    if (NVSDK_NGX_FAILED(r)) return refused("evaluation", r);
+    reset |= !s.nr_running; // Restart SR once when processed color replaces the original again.
+    s.nr_running = true;
+    s.nr_last_eval = texture_frame_no();
+    s.nr_render_w = width, s.nr_render_h = height;
+    g_nr_status = pending && !rebuild && !s.nr_rejected ? NR_PENDING : NR_ACTIVE;
+    if (dump_on()) {   // (opt-in same-frame input/output evidence, through the existing dump machinery)
+        Texture input, result;
+        input.image = s.color.image, input.format = s.color.format, input.width = width, input.height = height;
+        result.image = s.nr_output.image, result.format = s.nr_output.format, result.width = width, result.height = height;
+        dump_image(cmd, &input, 0, 0, "dlss5_input");
+        dump_image(cmd, &result, 0, 0, "dlss5_output");
+    }
+    if (++s.nr_frames == 1 || s.nr_frames % 600 == 0)
+        logf("vk: DLSS 5 Neural Rendering evaluated: %llu frames at %ux%u %s (HUD excluded)",
+             (unsigned long long)s.nr_frames, width, height, s.nr_stage_after ? "after upscaler" : "before upscaler");
+    return true;
 }
 
 void NVSDK_CONV ngx_log(const char* message, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature) {
@@ -223,9 +605,8 @@ std::vector<fs::path> runtime_dirs(const fs::path& game) {
 constexpr const char* kProjectId = "7b2f5d0c-6a1e-4c39-9f84-3d5e2a1b0c96";
 
 /// NGX on this device, once: false when DLSS cannot run here (the reason logged)
-bool ngx_init() {
+bool ngx_init_locked() {
     State& s = st();
-    std::lock_guard lk(s.mu);
     if (s.ngx_tried) return s.ngx_ok;
     s.ngx_tried = true;
     // (the game folder or nothing: an empty one made "ngx" relative, and NGX looked for its runtime in the current folder)
@@ -312,6 +693,177 @@ bool ngx_init() {
     return true;
 }
 
+bool ngx_init() { std::lock_guard lock(st().mu); return ngx_init_locked(); }
+
+// Called with State::mu held. A local NR file is mandatory even if NGX can search other directories.
+dlss_nr::Issue nr_check_locked(bool refresh) {
+    using dlss_nr::Issue;
+    State& s = st();
+    dlss_nr::Requirements requirements;
+#ifdef _WIN32
+    const fs::path runtime = game_dir() / "ngx" / "nvngx_dlssnr.dll";
+    std::error_code ec;
+    const bool exists = fs::exists(runtime, ec);
+    const bool valid_file = exists && fs::is_regular_file(runtime, ec) && fs::file_size(runtime, ec) > 0 && !ec;
+    requirements.runtime = exists;
+    requirements.valid_file = valid_file;
+#elif defined(__linux__)
+    static const bool experimental = env_switch("RX_VK_DLSS_NR_LINUX") > 0;
+    if (const auto issue = dlss_nr::linux_gate(experimental); issue != Issue::none) return issue;
+    // Native NGX owns Linux feature discovery/loading through its existing search paths.
+    // Do not guess a private .so filename, dlopen a PE DLL, or use a compatibility layer.
+    // A successful DLSSNR.Available query below is mandatory before CreateFeature(18).
+#else
+    return Issue::platform;
+#endif
+    requirements.nvidia = dev.props.vendorID == 0x10de;
+    requirements.upscaler = temporal_mode() >= 1 && temporal_mode() <= 5;
+    switch (dlss_why()) {
+    case DLSS_NOT_BUILT: requirements.upstream = Issue::not_built; break;
+    case DLSS_ENV_OFF: requirements.upstream = Issue::disabled; break;
+    case DLSS_NEEDS_RTX: requirements.upstream = Issue::unsupported_gpu; break;
+    case DLSS_NEEDS_DRIVER: requirements.upstream = Issue::needs_driver; break;
+    case DLSS_NO_RUNTIME: requirements.upstream = Issue::missing_dlss_runtime; break;
+    case DLSS_RUNTIME_NOT_ASCII: requirements.upstream = Issue::runtime_path; break;
+    default: break;
+    }
+    if (const Issue issue = dlss_nr::prerequisite(requirements); issue != Issue::none) return issue;
+    // Native HDR uses a bounded proxy and a residual composite after the upscaler.
+    if (refresh || s.nr_version.empty()) {
+        s.nr_version = "unknown";
+#ifdef _WIN32
+        const HMODULE version = LoadLibraryW(L"version.dll");
+        using Size = DWORD(WINAPI*)(LPCWSTR, LPDWORD);
+        using Info = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
+        using Query = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+        const auto size = version ? (Size)GetProcAddress(version, "GetFileVersionInfoSizeW") : nullptr;
+        const auto info = version ? (Info)GetProcAddress(version, "GetFileVersionInfoW") : nullptr;
+        const auto query = version ? (Query)GetProcAddress(version, "VerQueryValueW") : nullptr;
+        DWORD unused = 0, bytes = size ? size(runtime.c_str(), &unused) : 0;
+        if (info && query && bytes && bytes < 16*1024*1024) {
+            std::vector<uint8_t> data(bytes);
+            VS_FIXEDFILEINFO* value = nullptr; UINT length = 0;
+            if (info(runtime.c_str(), 0, bytes, data.data()) && query(data.data(), L"\\", (void**)&value, &length) &&
+                length >= sizeof(VS_FIXEDFILEINFO)) {
+                char text[48];
+                snprintf(text, sizeof text, "%u.%u.%u.%u", HIWORD(value->dwFileVersionMS), LOWORD(value->dwFileVersionMS),
+                         HIWORD(value->dwFileVersionLS), LOWORD(value->dwFileVersionLS));
+                s.nr_version = text;
+            }
+        }
+        if (version) FreeLibrary(version);
+#elif defined(__linux__)
+        s.nr_version = "native NGX (unreported)";
+#endif
+    }
+    if (!dev.device) return Issue::unavailable;
+    if (!ngx_init_locked()) {
+        switch (dlss_why()) {
+        case DLSS_NEEDS_RTX: return Issue::unsupported_gpu;
+        case DLSS_NEEDS_DRIVER: return Issue::needs_driver;
+        case DLSS_NO_RUNTIME: return Issue::missing_dlss_runtime;
+        default: return Issue::unavailable;
+        }
+    }
+#ifdef _WIN32
+    if(env_on("RX_VK_DLSS_NR_DIRECT") && nr_direct_start(runtime)) {s.nr_checked=true;s.nr_support=Issue::none;return Issue::none;}
+#endif
+    if (s.nr_checked && !refresh) return s.nr_support;
+    NVSDK_NGX_Parameter* caps = nullptr;
+    const NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_GetCapabilityParameters(&caps);
+    int available = 0, init = 0, needs_driver = 0;
+    NVSDK_NGX_Result queried = NVSDK_NGX_Result_Fail;
+    if (NVSDK_NGX_SUCCEED(r) && caps) {
+        queried = NVSDK_NGX_Parameter_GetI(caps, "DLSSNR.Available", &available);
+        NVSDK_NGX_Parameter_GetI(caps, "DLSSNR.FeatureInitResult", &init);
+        // Optional key: older NR runtimes need not supply it; missing does not mean a driver failure.
+        NVSDK_NGX_Parameter_GetI(caps, "DLSSNR.NeedsUpdatedDriver", &needs_driver);
+    }
+#if defined(__linux__) && !defined(_WIN32)
+    s.nr_support = dlss_nr::linux_capability(NVSDK_NGX_SUCCEED(queried), available != 0,
+                                      (unsigned)init == NVSDK_NGX_Result_FAIL_FeatureNotSupported, needs_driver != 0);
+#else
+    s.nr_support = dlss_nr::capability(NVSDK_NGX_SUCCEED(queried), available != 0,
+                                      (unsigned)init == NVSDK_NGX_Result_FAIL_FeatureNotSupported, needs_driver != 0);
+#endif
+    s.nr_checked = true;
+    logf("vk: DLSS 5 preflight: available %d, init %#x, query %#x, driver update %d: %s", available, (unsigned)init,
+         (unsigned)queried, needs_driver, s.nr_support == Issue::none ? "ready" : dlss_nr::message(s.nr_support));
+    if (caps) NVSDK_NGX_VULKAN_DestroyParameters(caps);
+    return s.nr_support;
+}
+
+/// One compute pipeline with push descriptors; what it made is destroyed again when a step fails
+bool make_pipeline(const uint32_t* code, size_t size, const VkDescriptorType* types, uint32_t n, uint32_t push,
+                   VkDescriptorSetLayout& set, VkPipelineLayout& layout, VkPipeline& pipe) {
+    const auto undo = [&] {
+        if (layout) vkDestroyPipelineLayout(dev.device, layout, nullptr);
+        if (set) vkDestroyDescriptorSetLayout(dev.device, set, nullptr);
+        set = VK_NULL_HANDLE, layout = VK_NULL_HANDLE, pipe = VK_NULL_HANDLE;
+        return false;
+    };
+    VkDescriptorSetLayoutBinding b[8]{};
+    for (uint32_t i = 0; i < n; i++) b[i] = {i, types[i], 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
+    VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    li.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    li.bindingCount = n, li.pBindings = b;
+    if (vkCreateDescriptorSetLayout(dev.device, &li, nullptr, &set) != VK_SUCCESS) return set = VK_NULL_HANDLE, undo();
+    const VkPushConstantRange pr{VK_SHADER_STAGE_COMPUTE_BIT, 0, push};
+    VkPipelineLayoutCreateInfo pi{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    pi.setLayoutCount = 1, pi.pSetLayouts = &set, pi.pushConstantRangeCount = 1, pi.pPushConstantRanges = &pr;
+    if (vkCreatePipelineLayout(dev.device, &pi, nullptr, &layout) != VK_SUCCESS) return layout = VK_NULL_HANDLE, undo();
+    VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    mi.codeSize = size, mi.pCode = code;
+    VkShaderModule m{};
+    if (vkCreateShaderModule(dev.device, &mi, nullptr, &m) != VK_SUCCESS) return undo();
+    VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr};
+    ci.layout = layout;
+    const bool ok = vkCreateComputePipelines(dev.device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipe) == VK_SUCCESS;
+    vkDestroyShaderModule(dev.device, m, nullptr);
+    return ok || undo();
+}
+
+bool nr_composite(VkCommandBuffer cmd, uint32_t width, uint32_t height, bool neural, const TemporalImage& output) {
+    State& s = st();
+    const VkDescriptorType types[] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
+    if (!s.nr_comp && !make_pipeline(DLSS_NR_COMPOSITE_COMP_SPV, sizeof DLSS_NR_COMPOSITE_COMP_SPV, types, 6, 28,
+                                    s.nr_set, s.nr_layout, s.nr_comp)) return false;
+    if (!s.point) {
+        VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        info.magFilter = info.minFilter = VK_FILTER_NEAREST;
+        info.addressModeU = info.addressModeV = info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        if (vkCreateSampler(dev.device, &info, nullptr, &s.point) != VK_SUCCESS) return false;
+    }
+    const bool use_original=s.nr_hdr_active || s.nr_scaled;
+    const bool separate = !s.nr_controls.debug || output.view == s.color.view;
+    if (separate && !make_image(cmd, s.nr_composed, VK_FORMAT_R16G16B16A16_SFLOAT, use_original ? s.nr_hdr_original.width : s.color.width, use_original ? s.nr_hdr_original.height : s.color.height)) return false;
+    const TemporalImage& target = separate ? static_cast<const TemporalImage&>(s.nr_composed) : output;
+    const uint32_t dw = s.nr_controls.debug ? output.width : use_original ? s.nr_original_w : width, dh = s.nr_controls.debug ? output.height : use_original ? s.nr_original_h : height;
+    struct Push { int32_t w, h, iw, ih; float color; int32_t debug; int32_t hdr; } pc{(int32_t)dw, (int32_t)dh, (int32_t)width, (int32_t)height,
+        std::clamp(s.nr_controls.color, 0, 100) / 100.0f, s.nr_controls.debug, s.nr_hdr_active ? 1 : s.nr_scaled ? 2 : 0};
+    if (!neural && (pc.debug == 2 || pc.debug == 3)) pc.debug = 1;
+    const VkDescriptorImageInfo info[] = {{s.point, s.color.view, VK_IMAGE_LAYOUT_GENERAL},
+        {s.point, neural ? s.nr_output.view : s.color.view, VK_IMAGE_LAYOUT_GENERAL},
+        {s.point, s.depth.view, VK_IMAGE_LAYOUT_GENERAL}, {s.point, s.motion.view, VK_IMAGE_LAYOUT_GENERAL},
+        {VK_NULL_HANDLE, target.view, VK_IMAGE_LAYOUT_GENERAL},
+        {s.point, use_original ? s.nr_hdr_original.view : s.color.view, VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet writes[6]{};
+    for (unsigned i = 0; i < 6; ++i) {
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstBinding = i, writes[i].descriptorCount = 1, writes[i].descriptorType = types[i];
+        writes[i].pImageInfo = &info[i];
+    }
+    full_barrier(cmd);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.nr_comp);
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, s.nr_layout, 0, 6, writes);
+    vkCmdPushConstants(cmd, s.nr_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+    vkCmdDispatch(cmd, (dw + 7) / 8, (dh + 7) / 8, 1);
+    full_barrier(cmd);
+    return true;
+}
+
 /// DLSS's preset: the DLSS model row's, RX_VK_DLSS_PRESET over it (upscaler_rows.h dlss_preset)
 unsigned wanted_preset() {
     static const char* const env = getenv("RX_VK_DLSS_PRESET");
@@ -323,6 +875,7 @@ unsigned wanted_preset() {
 int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh, bool native_aa,
             uint32_t* in_w, uint32_t* in_h, const char** fail) {
     State& s = st();
+    std::lock_guard lock(s.mu);
     // (the DLSS model row's preset once it has held it for half a second at 60 fps: stepping K to L (past M) makes L's
     // feature alone, not M's too, whose video memory NGX would keep for seconds (issue 17). The feature drawing meanwhile
     // keeps its own preset; the first feature, or one made again after being let go, takes the row's at once)
@@ -443,19 +996,44 @@ int prepare(VkCommandBuffer cmd, uint32_t rw, uint32_t rh, uint32_t ow, uint32_t
     return 2;   // (a new history)
 }
 
-bool start() { return ngx_init(); }
+bool start() { std::lock_guard lock(st().mu); return ngx_init_locked(); }
 
-void release();
+void release_locked();
 bool evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
     State& s = st();
-    NVSDK_NGX_Resource_VK color = resource(f.color, false), depth = resource(f.depth, false), mv = resource(f.motion, false),
-                          output = resource(f.output, true);
+    std::lock_guard lock(s.mu);
+    { std::lock_guard controls_lock(nr_controls_mutex); s.nr_controls = nr_controls; }
+    if (!s.feature_hdr && !f.nr_stage && f.nr_scale>=100 && s.nr_stage_after) { drop_nr(); s.nr_stage_after=false; }
+    // Native HDR NR is evaluated only by the independent post-upscaler adapter.
+    if (s.feature_hdr) s.nr_controls.debug = 0;
+    if (!s.feature_hdr && s.nr_hdr_active) { drop_nr(); s.nr_hdr_active=false; }
+    if(!s.feature_hdr && !f.nr_stage && f.nr_scale>=100)s.nr_scaled=false;
+    s.color = f.color, s.depth = f.depth, s.motion = f.motion;
+    s.nr_jitter[0] = f.jitter[0], s.nr_jitter[1] = f.jitter[1];
+    bool reset = f.reset;
+    if (s.nr_last_debug != s.nr_controls.debug) reset = true, s.nr_last_debug = s.nr_controls.debug;
+    const bool buffer_view = s.nr_controls.debug == 1 || s.nr_controls.debug >= 4;
+    const bool neural = !s.feature_hdr && !f.nr_stage && f.nr_scale>=100 && !buffer_view && neural_render(cmd, f.render_w, f.render_h, reset);
+    if (!f.nr_stage && f.nr_scale>=100 && buffer_view) { reset |= s.nr_running; s.nr_running = false; g_nr_status = NR_WAITING; }
+    const bool needs_composite = !s.feature_hdr && !f.nr_stage && f.nr_scale>=100 && (s.nr_controls.debug || (neural && s.nr_controls.color != 100));
+    const bool composed = needs_composite && nr_composite(cmd, f.render_w, f.render_h, neural, f.output);
+    if (needs_composite && !composed) {
+        nr_issue_set(dlss_nr::Issue::render_failed);
+        s.nr_failed = true;
+        reset |= s.nr_running;
+        drop_nr();
+    }
+    // Debug buffers are written directly into the engine output, never processed by NR or SR.
+    if (!f.nr_stage && f.nr_scale>=100 && s.nr_controls.debug && composed) return true;
+    NVSDK_NGX_Resource_VK color = resource(composed ? static_cast<const TemporalImage&>(s.nr_composed) :
+        neural && !needs_composite ? static_cast<const TemporalImage&>(s.nr_output) : f.color, false),
+        depth = resource(f.depth, false), mv = resource(f.motion, false), output = resource(f.output, true);
     NVSDK_NGX_VK_DLSS_Eval_Params ep{};
     ep.Feature.pInColor = &color, ep.Feature.pInOutput = &output;
     ep.pInDepth = &depth, ep.pInMotionVectors = &mv;
-    ep.InJitterOffsetX = f.jitter[0], ep.InJitterOffsetY = f.jitter[1];   // (render pixels, x right and y down)
+    ep.InJitterOffsetX = f.jitter[0], ep.InJitterOffsetY = f.jitter[1];
     ep.InRenderSubrectDimensions = {f.render_w, f.render_h};
-    ep.InReset = f.reset ? 1 : 0;
+    ep.InReset = reset ? 1 : 0;
     ep.InMVScaleX = ep.InMVScaleY = 1.0f;
     // (what the scene's transparent draws changed, when RX_VK_REACTIVE asks for it and there were any (vk_reactive.h):
     // DLSS's mask of where to lean on this frame's colour, as large as the chain's inputs. Without one the parameter stays
@@ -468,7 +1046,7 @@ bool evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
     }
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (NGX records into cmd itself: what this thread recorded through vk_work.h reaches cmd first)
     const NVSDK_NGX_Result r = NGX_VULKAN_EVALUATE_DLSS_EXT(cmd, s.feature, s.params, &ep);
-    note_work();   // (as at its creation: the barrier after it, and the game's next one, are recorded)
+    note_work();
     if (NVSDK_NGX_FAILED(r)) {
         // (the chain tries again at the next frame, kEngine's retry: one that keeps failing says so when its result changes
         // and every 600th time, as the chain's own reason does, not on every frame)
@@ -478,7 +1056,7 @@ bool evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
         // (half a second of them in a row: the feature is let go once, and prepare makes a new one for the next frame)
         if (s.eval_repeats == 30) {
             logf("vk: NVIDIA DLSS: 30 evaluations in a row failed: its feature is made again");
-            release();
+            release_locked(); // evaluate already owns State::mu.
         }
         return false;
     }
@@ -486,14 +1064,19 @@ bool evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
     return true;
 }
 
-void release() {
+void release_locked() {
     State& s = st();
+    drop_nr();
     s.refused = 0;   // (another engine chosen, or the chain idle: DLSS asked again makes its feature again)
     if (!s.feature) return;
     NVSDK_NGX_Handle* old = s.feature;
     temporal_later([old] { NVSDK_NGX_VULKAN_ReleaseFeature(old); });
     s.feature = nullptr;
     s.feature_rw = s.feature_rh = s.feature_ow = s.feature_oh = s.min_rw = s.min_rh = 0;
+}
+void release() {
+    std::lock_guard lock(st().mu);
+    release_locked();
 }
 
 uint64_t memory() {
@@ -511,6 +1094,134 @@ bool hdr() {
 const TemporalEngine kEngine{"NVIDIA DLSS", "DLSS", start, prepare, evaluate, release, memory, hdr, false, true};
 
 }  // namespace
+
+dlss_nr::Issue dlss_nr_check(bool refresh) {
+    State& s = st();
+    std::unique_lock lk(s.mu, std::defer_lock);
+    // Periodic UI probes use the cached issue while the renderer rebuilds NR.
+    if (refresh) lk.lock();
+    else if (!lk.try_lock()) return dlss_nr_issue();
+    if (s.nr_failed && !refresh) return dlss_nr_issue(); // Capability success does not erase an evaluation failure.
+    const auto issue = nr_check_locked(refresh);
+    if (issue == dlss_nr::Issue::none && refresh) s.nr_rejected = false;
+    const auto shown = issue == dlss_nr::Issue::none && s.nr_rejected ? dlss_nr::Issue::configuration_rejected : issue;
+    nr_issue_set(shown);
+    if (issue == dlss_nr::Issue::none && refresh) s.nr_failed = false;
+    return shown;
+}
+void dlss_nr_retry() { dlss_nr_check(true); }
+
+DlssNrStats dlss_nr_stats() {
+    State& s = st();
+    std::lock_guard lk(s.mu);
+    DlssNrStats result;
+    result.width = s.nr_render_w, result.height = s.nr_render_h, result.frames = s.nr_frames;
+    result.active = s.nr_running && s.nr_requested && (temporal_mode() >= 1 && temporal_mode() <= 5) && texture_frame_no()-s.nr_last_eval <= 2 && !dlss_nr::blocking(dlss_nr_issue());
+    snprintf(result.runtime, sizeof result.runtime, "%s", s.nr_version.empty() ? "unknown" : s.nr_version.c_str());
+    return result;
+}
+
+
+void dlss_nr_idle() {
+    if (!nr_resources.load(std::memory_order_relaxed)) return;
+    std::lock_guard lock(st().mu);
+    if (!temporal_wanted() && texture_frame_no()-st().nr_last_eval>120) drop_nr();
+}
+// No SR feature is needed: the chain supplies real inputs, regardless of its selected engine.
+bool dlss_nr_chain(VkCommandBuffer cmd, TemporalFrame& f, bool after, bool native_hdr, TemporalImage& result, bool& debug) {
+    State& s=st();
+    std::lock_guard lock(s.mu);
+    { std::lock_guard controls(nr_controls_mutex); s.nr_controls=nr_controls; }
+    const bool hdr_route = native_hdr;
+    if ((hdr_route ? true : f.nr_stage != 0) != after) return false;
+    const int compare=g_nr_compare.load(std::memory_order_relaxed);
+    const bool requested=compare>=0 ? compare!=0 : s.nr_controls.requested;
+    if (!requested && !s.nr_controls.debug) {
+        if (nr_resources.load(std::memory_order_relaxed)) { bool reset=f.reset; neural_render(cmd,1,1,reset); if (!after) f.reset=reset; }
+        return false; // NR Off performs no preprocessing, allocation or dispatch.
+    }
+    if (s.nr_hdr_active != hdr_route) { drop_nr(); s.nr_hdr_active=hdr_route; f.reset=true; }
+    const auto failed = [&](dlss_nr::Issue issue, const char* operation) {
+        logf("vk: DLSS 5 Neural Rendering: %s failed; original upscaler output retained", operation);
+        s.nr_failed=true;
+        nr_issue_set(issue);
+        drop_nr();
+        if (!after) f.reset=true;
+        return false;
+    };
+    if (s.nr_stage_after != after) { drop_nr(); s.nr_stage_after=after; }
+    if (s.nr_failed) return false;
+    if (dlss_nr::blocking(dlss_nr_issue())) {
+        const auto now=std::chrono::steady_clock::now();
+        if (now-s.nr_last_check>=std::chrono::seconds(1)) { s.nr_last_check=now; nr_issue_set(nr_check_locked(false)); }
+        if (dlss_nr::blocking(dlss_nr_issue())) return false;
+    }
+    nr_resources.store(true,std::memory_order_relaxed);
+    s.color=after ? f.output : f.color;
+    const uint32_t full_w=after ? f.output.width : f.render_w, full_h=after ? f.output.height : f.render_h;
+    const uint32_t scale=std::clamp(f.nr_scale,25,100);
+    const uint32_t w=scale==100 ? full_w : std::min(full_w,std::max(8u,((full_w*scale/100)+7u)&~7u));
+    const uint32_t h=scale==100 ? full_h : std::min(full_h,std::max(8u,((full_h*scale/100)+7u)&~7u));
+    s.nr_scaled=w!=full_w || h!=full_h;
+    s.nr_original_w=full_w;s.nr_original_h=full_h;
+    s.nr_hdr_original=s.color;
+    if (!w || !h || !f.render_w || !f.render_h || !s.color.view || !f.depth.view || !f.motion.view ||
+        w>s.color.width || h>s.color.height || f.render_w>f.depth.width || f.render_h>f.depth.height ||
+        f.render_w>f.motion.width || f.render_h>f.motion.height)
+        return failed(dlss_nr::Issue::render_failed,"invalid chain inputs");
+    s.nr_jitter[0]=after ? 0 : f.jitter[0]; s.nr_jitter[1]=after ? 0 : f.jitter[1];
+    // Real depth/motion are resampled at the pass extent. Motion remains in pixels of that extent.
+    const VkDescriptorType types[]={VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+    if (!s.nr_inputs && !make_pipeline(DLSS_NR_INPUTS_COMP_SPV,sizeof DLSS_NR_INPUTS_COMP_SPV,types,4,20,s.nr_inputs_set,s.nr_inputs_layout,s.nr_inputs)) return failed(dlss_nr::Issue::render_failed,"input pipeline creation");
+    if (!s.point) {
+        VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO}; info.magFilter=info.minFilter=VK_FILTER_NEAREST;
+        info.addressModeU=info.addressModeV=info.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        if (vkCreateSampler(dev.device,&info,nullptr,&s.point)!=VK_SUCCESS) return failed(dlss_nr::Issue::out_of_memory,"input sampler creation");
+    }
+    if (!make_image(cmd,s.nr_depth,VK_FORMAT_R32_SFLOAT,w,h) ||
+        !make_image(cmd,s.nr_motion,VK_FORMAT_R16G16_SFLOAT,w,h)) return failed(dlss_nr::Issue::out_of_memory,"input image creation");
+    const VkDescriptorImageInfo info[]={{s.point,f.depth.view,VK_IMAGE_LAYOUT_GENERAL},{s.point,f.motion.view,VK_IMAGE_LAYOUT_GENERAL},
+        {VK_NULL_HANDLE,s.nr_depth.view,VK_IMAGE_LAYOUT_GENERAL},{VK_NULL_HANDLE,s.nr_motion.view,VK_IMAGE_LAYOUT_GENERAL}};
+    VkWriteDescriptorSet writes[4]{};
+    for (unsigned i=0;i<4;++i) { writes[i]={VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}; writes[i].dstBinding=i; writes[i].descriptorCount=1; writes[i].descriptorType=types[i]; writes[i].pImageInfo=&info[i]; }
+    struct Push { int w,h,sw,sh,flip; } push{int(w),int(h),int(f.render_w),int(f.render_h),f.depth_reversed ? 1 : 0};
+    full_barrier(cmd); vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,s.nr_inputs);
+    vkCmdPushDescriptorSetKHR(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,s.nr_inputs_layout,0,4,writes);
+    vkCmdPushConstants(cmd,s.nr_inputs_layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof push,&push);
+    vkCmdDispatch(cmd,(w+7)/8,(h+7)/8,1); full_barrier(cmd);
+    s.depth=s.nr_depth; s.motion=s.nr_motion;
+    if (hdr_route || s.nr_scaled) {
+        s.nr_hdr_original = s.color;
+        const VkDescriptorType pt[]={VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,VK_DESCRIPTOR_TYPE_STORAGE_IMAGE};
+        if (!s.nr_proxy_pipe && !make_pipeline(DLSS_NR_HDR_PROXY_COMP_SPV,sizeof DLSS_NR_HDR_PROXY_COMP_SPV,pt,2,20,s.nr_proxy_set,s.nr_proxy_layout,s.nr_proxy_pipe)) return failed(dlss_nr::Issue::render_failed,"HDR proxy pipeline");
+        if (!make_image(cmd,s.nr_hdr_proxy,VK_FORMAT_R16G16B16A16_SFLOAT,w,h)) return failed(dlss_nr::Issue::out_of_memory,"HDR proxy image");
+        const VkDescriptorImageInfo pi[]={{s.point,s.nr_hdr_original.view,VK_IMAGE_LAYOUT_GENERAL},{VK_NULL_HANDLE,s.nr_hdr_proxy.view,VK_IMAGE_LAYOUT_GENERAL}};
+        VkWriteDescriptorSet pw[2]{};
+        for(unsigned i=0;i<2;++i) {pw[i]={VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};pw[i].dstBinding=i;pw[i].descriptorCount=1;pw[i].descriptorType=pt[i];pw[i].pImageInfo=&pi[i];}
+        const int extent[]={int(w),int(h),int(full_w),int(full_h),hdr_route ? 1 : 0};
+        full_barrier(cmd);vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,s.nr_proxy_pipe);
+        vkCmdPushDescriptorSetKHR(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,s.nr_proxy_layout,0,2,pw);
+        vkCmdPushConstants(cmd,s.nr_proxy_layout,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof extent,extent);
+        vkCmdDispatch(cmd,(w+7)/8,(h+7)/8,1);full_barrier(cmd);
+        s.color=s.nr_hdr_proxy;
+    }
+    bool reset=f.reset;
+    if (s.nr_controls.debug!=s.nr_last_debug) reset=true, s.nr_last_debug=s.nr_controls.debug;
+    debug=s.nr_controls.debug!=0;
+    const bool buffer_view=s.nr_controls.debug==1 || s.nr_controls.debug>=4;
+    const bool neural=!buffer_view && neural_render(cmd,w,h,reset);
+    if (!after) f.reset=reset;
+    if (s.nr_failed) return false;
+    if (buffer_view) s.nr_running=false;
+    if (debug || (neural && (hdr_route || s.nr_scaled || s.nr_controls.color!=100))) {
+        if (!nr_composite(cmd,w,h,neural,f.output)) return failed(dlss_nr::Issue::render_failed,"compositing");
+        result=debug && !after ? f.output : static_cast<const TemporalImage&>(s.nr_composed);
+        return true;
+    }
+    if (neural) result=s.nr_output;
+    return neural;
+}
 
 bool dlss_built() { return true; }
 const TemporalEngine* dlss_engine() { return &kEngine; }
@@ -542,11 +1253,12 @@ void dlss_device_extensions(std::vector<const char*>& want, const std::vector<Vk
     if (!both) g_why = DLSS_NEEDS_RTX;
 }
 
-void dlss_retry() { st().refused = 0; }
+void dlss_retry() { std::lock_guard lock(st().mu); st().refused = 0; }
 
 void dlss_probe() {
     if (dlss_why() != DLSS_OK || g_why.load(std::memory_order_relaxed) >= 0 || !dev.device) return;
-    ngx_init();
+    std::lock_guard lock(st().mu);
+    ngx_init_locked();
 }
 
 // ---- NVIDIA DLSS Frame Generation through NGX (no Streamline) ----
@@ -1144,7 +1856,13 @@ void dlss_fg_close() {
 
 #else  // (no NGX SDK in this build: DLSS is not there)
 
+void dlss_nr_idle() {}
+bool dlss_nr_chain(VkCommandBuffer, TemporalFrame&, bool, bool, TemporalImage&, bool&) { return false; }
 bool dlss_built() { return false; }
+dlss_nr::Issue dlss_nr_check(bool) { nr_issue_set(dlss_nr::Issue::not_built); return dlss_nr::Issue::not_built; }
+void dlss_nr_retry() { nr_issue_set(dlss_nr::Issue::not_built); }
+DlssNrStats dlss_nr_stats() { return {}; }
+
 const TemporalEngine* dlss_engine() { return nullptr; }
 void dlss_probe() {}
 void dlss_retry() {}

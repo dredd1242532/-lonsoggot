@@ -329,7 +329,7 @@ def check_sources():
         "a prompt says Open for Save my pipeline list"
     cs = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
     tick = menu[menu.find("void menu_tick() {"):]
-    save, catch_all = tick.find("is_share_row(r)) share_pipeline_list()"), tick.find("!r.value && can_bind()) page = 1")
+    save, catch_all = tick.find("is_share_row(r)) share_pipeline_list()"), tick.find("!r.value && can_bind()) {")
     assert 0 < save < catch_all, "Enter on the row would open the Controls page"
     body = menu[menu.find("void share_pipeline_list() {"):]
     body = body[:body.index("\n}\n")]

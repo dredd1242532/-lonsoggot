@@ -52,6 +52,10 @@ int saves = 0;
 void save() { ++saves; }
 void apply_pad_layout(int) {}
 void sync_preset_budgets(int) {}
+bool nr_slider(const int*) { return false; }
+bool nr_prepare_row(Row&, int&, int) { return true; }
+void nr_row_changed(Row&) {}
+const char* nr_ini_key(const int*) { return nullptr; }
 constexpr int kAutoPreset = 6;   /* (the Quality preset Auto (this PC): apply_auto, not reached here) */
 void apply_auto(bool) {}
 void env_release(const int*) {}   // (the environment's hold on a row: none here)

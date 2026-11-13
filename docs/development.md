@@ -450,3 +450,11 @@ through (inputs timed in frames, screenshots, waits for the game's state, the In
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
+
+### PC controls, neural rendering and a 30 FPS cap
+
+`pc_controls=0` keeps stock keyboard actions; `1` enables the separate Keyboard & Mouse action binds, Q/R mouse wheels and keyboard D-pad labels. `key_sprint`, `key_sprint_toggle` and `key_roll` are virtual key codes (0 unbound); their defaults are 0, 84 (T), 5 (Mouse 4). Controller bindings remain independent.
+
+`frame_rate_cap=-1` selects 30 FPS with real-time stepping; 0 through 6 keep their existing meanings. `dlss5=0` is NR off. `dlss5_scale=100` is the full-size neural pass; 25 through 100 in steps of 5 changes only that pass. `dlss5_stage` selects Before (0) or After (1), with Native HDR always After. `dlss5_profile`, `dlss5_style`, `dlss5_intensity`, `dlss5_preset`, `dlss5_structure`, `dlss5_tone`, `dlss5_skin`, `dlss5_color`, `dlss5_mask`, `dlss5_ui`, `dlss5_history`, and `dlss5_compare_top` persist their matching NR menu controls. Debug buffers are session-only.
+
+`RX_VK_DLSS_NR_DIRECT=1` opts into the Windows local bridge for a user-supplied patched NR runtime; default off. It neither downloads nor patches a runtime. The normal NGX path is retained. See [implementation, limitations and credit](pc-controls-neural-rendering.md).

@@ -15,7 +15,8 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 21
+#define MKWVK_API_VERSION 22
+enum { HOS_OPT_PC_CONTROLS = 55 };
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -106,6 +107,13 @@ typedef struct MkwVkSetting {
 } MkwVkSetting;
 
 /* what the executable gives the back end */
+/* Version 22: keyboard-only gameplay actions; the host owns this record for the lifetime of the renderer.
+   Keys are virtual key codes, 0 unbound. State fields are accessed with interlocked operations. */
+typedef struct MkwVkPcControls {
+    int32_t hold_key, roll_key, toggle_key;
+    int32_t toggle_previous, toggle_latch, roll_previous, controller;
+} MkwVkPcControls;
+
 typedef struct MkwVkHost {
     uint32_t version;   /* MKWVK_API_VERSION */
     void (*log)(const char *line);
@@ -198,6 +206,13 @@ typedef struct MkwVkHost {
     /* (version 20, longshot) the main screen's size in pixels, as host/hos_main.c takes its shape at the start (Windows: the
        primary's; Linux: SDL's primary desktop), for the Insert menu's Aspect ratio and Output resolution rows: 0 when not known */
     int (*screen_size)(int *width, int *height);
+    /* Version 22: calls below run on the game's menu/input thread, never the replay thread.
+       game_call preserves the complete guest context; entry is a guest PC, not a native address. */
+    MkwVkPcControls *(*pc_controls)(void);
+    uint64_t (*pc_game_call)(void *ctx, uint64_t entry, const uint64_t args[5]);
+    void (*pc_menu_focus)(uint64_t screen);
+    int (*pc_pad)(uint64_t *buttons, int32_t sticks[4]);
+    int (*pc_mouse)(int *x, int *y, int *w, int *h, uint32_t *pressed, int *scroll);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */
@@ -273,6 +288,8 @@ typedef struct MkwVkRenderer {
        game's thread, before any draw uses it: what the back end kept ready for it can be loaded now (gpu/vk/vk_programs.cpp).
        Its stages' code and control sections are in the game's memory at this call */
     void (*nvn_program_created)(const nvn_prog *p);
+    /* Version 22: observe a menu update on its own game thread. Optional; WebGPU keeps stock selection. */
+    void (*pc_menu_tick)(void *ctx, uint64_t screen);
 } MkwVkRenderer;
 
 /* the DLL's one export: null when Vulkan is not usable (the executable then falls back to WebGPU) */

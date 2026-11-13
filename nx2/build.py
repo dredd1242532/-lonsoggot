@@ -1420,6 +1420,18 @@ def main():
         if LINUX and not check_vk_symbols(vdll):
             return 1
         print("linked %s: %d MB (%.0fs)" % (vdll, os.path.getsize(vdll) >> 20, time.time() - t))
+    if build_vk and NGX_SDK and not LINUX:
+        # The NR runtime checks the caller-module suffix; keep this bridge separate from the renderer.
+        bridge = os.path.join(kit.ROOT,"gpu","vk","nr_bridge","nr_bridge.cpp")
+        dll = os.path.join(out,"longshot_nr_nvngx.dll")
+        command = [toolchain.need(toolchain.find("clang++"))] + target() + toolchain.native_link() + [
+            "-std=c++20","-O2","-fno-optimize-sibling-calls","-shared",bridge,"-o",dll,
+            "-I"+os.path.join(NGX_SDK,"include"),"-I"+os.path.join(vk_headers,"include")]
+        if toolchain.mingw():command += ["-static-libgcc","-static-libstdc++"]
+        result = subprocess.run(command,capture_output=True,text=True)
+        if result.returncode:
+            print("NR bridge build failed: " + result.stderr[-3000:])
+            return 1
     if a.dll:
         dll = os.path.join(out, "longshot_game.dll")   # (+ longshot_game.map: crash offsets -> f_<guest address>)
         t = time.time()

@@ -38,6 +38,7 @@ def main():
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 using VkCommandBuffer = int;
 struct { bool show_fps = false; } opts;
+struct { bool active = false; } nr_comparison;
 std::atomic<bool> open_now{false}, startup_on{false};
 std::string calls;
 bool can_draw = true;
@@ -54,6 +55,8 @@ enum Bound { B_DIRECT };
 void boundary(Bound) { calls += "d"; }
 }
 ui::Ctx ui_ctx(uint32_t, uint32_t) { return {}; }
+bool pc_wheel_active(){return false;} bool pc_dpad_active(){return false;}
+void pc_dpad_draw(ui::Ctx&){} void pc_wheel_draw(ui::Ctx&){}
 void prebake(const ui::Ctx&) { calls += "p"; }
 bool resized = false;
 bool prebake_needed(uint32_t, uint32_t) { return resized; }
@@ -62,8 +65,10 @@ void draw_menu(ui::Ctx&) { calls += "m"; }
 void draw_fps(ui::Ctx&, bool under_banner) { calls += under_banner ? "F" : "f"; }
 ''' + fn + r'''
 int main() {
-    for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true}) for (bool can : {true, false}) {
+    for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true})
+    for (bool compare : {false, true}) for (bool can : {true, false}) {
         opts.show_fps = fps;
+        nr_comparison.active = compare;
         open_now = menu;
         startup_on = startup;
         can_draw = can;
@@ -81,7 +86,7 @@ int main() {
         std::string want = "bp";
         if (startup) want += "s";
         if (menu) want += "m";
-        if (fps && !startup) want += menu ? "F" : "f";
+        if (fps && !startup) want += menu && !compare ? "F" : "f";
         want += "dr";   // (the recorder boundary right before the recording)
         CHECK(calls == want);
     }

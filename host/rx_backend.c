@@ -11,6 +11,8 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#include "pc_controls.h"
+int hos_sdl_pads(uint64_t*,int32_t*);
 
 /* the WebGPU renderer (gpu/render, renamed) */
 int wgr_start(void *hwnd);
@@ -219,6 +221,7 @@ static const MkwVkHost vk_host = {
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
+    hos_pc_controls, hos_pc_game_call, hos_pc_menu_focus, hos_sdl_pads, hos_pc_mouse,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
@@ -545,3 +548,5 @@ void rx_nvn_vmap_changing(uint64_t gpu, uint64_t size) {
 void rx_nvn_pool_created(uint64_t gpu, uint64_t size) {
     if (vk && vk->nvn_pool_created) vk->nvn_pool_created(gpu, size);
 }
+
+void rx_pc_menu_tick(void *ctx,uint64_t screen) { if(vk && vk->pc_menu_tick)vk->pc_menu_tick(ctx,screen); }

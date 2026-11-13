@@ -57,6 +57,7 @@ FIXTURE = r"""
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+void rx_pc_menu_tick(void *c,uint64_t screen) { (void)c;(void)screen; }
 uint8_t *fake_heap;
 static uint64_t heap_top = FAKE_BASE + 0x1000;
 static int64_t clock_ns = 1000000000LL;
@@ -312,6 +313,7 @@ class OotMenuMouseTests(unittest.TestCase):
             (tmp / "gpu" / "vk").mkdir(parents=True)
             # (beside the stand-in hos.h, and its "../gpu/vk/vk_api.h" the stand-in's)
             (tmp / "host" / "hos.h").write_text(HOS_H, encoding="utf-8")
+            (tmp / "host" / "pc_controls.h").write_text("void rx_pc_menu_tick(void*,uint64_t);\n", encoding="utf-8")
             (tmp / "gpu" / "vk" / "vk_api.h").write_text(VK_API_H, encoding="utf-8")
             # (and the real "../gpu/vk/compat/longshot_env.h": env_on, the switches' rule)
             (tmp / "gpu" / "vk" / "compat").mkdir()

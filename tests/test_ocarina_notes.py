@@ -255,7 +255,7 @@ class OcarinaNotesTests(unittest.TestCase):
         menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
         for label in ("Ocarina note (L)", "Ocarina note (R)", "Ocarina note (A)", "Ocarina note (Y)", "Ocarina note (X)"):
             self.assertIn('"%s"' % label, menu, "the Controls page has no row for " + label)
-        self.assertIn("controls[i].button >= HOS_KEY_MOVE_UP && controls[i].button <= HOS_KEY_CAM_RIGHT", menu,
+        self.assertIn("bool keys_only(int i) { return keyboard_page && i < kControls; }", menu,
                       "keys_only does not leave the note rows a gamepad column")
         self.assertIn("i >= HOS_KEY_OC_NOTE_L && i <= HOS_KEY_OC_NOTE_X", menu, "the ini save writes no pad_ line for a note row")
         with tempfile.TemporaryDirectory(prefix="longshot-oc-notes-") as tmp:

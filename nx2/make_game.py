@@ -57,7 +57,7 @@ import disk as _disk
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
-BESIDE = ["longshot", "longshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["longshot.exe", "longshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+BESIDE = ["longshot", "longshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["longshot.exe", "longshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll", "longshot_nr_nvngx.dll"]
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -2504,6 +2504,9 @@ def main(a=None):
         print("the shader list was not made: the game will compile its shaders as it plays", flush=True)
     else:
         note_shader_list(work, romfs, os.path.join(out, "longshot_shaders.bin"))
+    # Item artwork stays on this PC: decode the player's own romfs, never bundle game textures.
+    if run(PY + [os.path.join(HERE,"pc_item_icons.py"),"--romfs",romfs,"--out",os.path.join(out,"pc-ui","icons")],check=False,output=sys.stderr):
+        print("PC item icons were not made; wheel text remains available",flush=True)
     # (longshot) the button prompts of other controllers (host/prompts.c): the game's icon font redrawn per controller, with fontTools.
     # Without it the game shows its own icons
     prompts = os.path.join(out, "prompts")

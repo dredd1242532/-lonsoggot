@@ -80,6 +80,7 @@ Row rows[] = {
 };
 std::string ini_file;
 std::string ini_path() { return ini_file; }
+int sprint_key=16, roll_key=5, sprint_toggle_key=84;
 std::string mic_want;
 uint64_t auto_for = 0, auto_tuned = 0;   // (the Quality preset Auto (this PC)'s fingerprints, which save() writes)
 struct { int steps = 0; bool went_down = false; } auto_tuning;   // (and its tuning's steps)
@@ -88,8 +89,13 @@ constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;   /* (the note rows:
 const char* const bind_names[1] = {"a"};
 struct Host { int (*binding)(int, int, int); } host_value{nullptr}, *host = &host_value;
 bool can_bind() { return false; }
+const char* nr_ini_key(const int*) { return nullptr; }
 /* INI_KEY */
+int nr_persisted_value(const int*);
 /* SAVE */
+int nr_persisted_value(const int* v) { return saved_value(const_cast<int*>(v)); }
+void nr_environment(bool) {}
+bool has_nr=false;
 void env_part() {
 /* ENV */
 }
