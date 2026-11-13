@@ -58,6 +58,9 @@ static long long r_asked_ms;   /* (the clock's time Restart was pressed, in ms s
 static float r_cool0, r_pos[3];
 static char r_note[160];
 static int64_t r_note_ns;
+static const int64_t *player_seen_clock;
+
+void hos_oot_restart_watch_player(const int64_t *last_seen) { player_seen_clock = last_seen; }
 
 static long long unix_ms(void) {
     struct timespec ts;
@@ -177,6 +180,14 @@ static void saved(int64_t now) {
 
 void hos_oot_restart_input(void) {
     if (__atomic_exchange_n(&r_busy, 1, __ATOMIC_ACQUIRE)) return;   /* (another thread's read is at it) */
+    unsigned work = __atomic_load_n(&hos_oot_menu_work, __ATOMIC_RELAXED);
+    if (player_seen_clock) {
+        const int64_t last = __atomic_load_n(player_seen_clock, __ATOMIC_RELAXED);
+        if (last) {
+            r_seen_ever = 1;
+            if (last > get(&r_seen_ns)) put(&r_seen_ns, last);
+        }
+    }
     const int64_t now = hos_now_ns();
     const int seen = hos_oot_player_seen();
     if (seen) r_seen_ever = 1, put(&r_seen_ns, now);
@@ -213,6 +224,14 @@ void hos_oot_restart_input(void) {
         if (file && commit >= file && now - get(&r_fs_ns) >= (int64_t)kQuietMs * 1000000) saved(now);
         else if (!file && now - taken > (int64_t)kWriteMs * 1000000) refuse(R_SAVING, "the game took the request but wrote no save in 10 s");
         else if (now - taken > (int64_t)kSaveMs * 1000000) refuse(R_SAVING, "the game's save did not finish in 30 s");
+    }
+    if (work && !hos_oot_autoload_pending() && !hos_oot_restart_continuing()) {
+        const int done = state();
+        if (done == R_OFF || done == R_GONE) {
+            if (done == R_GONE) __atomic_store_n(&r_state, R_OFF, __ATOMIC_RELEASE);
+            /* A request arriving during this poll increments the word and must keep the next poll awake. */
+            __atomic_compare_exchange_n(&hos_oot_menu_work, &work, 0, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+        }
     }
     __atomic_store_n(&r_busy, 0, __ATOMIC_RELEASE);
 }
@@ -274,4 +293,5 @@ void hos_oot_restart_reset(void) {
     r_asked_ns = r_seen_ns = r_taken_ns = r_file_ns = r_commit_ns = r_fs_ns = r_cool_ns = r_note_ns = 0;
     r_asked_ms = 0, r_cool0 = 0, r_note[0] = 0;
     c_state = -1, c_asked_ms = 0;
+    player_seen_clock = NULL;
 }

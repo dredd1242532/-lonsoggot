@@ -11,6 +11,7 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#include "oot_autoload.h"
 
 /* the WebGPU renderer (gpu/render, renamed) */
 int wgr_start(void *hwnd);
@@ -378,6 +379,7 @@ int rx_start(void *hwnd) {
         const MkwVkRenderer *r = load_vulkan(dll);
         if (r && r->start(hwnd)) {
             vk = r;
+            hos_oot_autoload_start();
             hos_log("rx: renderer: Vulkan (%s)", dll);
             flush_early();
             return 1;
@@ -385,6 +387,7 @@ int rx_start(void *hwnd) {
         if (r) hos_log("rx: the Vulkan back end could not start on the window: WebGPU");
     }
     const int ok = wgr_start(hwnd);
+    if (ok) hos_oot_autoload_start();
     flush_early();
     return ok;
 }

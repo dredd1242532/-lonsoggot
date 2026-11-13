@@ -484,6 +484,11 @@ static LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     case WM_ERASEBKGND:
         return renderer ? 1 : DefWindowProcA(w, msg, wp, lp);
+    case WM_APP + 13: {   /* Restart in place: wake the save worker, without closing the window */
+        void hos_oot_menu_work_arm(void);
+        hos_oot_menu_work_arm();
+        return 0;
+    }
     case WM_APP + 9:   /* (the Insert menu's Restart now: closed as by the player, then started again: host/hos_relaunch.c) */
         hos_relaunch_ask();
         /* fall through */

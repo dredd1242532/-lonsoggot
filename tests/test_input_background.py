@@ -83,6 +83,7 @@ def main():
 volatile int hos_oot_live_action;
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }
 void rx_option_set(int id, int value) { (void)id; (void)value; CHECK(!"unexpected cheat option change"); }
+unsigned hos_oot_menu_work;
 void hos_oot_autoload_input(void) {}
 void hos_oot_restart_input(void) {}
 int hos_oot_autoload_alone(void) { return 0; }

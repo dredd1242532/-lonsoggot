@@ -174,10 +174,27 @@ static char save_path[MAX_PATH];
 
 static int restarted;   /* (this start is a restart in place's, host/oot_restart.c: the presses whatever the row says) */
 
+unsigned hos_oot_menu_work;
+
+void hos_oot_menu_work_arm(void) {
+    unsigned before = __atomic_load_n(&hos_oot_menu_work, __ATOMIC_RELAXED);
+    while (!__atomic_compare_exchange_n(&hos_oot_menu_work, &before, before + 1 ? before + 1 : 1, 0,
+                                        __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {}
+}
+
+void hos_oot_autoload_start(void) {
+    if (started) return;
+    if (hos_oot_restart_continue() || rx_option(HOS_OPT_SKIP_TITLE, 0)) hos_oot_menu_work_arm();
+    else started = 1;
+}
+
+int hos_oot_autoload_pending(void) { return !started || active; }
+
 void hos_oot_autoload_reset(void) {
     started = active = restarted = 0;
     start_ms = next_ms = 0;
     save_path[0] = 0;
+    hos_oot_menu_work = 0;
 }
 
 /* A restart in place's start, until Link is back: the title gets the host's presses alone (host/nn_hid.c). A stick nudged or

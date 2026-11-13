@@ -126,6 +126,7 @@ static void mouse_capture(int on){mouse_captured=on;}
 [[maybe_unused]] static void hos_sdl_mouse_position(float* a, float* b) { ui_only(); *a = x, *b = y; }
 static int esc_had_capture, captured_before_menu;
 static int fullscreen_asked=-1, menu_asked=-1, restart_asked, close_asked;
+static void hos_oot_menu_work_arm() { CHECK(!"unexpected restart request"); }
 #ifndef WM_APP
 constexpr uint32_t WM_APP=0x8000;
 #endif

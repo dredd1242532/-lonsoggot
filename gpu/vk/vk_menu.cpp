@@ -5252,6 +5252,7 @@ void menu_tick() {
             if (tab_row_to_global(TAB_GAMEPLAY, k) == kRestartRow) tab_selected[TAB_GAMEPLAY] = k;
         pending = &rows[kRestartRow];
         place_word = 0, place_at = prof_now(), place_state = 1;
+        PostMessageA(app_window(), WM_APP + 13, 0, 0);   // wake the host only after publishing the save request
     };
     if (const int ps = place_state.load()) {
         if (ps == 3) {   // (the game has saved, or no game is in play: on with the restart)

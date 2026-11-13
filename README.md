@@ -522,6 +522,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   and that save loaded. The save holds where you stand and your progress, not the enemies around you or anything in
   flight. Where the game takes no save, Restart says so and asks once more before it goes to the title. Off: Restart
   always goes to the title.
+  When no restart or automatic load is pending, the input and player-update hooks only check a shared demand flag;
+  they do not read restart clocks or poll the restart state.
 - **GPU device** matters on a PC with more than one graphics card (a laptop's integrated and dedicated GPUs, or a
   second card for Lossless Scaling). Auto prefers a dedicated one, and only cards with Vulkan 1.3 are listed.
   `longshot_log.txt` lists every card as `vk: device <n>`; `RX_VK_DEVICE=<n>` chooses one for a single run and wins

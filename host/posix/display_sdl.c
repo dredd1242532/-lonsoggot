@@ -207,7 +207,7 @@ static volatile int restart_asked;           /* (the Insert menu's Restart now: 
 static volatile int close_asked;             /* (the Insert menu's Quit: likewise, without the relaunch) */
 
 /* PostMessageA to the window (host/posix/win32_posix.c): WM_APP + 7, the Insert menu's Fullscreen row, WM_APP + 8 the
-   menu opened or closed, WM_APP + 9 its Restart now, WM_CLOSE its Quit (host/display.c's) */
+   menu opened or closed, WM_APP + 9 its Restart now, WM_APP + 13 its save-before-restart request, WM_CLOSE its Quit */
 __attribute__((visibility("default"))) void hos_posix_post_message(uint32_t msg, uintptr_t wp, intptr_t lp) {
     if (msg == WM_APP + 7) __atomic_store_n(&fullscreen_asked, wp ? 1 : 0, __ATOMIC_RELEASE);
     if (msg == WM_APP + 8) {
@@ -215,6 +215,10 @@ __attribute__((visibility("default"))) void hos_posix_post_message(uint32_t msg,
         __atomic_store_n(&menu_asked, !wp ? 0 : 1 + (lp != 0), __ATOMIC_RELEASE);
     }
     if (msg == WM_APP + 9) __atomic_store_n(&restart_asked, 1, __ATOMIC_RELEASE);
+    if (msg == WM_APP + 13) {
+        void hos_oot_menu_work_arm(void);
+        hos_oot_menu_work_arm();
+    }
     if (msg == WM_CLOSE) __atomic_store_n(&close_asked, 1, __ATOMIC_RELEASE);
 }
 /* the menu opened: the mouse let go (its capture kept for later); closed: the capture back, if the window still has the focus */

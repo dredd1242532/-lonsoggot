@@ -16,6 +16,7 @@
 #include "game_layout.h"
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "oot_restart.h"   /* (the Insert menu's Restart, in place) */
+#include "oot_autoload.h"   /* (the demand flag shared by restart and title loading) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include <math.h>
@@ -1356,12 +1357,14 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     __atomic_store_n(&flight_player_seen, now, __ATOMIC_RELAXED);
     if (marked_actor != actor || now - last_player_tick > 2000000000LL) marked_controller = 0;
     last_player_tick = now;
-    if (hos_oot_restart_continuing()) {   /* (started again by a restart in place: Link is back, and where) */
-        float pos[3];
-        for (unsigned i = 0; i < 3; i++) pos[i] = oot_load_float(c, actor + 796 + i * 4);
-        hos_oot_restart_player(pos);
+    if (__atomic_load_n(&hos_oot_menu_work, __ATOMIC_ACQUIRE)) {
+        if (hos_oot_restart_continuing()) {   /* (started again by a restart in place: Link is back, and where) */
+            float pos[3];
+            for (unsigned i = 0; i < 3; i++) pos[i] = oot_load_float(c, actor + 796 + i * 4);
+            hos_oot_restart_player(pos);
+        }
+        if (hos_oot_restart_asking()) oot_restart_request(c, actor);
     }
-    if (hos_oot_restart_asking()) oot_restart_request(c, actor);
     int action = rx_option(HOS_OPT_CHEAT_ACTION, 0);
     if (!action) action = __atomic_exchange_n(&hos_oot_live_action, 0, __ATOMIC_RELAXED);
     int bridge_ticket = 0;   /* (the control bridge's teleport or age switch, host/control.c: what came of it is kept for its reply) */
@@ -1966,6 +1969,9 @@ static int game_main(int argc, char **argv) {
     if (env_on("HOS_TRACE")) hos_trace = 1;
     if (!hos_user_dir) hos_user_dir = "user";
     CreateDirectoryA(hos_user_dir, NULL);
+#if defined(_WIN32) || defined(__linux__)
+    hos_oot_restart_watch_player(&flight_player_seen);
+#endif
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;

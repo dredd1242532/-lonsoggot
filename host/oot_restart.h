@@ -13,8 +13,11 @@
 enum { HOS_RESTART_ANS_NONE, HOS_RESTART_ANS_EVENT, HOS_RESTART_ANS_REFUSED, HOS_RESTART_ANS_COOLDOWN, HOS_RESTART_ANS_TAKEN };
 
 /* ---- the process that is asked to restart ---- */
-/* At each controller read (nn_hid.c, read_input): the menu's request taken up, its time limits, the restart once the game
-   has saved. */
+/* The existing player-update clock, installed once before the game runs. A request can distinguish a loading screen
+   after play from the first title without tracking the player on the idle input path. */
+void hos_oot_restart_watch_player(const int64_t *last_seen);
+/* At each controller read while demand is armed (nn_hid.c): the menu's request taken up, its time limits, the restart
+   once the game has saved. */
 void hos_oot_restart_input(void);
 /* Link's update asks the game while this is 1 (hos_main.c), says so just before it makes the request, and gives the game's
    answer with the pause's remaining updates and where Link stands. */

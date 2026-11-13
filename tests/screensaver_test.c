@@ -93,6 +93,7 @@ static void *SetCursor(void *cursor) { (void)cursor; unexpected(); return NULL; 
 static void rx_resize(unsigned width, unsigned height) { (void)width; (void)height; unexpected(); }
 static BOOL ValidateRect(HWND w, const RECT *rect) { (void)w; (void)rect; unexpected(); return FALSE; }
 static void hos_relaunch_ask(void) { unexpected(); }         /* (host/hos_relaunch.c: WM_APP + 9 and WM_CLOSE end the process) */
+static void hos_oot_menu_work_arm(void) { unexpected(); }   /* (WM_APP + 13 is not a screensaver message) */
 static void hos_window_closed_exit(void) { unexpected(); }
 static void rx_close_asked(void) { unexpected(); }   /* (host/rx_backend.c: WM_CLOSE, not one of the checked messages) */
 void hos_vk_note_key_press(unsigned key) { (void)key; }   /* (host/rx_backend.c: the menu notes key presses; nothing here) */

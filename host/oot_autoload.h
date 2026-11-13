@@ -3,6 +3,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Input and player-update hooks read this one demand word. Only a request or an armed title/resume sequence wakes them.
+   Read with __atomic_load_n(..., __ATOMIC_ACQUIRE); nonzero is active. Waking increments it so an older poll cannot
+   clear a newer request. The input worker clears it after both jobs finish. */
+extern unsigned hos_oot_menu_work;
+void hos_oot_menu_work_arm(void);
+/* Once the renderer's startup options are available, before controller reads need to load a save. */
+void hos_oot_autoload_start(void);
+int hos_oot_autoload_pending(void);
+
 /* The newest progress.sav under user_dir/save/<profile>/slot_*, as its mtime in seconds since the epoch (0: none). path,
    when given, is set to the file found. */
 uint64_t hos_oot_newest_save(const char *user_dir, char *path, size_t size);
