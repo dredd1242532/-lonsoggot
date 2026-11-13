@@ -125,13 +125,15 @@ this is a separate limit, not advice to turn security features off.
 #### Coverage and order
 
 Longshot's `.forgejo/workflows/build-windows.yml` builds and optionally signs on **Linux**. Its Authenticode
-step uses a pinned `osslsigncode` and a PKCS#11 token/service key. It signs two project executables, not every `.exe`:
+step uses a pinned `osslsigncode` and a PKCS#11 token/service key. It signs the project's own files, not every `.exe`
+or `.dll`:
 
 | Distributed Windows file | Where it comes from | This step |
 |---|---|---|
 | `LongshotBuilder.exe` at the zip's top | the `LongshotBuilder-Setup.exe` step compiles `builder/setup/setup.c` with the pinned llvm-mingw; `builder_package.py zip` copies it under this name | signs the setup before the copy |
 | `LongshotBuilder/LongshotBuilder-Setup.exe` | `builder_package.py package` copies the same setup; `make_game.py` later copies it unchanged as the game folder's launch wrapper | the same signed bytes |
 | `LongshotBuilder/LongshotBuilder.exe` | the **Longshot Builder** step's `dotnet publish` of the command-line .NET project | signs its final apphost |
+| `LongshotBuilder/LongshotBuilder.dll` | the same `dotnet publish`: the builder's own code, which the apphost loads (`PublishSingleFile` is false) | signs it in the same call |
 | .NET runtime executables/libraries in the publish folder; executables in downloaded `tools.lock` archives | Microsoft and the listed upstream tools | untouched; not represented as Longshot's code |
 | `LongshotLauncher-<v>-windows-x64-setup.exe` and `LongshotLauncher.exe` in the portable zip | the **other repository's** `release.yml` runs `scripts/package.sh`: `dotnet publish` for `win-x64`, then two copies of that single-file program | not changed by Longshot's step; needs its own integration |
 
@@ -155,11 +157,14 @@ To enable the **PKCS#11 token/service route**:
 1. Obtain a Linux-compatible OpenSSL 3 PKCS#11 provider and the chosen token/service's PKCS#11 module.
    Provision reviewed, version-pinned libraries and access to the non-exportable private key on a **release-only
    Linux** runner labelled `linux-signing`, otherwise equipped like `ubuntu-24.04`. The package is built and signed
-   on that same runner. No provider SDK is downloaded or licensed by this workflow.
+   on that same runner, in the same job: a known limitation, see RELEASING.md, *Optional Windows Authenticode*.
+   No provider SDK is downloaded or licensed by this workflow.
 2. Set repository Actions variables `AUTHENTICODE_PKCS11_PROVIDER` and `AUTHENTICODE_PKCS11_MODULE` to those
    libraries' absolute paths inside the signing job. Confirm their compatibility with the signer's OpenSSL before
    deployment. A cloud service needs a compatible PKCS#11 module; this is not an Azure Artifact Signing or SignPath
-   API integration. Choose a different integration if the service does not offer this interface.
+   API integration. Choose a different integration if the service does not offer this interface. Set the variable
+   `AUTHENTICODE_ROOT_PEM` to the public root certificate of the CA that issued the code-signing certificate (PEM;
+   its intermediates may follow): see *Trust* below.
 3. Set repository secrets `AUTHENTICODE_CERTIFICATE_PEM` (public code-signing leaf certificate first, followed by
    intermediate certificates), `AUTHENTICODE_KEY_URI` (a `pkcs11:` key selector without credentials) and, if needed,
    `AUTHENTICODE_TOKEN_PIN`. The PIN goes to the signer on stdin, never in command arguments or logs. Private PEM/PFX
@@ -167,6 +172,14 @@ To enable the **PKCS#11 token/service route**:
 4. Do not give the identity or provider authorization to PR jobs. **A runner label is not an access control:** runner
    admission and the service/token's authorization or approval policy must independently deny untrusted workloads,
    even if a PR asks for that label. Use a harmless canary to prove this before provisioning any real identity.
+   The canary also settles an open question: whether Forgejo evaluates `inputs.*` in a called workflow's `runs-on`
+   (`build-windows.yml`'s `package` job picks `linux-signing` that way). If it does not, the job lands on
+   `ubuntu-24.04`; the **Signing runner** step (`authenticode.py runner`, which holds no secret) then stops it with
+   `not on the signing runner` before the step that holds the PIN runs. A canary run with a dummy certificate and
+   provider paths should show `signing runner: the PKCS#11 provider and module are present` on `linux-signing`.
+   That step keeps the PIN from being *used* elsewhere; it cannot stop the runner that took the job from
+   *receiving* the secrets passed to it, so the token or service's own authorization must be bound to the signing
+   machine.
 5. Release from this repository's main/tag push as usual. `release.yml` passes only the named secrets, not
    `secrets: inherit`. Workflow guards and the Python decision require the build ref to equal the triggering commit.
    PRs, `pull_request_target`, fork pushes, other branches and manual build dispatches never sign.
@@ -178,17 +191,30 @@ players' `tools.lock`. Its upstream [release](https://github.com/mtrojnar/osslsi
 [PKCS#11 usage](https://github.com/mtrojnar/osslsigncode/blob/2.15/README.md#using-the-pkcs11-provider-with-osslsigncode-openssl-3x-only)
 describe the tool and provider interface.
 
-The sign command requests SHA-256 and an **RFC 3161** timestamp from `https://timestamp.digicert.com`.
-The verify command checks the embedded digest, the selected leaf fingerprint, and the signer and timestamp
-certificate chains against the Linux runner's `/etc/ssl/certs/ca-certificates.crt`; a verified timestamp result is
-required, not merely an exit of zero (an untimestamped signature can otherwise verify). Neither trust nor revocation
-checks are disabled. Child output is captured and errors are fixed messages, since provider diagnostics can contain
-credentials. Both EXEs must verify before either original is replaced or packaging starts.
+The sign command requests SHA-256 and an **RFC 3161** timestamp, from `https://timestamp.digicert.com` and then,
+if that fails, `http://timestamp.sectigo.com` (`TIMESTAMPS` in `scripts/authenticode.py`; osslsigncode tries each
+`-ts` in turn). A timestamp is signed by its authority, so plain HTTP is enough; when every server is down the sign
+fails and nothing is published. The verify command checks the embedded digest, the selected leaf fingerprint, the
+signer chain and the timestamp chain; a verified timestamp result is required, not merely an exit of zero (an
+untimestamped signature can otherwise verify). Neither trust nor revocation checks are disabled. Child output is
+captured and errors are fixed messages, since provider diagnostics can contain credentials. Every signed file must
+verify before any original is replaced or packaging starts.
+
+**Trust.** The signer chain is checked against `AUTHENTICODE_ROOT_PEM`, a repository variable that maintainers set to
+the issuing CA's public code-signing root (for example Sectigo Public Code Signing Root R46, GlobalSign Code Signing
+Root R45, an SSL.com code-signing root or Microsoft Identity Verification Root for Artifact Signing). When it is
+unset, the runner's `/etc/ssl/certs/ca-certificates.crt` is used instead, and the log says which: that bundle is
+Mozilla's TLS roots only, so a certificate chaining to a code-signing-only root fails verification there (safely);
+DigiCert Trusted Root G4 is one that would pass. A set but malformed value stops the job rather than falling back.
+The timestamp chains and the timestamp servers' HTTPS are always checked against the system bundle (DigiCert's and
+Sectigo's timestamp roots are in it). Take the root from the CA's own repository, compare its fingerprint with the
+one the CA publishes, and replace the variable when the CA changes.
 
 **Check the package too.** Main's existing PE/resource/runtime checks and Wine starts remain unchanged.
 For a configured signing release, `scripts/check_windows_files.py --authenticode --signer-cache <folder> <zip>`
-also verifies all three project EXE paths from the finished zip, before artifact upload and release checksums.
-That step receives only the public certificate, never the token PIN or key selector. Missing/duplicate EXE paths,
+also verifies all four signed project file paths from the finished zip (the setup's two copies, the apphost and
+`LongshotBuilder.dll`), before artifact upload and release checksums, against the same trust as above.
+That step receives only the public certificate and root, never the token PIN or key selector. Missing/duplicate paths,
 wrong signer, changed code, invalid trust or timestamp failures stop publication.
 
 Linux/OpenSSL trust is **not** Windows trust or SmartScreen reputation: a CA accepted on one platform need not be
@@ -211,7 +237,8 @@ python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode 
 ```
 
 It exports `unsigned-standin.exe`, `signed-setup-standin.exe`, `signed-apphost-standin.exe`,
-`standin-package.zip` (the same three EXE paths as the release), `signer.pem`, `timestamp.pem` and `SHA256SUMS`.
+`signed-library-standin.dll` (the same authored PE under the library's name), `standin-package.zip` (the same four
+signed paths as the release), `signer.pem`, `timestamp.pem` and `SHA256SUMS`.
 The zip is the verified positive fixture, not the corrupted copy used by the negative test. No key is exported.
 These are **tiny authored stand-ins, not working Builder binaries**. The public certificates are self-signed,
 test-only and short-lived; Windows should not trust their roots. Do not install them as trusted roots or turn off

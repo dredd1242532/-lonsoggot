@@ -66,6 +66,7 @@ def export_bundle(folder, out):
     names = (("unsigned-standin.exe", "unsigned.exe"),
              ("signed-setup-standin.exe", "LongshotBuilder-Setup.exe"),
              ("signed-apphost-standin.exe", "LongshotBuilder.exe"),
+             ("signed-library-standin.dll", "LongshotBuilder.dll"),
              ("standin-package.zip", "builder.zip"),
              ("signer.pem", "code.pem"), ("timestamp.pem", "TSA.pem"))
     files = {dest: (folder / source).read_bytes() for dest, source in names}
@@ -160,19 +161,21 @@ def main():
         tsa_key, tsa_cert = certificate(folder, "TSA", "timeStamping")
         trust = folder / "test-trust.pem"
         trust.write_bytes(cert.read_bytes() + tsa_cert.read_bytes())
-        setup, builder = folder / "LongshotBuilder-Setup.exe", folder / "LongshotBuilder.exe"
-        shutil.copyfile(unsigned, setup)
-        shutil.copyfile(unsigned, builder)
+        # (the library stand-in is the same authored PE under the builder library's name: Authenticode signs a DLL as an EXE)
+        setup, builder, library = folder / "LongshotBuilder-Setup.exe", folder / "LongshotBuilder.exe", folder / "LongshotBuilder.dll"
+        for file in (setup, builder, library):
+            shutil.copyfile(unsigned, file)
         leaf = auth.fingerprint(cert.read_text())
         with timestamp_server(folder, tsa_key, tsa_cert) as tsa:
             # The real sign_files/run_tool/verify_file path; only key access and trust/TSA are stand-ins.
-            auth.sign_files([setup, builder], tool, cert, ["-key", str(key)], ca_file=trust, timestamp=tsa)
-        print("stand-in: production signing path verifies two embedded SHA256 signatures and loopback RFC 3161 timestamps")
-        print("stand-in: unsigned %d bytes; signed setup %d bytes; signed apphost %d bytes" % (
-            unsigned.stat().st_size, setup.stat().st_size, builder.stat().st_size))
+            auth.sign_files([setup, builder, library], tool, cert, ["-key", str(key)], ca_file=trust, timestamp=tsa)
+        print("stand-in: production signing path verifies three embedded SHA256 signatures and loopback RFC 3161 timestamps")
+        print("stand-in: unsigned %d bytes; signed setup %d bytes; signed apphost %d bytes; signed library %d bytes" % (
+            unsigned.stat().st_size, setup.stat().st_size, builder.stat().st_size, library.stat().st_size))
 
         package, archive = folder / "package", folder / "builder.zip"
         bp.copy(str(builder), str(package / "LongshotBuilder.exe"))
+        bp.copy(str(library), str(package / "LongshotBuilder.dll"))
         bp.copy(str(setup), str(package / "LongshotBuilder-Setup.exe"))
         with contextlib.redirect_stdout(io.StringIO()):
             bp.make_zip(str(package), "v3.0.0", str(setup), str(archive))
@@ -182,7 +185,8 @@ def main():
         with zipfile.ZipFile(archive) as z:
             assert z.read(auth.ARCHIVE_FILES[0]) == z.read(auth.ARCHIVE_FILES[1]) == setup.read_bytes()
             assert z.read(auth.ARCHIVE_FILES[2]) == builder.read_bytes()
-        print("stand-in: three packaged EXE paths verify through the production archive checker; final zip checksum matches")
+            assert z.read(auth.ARCHIVE_FILES[3]) == library.read_bytes()
+        print("stand-in: four packaged project file paths verify through the production archive checker; final zip checksum matches")
 
         altered = bytearray(setup.read_bytes())
         pe = struct.unpack_from("<I", altered, 0x3c)[0]

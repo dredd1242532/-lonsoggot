@@ -293,16 +293,34 @@ is needed to keep making unsigned Windows builders.
 estimates, setup and rotation. Windows files are now built and signed on Linux: the certificate-store/PowerShell
 approach is not used. Choose a token/service with a compatible Linux PKCS#11 interface, not an exportable private-key
 PFX. The repository secrets are `AUTHENTICODE_CERTIFICATE_PEM` (public leaf and intermediates),
-`AUTHENTICODE_KEY_URI` and optional `AUTHENTICODE_TOKEN_PIN`; provider/module paths are repository variables.
+`AUTHENTICODE_KEY_URI` and optional `AUTHENTICODE_TOKEN_PIN`; provider/module paths are repository variables, and so
+is `AUTHENTICODE_ROOT_PEM`, the issuing CA's public code-signing root. Set the root: without it the signer chain is
+checked against the runner's TLS-only system bundle (the log says which was used), where most code-signing roots
+(Sectigo, GlobalSign, SSL.com, Microsoft's Artifact Signing) fail. A malformed root stops the job.
 Provision the isolated `linux-signing` runner and independent key-access denial before setting those secrets.
 
-The pinned Linux `osslsigncode` signs and RFC 3161-timestamps the setup and apphost before packaging, verifies both,
-then `check_windows_files.py --authenticode` verifies the three EXE paths in the completed zip before checksums.
+The pinned Linux `osslsigncode` signs and RFC 3161-timestamps the setup, the apphost and `LongshotBuilder.dll` before
+packaging (DigiCert's timestamp server, then Sectigo's if it fails; all down stops the job), verifies all three,
+then `check_windows_files.py --authenticode` verifies the four signed paths in the completed zip before checksums.
+Before the signing step, the **Signing runner** step (no secrets) stops the job with `not on the signing runner` when
+the PKCS#11 provider or module is missing. The canary run (docs/releases.md) must show it passing on `linux-signing`:
+whether Forgejo evaluates `inputs.*` in a called workflow's `runs-on` is not yet confirmed.
 An absent certificate logs `not signed: no certificate configured` and succeeds unsigned. A configured failure stops
 the job. The software-key/loopback-TSA stand-in exercises the real command path, not hardware custody or publisher
 trust. Windows trust, the real provider and timestamp service still need a tester; Linux trust is not Windows trust.
 The launcher repository needs separate integration. Removing the certificate secret returns to unsigned output:
 never use that as a silent workaround once players are promised signed releases.
+
+**Known limitation, and the follow-up before signing is turned on for players.** Signing runs in
+`build-windows.yml`'s `package` job, the job that also ran `dotnet publish` (NuGet restore and MSBuild targets from
+packages), `apt-get install` and, after signing, Wine. Build-time code therefore shares a runner, and a job, with the
+token. `dotnet publish --disable-build-servers` keeps MSBuild and compiler servers from outliving the build, but that
+does not isolate the key. The follow-up is a small signing job of its own: the build job uploads the unsigned setup
+and publish folder and outputs their SHA-256; the signing job (the only one on `linux-signing`, with the secrets and
+the same guards) downloads them, checks those hashes, signs, verifies and uploads; a packaging job makes the package
+and zip from the signed files, so `SHA256SUMS` still covers signed bytes. It was left out of this change because it
+moves the self-contained publish folder through two more artifact transfers and needs Forgejo's handling of a
+skipped signing job in `needs` to be checked in a run, neither of which a review can confirm.
 
 
 ## Troubleshooting

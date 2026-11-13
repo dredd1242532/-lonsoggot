@@ -12,8 +12,10 @@ involved. Python's standard library, and llvm-mingw's llvm-objdump and llvm-read
         the builder's --cli with no Python ("error The build tools could not start"). A sign that they load and their
         imports and .NET resolve, not a test of what they do (RELEASING.md, "Needs a Windows tester")
     python -I scripts/check_windows_files.py --authenticode --signer-cache <folder> <zip>
-        optional signed-release check of all three project EXEs with the pinned Linux signer; requires only the public
-        AUTHENTICODE_CERTIFICATE_PEM, not key access. Each embedded signature must match that leaf and have a valid timestamp
+        optional signed-release check of the signed project files (the setup's two copies, the builder's apphost and its
+        LongshotBuilder.dll) with the pinned Linux signer; requires only the public AUTHENTICODE_CERTIFICATE_PEM and,
+        when set, AUTHENTICODE_ROOT_PEM, not key access. Each embedded signature must match that leaf, chain to that root
+        (else to the system bundle) and have a valid timestamp
 
 Prints what is wrong, and exits 1, when anything is.
 """
@@ -172,8 +174,8 @@ def authenticode(a):
     spec.loader.exec_module(auth)
     try:
         leaf = auth.fingerprint(os.environ.get(auth.CERTIFICATE, ""))
-        with auth.pinned_tool(a.signer_cache) as tool:
-            auth.verify_archive(a.zip, tool, leaf)
+        with auth.trust_anchor(os.environ) as ca_file, auth.pinned_tool(a.signer_cache) as tool:
+            auth.verify_archive(a.zip, tool, leaf, ca_file, auth.CA_FILE)
     except (auth.SigningError, OSError, ValueError, zipfile.BadZipFile):
         bad("packaged Authenticode verification failed")
 

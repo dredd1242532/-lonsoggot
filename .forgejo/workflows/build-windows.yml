@@ -71,7 +71,9 @@ jobs:
   package:
     name: Longshot Builder zip
     # Both paths build on Linux. Runner admission/provider authorization must deny PR access to the signing identity;
-    # a label alone is not an access control (docs/releases.md, Windows Authenticode).
+    # a label alone is not an access control (docs/releases.md, Windows Authenticode). Not yet confirmed: that Forgejo
+    # evaluates inputs.* in a called workflow's runs-on. If it does not, this is ubuntu-24.04 even for a signed release:
+    # the "Signing runner" step below then stops the job, with no secret in its step, before the PIN is ever used.
     runs-on: ${{ inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && 'linux-signing' || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -140,15 +142,29 @@ jobs:
         run: >-
           dotnet publish builder/LongshotBuilder/LongshotBuilder.csproj --configuration Release
           --runtime win-x64 -p:EnableWindowsTargeting=true
-          -p:Version="$VERSION" -p:NuGetAudit=false --output "$RUNNER_TEMP/publish"
+          -p:Version="$VERSION" -p:NuGetAudit=false --output "$RUNNER_TEMP/publish" --disable-build-servers
 
-      # Sign the two project executables before either copy of the setup is packaged, and before release.yml hashes the zip.
-      # No signing secret is passed to a PR step, including same-repository PRs and pull_request_target.
+      # The canary for runs-on above: a signed release stops here, before any step holds a secret, unless this runner has
+      # the PKCS#11 provider and module ("not on the signing runner").
+      - name: Signing runner
+        if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          AUTHENTICODE_PKCS11_PROVIDER: ${{ vars.AUTHENTICODE_PKCS11_PROVIDER }}
+          AUTHENTICODE_PKCS11_MODULE: ${{ vars.AUTHENTICODE_PKCS11_MODULE }}
+        run: python -I scripts/authenticode.py runner
+      # Sign the setup, the builder's apphost and its LongshotBuilder.dll before either copy of the setup is packaged, and
+      # before release.yml hashes the zip. No signing secret is passed to a PR step, including same-repository PRs and
+      # pull_request_target.
+      # Known limitation (RELEASING.md, "Optional Windows Authenticode"): this is the job that ran dotnet publish (NuGet
+      # restore and MSBuild targets), apt-get, and later Wine, so build-time code shares a runner with the token. The
+      # follow-up is a signing job of its own that only downloads the unsigned files, checks their hashes, signs and
+      # verifies; dotnet publish runs with --disable-build-servers so no build server outlives it.
       - name: Authenticode (optional)
         if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         env:
           AUTHENTICODE_BUILD_REF: ${{ inputs.ref }}
           AUTHENTICODE_CERTIFICATE_PEM: ${{ secrets.AUTHENTICODE_CERTIFICATE_PEM }}
+          AUTHENTICODE_ROOT_PEM: ${{ vars.AUTHENTICODE_ROOT_PEM }}
           AUTHENTICODE_KEY_URI: ${{ secrets.AUTHENTICODE_KEY_URI }}
           AUTHENTICODE_TOKEN_PIN: ${{ secrets.AUTHENTICODE_TOKEN_PIN }}
           AUTHENTICODE_PKCS11_PROVIDER: ${{ vars.AUTHENTICODE_PKCS11_PROVIDER }}
@@ -189,6 +205,7 @@ jobs:
         if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         env:
           AUTHENTICODE_CERTIFICATE_PEM: ${{ secrets.AUTHENTICODE_CERTIFICATE_PEM }}
+          AUTHENTICODE_ROOT_PEM: ${{ vars.AUTHENTICODE_ROOT_PEM }}
         run: >-
           python -I scripts/check_windows_files.py --authenticode --signer-cache "$RUNNER_TEMP/authenticode"
           "dist/LongshotBuilder-$TAG-windows-x64.zip"

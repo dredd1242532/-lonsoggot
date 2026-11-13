@@ -28,7 +28,7 @@ class StandinExport(unittest.TestCase):
         self.source = self.root / "private"
         self.source.mkdir()
         self.output = self.root / "export"
-        for name in ("unsigned.exe", "LongshotBuilder-Setup.exe", "LongshotBuilder.exe"):
+        for name in ("unsigned.exe", "LongshotBuilder-Setup.exe", "LongshotBuilder.exe", "LongshotBuilder.dll"):
             (self.source / name).write_bytes(("authored bytes for " + name).encode())
         for name in ("code.pem", "TSA.pem"):
             (self.source / name).write_bytes(b"-----BEGIN CERTIFICATE-----\npublic fixture\n-----END CERTIFICATE-----\n")
@@ -38,6 +38,7 @@ class StandinExport(unittest.TestCase):
             z.writestr("LongshotBuilder.exe", b"positive signed setup fixture")
             z.writestr("LongshotBuilder/LongshotBuilder-Setup.exe", b"positive signed setup fixture")
             z.writestr("LongshotBuilder/LongshotBuilder.exe", b"positive signed apphost fixture")
+            z.writestr("LongshotBuilder/LongshotBuilder.dll", b"positive signed library fixture")
 
     def export(self):
         with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -47,10 +48,11 @@ class StandinExport(unittest.TestCase):
     def test_exports_only_named_public_files_and_correct_hashes(self):
         text = self.export()
         expected = {"unsigned-standin.exe", "signed-setup-standin.exe", "signed-apphost-standin.exe",
-                    "standin-package.zip", "signer.pem", "timestamp.pem", "SHA256SUMS"}
+                    "signed-library-standin.dll", "standin-package.zip", "signer.pem", "timestamp.pem", "SHA256SUMS"}
         self.assertEqual({p.name for p in self.output.iterdir()}, expected)
         self.assertEqual((self.output / "standin-package.zip").read_bytes(), (self.source / "builder.zip").read_bytes())
         self.assertEqual((self.output / "signed-setup-standin.exe").read_bytes(), (self.source / "LongshotBuilder-Setup.exe").read_bytes())
+        self.assertEqual((self.output / "signed-library-standin.dll").read_bytes(), (self.source / "LongshotBuilder.dll").read_bytes())
         sums = dict((name, digest) for digest, name in (line.split("  ", 1) for line in (self.output / "SHA256SUMS").read_text().splitlines()))
         self.assertEqual(set(sums), expected - {"SHA256SUMS"})
         for name, digest in sums.items():
@@ -125,7 +127,8 @@ class StandinExport(unittest.TestCase):
         real_load = standin.load
         auth = mock.Mock()
         auth.SigningError = ValueError
-        auth.ARCHIVE_FILES = ("LongshotBuilder.exe", "LongshotBuilder/LongshotBuilder-Setup.exe", "LongshotBuilder/LongshotBuilder.exe")
+        auth.ARCHIVE_FILES = ("LongshotBuilder.exe", "LongshotBuilder/LongshotBuilder-Setup.exe", "LongshotBuilder/LongshotBuilder.exe",
+                              "LongshotBuilder/LongshotBuilder.dll")
         auth.fingerprint.return_value = "f" * 64
         auth.verify_file.side_effect = ValueError("negative signature fixture")
 
@@ -150,6 +153,7 @@ class StandinExport(unittest.TestCase):
         with zipfile.ZipFile(self.output / "standin-package.zip") as z:
             self.assertEqual(z.read(auth.ARCHIVE_FILES[2]), (self.output / "signed-apphost-standin.exe").read_bytes())
             self.assertEqual(z.read(auth.ARCHIVE_FILES[2])[256], 0xc3)
+            self.assertEqual(z.read(auth.ARCHIVE_FILES[3]), (self.output / "signed-library-standin.dll").read_bytes())
 
     def test_tsa_paths_are_quoted_for_windows_and_spaces(self):
         self.assertEqual(standin.config_path(PureWindowsPath(r"C:\Users\Example Name\TSA.key")),

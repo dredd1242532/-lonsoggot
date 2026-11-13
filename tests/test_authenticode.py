@@ -61,6 +61,7 @@ class Authenticode(unittest.TestCase):
         publish = self.root / "publish with spaces"
         publish.mkdir()
         (publish / "LongshotBuilder.exe").write_bytes(b"MZ builder stand-in")
+        (publish / "LongshotBuilder.dll").write_bytes(b"MZ builder library stand-in")
         (publish / "third-party.exe").write_bytes(b"third-party signature unchanged")
         return setup, publish
 
@@ -142,25 +143,36 @@ class Authenticode(unittest.TestCase):
         self.assertEqual(args, ["signer", "verify", "-CAfile", auth.CA_FILE, "-TSA-CAfile", auth.CA_FILE,
                                 "-require-leaf-hash", "sha256:" + self.leaf, "-in", "file.exe"])
         self.assertNotIn("-catalog", args)
+        with mock.patch.object(auth.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=VALID)) as run:
+            auth.verify_file("signer", "file.dll", self.leaf, "root.pem", auth.CA_FILE)
+        self.assertEqual(run.call_args.args[0][2:6], ["-CAfile", "root.pem", "-TSA-CAfile", auth.CA_FILE])
         for code, text in ((1, VALID), (2, VALID), (0, "Timestamp is not available\nSignature verification: ok"), (0, "")):
             with self.subTest(code=code, text=text), mock.patch.object(auth.subprocess, "run",
                     return_value=SimpleNamespace(returncode=code, stdout=text)), self.assertRaises(auth.SigningError):
                 auth.verify_file("signer", "file.exe", self.leaf)
 
-    def test_exact_two_files_and_stdin_request(self):
+    def test_exact_three_files_and_stdin_request(self):
         setup, publish = self.inputs()
+        files = [setup, publish / "LongshotBuilder.exe", publish / "LongshotBuilder.dll"]
         with mock.patch.dict(os.environ, {"AUTHENTICODE_TOKEN_PIN": "pin-secret"}), \
                 mock.patch.object(auth.subprocess, "run", side_effect=self.signer) as run:
-            auth.sign_files([setup, publish / "LongshotBuilder.exe"], "signer", self.cert,
-                            ["-key", "pkcs11:object=key", "-readpass", "-"], password="pin-secret\n")
-        self.assertEqual(run.call_count, 4)  # sign, verify, sign, verify
+            auth.sign_files(files, "signer", self.cert, ["-key", "pkcs11:object=key", "-readpass", "-"],
+                            ca_file="root.pem", password="pin-secret\n", tsa_ca_file=auth.CA_FILE)
+        self.assertEqual(run.call_count, 6)  # sign, verify for each
         signs = [c for c in run.call_args_list if c.args[0][1] == "sign"]
-        self.assertEqual([Path(c.args[0][c.args[0].index("-in") + 1]) for c in signs], [setup.resolve(), (publish / "LongshotBuilder.exe").resolve()])
+        self.assertEqual([Path(c.args[0][c.args[0].index("-in") + 1]) for c in signs], [f.resolve() for f in files])
+        self.assertEqual(auth.TIMESTAMPS, ("https://timestamp.digicert.com", "http://timestamp.sectigo.com"))
         for call in signs:
             args = call.args[0]
             self.assertEqual(args[args.index("-h") + 1], "sha256")
-            self.assertEqual(args[args.index("-ts") + 1], auth.TIMESTAMP)
+            # (every server, in order: osslsigncode tries the next when one fails, and fails when all do)
+            self.assertEqual([args[i + 1] for i, a in enumerate(args) if a == "-ts"], list(auth.TIMESTAMPS))
+            self.assertEqual(args[args.index("-HTTPS-CAfile") + 1], auth.CA_FILE)
+            self.assertEqual(Path(args[args.index("-out") + 1]).suffix, Path(args[args.index("-in") + 1]).suffix)
             self.assertEqual(call.kwargs["input"], "pin-secret\n")
+        for call in run.call_args_list:
+            if call.args[0][1] == "verify":
+                self.assertEqual(call.args[0][2:6], ["-CAfile", "root.pem", "-TSA-CAfile", auth.CA_FILE])
         for call in run.call_args_list:
             self.assertNotIn("pin-secret", " ".join(call.args[0]))
             self.assertNotIn("AUTHENTICODE_TOKEN_PIN", call.kwargs["env"])
@@ -212,7 +224,7 @@ class Authenticode(unittest.TestCase):
     def test_package_preserves_signed_bytes_in_both_setup_copies(self):
         setup, publish = self.inputs()
         with mock.patch.object(auth.subprocess, "run", side_effect=self.signer):
-            auth.sign_files([setup, publish / "LongshotBuilder.exe"], "signer", self.cert, [])
+            auth.sign_files([setup, publish / "LongshotBuilder.exe", publish / "LongshotBuilder.dll"], "signer", self.cert, [])
         package, out = self.root / "package", self.root / "release.zip"
         with mock.patch.object(bp, "tracked", return_value=[]), mock.patch.object(bp, "state_list", return_value=0):
             self.assertEqual(bp.package(SimpleNamespace(out=str(package), publish=str(publish), setup=str(setup))), 0)
@@ -221,10 +233,13 @@ class Authenticode(unittest.TestCase):
             self.assertEqual(z.read("LongshotBuilder.exe"), setup.read_bytes())
             self.assertEqual(z.read("LongshotBuilder/LongshotBuilder-Setup.exe"), setup.read_bytes())
             self.assertEqual(z.read("LongshotBuilder/LongshotBuilder.exe"), (publish / "LongshotBuilder.exe").read_bytes())
+            self.assertEqual(z.read("LongshotBuilder/LongshotBuilder.dll"), (publish / "LongshotBuilder.dll").read_bytes())
+            self.assertTrue(z.read("LongshotBuilder/LongshotBuilder.dll").endswith(b" signed stand-in"))
             self.assertEqual(z.read("LongshotBuilder/third-party.exe"), b"third-party signature unchanged")
         with mock.patch.object(auth, "verify_file") as verify:
             auth.verify_archive(out, "signer", self.leaf)
-            self.assertEqual(verify.call_count, 3)
+            self.assertEqual(verify.call_count, 4)
+            self.assertEqual([Path(c.args[1]).suffix for c in verify.call_args_list], [".exe", ".exe", ".exe", ".dll"])
         with zipfile.ZipFile(out, "w") as z:
             z.writestr("LongshotBuilder.exe", b"MZ")
         with mock.patch.object(auth, "verify_file"), self.assertRaises(auth.SigningError):
@@ -240,6 +255,15 @@ class Authenticode(unittest.TestCase):
             self.assertIn(gate, windows.split("runs-on:", 1)[1].splitlines()[0])
         self.assertIn("'linux-signing' || 'ubuntu-24.04'", windows)
         self.assertIn("AUTHENTICODE_CERTIFICATE_PEM: ${{ secrets.AUTHENTICODE_CERTIFICATE_PEM }}", signed)
+        self.assertIn("AUTHENTICODE_ROOT_PEM: ${{ vars.AUTHENTICODE_ROOT_PEM }}", signed)
+        # (the canary for runs-on: the runner check holds no secret and comes before the step that does)
+        runner = windows.split("- name: Signing runner\n", 1)[1].split("- name:", 1)[0]
+        self.assertEqual(runner.split("if:", 1)[1].splitlines()[0], signed.split("if:", 1)[1].splitlines()[0])
+        self.assertNotIn("secrets.", runner)
+        self.assertIn("scripts/authenticode.py runner", runner)
+        self.assertLess(windows.index("dotnet publish builder/"), windows.index("- name: Signing runner"))
+        self.assertLess(windows.index("- name: Signing runner"), windows.index("- name: Authenticode (optional)"))
+        self.assertIn("--disable-build-servers", windows.split("dotnet publish builder/", 1)[1].split("- name:", 1)[0])
         unsigned = windows.split("- name: Authenticode not configured\n", 1)[1].split("- name:", 1)[0]
         self.assertNotIn("secrets.", unsigned)
         self.assertIn("!inputs.authenticode", unsigned)
@@ -251,6 +275,7 @@ class Authenticode(unittest.TestCase):
         self.assertNotIn("AUTHENTICODE_TOKEN_PIN", packaged)
         self.assertNotIn("AUTHENTICODE_KEY_URI", packaged)
         self.assertIn("check_windows_files.py --authenticode", packaged)
+        self.assertIn("AUTHENTICODE_ROOT_PEM: ${{ vars.AUTHENTICODE_ROOT_PEM }}", packaged)
         self.assertIn("authenticode: ${{ needs.version.outputs.authenticode == 'true' }}", release)
         self.assertIn("needs: [version, linux, windows]", release)
         self.assertNotIn("secrets: inherit", release)
@@ -264,6 +289,61 @@ class Authenticode(unittest.TestCase):
         self.assertLess(package.index("Check packaged Authenticode"), package.index("- id: upload_1"))
         self.assertIn("if: steps.upload_1.outcome == 'failure'", package)
         self.assertIn("linux-signing", (ROOT / ".forgejo/actionlint.yaml").read_text(encoding="utf-8"))
+
+    def test_pinned_root_or_system_bundle_and_never_a_silent_fallback(self):
+        with auth.trust_anchor({}) as ca_file:
+            self.assertEqual(ca_file, auth.CA_FILE)
+        self.assertIn("system bundle", self.stdout.getvalue())
+        with auth.trust_anchor({auth.ROOT_CERTIFICATE: CERT}) as ca_file:
+            self.assertNotEqual(ca_file, auth.CA_FILE)
+            self.assertEqual(Path(ca_file).read_text(encoding="ascii"), CERT)
+        self.assertFalse(Path(ca_file).exists())
+        self.assertIn(auth.ROOT_CERTIFICATE + ", first certificate SHA-256 " + self.leaf, self.stdout.getvalue())
+        for value in ("not a certificate", "-----BEGIN PRIVATE KEY-----\nsecret", CERT + "secret"):
+            with self.subTest(value=value), self.assertRaises(auth.SigningError):
+                with auth.trust_anchor({auth.ROOT_CERTIFICATE: value}):
+                    self.fail("a malformed root must not be used, nor the system bundle in its place")
+        self.assertNotIn("secret", self.stdout.getvalue())
+
+    def test_sign_builder_signs_the_setup_apphost_and_library_against_the_pinned_root(self):
+        setup, publish = self.inputs()
+        provider, module = self.root / "provider.so", self.root / "module.so"
+        provider.touch()
+        module.touch()
+        env = dict(ENV, AUTHENTICODE_KEY_URI="pkcs11:object=key", AUTHENTICODE_PKCS11_PROVIDER=str(provider),
+                   AUTHENTICODE_PKCS11_MODULE=str(module), AUTHENTICODE_TOKEN_PIN="pin-secret",
+                   **{auth.ROOT_CERTIFICATE: CERT})
+        with mock.patch.object(auth, "pinned_tool", return_value=contextlib.nullcontext("signer")), \
+                mock.patch.object(auth, "sign_files") as sign:
+            auth.sign_builder(setup, publish, CERT, env, self.root / "cache")
+        files = sign.call_args.args[0]
+        self.assertEqual(files, [setup, publish / "LongshotBuilder.exe", publish / "LongshotBuilder.dll"])
+        self.assertNotEqual(sign.call_args.kwargs["ca_file"], auth.CA_FILE)
+        self.assertEqual(sign.call_args.kwargs["tsa_ca_file"], auth.CA_FILE)
+        self.assertEqual(sign.call_args.kwargs["password"], "pin-secret\n")
+        self.assertEqual(auth.ARCHIVE_FILES[3], "LongshotBuilder/LongshotBuilder.dll")
+        # (off the signing runner the PKCS#11 check stops it before the PIN is read or a tool is fetched)
+        with mock.patch.object(auth, "pinned_tool") as tool, mock.patch.object(auth, "sign_files") as sign, \
+                self.assertRaises(auth.SigningError):
+            auth.sign_builder(setup, publish, CERT, dict(env, AUTHENTICODE_PKCS11_MODULE="/absent/module.so"), self.root)
+        tool.assert_not_called()
+        sign.assert_not_called()
+
+    def test_runner_check_stops_off_the_signing_runner_without_secrets(self):
+        provider, module = self.root / "provider.so", self.root / "module.so"
+        provider.touch()
+        module.touch()
+        for env in ({}, {"AUTHENTICODE_PKCS11_PROVIDER": str(provider)},
+                    {"AUTHENTICODE_PKCS11_PROVIDER": str(provider), "AUTHENTICODE_PKCS11_MODULE": "module.so"},
+                    {"AUTHENTICODE_PKCS11_PROVIDER": str(provider), "AUTHENTICODE_PKCS11_MODULE": str(self.root / "absent.so")}):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(auth.main(["runner"]), 1)
+        self.assertIn("not on the signing runner", self.stderr.getvalue())
+        with mock.patch.dict(os.environ, {"AUTHENTICODE_PKCS11_PROVIDER": str(provider),
+                                          "AUTHENTICODE_PKCS11_MODULE": str(module)}, clear=True), \
+                mock.patch.object(auth, "certificate_for") as certificate:
+            self.assertEqual(auth.main(["runner"]), 0)
+            certificate.assert_not_called()
 
     def test_checked_tool_archive_is_freshly_extracted(self):
         self.assertEqual(auth.OSSLSIGNCODE[:4], ("2.15", "osslsigncode-2.15-linux-amd64",
