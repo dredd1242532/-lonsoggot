@@ -8,6 +8,11 @@
 # 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool the Windows and the Linux builder
 #    need is in Longshot's packages), then the version's name; a tag is checked too (scripts/release.py check-tag: its form, on main, above
 #    every release, and as high as the commits since the last stable call for). Either refused builds nothing.
+#    A tag whose commit CI has released already (its nightly; for a stable, its release candidate) names that release in
+#    `checked` (scripts/release.py released-as: published, its SHA256SUMS signed by a key the launcher trusts and naming its
+#    every file; one that is not stops the run). Its run passed every check of the commit, so the build checks that ship
+#    no file are not run again. Its files are not reused: each carries its version (the AppImage's VERSION and Vulkan back
+#    end, the zip's VERSION and builder), and a release never ships a file that names another version.
 # 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
 # 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
 #    then a draft release with every file, published last: until then no launcher sees it. A nightly also prunes the
@@ -40,6 +45,7 @@ jobs:
     outputs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
+      checked: ${{ steps.name.outputs.checked }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,12 +62,18 @@ jobs:
       - id: name
         env:
           RELEASE_TOKEN: ${{ forgejo.token }}
+          FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
         run: |
           git fetch -q --tags origin main
           ref=$(git rev-parse HEAD)
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             tag=${GITHUB_REF#refs/tags/}
             python3 -I scripts/release.py check-tag "$tag" --main origin/main
+            # (the release CI made of this commit already, checked: its build checks are not run again; it stops here when
+            # a release of this commit is not signed or not whole)
+            checked=$(python3 -I scripts/release.py released-as "$ref" --not "$tag")
+            echo "checked=$checked" >> "$GITHUB_OUTPUT"
+            [[ -z $checked ]] || echo "::notice::$checked is this commit's release: its build checks are not run again"
           else
             # (a nightly whose commit is no longer main's skips itself: the release runs queue one at a time, and of a few
             # merges in a row only the newest one builds; the one already running goes on)
@@ -86,6 +98,7 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
+      checked: ${{ needs.version.outputs.checked }}
 
   windows:
     name: Windows builder
@@ -95,6 +108,7 @@ jobs:
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
+      checked: ${{ needs.version.outputs.checked }}
 
   publish:
     name: Sign and publish

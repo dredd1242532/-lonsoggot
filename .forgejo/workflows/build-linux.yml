@@ -4,6 +4,9 @@
 # they are tools.lock's linux-x64 lines, installed here to build the back end and check the image, and on the player's PC by
 # the launcher or the builder's first start. No game data is involved. Built in Ubuntu 22.04, the oldest system it is for
 # (glibc 2.35). The AppImage is a workflow artifact; called by release.yml with the version's name, it is the release's.
+# It carries the version (its name, usr/share/longshot/VERSION, and longshot_vk.so's menu and bug report: nx2/version.py), so
+# a tag always builds it again; a tag whose commit CI released already (release.yml's `checked`) skips only the build check
+# that ships nothing and passed in that run (the back end with AMD FSR 4).
 name: Linux AppImage
 on:
   # (no pull_request trigger for now: the Release workflow builds main's pushes and tags by calling this one; build a
@@ -19,11 +22,18 @@ on:
         description: the commit to build
         type: string
         required: true
+      checked:
+        description: a published release of the same commit (scripts/release.py released-as), whose run passed the build check that ships no file (AMD FSR 4); it is not run again
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
 env:
   # (the version this run is for, from the Release workflow; empty on other runs)
   RELEASE_TAG: ${{ inputs.tag }}
+  # (a published release of the same commit, when there is one: the AMD FSR 4 build check, passed in its run, is not run again)
+  RELEASE_CHECKED: ${{ inputs.checked }}
 concurrency:
   group: linux-appimage-${{ inputs.tag || github.ref }}
   # (a pull request's older run is cancelled; a release's never is)
@@ -197,6 +207,7 @@ jobs:
       # description, the unit exposure; the descriptor buffers in vk_main.cpp): built once more in a copy of the back end's
       # work folder, where only vk_fsr4.cpp compiles again. The AppImage above is not changed)
       - name: longshot_vk.so with AMD FSR 4 (build check)
+        if: env.RELEASE_CHECKED == ''
         shell: bash   # (this container's default is sh, which has no PIPESTATUS)
         run: |
           cp -r build-linux/vk-work "$RUNNER_TEMP/vk-fsr"
