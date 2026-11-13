@@ -136,12 +136,13 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("self-hosted", job)
         self.assertNotIn("continue-on-error", job)
         self.assertNotIn("secrets.", job)
-        # Forgejo does not enforce GitHub's permissions key. Do not pretend it
-        # confines the token; use fork pull_request semantics and no secrets.
+        # Forgejo does not enforce GitHub's permissions key. Do not claim it
+        # confines the token; require no configured secrets and explicit removal.
         self.assertNotIn("permissions:", workflow)
         self.assertNotIn("pull_request_target", workflow)
         self.assertIn("concurrency:\n", workflow)
-        self.assertIn("forgejo.event_name", workflow)
+        self.assertIn("forgejo.ref", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("env -u FORGEJO_TOKEN -u GITHUB_TOKEN python3", job)
         self.assertIn("persist-credentials: false", job)
         for use in re.findall(r"uses: (\S+)", job):
@@ -151,8 +152,8 @@ class Workflow(unittest.TestCase):
                          "dpkg-query", "lvp_icd*.json", "VK_DRIVER_FILES", "VK_ICD_FILENAMES",
                          "tests/run_vulkan_fixtures.py", "--device llvmpipe"):
             self.assertIn(required, job)
-        triggers = workflow.split("\nconcurrency:", 1)[0]
-        self.assertIn("pull_request:\n    branches: [main]", triggers)
+        triggers = workflow.split("\non:\n", 1)[1].split("\nconcurrency:", 1)[0]
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", triggers, re.M), ["workflow_dispatch"])
         self.assertNotIn("paths:", triggers)
 
 

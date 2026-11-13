@@ -218,6 +218,8 @@ existing [CI workflow](.forgejo/workflows/ci.yml). Setup and labels are describe
 [Forgejo runner guide](docs/forgejo-runners.md); this job uses its isolated `ubuntu-24.04` environment, needs Node.js 24
 for the pinned checkout action, and installs Mesa's software driver, Vulkan loader/headers/tools and Khronos validation.
 It does not enable Actions or register a runner.
+Like the other full checks, start it by hand: *Actions* > *Authored Vulkan fixtures* > *Run workflow*.
+Pull requests and pushes do not start this lane; the local command below remains available without a runner.
 Its first completed Forgejo run is still required before calling this CI coverage. The job has no configured secrets
 or uploads, does not persist checkout credentials, and removes the forge tokens from the fixture command. Forgejo
 does not enforce GitHub's `permissions` key; this is not a substitute for disposable-runner isolation.
