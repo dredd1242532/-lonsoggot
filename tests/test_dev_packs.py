@@ -246,6 +246,10 @@ def test_generated_and_runtime(d):
     check("generated files the build no longer makes are gone; saves, settings and the game's own files are not: %s" % gone,
           gone == ["longshot_pipeline_states_shipped.bin", "prompts/Common.bntx"])
     check("a base that recorded no outputs (adopted) loses nothing", packs.generated_changes(str(game), str(out))[1] == [])
+    legacy = outputs + ["mkw_vk_pipelines.stamp", "mkw_vk_pipelines_play_2.bin"]   # (a list recorded before caches were filtered)
+    gone = packs.generated_changes(str(game), str(out), legacy)[1]
+    check("an older base's outputs list never deletes a cache, and still a generated file the build no longer makes: %s" % gone,
+          gone == ["longshot_pipeline_states_shipped.bin", "prompts/Common.bntx"])
     write(out / "stale.bin", b"an earlier pack's")
     packs.clear_output(str(out))
     check("the output folder keeps only romfs for the next build", sorted(os.listdir(out)) == ["romfs"])

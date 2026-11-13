@@ -246,7 +246,8 @@ def generated_changes(base_game, game, base_outputs=None):
             q = os.path.join(base_game, rel)
             if not (os.path.isfile(q) and same_file(p, q)):
                 changed.append(rel)
-    gone = [rel for rel in base_outputs or () if not os.path.isfile(os.path.join(game, rel))]
+    # (never a cache, even in an outputs list a base recorded before the caches' family was complete)
+    gone = [rel for rel in base_outputs or () if not is_cache(rel) and not os.path.isfile(os.path.join(game, rel))]
     return changed, gone
 
 
