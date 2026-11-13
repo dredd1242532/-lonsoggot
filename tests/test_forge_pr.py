@@ -205,6 +205,21 @@ class PR(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("warning: measured on main", err, "a warning does not stop it")
 
+    def test_ready_waits_for_the_test_requests(self):
+        body = FILLED.replace("(T-9MZ4)", "(request to open)")
+        self.forgejo.add(5, "WIP: fix: x", body)
+        code, _, err = self.run_forge("pr", "ready", "5")
+        self.assertEqual(code, 1)
+        self.assertIn("## Testing's 'Needs other testers:' still has a request to open: Steam Deck", err)
+        self.assertIn("scripts/test_requests.py request --pr", err)
+        self.assertNotIn("warning: ## Testing", err, "said once, as the reason")
+        self.assertIn("Description: complete but for 1 test request to open", self.run_forge("pr", "status", "5")[1])
+        self.forgejo.prs[5]["body"] = FILLED
+        self.assertEqual(self.run_forge("pr", "ready", "5")[0], 0)
+        out = self.run_forge("pr", "status", "5")[1]
+        self.assertIn("Testing: Tested filled in, Not tested filled in; needs other testers: 2 (2 with a test request, "
+                      "0 to open)", out)
+
     def test_ready_force(self):
         self.forgejo.add(5, "WIP: fix: x", TEMPLATE)
         code, out, err = self.run_forge("pr", "ready", "5", "--force")
@@ -312,14 +327,14 @@ class PR(unittest.TestCase):
                                              "created_at": "2026-11-12T18:0%d:00Z" % i})
         code, out, _ = self.run_forge("pr", "status", "5")
         self.assertEqual(code, 0)
-        for want in ("work in progress", "to fix before pr ready", "For everyone: 0 of 9 ticked", "Mergeable: yes",
+        for want in ("work in progress", "to fix before pr ready", "For everyone: 0 of 10 ticked", "Mergeable: yes",
                      "Labels: needs measurements", "Reviews: bob approved", "Last comments (5 in all)", "comment 4"):
             self.assertIn(want, out)
         self.assertNotIn("carol", out)
         self.assertNotIn("comment 1", out)
         self.forgejo.add(6, "fix: y", FILLED)
         out = self.run_forge("pr", "status", "6")[1]
-        for want in ("ready for review", "Description: complete", "For everyone: 9 of 9 ticked", "Reviews: none"):
+        for want in ("ready for review", "Description: complete", "For everyone: 10 of 10 ticked", "Reviews: none"):
             self.assertIn(want, out)
 
     def test_view_shows_wip(self):

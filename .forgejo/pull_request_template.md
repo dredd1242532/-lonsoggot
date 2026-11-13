@@ -51,13 +51,22 @@ How to reproduce: <the save or spot, the settings and switches, the commands, so
 <the log lines or test output the numbers come from>
 ```
 
-## Not tested
+## Testing
 
-<!-- Where it never ran (hardware, OS, driver, areas), with the test request opened for it (docs/test-requests.md);
-     and where it ran without numbers. "Nothing" is an answer. -->
+<!-- Tested: what you ran and checked, where (hardware, OS, driver) and how (the game-free checks; in the game, the
+     area and steps; a test request's result), including what you checked but didn't measure.
+     Not tested: what this PR could affect that nobody has run yet, and why.
+     Needs other testers: one line per thing you can't test yourself (hardware, OS, driver, a handheld), with what to
+     check, the result expected and its test request (scripts/test_requests.py request, docs/test-requests.md), or
+     "request to open" while it is WIP; "None" if you covered everything.
+     E.g. "- Steam Deck: Kokiri Forest loads without the hang, expecting no gfx timeout (T-7KQ2)". -->
 
-Not tested: <hardware, systems or areas>
-Tested but not measured: <where it ran without numbers>
+**Tested:** <what was run and checked, where and how>
+
+**Not tested:** <what this PR could affect that nobody has run yet, and why>
+
+**Needs other testers:**
+- <hardware or system>: <what to check>, expecting <the result> (<test request, or "request to open">)
 
 ## Screenshots
 
@@ -83,13 +92,17 @@ Fixes #
 
 ## Checklist
 
+<!-- Keep the whole checklist, both lists, in every PR: tick what is done; in If applicable, leave unticked (or write
+     "n/a" beside) what doesn't apply. -->
+
 ### For everyone
 
 - [ ] One topic.
 - [ ] The title is a Conventional Commit (`type(scope): description`).
 - [ ] Rebased on current `main`.
 - [ ] `python -I -B tests/run_all.py` run and passing (any failure that also fails on `main` is named above).
-- [ ] Tested in the game, or what wasn't is named under Not tested.
+- [ ] Tested in the game, or what wasn't is named under Testing.
+- [ ] Testing filled in: what was tested, what wasn't, and what needs other testers (with test requests).
 - [ ] Measured: main and this PR at named commits, on the same PC, scene and settings, at least 2 interleaved runs each, the median reported.
 - [ ] No game files, dumps, build output or generated files.
 - [ ] `third_party/` untouched (a new folder with a `PROVENANCE.md` instead).
