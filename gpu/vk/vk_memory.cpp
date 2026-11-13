@@ -137,11 +137,16 @@ Pool* last_pool = nullptr;            // (the last pool_of hit: draws in a row b
 extern Pool* pool_cache[4096];
 void retire_pool(std::map<uint64_t, Pool>::iterator it);
 Pool* pool_lookup(uint64_t guest, uint64_t size);
+#ifdef _WIN32
 struct SrwMutex {   // (a slim reader/writer lock: half std::mutex's cost, taken for every buffer a draw binds)
     SRWLOCK l = SRWLOCK_INIT;
     void lock() { AcquireSRWLockExclusive(&l); }
     void unlock() { ReleaseSRWLockExclusive(&l); }
 };
+#else
+// (off Windows SRWLOCK is a pthread rwlock, host/posix/windows.h: more atomic steps than a mutex for a lock only ever taken whole)
+using SrwMutex = std::mutex;
+#endif
 SrwMutex pools_mu;
 uint32_t generation = ~0u;
 uint64_t align = 4096;
