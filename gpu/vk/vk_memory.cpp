@@ -2484,9 +2484,9 @@ uint64_t mirror_budget() {
     }();
     // (the Insert menu's quality preset sets one, 256 MB at Minimum (4GB): it was never read, and an 8 GB card kept ~2 GB of
     // mirrors with the 4GB preset on, 2026-11-08)
-    // (only on a card the preset is for: preset_caps_memory; a preset's never past Auto's on this card: mirror_budget.h preset_bytes)
+    // (only on a card the preset is for: preset_caps_memory; a preset's never past Auto's on this card: mirror_budget.h budget_bytes)
     if (opts.mirror_mb > 0 && !getenv("RX_VK_MIRROR_MB") && preset_caps_memory())
-        return mirror_rule::preset_bytes((uint64_t)opts.mirror_mb << 20, opts.budget > 0, device_vram_bytes());
+        return mirror_rule::budget_bytes((uint64_t)opts.mirror_mb << 20, opts.budget > 0, device_vram_bytes());
     return b;
 }
 uint64_t mirror_bytes = 0, mirror_epoch = 0;

@@ -30,7 +30,7 @@ inline uint64_t auto_bytes(uint64_t vram) {
 /// a small card at Auto's. Chosen on the VRAM budget row itself: the player's, except on a small card, where it is capped at Auto's
 /// too (the row's 3.6 GB step on a 4 GB card was 512 MB before Low's mirrors went to 1536; its steps of 4.8 GB and more, past
 /// what such a card has, now keep 512 as well)
-inline uint64_t preset_bytes(uint64_t asked, bool by_preset, uint64_t vram) {
+inline uint64_t budget_bytes(uint64_t asked, bool by_preset, uint64_t vram) {
     return vram && (by_preset || small_card(vram)) ? std::min(asked, auto_bytes(vram)) : asked;
 }
 
