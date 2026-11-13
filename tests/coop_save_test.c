@@ -28,6 +28,8 @@ static int save_send(void *u, int member, uint8_t kind, const uint8_t id[16], ui
     Side *s = u;
     uint8_t data[COOP_SAVE_CHUNK_HEAD + COOP_SAVE_CHUNK];
     assert(n <= sizeof data); memcpy(data, bytes, n);
+    if (kind == COOP_K_SAVE_OFFER || kind == COOP_K_SAVE_CONTROL)
+        assert(n >= 24 && !memcmp(data, "longshot-coop/save/1", sizeof "longshot-coop/save/1" - 1));
     if (!changed && kind == COOP_K_SAVE_OFFER && fault) {
         if (!strcmp(fault, "signature")) { data[320] ^= 1; changed = 1; }
         if (!strcmp(fault, "recipient")) { data[72] ^= 1; coop_sign(data + 288, secret_keys[0], data, 288); changed = 1; }

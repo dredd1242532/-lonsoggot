@@ -16,6 +16,7 @@ int hos_save_export(unsigned slot, CoopSaveSource *out);
 static CoopOnce once = COOP_ONCE_INIT;
 static CoopLock state_lock, queue_lock;
 static CoopThread worker;
+static CoopEvent wake;
 static CoopSave *exchange;
 static int running;
 static struct {
@@ -28,6 +29,7 @@ static int overflow;
 static uint64_t utc_ms(void) { return (uint64_t)time(NULL) * 1000; }
 static void initialize(void *unused) {
     (void)unused; coop_lock_init(&state_lock); coop_lock_init(&queue_lock);
+    coop_event_init(&wake, 0, 0);
 }
 static int binding(void *u, int member, CoopSaveBinding *out) { (void)u; return hos_oot_coop_save_binding(member, out); }
 static int send_event(void *u, int member, uint8_t kind, const uint8_t id[16], uint64_t deadline, const void *p, size_t n) {
@@ -66,6 +68,7 @@ static void receive(int from, uint64_t session, uint64_t event, const uint8_t *p
         memcpy(queue[at].bytes, p, n);
     }
     coop_unlock(&queue_lock);
+    coop_event_set(&wake);
 }
 static void run(void *unused) {
     (void)unused;
@@ -84,8 +87,12 @@ static void run(void *unused) {
         if (failed) coop_save_cancel(exchange, now);
         if (from) coop_save_receive(exchange, from, session, kind, bytes, n, now, utc);
         coop_save_tick(exchange, coop_now_ms(), utc_ms());
+        CoopSaveView v;
+        coop_save_view(exchange, &v);
+        int active = v.incoming == COOP_SAVE_OFFERED || v.incoming == COOP_SAVE_TRANSFERRING ||
+                     v.outgoing == COOP_SAVE_OFFERED || v.outgoing == COOP_SAVE_TRANSFERRING;
         coop_unlock(&state_lock);
-        coop_sleep_ms(25);
+        coop_event_wait_ns(&wake, active ? 25000000 : 1000000000);
     }
 }
 
@@ -122,6 +129,8 @@ int hos_coop_save_exchange(const char *action, int member, unsigned slot, uint32
     else if (ok && !strcmp(action, "cancel")) coop_save_cancel(exchange, coop_now_ms());
     else if (strcmp(action, "identity") && strcmp(action, "status")) ok = 0;
     coop_save_view(exchange, out);
+    const int notify = running && strcmp(action, "status");
     coop_unlock(&state_lock);
+    if (notify) coop_event_set(&wake);
     return ok;
 }

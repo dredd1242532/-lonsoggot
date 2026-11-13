@@ -28,7 +28,7 @@ static uint64_t u64(const uint8_t *p) { return u32(p) | (uint64_t)u32(p + 4) << 
 static void put32(uint8_t *p, uint32_t v) { for (unsigned i = 0; i < 4; i++) p[i] = (uint8_t)(v >> (i * 8)); }
 static void put64(uint8_t *p, uint64_t v) { put32(p, (uint32_t)v); put32(p + 4, (uint32_t)(v >> 32)); }
 static int zeros(const uint8_t *p, size_t n) { for (size_t i = 0; i < n; i++) if (p[i]) return 0; return 1; }
-static void domain(uint8_t *p, unsigned type) { memset(p, 0, 24); memcpy(p, "longshot-coop/save/1", 19); p[23] = (uint8_t)type; }
+static void domain(uint8_t *p, unsigned type) { memset(p, 0, 24); memcpy(p, "longshot-coop/save/1", sizeof "longshot-coop/save/1" - 1); p[23] = (uint8_t)type; }
 static int domain_is(const uint8_t *p, unsigned type) { uint8_t d[24]; domain(d, type); return !memcmp(p, d, 24); }
 static uint32_t chunks(const Transfer *t) {
     return (t->source.size[0] + COOP_SAVE_CHUNK - 1) / COOP_SAVE_CHUNK + (t->source.size[1] + COOP_SAVE_CHUNK - 1) / COOP_SAVE_CHUNK;
