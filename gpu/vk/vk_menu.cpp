@@ -2481,11 +2481,9 @@ const int kTop = tab_row_count(TAB_PAGE);   // (Layout preset and Button prompts
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
 bool listen_armed = false;   // (once what started it was let go)
 int64_t listen_end = 0;
-std::string keys_text(int button) {
-    const int a = host->binding(HOS_BIND_KEY, button, 0), b = host->binding(HOS_BIND_KEY, button, 1);
-    std::string t = a ? key_name(a) : "";
-    if (b) t += std::string(a ? ", " : "") + key_name(b);
-    return t.empty() ? "None" : t;
+std::string key_text(int button, int slot) {
+    const int k = host->binding(HOS_BIND_KEY, button, slot);
+    return k ? key_name(k) : "None";
 }
 
 // ---- what is drawn: Dear ImGui over the window's image (vk_imgui.h) in the game's own style (vk_ui.h). Built anew at each
@@ -3239,12 +3237,17 @@ void draw_controls(ui::Ctx& c) {
                  hh + 18 * s, bar_top - 12 * s);
     }
     const float rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, width = rx1 - rx0;
-    const float pad_x = rx0 + width * 0.32f, key_x = rx0 + width * 0.75f;
-    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, rx1};
+    // (the names narrower than with one key column; each key cell as wide as a long key name needs, "Right click" chosen,
+    // within a sixth and a fifth of the row; the gamepad cells share the rest: at Small and Medium as wide as with one key
+    // column, at Large cut as they were)
+    const float key_w = std::clamp(ui::size_of(c.f.strong, 18 * s, "Right click").x + 30 * s, width * 0.16f, width * 0.2f);
+    const float pad_x = rx0 + width * 0.26f, key_x = rx1 - 2 * key_w;
+    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, key_x + key_w, rx1};
     float top = hh + 22 * s;
     ui::text_mid_centre(c, c.f.body, 15 * s, col_x[kCtlAlternate], top + 8 * s, ui::kDim, "Gamepad");
+    ui::text_mid_centre(c, c.f.body, 15 * s, col_x[kCtlKeyboard2], top + 8 * s, ui::kDim, "Keyboard");
     ui::text_mid(c, c.f.body, 15 * s, rx0 + 20 * s, top + 27 * s, ui::kDim, "Button");
-    const char* titles[kCtlColumns] = {"Input 1", "Input 2", "Keyboard"};
+    const char* titles[kCtlColumns] = {"Input 1", "Input 2", "Key 1", "Key 2"};
     for (int col = kCtlPrimary; col < kCtlColumns; col++)
         ui::text_mid_centre(c, c.f.body, 15 * s, (col_x[col] + col_x[col + 1]) * 0.5f, top + 27 * s, ui::kDim, titles[col]);
     top += 43 * s;
@@ -3278,10 +3281,12 @@ void draw_controls(ui::Ctx& c) {
         hits.add(rx0, y0, pad_x, y1, menu_hit::kCtlRow, i);
         const bool keys = keys_only(i);
         for (int col = kCtlPrimary; col < kCtlColumns; col++) {
-            const bool keyboard = col == kCtlKeyboard, disabled = keys && !keyboard;
-            const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (keyboard ? 0 : 3 * s);
-            const std::string v = keyboard ? keys_text(ctl.button) : disabled ? "-" : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
-            const bool here = sel && col == (keys ? kCtlKeyboard : ccol);
+            const bool keyboard = col >= kCtlKeyboard, disabled = keys && !keyboard;
+            const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (col == kCtlColumns - 1 ? 0 : 3 * s);
+            const std::string v = keyboard   ? key_text(ctl.button, menu_hit::ctl_key_slot(col))
+                                  : disabled ? "-"
+                                             : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
+            const bool here = sel && col == menu_hit::ctl_column(ccol, keys);
             const ImVec2 va(a, y), vb(b, y + rh);
             if (here && listening) {   // (waiting for the new input: amber, the outline as a selected value's)
                 const float in = 4 * s;
@@ -4879,8 +4884,8 @@ void menu_tick() {
                     }
                 if (!listen_armed) listen_armed = !down;
                 else if (down) {
-                    host->bind(HOS_BIND_KEY, controls[csel - kTop].button, 0, down);
-                    host->bind(HOS_BIND_KEY, controls[csel - kTop].button, 1, 0);
+                    const int i = csel - kTop;   // (the selected key cell's slot only: the other key stays)
+                    host->bind(HOS_BIND_KEY, controls[i].button, menu_hit::ctl_key_slot(menu_hit::ctl_column(ccol, keys_only(i))), down);
                     listening = 0, changed = true;
                     save();
                 }
@@ -4894,7 +4899,7 @@ void menu_tick() {
                 const int at = option ? hit.index : kTop + hit.index;   // (the page's row: its own rows first)
                 if (on && (moved || ptr.pressed)) {
                     if (at != csel) csel = at, changed = true;
-                    if (hit.part == menu_hit::kCtlCell && !keys_only(hit.index) && ccol != hit.side) ccol = hit.side, changed = true;
+                    if (hit.part == menu_hit::kCtlCell && ccol != hit.side) ccol = hit.side, changed = true;
                 }
                 if (ptr.pressed & HOS_MOUSE_LEFT) {
                     if (option) press[hit.side < 0 ? 3 : 4] = true;   // (a value's halves: Left and Right; the name: Right)
@@ -4914,26 +4919,26 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
-                if ((press[3] || press[4]) && i < kControls && !keys_only(i)) {
-                    ccol = (ccol + kCtlColumns + (press[3] ? -1 : 1)) % kCtlColumns;
+                if ((press[3] || press[4]) && i < kControls) {
+                    ccol = menu_hit::ctl_step(ccol, press[3] ? -1 : 1, keys_only(i));
                     changed = true;
                 }
-                const int col = keys_only(i) ? kCtlKeyboard : ccol;
+                const int col = menu_hit::ctl_column(ccol, keys_only(i));
                 if (press[7]) {
                     if (i == kControls) {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
                         save();
                     }
-                    else listening = col == kCtlKeyboard ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
+                    else listening = menu_hit::ctl_key_slot(col) >= 0 ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
                     changed = true;
                 }
                 if ((press[8] || press[9]) && i < kControls) {
-                    if (col != kCtlKeyboard) {
+                    if (menu_hit::ctl_key_slot(col) < 0) {
                         host->bind(HOS_BIND_PAD, controls[i].button, col, -1);
                         opts.pad_layout = detect_pad_layout();
                     }
-                    else for (int k = 0; k < 2; k++) host->bind(HOS_BIND_KEY, controls[i].button, k, 0);
+                    else host->bind(HOS_BIND_KEY, controls[i].button, menu_hit::ctl_key_slot(col), 0);
                     changed = true;
                     save();
                 }
