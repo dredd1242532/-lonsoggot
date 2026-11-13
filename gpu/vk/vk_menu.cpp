@@ -2422,11 +2422,19 @@ const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {
 constexpr int kControls = sizeof controls / sizeof controls[0];   // (then "Reset to defaults")
 // (the stick's and camera's directions: keys only; the ocarina's note rows take a gamepad input too, host/nn_hid.c)
 bool keys_only(int i) { return i < kControls && controls[i].button >= HOS_KEY_MOVE_UP && controls[i].button <= HOS_KEY_CAM_RIGHT; }
+// a row takes the touchpad click as its Input 1 or Input 2: then the click is that row's, not the menu's
+bool touchpad_bound() {
+    for (int i = 0; host && host->binding && i < kControls; i++)
+        for (int slot = 0; slot < 2 && !keys_only(i); slot++)
+            if (host->binding(HOS_BIND_PAD, controls[i].button, slot) == HOS_PAD_TOUCHPAD) return true;
+    return false;
+}
 // a pad input's name on the controller of the button prompts (the Button prompts row's choice; Auto: the face in use),
 // else by its place
 const char* pad_name(int p) {
     if (p < 0 || p >= HOS_PAD_N) return "None";
     static const char* paddles[] = {"R4", "L4", "R5", "L5"};
+    if (p == HOS_PAD_TOUCHPAD) return "Touchpad";
     if (p >= HOS_PAD_RPADDLE1) return paddles[p - HOS_PAD_RPADDLE1];
     static const char* t[HOS_PROMPT_KEYBOARD + 1][HOS_PAD_RPADDLE1] = {   // (by place, then HOS_PROMPT_*; the keyboard's: by place)
         {"Bottom button", "Right button", "Left button", "Top button", "Select / Back", "Home", "Start", "L stick press",
@@ -4779,8 +4787,9 @@ void menu_tick() {
         if (force) pad_last = !strcmp(force, "pad");
     }
     auto pad = [&](int p) { return listening != 1 && (pad_press >> p & 1) != 0; };
-    // (longshot) a DualShock 4's or DualSense's touchpad click is F1: it opens and closes the menu as the key does
-    if (pad(HOS_PAD_TOUCHPAD)) press[6] = true;
+    // (longshot) a DualShock 4's or DualSense's touchpad click is F1, while no row of the Controls page takes it: it opens and
+    // closes the menu as the key does
+    if (pad(HOS_PAD_TOUCHPAD) && !touchpad_bound()) press[6] = true;
     if (host && host->binding)   // (A and B as bound now: the Controls page or the Layout preset can change them)
         menu_keys::confirm_back(host->binding(HOS_BIND_PAD, HOS_SW_A, 0), host->binding(HOS_BIND_PAD, HOS_SW_B, 0), &pad_confirm,
                                 &pad_back);
@@ -4900,7 +4909,7 @@ void menu_tick() {
             if (press[5] || prof_now() > listen_end) listening = 0, changed = true;   // (Esc, or nothing for a while)
             else if (listening == 1) {
                 if (!listen_armed) listen_armed = (raw & ~(1u << HOS_PAD_GUIDE)) == 0;
-                else if (const uint32_t p = pad_press & ~(1u << HOS_PAD_GUIDE) & ~(1u << HOS_PAD_TOUCHPAD)) {
+                else if (const uint32_t p = pad_press & ~(1u << HOS_PAD_GUIDE)) {
                     int bit = 0;
                     while (!(p >> bit & 1)) bit++;
                     host->bind(HOS_BIND_PAD, controls[csel - kTop].button, ccol, bit);
