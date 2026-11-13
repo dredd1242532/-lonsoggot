@@ -2317,7 +2317,7 @@ void share_pipeline_list() {
 
 /// A row's new value v, as the arrows set it (dir: 1 up, -1 down, for the rows that skip or wrap), saved unless !keep
 /// (a slider's drag: saved once it is let go)
-/// (hookshot) The Controls tab's Sprint row turned on: Sprint gets Shift and the left stick's press where they are still
+/// (longshot) The Controls tab's Sprint row turned on: Sprint gets Shift and the left stick's press where they are still
 /// the defaults' (Shift on B, which moves to V when no control has V; the press on LS, which keeps its other input), and only
 /// when Sprint has none of its own. Off: those go back to B and LS. A control the player rebound is left as it is
 void apply_sprint_layout(bool on) {

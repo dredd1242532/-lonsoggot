@@ -2,7 +2,7 @@
 keys and gamepad inputs that, while the left stick is pushed, holds A, the game's own run. Off by default.
 
 The bindings: host/nn_hid.c's binding table is compiled alone (C), as tests/test_bound_keys.py does, and linked with the
-menu's apply_sprint_layout cut out of gpu/vk/vk_menu.cpp (C++), against a fake hookshot_options.ini for each case. A new
+menu's apply_sprint_layout cut out of gpu/vk/vk_menu.cpp (C++), against a fake longshot_options.ini for each case. A new
 install's defaults are the ones from before Sprint (Shift B, the left stick's press LS) and give Sprint nothing; the row
 turned on gives it Shift and the press (B to V, LS keeping its other input) and turned off puts them back; a player who
 rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps theirs. The sources are checked for the
@@ -164,7 +164,7 @@ class SprintTests(unittest.TestCase):
         menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
         layout = test_bound_keys.block(menu, "void apply_sprint_layout(")
         include = ["-I", str(ROOT / "gpu" / "vk"), "-I", str(ROOT / "gpu")]
-        with tempfile.TemporaryDirectory(prefix="hookshot-sprint-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="longshot-sprint-") as tmp:
             tmp = Path(tmp)
             (tmp / "t.c").write_text(test_bound_keys.PRELUDE + code + MAIN, encoding="utf-8")
             (tmp / "layout.cpp").write_text(LAYOUT % layout, encoding="utf-8")
@@ -181,7 +181,7 @@ class SprintTests(unittest.TestCase):
                     folder = tmp / name
                     folder.mkdir()
                     if ini is not None:
-                        (folder / "hookshot_options.ini").write_text(ini, encoding="utf-8")
+                        (folder / "longshot_options.ini").write_text(ini, encoding="utf-8")
                     run = subprocess.run([str(binary), str(folder), name], text=True, capture_output=True, timeout=30)
                     self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
@@ -264,7 +264,7 @@ class SprintStepTests(unittest.TestCase):
         code = (test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" + gap + "\n" +
                 test_bound_keys.block(hid, "static void sprint_step("))
         head, body = STEP_MAIN.split("static int fails;", 1)
-        with tempfile.TemporaryDirectory(prefix="hookshot-sprint-step-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="longshot-sprint-step-") as tmp:
             tmp = Path(tmp)
             (tmp / "t.c").write_text(head + code + "\nstatic int fails;" + body, encoding="utf-8")
             binary = tmp / ("t.exe" if sys.platform == "win32" else "t")

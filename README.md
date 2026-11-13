@@ -660,7 +660,7 @@ holds A, the game's own run, only while the left stick (or the movement keys) is
 as a press: Link runs at once, without rolling, and runs past people, signs and pots without talking, reading or picking
 up. Your own A still works while sprinting: Sprint lets go of A for a moment as yours goes down, so a tap rolls (or
 talks, opens, picks up) as it does without Sprint.
-(`HOS_SPRINT_STILL_MS=<ms>` in `hookshot_env.txt` starts a sprint with the stick let go for that long instead, the older
+(`HOS_SPRINT_STILL_MS=<ms>` in `longshot_env.txt` starts a sprint with the stick let go for that long instead, the older
 way round the roll, for a game without the patch.) Turning the row on changes your controls: Shift moves from B to Sprint (B
 goes to <kbd>V</kbd>, when no control has V) and the left stick's press from LS to Sprint. Turning it off puts them
 back. Controls you rebound yourself, and keys or buttons you gave Sprint, are left alone. Sprint has its own row on the
