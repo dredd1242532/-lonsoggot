@@ -655,7 +655,9 @@ def main():
          "menu_tick: RX_VK_MENU_SCRIPT has no ROW:<name> (a scripted session must choose Accept by name, not by counting rows)")
     if tick.index("else if (press[7] && coop_kind(r) >= 0) coop_press(r)") > tick.index("else if (press[7] && !r.value && can_bind())"):
         raise SystemExit("FAIL: menu_tick: the Co-op tab's rows would open the Controls page")
-    need(tick, r"pending != &r \|\| \(!mine && coop_kind\(\*pending\) < 0\)", "menu_tick: Accept and Leave are not armed without the focus")
+    need(tick, r"const bool reading_terms = pending && coop_kind\(\*pending\) == kCoopAccept && cur_tab == TAB_RULES;\s*"
+               r"if \(pending && \(\(pending != &r && !reading_terms\) \|\| \(!mine && coop_kind\(\*pending\) < 0\)\)\)",
+         "menu_tick: Accept must survive reading its terms, and Co-op confirmations must work without focus")
     need(tick, r"else if \(press\[7\] && coop_kind\(r\) == kCoopRules\) cur_tab = TAB_RULES, tab_selected\[TAB_RULES\] = 0, press\[7\] = false",
          "menu_tick: Room rules does not open its page on confirm")
     if tick.index("coop_kind(r) == kCoopRules) cur_tab = TAB_RULES") > tick.index("else if (press[7] && coop_kind(r) >= 0) coop_press(r)"):
