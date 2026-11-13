@@ -2405,7 +2405,7 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
 //   write generations) are copied in, in the recording's upload command buffer (submitted right before it).
 // - GPU -> guest: what the submission's shaders and copies may write into a mirror is copied back into the imported
 //   pool at the submission's end, so the CPU (and everything that reads guest memory) sees it.
-// RX_VK_MIRROR=0: no mirrors; RX_VK_MIRROR_MB: their budget (default 3072).
+// RX_VK_MIRROR=0: no mirrors; RX_VK_MIRROR_MB: their budget (default by the card: mirror_budget.h auto_bytes).
 bool mirror_on() {
     static const int on = [] {
         const char* e = getenv("RX_VK_MIRROR");

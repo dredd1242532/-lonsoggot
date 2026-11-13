@@ -7,6 +7,9 @@
 
 namespace mkwvk::mirror_rule {
 
+/// What a card counts as small: 4.5 GB or less, where Auto gives an eighth
+inline bool small_card(uint64_t vram) { return vram && vram <= (4ull << 30) + (512ull << 20); }
+
 /// Auto's mirrors: a quarter of the card, at most 3 GB, and an eighth on a card of 4.5 GB or less (512 MB on 4 GB). A pool left out
 /// is read by the GPU over PCIe: on 8 GB cards, a 3070 or a 4060, that left the GPU at a few percent and the frame stuttering, and
 /// on a 6 GB RTX 3060 Laptop at an eighth (768 MB) or the Low preset's 512 MB, 30-32 GB of bound ranges went over PCIe every 600
@@ -15,15 +18,17 @@ namespace mkwvk::mirror_rule {
 /// and now they are made in the textures' pool, where the textures take them (vram_compact.h blocks_at_start)
 inline uint64_t auto_bytes(uint64_t vram) {
     if (!vram) return 3072ull << 20;
-    if (vram <= (4ull << 30) + (512ull << 20)) return vram / 8;
+    if (small_card(vram)) return vram / 8;
     return std::min<uint64_t>(vram / 4, 3072ull << 20);
 }
 
-/// The mirrors when a Quality preset set the budgets (by_preset): never more than Auto gives the card, so a preset made for a
-/// larger card (Low's 1536 MB on a 4 GB one, preset_caps_memory lets Low's budgets through up to 6.75 GB) keeps a small card at
-/// Auto's. A budget chosen on the VRAM budget row itself is the player's on any card, as chosen
+/// The mirrors a budget asks for, by the card. Set by a Quality preset (by_preset): never more than Auto gives the card, so a
+/// preset made for a larger card (Low's 1536 MB on a 4 GB one, preset_caps_memory lets Low's budgets through up to 6.75 GB) keeps
+/// a small card at Auto's. Chosen on the VRAM budget row itself: the player's, except on a small card, where it is capped at Auto's
+/// too (the row's 3.6 GB step on a 4 GB card was 512 MB before Low's mirrors went to 1536; its steps of 4.8 GB and more, past
+/// what such a card has, now keep 512 as well)
 inline uint64_t preset_bytes(uint64_t asked, bool by_preset, uint64_t vram) {
-    return by_preset && vram ? std::min(asked, auto_bytes(vram)) : asked;
+    return vram && (by_preset || small_card(vram)) ? std::min(asked, auto_bytes(vram)) : asked;
 }
 
 }  // namespace mkwvk::mirror_rule
