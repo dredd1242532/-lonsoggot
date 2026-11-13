@@ -215,9 +215,13 @@ class Bump(unittest.TestCase):
         # (git-cliff takes a lone ref for a range and stops: SetCommitRangeError("HEAD", unable to parse OID), the
         # launcher's first nightlies. With no tag before and no first commit, it is given no range: the whole history)
         self.commit("feat: a")
-        stub = self.dir / "git-cliff-stub"
-        stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
-        stub.chmod(0o755)
+        if os.name == "nt":   # (Windows starts a .cmd, not a #! script: WinError 193. It echoes its arguments on one line)
+            stub = self.dir / "git-cliff-stub.cmd"
+            stub.write_text("@echo %*\r\n", encoding="utf-8")
+        else:
+            stub = self.dir / "git-cliff-stub"
+            stub.write_text("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done\n", encoding="utf-8")
+            stub.chmod(0o755)
         with mock.patch.dict(os.environ, GIT_CLIFF=str(stub)), mock.patch.dict(release.PRODUCTS["launcher"], since=None):
             args = release.notes("nightly-2-0123abcd", "launcher", root=str(self.dir)).split()
         self.assertEqual(args[-2:], ["--strip", "all"])
