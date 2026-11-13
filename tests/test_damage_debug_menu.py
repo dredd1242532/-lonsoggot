@@ -56,7 +56,8 @@ bool upscaler_shown(int n) { return n > 1; }
 bool model_shown(bool available) { return available; }
 }
 '''
-    for name in ("bool cheats_on(", "bool row_shown(", "int tab_row_count(", "int tab_row_to_global("):
+    for name in ("bool cheats_on(", "bool row_shown(", "int tab_row_count(", "int tab_row_to_global(",
+                 "int menu_damage_taken("):
         source += block(menu, name) + '\n'
     source += menu[menu.index("struct DebugGroup {"):menu.index("/// (longshot) The Debug tab's rows from top down")]
     source += r'''
@@ -89,6 +90,7 @@ int main() {
         assert(debug_step(order[n - 1], 1) == order[0]);
         assert(debug_step(order[0], -1) == order[n - 1]);
         assert(opts.damage_taken == 3); // Hiding the tools must not reset the saved option.
+        assert(menu_damage_taken() == (env || enabled ? 3 : 1)); // Hidden means Normal for the host.
     }
     assert(kDebugGroups == 3 && kDebugTools == 11);
     assert(!std::strcmp(debug_groups[0].title, "Player"));
