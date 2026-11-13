@@ -54,6 +54,8 @@ enum { HOS_OPT_SKIP_OPENING = 52 };
 /* (HOS_OPT_FPS_CAP, 53: the Game frame rate cap row, host/nn_vi.c fps_refresh reads it at each present: 0 the console's 60, then
    90, 120, 144, 165, 240, 6 Uncapped; a change applies in play) */
 enum { HOS_OPT_FPS_CAP = 53 };
+/* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
+enum { HOS_OPT_DAMAGE_TAKEN = 55 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
@@ -240,7 +242,7 @@ typedef struct MkwVkRenderer {
     void (*nvn_texture_created)(const nvn_tex *t);
     /* the CPU set an event's value: in order with the submits (the GPU's waits on it) */
     void (*nvn_event_signal)(uint64_t gpu, uint32_t value);
-    int (*option)(int id);   /* (longshot, the Insert menu) 0: game time follows the clock, 1: the menu is open, 2: dynamic resolution, 3: its fixed scale in percent, 4: the controllers count behind other windows, 5: text speed (0 normal to 3 instant), 6: native mouse look (host/mouse_native.c),
+    int (*option)(int id);   /* (longshot, the Insert menu) 0: game time follows the clock, 1: the menu is open, 2: dynamic resolution, 3: its fixed scale in percent, 4: the controllers count behind other windows, 5: text speed (0 normal to 3 instant), 6: Mouse camera (host/mouse_native.c; 1 native mouse look, 2 off: the mouse is never captured),
                                 7: the mouse's sensitivity in percent, 8: its up and down swapped (host/nn_hid.c),
                                 18 to 23: the Motion page (HOS_OPT_GYRO*: motion controls from a pad's gyroscope, host/pad_sdl.c;
                                 the horizontal and vertical sensitivity in percent, each turned around, the deadzone),

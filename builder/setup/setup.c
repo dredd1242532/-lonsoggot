@@ -1,6 +1,8 @@
 /* LongshotBuilder.exe in LongshotBuilder-<version>-windows-x64.zip (docs/releases.md): installs the Longshot Builder the zip
    carries, with the build tools tools.lock names, and starts it. It looks for no release itself: the Longshot Launcher
    (MagicBeanDev/LongshotLauncher) installs and updates the builder from Longshot's releases, and RecompLauncher runs this.
+   The builder has no window: only --cli installs and starts it, --play starts a built game, and this file as a game folder's
+   longshot.exe starts that game. Started any other way (by hand), it says to get the Longshot Launcher and does nothing else.
    The zip holds this setup, LongshotBuilder\ (the builder and Longshot's sources), tools.lock and VERSION: the builder is
    copied into %LOCALAPPDATA%\LongshotBuilder\versions\<version>, and each tool of tools.lock (`tool <name> <version> <system>
    <sha256> <size> <dest> <prefix> <url> [<url>]`) is downloaded from the first URL that answers, checked by its SHA-256,
@@ -9,11 +11,6 @@
    Tools are unpacked with Windows' own tar.exe. Files fetched by a program carry no "downloaded from the internet" mark,
    and the download itself holds no scripts, which is what antivirus programs' machine-learning guesses
    (Trojan:Script/...!ml) fired on.
-
-   LONGSHOT_SETUP_LIST=<url> installs a list of the older form instead, for development:
-       tag <tag>
-       part <sha256> <bytes> <folder under the install> <top folder in the zip to rename, or -> <new name, or -> <url>
-       run <the builder, relative to the install>
    Build: clang -O2 -mwindows -municode setup.c setup_rc.o -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lole32 -o LongshotBuilder-Setup.exe */
 #define WIN32_LEAN_AND_MEAN
 #ifndef UNICODE
@@ -40,11 +37,11 @@ static wchar_t g_status[512];
 static volatile LONG g_percent = -1;
 static DWORD g_http_status;   /* (the last answer: 0 when the server was not reached) */
 static wchar_t g_cmdline[2048];
-static wchar_t g_app[MAX_PATH];   /* (LongshotBuilder\ beside this setup, the builder its zip carries; empty with LONGSHOT_SETUP_LIST) */
+static wchar_t g_app[MAX_PATH];   /* (LongshotBuilder\ beside this setup, the builder its zip carries) */
 static HbHome g_home;
 static int g_home_ok;
 /* (RecompLauncher) --cli <make_game.py's options>: no window, the builder's lines on this process's stdout and stderr, its exit code
-   as ours; --play <game folder>: the game itself, waited for. Neither is used by the builder's own start, which is unchanged. */
+   as ours; --play <game folder>: the game itself, waited for. */
 static int g_headless;
 static DWORD g_exit;
 
@@ -59,8 +56,7 @@ static void say_error(const wchar_t *msg) {
 typedef struct {
     char sha[65];
     unsigned long long size;
-    char dest[260], from[260], to[260], url[1024], url2[1024];
-    int tool;   /* (a tools.lock line: from is the archive's prefix, unpacked as dest) */
+    char dest[260], from[260], url[1024], url2[1024];   /* (a tools.lock line: from is the archive's prefix, unpacked as dest) */
 } Part;
 /* the next non-empty line of a text, cut in place (its \r or \n made 0); *next moves past it. NULL at the end
    (strtok's work without its hidden state) */
@@ -296,9 +292,6 @@ static int init_home(int portable) {
     if (!n || n >= MAX_PATH || GetEnvironmentVariableW(L"LONGSHOT_SETUP_BASE", requested, MAX_PATH) >= MAX_PATH) return 0;
     if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, profile) == S_OK)
         hb_home_join(standard, MAX_PATH, profile, L"LongshotBuilder");   /* an explicit/portable home needs no AppData */
-    const wchar_t *name = wcsrchr(self, L'\\');
-    name = name ? name + 1 : self;
-    const int game = !_wcsicmp(name, L"longshot.exe");
     if (portable) {
         if (*requested) {
             if (!hb_home_full(g_home.root, requested)) return 0;
@@ -306,7 +299,7 @@ static int init_home(int portable) {
             wchar_t parent[MAX_PATH];
             if (!hb_home_full(parent, self) || !hb_home_parent(parent)) return 0;
             HbHome existing;
-            if (!hb_home_discover(&existing, NULL, self, parent, game)) return 0;
+            if (!hb_home_discover(&existing, NULL, self, parent)) return 0;
             if (existing.portable) wcscpy(g_home.root, existing.root);
             else if (!hb_home_join(g_home.root, MAX_PATH, parent, L"LongshotBuilder")) return 0;
         }
@@ -314,7 +307,7 @@ static int init_home(int portable) {
         mkdirs(g_home.root);
         if (!hb_home_mark(g_home.root)) return 0;
         g_home.portable = 1;
-    } else if (!hb_home_discover(&g_home, requested, self, standard, game)) return 0;
+    } else if (!hb_home_discover(&g_home, requested, self, standard)) return 0;
     wchar_t inherited[3] = L"";
     if (GetEnvironmentVariableW(L"LONGSHOT_BUILDER_PORTABLE", inherited, 3) == 1 &&
         inherited[0] == L'1' && !g_home.portable) return 0;
@@ -362,26 +355,10 @@ static void write_small(const wchar_t *path, const char *text) {
     CloseHandle(f);
 }
 
-/* A part that unpacks into a folder of its own (the tools the builder ships: Python, emsdk, the CPM packages, third_party,
-   wgpu-native, llvm-mingw): that folder, relative to a version's folder, in rel (0: the part has none, e.g. the builder's own code).
-   Named from its download (LongshotBuilder-<name>-<sha>.zip) or, for llvm-mingw, from its dest and rename. */
+/* The folder a tool of tools.lock unpacks into (the tools the builder ships: Python, emsdk, the CPM packages, third_party,
+   wgpu-native, llvm-mingw), relative to a version's folder, in rel: its dest */
 static int part_folder(const Part *p, wchar_t *rel, int n) {
-    if (p->tool) {   /* (a tool of tools.lock: its folder is its dest) */
-        swprintf(rel, n, L"%hs", p->dest);
-    } else if (strcmp(p->to, "-") && strcmp(p->dest, ".")) {   /* (llvm-mingw: dest LongshotBuilder/tools, renamed to llvm-mingw) */
-        swprintf(rel, n, L"%hs\\%hs", p->dest, p->to);
-    } else {
-        const char *b = strrchr(p->url, '/');
-        b = b ? b + 1 : p->url;
-        static const char *const own[] = {"python", "emsdk", "cpm", "third_party", "wgpu-native"};
-        int found = 0;
-        for (int i = 0; i < 5 && !found; i++) {
-            char want[64];
-            snprintf(want, sizeof want, "LongshotBuilder-%s-", own[i]);
-            if (!strncmp(b, want, strlen(want))) swprintf(rel, n, L"LongshotBuilder\\tools\\%hs", own[i]), found = 1;
-        }
-        if (!found) return 0;
-    }
+    swprintf(rel, n, L"%hs", p->dest);
     for (wchar_t *q = rel; *q; q++) if (*q == L'/') *q = L'\\';
     return 1;
 }
@@ -566,9 +543,7 @@ static int retryable(DWORD status) {
 static int builder_ready(const wchar_t *exe) {
     static const wchar_t *const required[] = {
         L"LongshotBuilder.dll", L"LongshotBuilder.deps.json", L"LongshotBuilder.runtimeconfig.json",
-        L"hostfxr.dll", L"hostpolicy.dll", L"coreclr.dll", L"System.Private.CoreLib.dll",
-        L"WindowsBase.dll", L"PresentationCore.dll", L"PresentationFramework.dll",
-        L"PresentationNative_cor3.dll", L"wpfgfx_cor3.dll"
+        L"hostfxr.dll", L"hostpolicy.dll", L"coreclr.dll", L"System.Private.CoreLib.dll"
     };
     wchar_t path[MAX_PATH];
     const size_t n = wcslen(exe);
@@ -589,28 +564,10 @@ static int builder_ready(const wchar_t *exe) {
     return 1;
 }
 
-#define LAUNCHER_RELEASES L"https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases"
-
-/* The list to install: LONGSHOT_SETUP_LIST=<url>, NULL when none was given (then the list beside this setup, if any) */
-static const char *manifest_url(void) {
-    static char u[1024];
-    const char *e = getenv("LONGSHOT_SETUP_LIST");
-    if (!e || !*e || strlen(e) >= sizeof u) return NULL;
-    snprintf(u, sizeof u, "%s", e);
-    return u;
-}
+#define LAUNCHER_DOWNLOAD L"https://longshot.magicbean.dev/download"
 
 static DWORD WINAPI work(LPVOID unused) {
     (void)unused;
-    /* (--repair, from the builder's Repair button: every part checked again and the version unpacked anew, after the builder that
-       started this has closed. It is not passed on) */
-    int repair = 0;
-    wchar_t *flag = wcsstr(g_cmdline, L"--repair");
-    if (flag) {
-        repair = 1;
-        wmemmove(flag, flag + 8, wcslen(flag + 8) + 1);
-        Sleep(2000);
-    }
     wchar_t base[MAX_PATH], downloads[MAX_PATH];
     if (!g_home_ok || (g_home.portable && hb_home_marked(g_home.root) != 1)) fail(L"The Builder home is unavailable or its portable marker is invalid.");
     wcscpy(base, g_home.root);
@@ -619,16 +576,15 @@ static DWORD WINAPI work(LPVOID unused) {
 
     status(L"Reading the parts list...");
     Mem man = {0};
-    /* (no URL given: the list beside this setup, as the RecompLauncher zip carries it; nothing is looked up on a server) */
-    int beside = 0;
-    if (!manifest_url()) {
+    /* (the list beside this setup, as the zip carries it; nothing is looked up on a server) */
+    {
         wchar_t list[MAX_PATH];
         GetModuleFileNameW(NULL, list, MAX_PATH);
         wchar_t *slash = wcsrchr(list, L'\\');
         if (slash && (size_t)(slash + 1 - list) + 20 < MAX_PATH) wcscpy(slash + 1, L"tools.lock");
         HANDLE h = slash ? CreateFileW(list, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL) : INVALID_HANDLE_VALUE;
         if (h == INVALID_HANDLE_VALUE)
-            fail(L"No tools.lock beside this setup: unpack the whole LongshotBuilder zip, or get the Longshot Launcher from " LAUNCHER_RELEASES);
+            fail(L"No tools.lock beside this setup: unpack the whole LongshotBuilder zip, or get the Longshot Launcher from " LAUNCHER_DOWNLOAD);
         char buf[4096];
         DWORD got;
         while (ReadFile(h, buf, sizeof buf, &got, NULL) && got && man.n < (1 << 20)) mem_sink(&man, buf, got);
@@ -645,30 +601,10 @@ static DWORD WINAPI work(LPVOID unused) {
         mem_sink(&man, head, (DWORD)strlen(head));
         wcscpy(slash + 1, L"LongshotBuilder");
         wcscpy(g_app, list);
-        beside = 1;
     }
-    /* (tried again on a server error or no answer: 8 tries over ~3 minutes) */
+    /* (a tool's download is tried again on a server error or no answer: 8 tries over ~3 minutes) */
     static const int waits[] = {3, 6, 12, 20, 30, 45, 60};
     enum { TRIES = 8 };
-    int ok = beside;
-    for (int attempt = 0; attempt < TRIES && !ok; attempt++) {
-        if (attempt) {
-            status(L"The server didn't answer (%lu). Trying again in %d s...", g_http_status, waits[attempt - 1]);
-            Sleep(waits[attempt - 1] * 1000);
-            status(L"Reading the parts list...");
-        }
-        free(man.p);
-        man = (Mem){0};
-        g_http_status = 0;
-        ok = http_get(manifest_url(), mem_sink, &man, 0, NULL) && man.p;
-        if (!ok && !retryable(g_http_status)) break;   /* (404 and the like: trying again changes nothing) */
-    }
-    if (!ok)
-        fail(g_http_status == 404
-                 ? L"The parts list was not found. Get the Longshot Launcher: " LAUNCHER_RELEASES
-             : g_http_status ? L"The download server is failing right now (an error 500 or above, tried 8 times over 3 minutes). "
-                               L"Try again in a few minutes, or later today."
-                             : L"Could not reach the server to get the Longshot Builder. Check your internet connection and try again.");
 
     char tag[128] = "", run[260] = "";
     Part parts[MAX_PARTS];
@@ -676,17 +612,13 @@ static DWORD WINAPI work(LPVOID unused) {
     for (char *next = man.p, *line; (line = next_line(&next)) != NULL;) {
         if (!strncmp(line, "tag ", 4)) sscanf(line + 4, "%127s", tag);
         else if (!strncmp(line, "run ", 4)) sscanf(line + 4, "%259s", run);
-        else if (!strncmp(line, "part ", 5) && nparts < MAX_PARTS) {
-            Part *p = &parts[nparts];
-            memset(p, 0, sizeof *p);
-            if (sscanf(line + 5, "%64s %llu %259s %259s %259s %1023s", p->sha, &p->size, p->dest, p->from, p->to, p->url) == 6) nparts++;
-        } else if (!strncmp(line, "tool ", 5) && nparts < MAX_PARTS) {   /* (tools.lock: name version system sha size dest prefix urls) */
+        else if (!strncmp(line, "tool ", 5) && nparts < MAX_PARTS) {   /* (tools.lock: name version system sha size dest prefix urls) */
             Part *p = &parts[nparts];
             char name[64], version[64], system[32];
             memset(p, 0, sizeof *p);
             const int got = sscanf(line + 5, "%63s %63s %31s %64s %llu %259s %259s %1023s %1023s", name, version, system, p->sha,
                                    &p->size, p->dest, p->from, p->url, p->url2);
-            if (got >= 8 && !strcmp(system, "windows-x64")) strcpy(p->to, "-"), p->tool = 1, nparts++;
+            if (got >= 8 && !strcmp(system, "windows-x64")) nparts++;
         }
     }
     if (!tag[0] || !run[0] || !nparts) fail(L"The release's setup list could not be read. Try again later.");
@@ -696,8 +628,7 @@ static DWORD WINAPI work(LPVOID unused) {
             const Part *p = &parts[i];
             bad = strlen(p->sha) != 64 || strspn(p->sha, "0123456789abcdef") != 64 || _strnicmp(p->url, "https://", 8) ||
                   (p->url2[0] && _strnicmp(p->url2, "https://", 8)) ||
-                  (strcmp(p->dest, ".") && !list_name_ok(p->dest, 1)) || (strcmp(p->from, "-") && !list_name_ok(p->from, p->tool)) ||
-                  (strcmp(p->to, "-") && !list_name_ok(p->to, 0)) || (p->tool && !strcmp(p->dest, "."));
+                  !list_name_ok(p->dest, 1) || (strcmp(p->from, "-") && !list_name_ok(p->from, 1));
         }
         if (bad) fail(L"The release's setup list has a name this setup does not accept. Try again later.");
     }
@@ -710,13 +641,13 @@ static DWORD WINAPI work(LPVOID unused) {
     home_path(exe, L"%ls\\%ls", install, wrun);
     for (wchar_t *q = exe; *q; q++) if (*q == L'/') *q = L'\\';
 
-    if (repair || GetFileAttributesW(marker) == INVALID_FILE_ATTRIBUTES || !builder_ready(exe)) {
+    if (GetFileAttributesW(marker) == INVALID_FILE_ATTRIBUTES || !builder_ready(exe)) {
         /* (unpacked into <tag>.part and renamed once complete: a setup stopped half way never leaves a version that looks installed) */
         home_path(install, L"%ls\\%ls.part", versions, wtag);
         rmtree(install);
         if (!g_home.portable) rmtree(final_dir);
         mkdirs(install);
-        if (g_app[0]) {   /* (the builder the zip carries, beside this setup) */
+        {   /* (the builder the zip carries, beside this setup) */
             wchar_t app[MAX_PATH];
             status(L"Copying the Longshot Builder...");
             home_path(app, L"%ls\\LongshotBuilder", install);
@@ -777,13 +708,11 @@ static DWORD WINAPI work(LPVOID unused) {
             status(L"Unpacking part %d of %d...", i + 1, nparts);
             wchar_t dest[MAX_PATH], wdest[260], tarcmd[2 * MAX_PATH + 64], sys[MAX_PATH], final_tool[MAX_PATH];
             w(p->dest, wdest, 260);
-            if (p->tool) {   /* (a tool: unpacked aside, then its prefix folder moved in as dest) */
-                home_path(final_tool, L"%ls\\%ls", install, wdest);
-                for (wchar_t *q = final_tool; *q; q++) if (*q == L'/') *q = L'\\';
-                home_path(dest, L"%ls\\.tool-%d", install, i);
-                rmtree(dest);
-            } else if (!strcmp(p->dest, ".")) wcscpy(dest, install);
-            else home_path(dest, L"%ls\\%ls", install, wdest);
+            /* (a tool: unpacked aside, then its prefix folder moved in as dest) */
+            home_path(final_tool, L"%ls\\%ls", install, wdest);
+            for (wchar_t *q = final_tool; *q; q++) if (*q == L'/') *q = L'\\';
+            home_path(dest, L"%ls\\.tool-%d", install, i);
+            rmtree(dest);
             for (wchar_t *q = dest; *q; q++) if (*q == L'/') *q = L'\\';
             mkdirs(dest);
             GetSystemDirectoryW(sys, MAX_PATH);
@@ -811,7 +740,7 @@ static DWORD WINAPI work(LPVOID unused) {
                 /* Keep both paths; the displayed excerpt uses only the space left in fail()'s 1024-wide message. */
                 fail(L"%ls%.*ls", heading, (int)(1023 - wcslen(heading)), detail);
             }
-            if (p->tool) {
+            {   /* (the tool's prefix folder, moved in as dest) */
                 wchar_t from[MAX_PATH], wf[260], parent[MAX_PATH];
                 w(p->from, wf, 260);
                 if (strcmp(p->from, "-")) home_path(from, L"%ls\\%ls", dest, wf);
@@ -824,13 +753,6 @@ static DWORD WINAPI work(LPVOID unused) {
                     fail(L"Could not set up tool %d of %d (%ls: no %ls in its archive, or a file the builder has already?).", i + 1, nparts,
                          wdest, wf);
                 rmtree(dest);
-            } else if (strcmp(p->from, "-") && strcmp(p->to, "-")) {   /* (llvm-mingw-<version>-ucrt-x86_64 -> llvm-mingw) */
-                wchar_t from[MAX_PATH], to[MAX_PATH], wf[260], wt[260];
-                w(p->from, wf, 260), w(p->to, wt, 260);
-                home_path(from, L"%ls\\%ls", dest, wf);
-                home_path(to, L"%ls\\%ls", dest, wt);
-                if (GetFileAttributesW(to) == INVALID_FILE_ATTRIBUTES && !MoveFileW(from, to))
-                    fail(L"Could not set up part %d of %d (renaming %ls).", i + 1, nparts, wf);
             }
         }
         wchar_t staged_exe[MAX_PATH];
@@ -892,30 +814,6 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
-/* (launch mode) "Longshot Launcher.exe" in a game folder (nx2/make_game.py puts this file there under that name): the installed
-   builder opened as the game's launcher (--launch <that folder>: Play, and Update when a newer release is out), at once, with no
-   window, download or network of its own. With no builder installed yet, the setup runs as usual and then opens the launcher. */
-static int launch_installed(const wchar_t *args) {
-    wchar_t base[MAX_PATH], cur[MAX_PATH], exe[MAX_PATH], dir[MAX_PATH], cmd[4096];
-    if (!g_home_ok) return 0;
-    wcscpy(base, g_home.root);
-    char tag[128] = "";
-    home_path(cur, L"%ls\\versions\\current.txt", base);
-    read_small(cur, tag, sizeof tag);
-    if (!tag[0] || tag[0] == '.' || !list_name_ok(tag, 0)) return 0;
-    wchar_t wtag[128];
-    MultiByteToWideChar(CP_UTF8, 0, tag, -1, wtag, 128);
-    home_path(dir, L"%ls\\versions\\%ls\\LongshotBuilder", base, wtag);
-    home_path(exe, L"%ls\\LongshotBuilder.exe", dir);
-    if (!builder_ready(exe)) return 0;
-    swprintf(cmd, 4096, L"\"%ls\" %ls", exe, args);
-    STARTUPINFOW si = {sizeof si};
-    PROCESS_INFORMATION pi;
-    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi)) return 0;
-    CloseHandle(pi.hThread), CloseHandle(pi.hProcess);
-    return 1;
-}
-
 /* (RecompLauncher's Play) --play <game folder>: bin\longshot.exe there, started like the game folder's launcher starts it but without
    its update question, and waited for, so the launcher knows when the session ends. */
 static int play_folder(const wchar_t *args) {
@@ -953,18 +851,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
         if (!wcsncmp(c, L"--play", 6) && (c[6] == L' ' || !c[6])) return play_folder(c + 6);
         if (!wcsncmp(c, L"--cli", 5) && (c[5] == L' ' || !c[5])) g_headless = 1, show = SW_HIDE;
     }
-    g_home_ok = init_home(portable);
-    {
+    {   /* (the game folder's launcher, longshot.exe there (nx2/make_game.py copies this file): the game, bin\longshot.exe, at once) */
         wchar_t self[MAX_PATH];
         GetModuleFileNameW(NULL, self, MAX_PATH);
         const wchar_t *name = wcsrchr(self, L'\\');
         name = name ? name + 1 : self;
-        if (!_wcsicmp(name, L"longshot.exe") && !wcsstr(g_cmdline, L"--")) {   /* (the game folder's launcher) */
+        if (!_wcsicmp(name, L"longshot.exe") && !wcsstr(g_cmdline, L"--")) {
             wchar_t *slash = wcsrchr(self, L'\\');
             if (slash) *slash = 0;
-            swprintf(g_cmdline, 2047, L"--launch \"%ls\"", self);
-            if (launch_installed(g_cmdline)) return 0;
-            /* (no builder installed on this PC: the game itself, at once; nothing is downloaded to show a Play button) */
             wchar_t game[MAX_PATH], cmd[MAX_PATH + 4];
             home_path(game, L"%ls\\bin\\longshot.exe", self);
             swprintf(cmd, MAX_PATH + 4, L"\"%ls\"", game);
@@ -974,16 +868,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
                 CloseHandle(pi.hThread), CloseHandle(pi.hProcess);
                 return 0;
             }
-            MessageBoxW(NULL, L"The game (bin\\longshot.exe) is missing from this folder. Build it again with the Longshot Builder.", L"Longshot",
+            MessageBoxW(NULL, L"The game (bin\\longshot.exe) is missing from this folder. Build it again with the Longshot Launcher.", L"Longshot",
                         MB_ICONERROR);
             return 1;
         }
-        if (wcsstr(g_cmdline, L"--launch") && launch_installed(g_cmdline)) return 0;
     }
+    if (!g_headless) {   /* (started by hand: the builder has no window to install and open) */
+        MessageBoxW(NULL, L"The Longshot Builder has no window of its own: the Longshot Launcher builds the game and starts it. "
+                          L"Get the launcher from " LAUNCHER_DOWNLOAD, L"Longshot Builder", MB_OK | MB_ICONINFORMATION);
+        return 1;
+    }
+    g_home_ok = init_home(portable);
     if (!g_home_ok) {
         const wchar_t *why = L"The Builder home is unavailable or its portable marker is invalid. For a new portable install, put this setup in a writable folder and start it with --portable.";
-        if (g_headless) say_error(why);
-        else MessageBoxW(NULL, why, L"Longshot Builder setup", MB_OK | MB_ICONERROR);
+        say_error(why);
         return 1;
     }
     INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_PROGRESS_CLASS};

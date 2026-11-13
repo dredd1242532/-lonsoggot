@@ -4,7 +4,7 @@
 # the Vulkan headers) are not in it either: they are tools.lock's linux-x64 lines, which the Longshot Launcher installs
 # beside it, or the AppImage itself at its first start (builder/linux/linux_tools.py; docs/releases.md, "tools.lock").
 #
-#   scripts/linux/deps.sh        (first: Python with Tk, the AppImage packer, into build-linux/deps)
+#   scripts/linux/deps.sh        (first: Python, the AppImage packer, into build-linux/deps)
 #   scripts/linux/appimage.sh    -> build-linux/Longshot-<version>-x86_64.AppImage: the Linux builder a release ships, which
 #                                   the Longshot Launcher installs (docs/releases.md)
 # The same image builds the game and, with --play, starts the one it saved.
@@ -68,6 +68,9 @@ mkdir -p "$T/scripts"
 cp scripts/ngx_sdk.py "$T/scripts/"
 cp -a gpu/vk gpu/compat gpu/third_party "$T/gpu/"
 cp -a third_party/imgui third_party/zstd third_party/fonts "$T/third_party/"
+# (AMD FSR 4, when chosen: AMD's MIT FSR API headers, which the Vulkan back end compiled here builds with (make_game.py --fsr,
+# nx2/build.py). AMD's runtime is not among them: on Linux the player's own amd_fidelityfx_upscaler_vk.so, the readme)
+cp -a third_party/fidelityfx "$T/third_party/"
 mkdir -p "$T/third_party/zbic" "$T/third_party/a64-kit"
 # (zbic's single-file zstd too: the Vulkan back end compiled here, with DLSS, builds zstd.c and includes zstd.h; v2.2.0-rc.1
 # carried only zbic.so, and every Linux build with DLSS stopped at FileNotFoundError: zstd.h)
@@ -86,16 +89,15 @@ fi
 [ -n "$(find "$T/assets/pipeline_states" -name "*.bin.xz" 2>/dev/null)" ] || { echo "assets/pipeline_states/ holds no pipeline state list: a release ships them (docs/development.md, \"The pipeline state list\")"; exit 1; }
 find "$T" -name __pycache__ -prune -exec rm -rf {} +
 
-# ---- what it starts with: its Python (the window, the tools' download, nx2/make_game.py) and the Vulkan back end ----
+# ---- what it starts with: its Python (the tools' download, nx2/make_game.py) and the Vulkan back end ----
 cp -a "$DEPS/python" "$APPDIR/usr/python"
-cp "$DEPS/tk/libtcl9tk9.0.so" "$DEPS/tk/libXft.so.2" "$DEPS/tk/libXrender.so.1" "$APPDIR/usr/python/lib/"
 cp "$VK" "$L/longshot_vk.so"
-cp -a "$DEPS/licenses" "$T/licenses"   # (Tk, libXft, libXrender: what this AppImage carries besides Longshot and Python)
 # ---- the licences of the third-party parts compiled into longshot_vk.so (tests/test_appimage_licenses.py) ----
-mkdir -p "$T/licenses/imgui" "$T/licenses/zstd" "$T/licenses/libertinus"
+mkdir -p "$T/licenses/imgui" "$T/licenses/zstd" "$T/licenses/libertinus" "$T/licenses/fidelityfx"
 cp third_party/imgui/LICENSE.txt third_party/imgui/PROVENANCE.md "$T/licenses/imgui/"
 cp third_party/zstd/LICENSE third_party/zstd/PROVENANCE.md "$T/licenses/zstd/"
 cp third_party/fonts/libertinus/OFL.txt third_party/fonts/PROVENANCE.md "$T/licenses/libertinus/"
+cp third_party/fidelityfx/LICENSE.md third_party/fidelityfx/PROVENANCE.md "$T/licenses/fidelityfx/"   # (with AMD FSR 4)
 # ---- end of the licences ----
 
 # ---- check: tools.lock's compiler builds and links a program against its sysroot, and it runs ----

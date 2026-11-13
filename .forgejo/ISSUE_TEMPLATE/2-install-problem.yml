@@ -29,7 +29,7 @@ body:
   - type: dropdown
     id: track
     attributes:
-      label: Update track
+      label: Channel
       options:
         - Release
         - Release candidate

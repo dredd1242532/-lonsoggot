@@ -110,7 +110,7 @@ They are not in the release: `tools.lock` names them.
 
 ```
 tool <name> <version> <system> <sha256> <size> <dest> <prefix> <url> [<url> ...]
-tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/llvm-mingw llvm-mingw-20261104-ucrt-x86_64 https://git.magicbean.dev/api/packages/MagicBeanDev/generic/llvm-mingw-windows-x64/20261104/5521…-llvm-mingw.zip https://github.com/mstorsjo/…
+tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/llvm-mingw llvm-mingw-20261104-ucrt-x86_64 https://git-cdn.magicbean.dev/api/packages/…-llvm-mingw.zip https://git.magicbean.dev/api/packages/…-llvm-mingw.zip https://github.com/mstorsjo/…
 ```
 
 - **Installing.** The Windows builder's setup (`builder/setup/setup.c`), the Linux AppImage (`builder/linux/linux_tools.py`)
@@ -125,7 +125,9 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/
   package** of the MagicBeanDev organization (its *Packages* tab): the package `<name>-<system>` (`emsdk-windows-x64`,
   `emsdk-linux-x64`: a tool's Windows and Linux builds have versions of their own), its version the tool's, the file
   `<sha256>-<name>.zip`, at `https://git.magicbean.dev/api/packages/MagicBeanDev/generic/<name>-<system>/<version>/<file>`.
-  Anyone downloads them with no account. A package version's files never change (Forgejo refuses a second upload of a
+  Forgejo keeps packages in Cloudflare R2, and `git-cdn.magicbean.dev` serves the same paths from Cloudflare's edge
+  (cached), so a tool's first URL is its `git-cdn.magicbean.dev` link and its second the same file on git.magicbean.dev
+  (`scripts/tools.py check --require` holds both, in that order). Anyone downloads them with no account. A package version's files never change (Forgejo refuses a second upload of a
   name), and nothing prunes them, so an older version's tools stay downloadable. Where an archive came from (upstream for
   llvm-mingw, NotRexed/Hookshot's `builder-parts` release for those taken from Hookshot) is its fallback URL, so no install
   depends on a repository we do not control alone. An archive Longshot makes itself (the CPM cache with dav1d, the
@@ -139,13 +141,13 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/
   v2.1.0's with dav1d added (`scripts/windows/dav1d.sh`), and `third-party` the prebuilt files of Hookshot v2.1.0's
   `third_party` part (`assemble third-party`). Linux: `scripts/linux/deps.sh tools`'s. There is no play profile yet: the
   lock has no `profile` line, and `check --require` does not ask for one.
-- **Linux.** The AppImage carries only the builder: its Python (the window, the tools' download and `make_game.py` run on it,
+- **Linux.** The AppImage carries only the builder: its Python (the tools' download and `make_game.py` run on it,
   and its packages follow `requirements.txt`, which changes with the version), Longshot's sources and the prebuilt Vulkan
   back end. Each `linux-x64` tool's `dest` is where the AppImage had it (`usr/lib/longshot/emsdk`, `usr/share/longshot/cpm`,
   ...). The launcher unpacks them beside the unpacked AppImage, as on Windows. An AppImage started by itself
   (`builder/linux/AppRun`) finds them there, or in the launcher's copy of the same version, or in
-  `$XDG_DATA_HOME/longshot/builder/toolchains/<v>/`; what is missing it downloads there at its first start, with a progress
-  window (`--cli`: lines on stderr), linking a tool another version there has. Once there, no connection is needed.
+  `$XDG_DATA_HOME/longshot/builder/toolchains/<v>/`; what is missing its first `--cli` downloads there, its progress on
+  stderr, linking a tool another version there has. Once there, no connection is needed.
   `scripts/linux/deps.sh tools` makes the Linux archives from its pinned downloads (`scripts/tools.py pack`: modes and
   relative links kept).
 
@@ -194,7 +196,6 @@ There is no installer program: the launcher installs itself (the launcher's READ
   portable zip, in place beside its `portable` file; the file keeps its name.
 
 `LONGSHOT_LAUNCHER_TRUST=<public key .pem>` trusts one more key, to try a release signed with a test key.
-`LONGSHOT_LAUNCHER_PARTS=<list>` builds from a local parts list with no release at all (development).
 
 ## CI
 
@@ -238,8 +239,35 @@ The first release of each product only needs its first number (Longshot `v3.0.0`
 git-cliff writes them at release time from the commit titles since the previous tag, with the repository's `cliff.toml`.
 For a stable, that is since the previous stable, so its notes cover its release candidates. The headings are Features,
 Fixes, Performance, Reverted, Documentation, Code, Build and Tests; `ci` and `chore` are left out. The notes go on the
-release page only: nothing is committed back to `main`, and there is no changelog file to keep up. Hookshot's
-`CHANGELOG.md` in Longshot is history.
+release page only: nothing is committed back to `main`, and there is no changelog file to keep up (Hookshot's is in
+NotRexed/Hookshot).
+
+`release.py publish` puts a header above the notes (`release_page`), so a player who lands on a release page downloads the
+right thing:
+
+- **The launcher's releases** start with big download links to that release's own files: *Download for Windows* (the
+  installer), *Download for Linux* (the AppImage), and a small link to the portable zip, all through git-cdn.magicbean.dev
+  (the same paths as git.magicbean.dev, from Cloudflare's edge).
+- **Longshot's releases** start with "To play, get the Longshot Launcher": the same big links, to the newest launcher of
+  the **same channel** (an rc to the launcher's rc, a nightly to its nightly, a stable to its stable) through the links
+  below, then "Don't download the files below": they are the builders the launcher installs.
+
+## Download links
+
+Forgejo's `/releases/latest` covers stable only. longshot.magicbean.dev (the Longshot website, `website/worker/index.ts` in MagicBeanDev/Longshot) has permanent links to
+the newest launcher of each channel, read from LongshotLauncher's release list by the rules above (cached 60 seconds):
+
+| Link | Goes to |
+|---|---|
+| `https://longshot.magicbean.dev/download` | a page: the launcher for the visitor's system, from the best channel there is, and every channel |
+| `https://longshot.magicbean.dev/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
+| `https://longshot.magicbean.dev/download/launcher/<channel>` | the channel's newest release page |
+| `https://longshot.magicbean.dev/download/launcher/<channel>/<os>` | that file of the channel's newest release |
+
+`<channel>` is `stable`, `rc` or `nightly`; `<os>` is `windows` (the setup), `windows-portable` (the zip) or `linux` (the
+AppImage). A channel with no release yet answers with a page that says so and offers the newest there is. The READMEs'
+download buttons and Longshot's release pages use these links; there are none for Longshot's builder files, which only
+the launcher downloads.
 
 ## RecompLauncher (Longshot)
 
@@ -276,5 +304,5 @@ updates everything), or **RecompLauncher**, with the same builder files.
 - **Tags and computed numbers, not release PRs.** A maintainer tags; CI checks the number against what was merged and
   writes the notes. Nothing is committed back to `main`, so there is no release branch or bot commit to review.
 - **The builders do not update themselves.** One updater, the launcher's, with one set of rules, instead of three (the
-  game, the WPF builder, the Linux builder). The builders keep `--update <folder>`, which rebuilds a game with their
-  own tools.
+  game, the Windows builder, the Linux builder). The builders have no window any more; their `--cli --update <folder>`
+  rebuilds a game with their own tools.
