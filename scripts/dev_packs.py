@@ -56,11 +56,13 @@ CROSS = WINDOWS and os.name != "nt"   # (the Windows game built on Linux: it can
 # not used, so a base can start from an older base's)
 # (all of them, from the renderer's sources, 2026-11-13: the program cache plain or compressed and its index
 # (vk_progcache.cpp, the index is the cache's name with .idx for .bin), its modules' ids (vk_programs.cpp), the pipeline
-# notes, predicted and built (vk_draw.cpp pipe_notes_path, precompile_built_path), the compute pipelines and their
+# notes, predicted (with the predicted pipelines' keys, read by the census) and built (vk_draw.cpp pipe_notes_path,
+# predicted_keys_write, precompile_built_path), the compute pipelines and their
 # variants, the state lists (and the older one still read), the prepare's record, and the driver's pipeline cache with
 # its stamp (without it the cache and its play files are dropped, pcache_stamp.h))
 CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.zst.bin", "longshot_programs.zst.idx",
-          "longshot_module_ids.bin", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted", "longshot_pipelines.bin.built",
+          "longshot_module_ids.bin", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted", "longshot_pipelines.bin.predicted_keys",
+          "longshot_pipelines.bin.built",
           "longshot_computes.bin", "longshot_compute_variants.bin", "longshot_pipeline_states.bin",
           "longshot_pipeline_states_v1.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin", "mkw_vk_pipelines.stamp")
 PLAY_FILES = re.compile(r"mkw_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)

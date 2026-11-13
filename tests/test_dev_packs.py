@@ -85,9 +85,9 @@ def test_caches_named_in_renderer():
     text = "".join(p.read_text(encoding="utf-8", errors="replace") for g in ("*.cpp", "*.h") for p in (ROOT / "gpu" / "vk").glob(g))
     for c in packs.CACHES + (packs.SEED,):
         # (some are a named file with a suffix the renderer adds: .predicted and .built to the notes, .idx for .bin)
-        name = c.replace(".predicted", "").replace(".built", "").replace(".zst.idx", ".zst.bin")
+        name = c.replace(".predicted_keys", "").replace(".predicted", "").replace(".built", "").replace(".zst.idx", ".zst.bin")
         check("the renderer still names %s" % name, name in text)
-    check("the predicted and built notes' suffixes, and the index's", all(s in text for s in ('".predicted"', '".built"', '".idx"')))
+    check("the predicted and built notes' suffixes, and the index's", all(s in text for s in ('".predicted"', '".predicted_keys"', '".built"', '".idx"')))
     # (and the other way round: every .bin or .idx the renderer names beside the game is a cache, or one of the two files a
     # build makes (the shader seed, the shipped state list); a new cache file in the renderer fails here until it is classified)
     named = set(re.findall(r'"(longshot_[A-Za-z0-9_.]*\.(?:bin|idx))"', text))
