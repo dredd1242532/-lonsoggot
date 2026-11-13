@@ -48,14 +48,17 @@ uint64_t frame_no = 1;
 uint64_t texture_frame_no() { return frame_no; }
 thread_local bool ask_start_first = false;
 thread_local bool quick_build = false;
-// (build_graphics: what each call was, and what it answers: the caches' full one, or a quick one)
+thread_local bool gate_busy = false;
+// (build_graphics: what each call was, and what it answers: the caches' full one, or a quick one; gate_held: the driver-fault
+// gate busy, another build of the program in the driver, as build_graphics answers it then)
 struct Call { bool asked, quick, start_first; };
 std::vector<Call> calls;
-bool cache_has = false;
+bool cache_has = false, gate_held = false;
 VkPipeline next_handle = 100;
 VkPipeline build_graphics(const Program&, const NvnState&, const Targets&, VkPrimitiveTopology, int part = -1, bool* cold = nullptr) {
     calls.push_back({cold != nullptr, quick_build, ask_start_first});
     check(part == -1, "a whole pipeline is asked for");
+    if (gate_held) return gate_busy = true, cold ? (*cold = true, VK_NULL_HANDLE) : VK_NULL_HANDLE;
     if (cold) return cache_has ? next_handle++ : (*cold = true, VK_NULL_HANDLE);
     return next_handle++;
 }
@@ -74,13 +77,14 @@ struct FakeEntry {
 
 void header_rules() {
     bool bad = false;
-    check(quick_pipe::quick_ms(nullptr, true, &bad) == quick_pipe::kQuickDefaultMs && !bad, "unset: on for AMD's driver");
-    check(quick_pipe::quick_ms(nullptr, false, &bad) == 0 && !bad, "unset: off elsewhere");
-    check(quick_pipe::quick_ms("250", false, &bad) == 250 && !bad, "a number sets it anywhere");
-    check(quick_pipe::quick_ms(" 0 ", true, &bad) == 0 && !bad, "0 turns it off on AMD");
-    check(quick_pipe::quick_ms("-5", true, &bad) == 0 && !bad, "a negative number is off");
+    check(quick_pipe::quick_ms(nullptr, &bad) == 0 && !bad, "unset: off on every driver (until measured on AMD)");
+    check(quick_pipe::quick_ms("250", &bad) == 250 && !bad, "a number sets it anywhere");
+    check(quick_pipe::quick_ms("8", &bad) == quick_pipe::kQuickSuggestedMs && !bad, "the suggested value");
+    check(quick_pipe::kQuickSuggestedMs > 0 && quick_pipe::kQuickSuggestedMs <= 16, "the suggested budget is under a 60 fps frame");
+    check(quick_pipe::quick_ms(" 0 ", &bad) == 0 && !bad, "0 turns it off");
+    check(quick_pipe::quick_ms("-5", &bad) == 0 && !bad, "a negative number is off");
     for (const char* v : {"", "8ms", "off", "nan", "inf", "1e999"}) {
-        check(quick_pipe::quick_ms(v, true, &bad) == quick_pipe::kQuickDefaultMs && bad, "a non-number is the default, said");
+        check(quick_pipe::quick_ms(v, &bad) == 0 && bad, "a non-number is off, said");
         check(quick_pipe::wait_ms(v, &bad) == 0 && bad, "a non-number wait is off, said");
     }
     check(quick_pipe::wait_ms(nullptr, &bad) == 0 && !bad, "the brief wait is off unless set");
@@ -89,33 +93,59 @@ void header_rules() {
     check(quick_pipe::slow_ms("999999", &bad) == 60000, "the slow-build test is at most a minute");
     check(quick_pipe::slow_ms("8s", &bad) == 0 && bad, "the slow-build test is strict");
 
-    const auto none = [] { return 0; };
+    const auto none = [](bool&) { return 0; };
     int built = 0, asked = 0;
     std::vector<int> gone;
     double clock = 0;
-    const auto ask_none = [&] { return asked++, 0; };
-    const auto build_slow = [&] { return clock += 400, ++built, 50 + built; };   // (each quick build: 400 ms)
+    const auto ask_none = [&](bool&) { return asked++, 0; };
+    const auto build_slow = [&](bool&) { return clock += 400, ++built, 50 + built; };   // (each quick build: 400 ms)
     const auto destroy = [&](int pl) { gone.push_back(pl); };
     const auto now = [&] { return clock; };
     const auto poll = [&] { clock += 1; };
     quick_pipe::FrameBudget budget;
-    // (budget per frame: 1000 ms, 400 ms a build. Three skippable draws get one, the fourth in the frame is left out)
+    // (budget per frame: 1000 ms, 400 ms a build. Two skippable draws get one; the third would end at 1200 ms, past the budget,
+    // so it is left out and not started: the frame ends at 800 ms, not 1200)
     FakeEntry e[6];
     int got = 0;
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 3; i++)
         got += quick_pipe::take(e[i], false, 1000, budget, 7, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick;
-    check(got == 3 && built == 3, "a frame's quick builds stop once its budget is spent");
-    check(e[3].quick.load() == quick_pipe::kNone, "an entry left out for the budget can be given one in a later frame");
+    check(got == 2 && built == 2 && budget.used == 800, "a frame's quick builds stop before one that would overrun its budget");
+    check(e[2].quick.load() == quick_pipe::kNone, "an entry left out for the budget can be given one in a later frame");
     check(quick_pipe::take(e[4], true, 1000, budget, 7, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick,
           "a draw that cannot be left out is not held to the budget");
-    check(quick_pipe::take(e[3], false, 1000, budget, 8, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick,
+    check(quick_pipe::take(e[2], false, 1000, budget, 8, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick,
           "the next frame has its budget again");
     check(quick_pipe::take(e[5], false, 0, budget, 9, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kNothing,
           "a budget of 0 is off");
+    {   // (builds slower than the whole budget: the frame's first is still made, then none more in it: one build past it at most)
+        quick_pipe::FrameBudget small;
+        FakeEntry s[3];
+        built = 0;
+        check(quick_pipe::take(s[0], false, 8, small, 1, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick,
+              "a frame's first quick build is made whatever it is expected to take");
+        check(quick_pipe::take(s[1], false, 8, small, 1, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kNothing &&
+                  built == 1,
+              "no second build in a frame its first overran");
+        check(quick_pipe::take(s[1], false, 8, small, 2, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick &&
+                  built == 2,
+              "the next frame makes one again");
+        // (a busy gate's retry early in a frame takes a little time and builds nothing: it must not use up the frame's one
+        // build, or an entry whose program is in the driver for seconds, retried at the same place each frame, keeps every
+        // skippable draw after it from a quick pipeline for that long)
+        FakeEntry r[2];
+        const auto ask_busy = [&](bool& busy) { clock += 1; busy = true; return 0; };
+        check(quick_pipe::take(r[0], false, 8, small, 3, ask_busy, build_slow, destroy, now, poll) == quick_pipe::Got::kNothing &&
+                  r[0].quick.load() == quick_pipe::kNone,
+              "a busy gate's retry builds nothing and leaves the entry to try again");
+        check(quick_pipe::take(r[1], false, 8, small, 3, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick &&
+                  built == 3,
+              "a frame's first build still comes after a busy retry took some of its time");
+    }
     // (cache first: a full one the caches have is taken, and nothing is built)
     FakeEntry c;
     const int before = built;
-    check(quick_pipe::take(c, false, 1000, budget, 10, [] { return 9; }, build_slow, destroy, now, poll) == quick_pipe::Got::kCached &&
+    check(quick_pipe::take(c, false, 1000, budget, 10, [](bool&) { return 9; }, build_slow, destroy, now, poll) ==
+                  quick_pipe::Got::kCached &&
               c.pipeline.load() == 9 && built == before,
           "the caches' full pipeline first, without a quick build");
     // (once an entry: a second draw neither asks nor builds again)
@@ -125,7 +155,7 @@ void header_rules() {
           "an entry is given one once");
     // (the full one came first: kept, the quick one destroyed, no draw has seen it)
     FakeEntry f;
-    const auto build_racing = [&] { f.pipeline.store(1); f.ready.store(true); return 77; };
+    const auto build_racing = [&](bool&) { f.pipeline.store(1); f.ready.store(true); return 77; };
     check(quick_pipe::take(f, false, 1000, budget, 11, ask_none, build_racing, destroy, now, poll) == quick_pipe::Got::kOther &&
               f.pipeline.load() == 1 && gone == std::vector<int>{77},
           "a quick one that loses to the full build is destroyed, the full one kept");
@@ -152,6 +182,31 @@ void header_rules() {
     check(quick_pipe::take(t, true, 1000, budget, 13, none, none, destroy, now, [&] { polls++; }) == quick_pipe::Got::kNothing &&
               polls == 0,
           "an attempt that is over without one is not waited for");
+
+    // (the driver-fault gate busy (AMD: the entry's own full build in the driver): nothing, and the entry left to be tried
+    // again; neither a quick build after a busy cache ask, nor a wait. Once the gate is free a later draw gets one)
+    {
+        FakeEntry g;
+        int asks = 0, builds = 0;
+        const auto ask_busy = [&](bool& busy) { return asks++, busy = true, 0; };
+        const auto build_busy = [&](bool& busy) { return builds++, busy = true, 0; };
+        const auto build_ok = [&](bool&) { return builds++, 42; };
+        quick_pipe::FrameBudget gb;
+        check(quick_pipe::take(g, false, 8, gb, 1, ask_busy, build_ok, destroy, now, poll) == quick_pipe::Got::kNothing &&
+                  asks == 1 && builds == 0 && g.quick.load() == quick_pipe::kNone,
+              "a busy gate at the cache ask: no quick build, the entry tried again later");
+        check(quick_pipe::take(g, true, 8, gb, 1, ask_none, build_busy, destroy, now, poll) == quick_pipe::Got::kNothing &&
+                  builds == 1 && g.quick.load() == quick_pipe::kNone,
+              "a busy gate at the quick build: the entry tried again later, a must draw goes on to wait for the full build");
+        check(quick_pipe::take(g, false, 8, gb, 1, ask_none, build_ok, destroy, now, poll) == quick_pipe::Got::kQuick &&
+                  g.pipeline.load() == 42 && g.quick.load() == quick_pipe::kTried,
+              "once the gate is free, the entry gets its quick pipeline");
+        FakeEntry n;   // (one that will not be made, the gate free: tried, not asked again)
+        const auto build_never = [&](bool&) { return builds++, 0; };
+        check(quick_pipe::take(n, false, 8, gb, 2, ask_none, build_never, destroy, now, poll) == quick_pipe::Got::kNothing &&
+                  n.quick.load() == quick_pipe::kTried,
+              "a quick pipeline that will not be made is tried once");
+    }
 
     // (the brief wait: hurried, waited at most what is left of the frame's budget, the time taken off it)
     std::atomic<bool> ready{false};
@@ -200,6 +255,18 @@ void cut_code(double want_ms) {
     check(quick_pipeline(n, p, s, at, 0, false) && calls.size() == 1 && calls[0].quick,
           "without pipelineCreationCacheControl the caches are not asked (the flag needs it)");
     dev.vk13.pipelineCreationCacheControl = true;
+    // (the driver-fault gate busy: build_graphics says so; the entry is not marked tried, and a later draw gets one)
+    PipeEntry b;
+    gate_held = true, calls.clear();
+    check(!quick_pipeline(b, p, s, at, 0, true) && b.quick.load() == quick_pipe::kNone && calls.size() == 1 && calls[0].asked,
+          "a busy gate at the cache ask: nothing, no quick build, the entry tried again later");
+    dev.vk13.pipelineCreationCacheControl = false, calls.clear();
+    check(!quick_pipeline(b, p, s, at, 0, true) && b.quick.load() == quick_pipe::kNone && calls.size() == 1 && calls[0].quick,
+          "a busy gate at the quick build: nothing, the entry tried again later");
+    dev.vk13.pipelineCreationCacheControl = true;
+    gate_held = false, calls.clear();
+    check(quick_pipeline(b, p, s, at, 0, true) && b.pipeline.load() != 0 && b.quick.load() == quick_pipe::kTried,
+          "the gate free again: the entry gets one");
     check(pipe_wait_budget_ms() == quick_pipe::wait_ms(std::getenv("RX_VK_PIPE_WAIT_MS"), nullptr), "RX_VK_PIPE_WAIT_MS as read");
 }
 

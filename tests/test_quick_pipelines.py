@@ -4,11 +4,15 @@ Ported from Mako, by sharkiix (8292d363). Checks, game-free:
 - the budget a frame on each recording thread, the caches asked first, an entry given one once, the full build replacing the
   quick one and a quick one that lost to it destroyed, a draw that must wait not held to the budget (quick_pipe.h, with fake
   handles), and the brief wait's budget;
+- a driver-fault gate that was only busy (AMD: the program's own full build in the driver) leaves the entry to be tried again,
+  in quick_pipe.h and through vk_draw.cpp's quick_pipeline; a frame's budget is not overrun by more than one build;
 - vk_draw.cpp's own quick_pipeline, cut out and built against stand-ins: the caches asked without compiling before a quick
-  build, the quick build under quick_build, and RX_VK_QUICK_MS on by default on AMD's proprietary driver only, strictly read;
-- build_graphics: a quick build goes into no pipeline cache and does not count towards a save, is not made where the full
-  build is made without the optimizer already, and does not wait at the driver-fault gate; the worker's full build replaces it;
-  draw(): only pipelines take the quick path, a shader still translating is waited for as before.
+  build, the quick build under quick_build, and RX_VK_QUICK_MS off by default on every driver, strictly read;
+- build_graphics: a quick build goes into no pipeline cache, does not count towards a save nor in st_pipelines, is not made
+  where the full build is made without the optimizer already, and does not wait at the driver-fault gate, which says when it
+  was busy; RX_VK_TEST_SLOW_MS holds the full build inside the gate; the worker's full build replaces the quick one, and one
+  that failed leaves it; draw(): only pipelines take the quick path, a shader still translating is waited for as before, and
+  RX_VK_PIPE_SKIP=0 waits for every full pipeline.
 python -I -B tests/test_quick_pipelines.py
 """
 import argparse
@@ -40,26 +44,42 @@ def check_source(draw):
         raise SystemExit("the quick build is decided after the driver is asked")
     if "fault_quarantine().begin(p.key, !cold && !quick_build)" not in build:
         raise SystemExit("a quick build waits at the driver-fault gate behind the program's full build")
+    if "if (gate == driver_faults::Quarantine::kBusy) return gate_busy = true," not in build:
+        raise SystemExit("a busy driver-fault gate is not told apart: the entry would never be tried again")
+    slow = build.index("if (slow_full_build && test_slow_ms() > 0) std::this_thread::sleep_for(")
+    if not build.index("fault_quarantine().begin(") < slow < build.index("graphics_with("):
+        raise SystemExit("RX_VK_TEST_SLOW_MS does not hold the full build inside the driver-fault gate")
+    if "if (!quick_build) {   // (longshot: quick builds are counted apart" not in build or \
+            build.index("st_pipelines++;") < build.index("if (!quick_build) {   // (longshot: quick builds are counted apart"):
+        raise SystemExit("a quick build is counted in st_pipelines")
     if "const VkPipelineCache cache = quick_build ? VK_NULL_HANDLE" not in build:
         raise SystemExit("a quick build goes into a pipeline cache")
     if "pcache_built_since_save += !driver_cache_only && !quick_build;" not in build:
         raise SystemExit("a quick build counts towards saving the pipeline cache")
     job = between(draw, "    jobs_push([job] {\n        // (over a linked one", "}, false, &e->ready,")
-    if "if (const VkPipeline full = build_graphics(*job->p, job->s, job->at, job->topo)) job->e->pipeline = full;" not in job:
+    if "if (full) {\n            job->e->pipeline = full;" not in job:
         raise SystemExit("the worker's full build no longer replaces the quick one")
-    if job.index('getenv("RX_VK_TEST_SLOW_MS")') > job.index("build_graphics(") or "quick_pipe::slow_ms(" not in job:
-        raise SystemExit("RX_VK_TEST_SLOW_MS does not hold the full build, or is not read strictly")
+    if "slow_full_build = true;" not in job or job.index("slow_full_build = true;") > job.index("build_graphics(") or \
+            job.index("slow_full_build = false;") < job.index("build_graphics("):
+        raise SystemExit("RX_VK_TEST_SLOW_MS does not hold the worker's full build")
+    slow = between(draw, "int test_slow_ms() {", "\n}\n")
+    if 'getenv("RX_VK_TEST_SLOW_MS")' not in slow or "quick_pipe::slow_ms(" not in slow:
+        raise SystemExit("RX_VK_TEST_SLOW_MS is not read strictly")
     body = draw[draw.index("void draw(VkCommandBuffer"):]
     body = body[:body.index("    cur_program = &p;")]
     translation = between(body, "    if (!cp->ready.load(std::memory_order_acquire)) {", "\n    }\n")
     for name in ("quick_pipeline(", "pipe_wait_budget_ms(", "jobs_hurry("):
         if name in translation:
-            raise SystemExit(f"{name} applies to a shader still translating: that wait stays as it is (#1573)")
+            raise SystemExit(f"{name} applies to a shader still translating: that wait stays as it is "
+                             "(https://github.com/NotRexed/Hookshot/pull/1573)")
     pipe = between(body, "    if (!pe->ready.load(std::memory_order_acquire)) {", "\n    if (use.on) use.pipeline_made(")
     for name in ("quick_pipeline(*pe, p, s, at, topo, !may_skip)", "pipe_wait_budget_ms()", "jobs_hurry(pe->ready)",
                  "wait_for(pe->ready)"):
         if name not in pipe:
             raise SystemExit(f"draw()'s pipeline wait lacks {name}")
+    if "if (always_wait) {\n            wait_for(pe->ready);\n        } else if (" not in pipe or \
+            pipe.index("if (always_wait) {") > pipe.index("quick_pipeline("):
+        raise SystemExit("RX_VK_PIPE_SKIP=0 draws with a quick pipeline: it waits for every pipeline")
     for switch in ("RX_VK_QUICK_MS", "RX_VK_PIPE_WAIT_MS", "RX_VK_TEST_SLOW_MS"):
         if f'getenv("{switch}")' not in draw or "atoi(getenv(\"" + switch in draw or "atof(getenv(\"" + switch in draw:
             raise SystemExit(f"{switch} is not read strictly (quick_pipe.h)")
@@ -89,8 +109,8 @@ def main():
         exe = tmp / "quick-pipelines"
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-pthread", "-I", str(tmp),
                         str(ROOT / "tests/test_quick_pipelines.cpp"), "-o", str(exe)], check=True)
-        for driver, value, want in (("amd", None, "1000"), ("nvidia", None, "0"), ("amd", "0", "0"), ("nvidia", "250", "250"),
-                                    ("amd", "8ms", "1000"), ("nvidia", "fast", "0")):
+        for driver, value, want in (("amd", None, "0"), ("nvidia", None, "0"), ("amd", "0", "0"), ("nvidia", "250", "250"),
+                                    ("amd", "8", "8"), ("amd", "8ms", "0"), ("nvidia", "fast", "0")):
             env = {k: v for k, v in os.environ.items() if k not in ("RX_VK_QUICK_MS", "RX_VK_PIPE_WAIT_MS")}
             if value is not None:
                 env["RX_VK_QUICK_MS"] = value

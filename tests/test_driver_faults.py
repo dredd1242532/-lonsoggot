@@ -168,8 +168,8 @@ def main():
     calls = [m.start() for m in re.finditer(r"\b(?:guarded_graphics|graphics_with)\(", build)]
     assert calls and 0 <= i_begin < calls[0] and calls[-1] < i_end, (i_begin, calls, i_end)   # (the AMD retry too, #1747)
     assert "driver_fault_note(p.key)" in build[i_end:]
-    assert re.search(r"kBusy\) return cold \? \(\*cold = true, VK_NULL_HANDLE\) : VK_NULL_HANDLE;", build), \
-        "a busy program answers a cold probe as cold, and a quick build (which does not wait either) with none"
+    assert re.search(r"kBusy\) return gate_busy = true, cold \? \(\*cold = true, VK_NULL_HANDLE\) : VK_NULL_HANDLE;", build), \
+        "a busy program answers a cold probe as cold, and a quick build (which does not wait either) with none, both saying busy"
     # (#1747's retry without the optimizer followed the guard's VK_ERROR_UNKNOWN, which a fault was then: it still does)
     if "recovered with optimization disabled" in build:
         assert "(r == VK_ERROR_UNKNOWN || r == kDriverFault)" in build

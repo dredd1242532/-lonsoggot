@@ -2,7 +2,8 @@
 
 With RX_VK_PIPE_SKIP and RX_VK_TRANSLATE_WAIT_MS unset it also checks the pipeline's quick path (quick_pipeline,
 RX_VK_PIPE_WAIT_MS's brief wait): a quick pipeline is drawn with, a skippable draw is left out only after the brief wait, a
-draw that must wait asks for one with must set, and a shader still translating is waited for as before.
+draw that must wait asks for one with must set, and a shader still translating is waited for as before. With
+RX_VK_PIPE_SKIP=0, a quick pipeline is on offer and never asked for: every pipeline is waited for.
 
 The real draw decision block is extracted intact. Publication and final resource writes are CPU witnesses,
 not a claim about GPU output, timing, or a reproduced game failure.
@@ -152,7 +153,12 @@ void scenario(int kind, bool translated, bool pipeline_hot, bool persistent, boo
     const bool spent = wait_ms <= 0;   // (a bound of 0: no wait at all, and none counted)
     const bool skip_unknown = (legacy && !translated && persistent) || (bounded && (!fast || spent));
     const bool should_draw = !skip_unknown && (pipeline_hot || force || !persistent || kind != 0);
+    // (RX_VK_PIPE_SKIP=0 waits for every pipeline: a quick one on offer is not asked for, nor drawn with)
+    const bool offered = quick_gives;
+    if (force) quick_gives = true;
     decision(&p, {persistent});
+    quick_gives = offered;
+    if (force) check(quick_calls == 0, "RX_VK_PIPE_SKIP=0 asks for no quick pipeline");
     if (!checked) return;
     char label[120];
     std::snprintf(label, sizeof label, "kind%d translated%d hot%d persistent%d fast%d force%d", kind, translated, pipeline_hot,

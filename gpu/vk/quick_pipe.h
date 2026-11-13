@@ -1,7 +1,8 @@
 // (longshot) Quick pipelines (RX_VK_QUICK_MS) and the brief pipeline wait (RX_VK_PIPE_WAIT_MS), for a draw whose full
 // pipeline build is not done (vk_draw.cpp, draw and quick_pipeline). Ported from Mako, by sharkiix (8292d363): AMD's
 // optimizer took 5-13 s a pipeline for Volvagia's intro, whose colour draws were left out (a black silhouette) or, waited
-// for, froze it. Only pipelines: a shader still translating is waited for as before (#1573, RX_VK_TRANSLATE_WAIT_MS).
+// for, froze it. Only pipelines: a shader still translating is waited for as before
+// (https://github.com/NotRexed/Hookshot/pull/1573, RX_VK_TRANSLATE_WAIT_MS).
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -10,8 +11,10 @@
 
 namespace quick_pipe {
 
-/// RX_VK_QUICK_MS unset: this budget on AMD's proprietary driver, where the slow optimizer was measured; none elsewhere
-constexpr double kQuickDefaultMs = 1000;
+/// RX_VK_QUICK_MS's suggested value (off unless set, on every driver, until a run on AMD measures it): half a frame at 60 fps,
+/// the same bound as RX_VK_TRANSLATE_WAIT_MS's tested 8. A skippable draw's quick build only stands in for leaving it out, so
+/// its cost has to stay under a frame's: Mako's 1000 traded a missing draw for a hitch of up to a second
+constexpr double kQuickSuggestedMs = 8;
 /// How long a draw that cannot be left out waits for a quick one another thread is making (a few ms as a rule)
 constexpr int kOtherQuickPolls = 5000;   // (1 ms each)
 
@@ -27,10 +30,9 @@ inline double read_ms(const char* env, double def, bool* bad) {
     }
     return ms > 0 ? ms : 0;
 }
-/// RX_VK_QUICK_MS: each recording thread's quick builds a frame, in ms (0: none, the draw left out or waited for as before)
-inline double quick_ms(const char* env, bool amd_proprietary, bool* bad) {
-    return read_ms(env, amd_proprietary ? kQuickDefaultMs : 0, bad);
-}
+/// RX_VK_QUICK_MS: each recording thread's quick builds a frame, in ms (unset or 0: none, the draw left out or waited for as
+/// before, on every driver)
+inline double quick_ms(const char* env, bool* bad) { return read_ms(env, 0, bad); }
 /// RX_VK_PIPE_WAIT_MS: each recording thread's waits a frame for skippable draws' pipelines, in ms (off unless set)
 inline double wait_ms(const char* env, bool* bad) { return read_ms(env, 0, bad); }
 /// RX_VK_TEST_SLOW_MS: a test that holds each full build that long, as AMD's optimizer on a cold cache (off unless set; at
@@ -44,14 +46,30 @@ inline int slow_ms(const char* env, bool* bad) {
 struct FrameBudget {
     uint64_t frame = ~0ull;
     double used = 0;
+    double build_ms = 0;   // (take's: the thread's last quick build, what the next one is expected to take; 0: none yet)
+    int builds = 0;        // (quick builds started this frame on this thread: not a cache answer or a busy gate's retry)
     double left(uint64_t now, double total) {
-        if (now != frame) frame = now, used = 0;
+        if (now != frame) frame = now, used = 0, builds = 0;
         return total - used;
+    }
+    /// take's: whether a quick build for a draw that may be left out is started now. One expected to fit in what is left, or
+    /// the frame's first build whatever it is expected to take (so that a build slower than the whole budget is still made,
+    /// one a frame): a frame runs past the budget by at most one build, not by every build started before it was spent. The
+    /// first is counted by builds started, not by time used: a busy gate's retry or a cache answer early in the frame takes
+    /// a little time but builds nothing, and must not keep the frame's one build from the draws after it
+    bool fits(uint64_t now, double total) {
+        const double l = left(now, total);
+        return l > 0 && (builds == 0 || build_ms <= l);
+    }
+    void started(uint64_t now, double total) {
+        left(now, total);
+        builds++;
     }
     void spend(double ms) { used += ms; }
 };
 
-/// The quick state of an entry: none tried, one being made, one tried (made or not)
+/// The quick state of an entry: none tried (or tried while the driver-fault gate was busy: tried again), one being made, one
+/// tried (made, or one that will not be made: the full build unoptimized already, a program the driver faulted on)
 enum : uint8_t { kNone = 0, kMaking = 1, kTried = 2 };
 enum class Got { kNothing, kCached, kQuick, kOther };
 
@@ -60,14 +78,17 @@ enum class Got { kNothing, kCached, kQuick, kOther };
 /// driver's optimizer and not into our pipeline cache (build); either set as the entry's pipeline, not ready, so the worker's
 /// full build replaces it. A handle that loses to the full one, which came first, is destroyed (no draw has seen it).
 /// must: a draw that cannot be left out: not held to the budget, and waits (poll) for a quick one another thread is making.
-/// The time taken comes off the budget either way. kOther: another thread's (or the full build) is there to draw with
+/// The time taken comes off the budget either way. kOther: another thread's (or the full build) is there to draw with.
+/// ask and build set their bool when the driver-fault gate was busy (on AMD, one build of a program in the driver at a time:
+/// often the entry's own full build, queued a moment before): then nothing is built, and the entry is left kNone, to be
+/// tried again by a later draw. A retry is one non-blocking ask of the gate, and comes off the budget as any other
 template <class Entry, class Ask, class Build, class Destroy, class Now, class Poll>
 Got take(Entry& e, bool must, double budget_ms, FrameBudget& budget, uint64_t frame, Ask&& ask, Build&& build, Destroy&& destroy,
          Now&& now_ms, Poll&& poll) {
     using P = decltype(e.pipeline.load());
     const auto there = [&] { return e.pipeline.load(std::memory_order_acquire) != P{}; };
     if (budget_ms <= 0) return Got::kNothing;
-    if (!must && budget.left(frame, budget_ms) <= 0) return there() ? Got::kOther : Got::kNothing;
+    if (!must && !budget.fits(frame, budget_ms)) return there() ? Got::kOther : Got::kNothing;
     uint8_t none = kNone;
     if (!e.quick.compare_exchange_strong(none, kMaking, std::memory_order_acq_rel)) {
         for (int i = 0; must && i < kOtherQuickPolls && e.quick.load(std::memory_order_acquire) == kMaking && !there() &&
@@ -78,17 +99,21 @@ Got take(Entry& e, bool must, double budget_ms, FrameBudget& budget, uint64_t fr
     }
     const double t0 = now_ms();
     Got got = Got::kCached;
-    P pl = ask();
-    if (pl == P{}) got = Got::kQuick, pl = build();
+    bool busy = false;
+    P pl = ask(busy);
+    double t1 = 0;
+    if (pl == P{} && !busy) got = Got::kQuick, t1 = now_ms(), budget.started(frame, budget_ms), pl = build(busy);
+    const double t2 = now_ms();
+    if (got == Got::kQuick && pl != P{}) budget.build_ms = t2 - t1;   // (one made: a busy gate or a NOOPT one took no time)
     budget.left(frame, budget_ms);
-    budget.spend(now_ms() - t0);
+    budget.spend(t2 - t0);
     if (pl != P{}) {
         P empty{};
         if (!e.pipeline.compare_exchange_strong(empty, pl, std::memory_order_acq_rel)) destroy(pl), got = Got::kOther;
     } else {
         got = there() ? Got::kOther : Got::kNothing;
     }
-    e.quick.store(kTried, std::memory_order_release);
+    e.quick.store(pl == P{} && busy ? kNone : kTried, std::memory_order_release);
     return got;
 }
 
