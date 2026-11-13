@@ -90,6 +90,9 @@ break.
 
 ## Development setup
 
+New here? [docs/dev-starter.md](docs/dev-starter.md) puts the first steps in order, and `python -I scripts/dev_setup.py`
+checks this PC for them.
+
 You need your own supported dump: program `0400486024DEC000`, update v131072, build `e0f3ccfa`. Other versions don't
 work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free. For runtime
 memory, see the README's [requirements](README.md#what-you-need): the game alone can exceed 16 GiB, depending on the

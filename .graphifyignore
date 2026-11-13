@@ -1,0 +1,34 @@
+# What graphify (scripts/dev_setup.py, docs/dev-starter.md) leaves out of the code graph. graphify also reads .gitignore;
+# this file says it again for what must never be graphed, so a run with --no-gitignore still leaves it out.
+
+# ---- the game and anything made from it: never graphed (.gitignore's first section) ----
+work/
+gen/
+image/
+exefs/
+romfs/
+gamefile/
+*.bin
+*.keys
+*.nso
+*.nca
+*.nsp
+*.xci
+*.nup
+*.nsz
+*.xcz
+
+# ---- build output, toolchains and SDKs kept in the clone ----
+build/
+build-linux/
+ngx-sdk/
+llvm-mingw/
+cpm/
+emsdk/
+graphify-out/
+
+# ---- not Longshot's own code ----
+third_party/
+website/node_modules/
+website/dist/
+*_spv.h

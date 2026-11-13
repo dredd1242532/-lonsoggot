@@ -35,5 +35,8 @@ __pycache__/
 build-linux/
 *.so
 
+# ---- graphify's code graph (scripts/dev_setup.py): each PC's own, never committed ----
+graphify-out/
+
 # ---- NVIDIA's DLSS SDK (scripts/ngx_sdk.py): NVIDIA's files, never committed ----
 ngx-sdk/
