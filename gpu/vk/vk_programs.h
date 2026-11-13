@@ -1,4 +1,4 @@
-// (hookshot) The programs' life (vk_programs.cpp): what the game does with its programs (makes them, gives them their shaders,
+// (longshot) The programs' life (vk_programs.cpp): what the game does with its programs (makes them, gives them their shaders,
 // frees them), what each needed when it was first drawn or dispatched, and one set of counters for all of it (the census).
 // Not part of the translator stamp: a change here keeps every player's translated programs.
 #pragma once
@@ -44,7 +44,7 @@ void programs_slow_upload(double ms, uint32_t width, uint32_t height, uint32_t n
 /// a load at a create call asks for a learned variant's pipeline by it, with no code read and no module made.
 /// RX_VK_MODULE_IDS=0: off
 void module_ids_on();
-/// A compute program's module made from its code: its identifier kept for the next run (hookshot_module_ids.bin)
+/// A compute program's module made from its code: its identifier kept for the next run (longshot_module_ids.bin)
 void module_id_learned(uint64_t key, uint64_t variant, VkShaderModule module);
 /// What was learned, written (a load worker after its job, and the close)
 void module_ids_flush();
@@ -90,7 +90,7 @@ struct ProgramCensus {
     // ... for the first uses that needed something (a load, a translation, a pipeline made)
     std::atomic<int64_t> needy{0}, needy_after_100{0}, needy_in_load{0};
     // everything play makes, first use or not
-    std::atomic<int64_t> play_loads{0}, play_load_ns{0};   // (program records read from hookshot_programs.bin in play)
+    std::atomic<int64_t> play_loads{0}, play_load_ns{0};   // (program records read from longshot_programs.bin in play)
     std::atomic<int64_t> play_pipes_new{0};                // (graphics pipelines play asked for that were not ready)
     std::atomic<int64_t> play_from_driver{0}, play_from_start{0}, play_compiled{0};   // (create_cached, graphics and compute)
     // the load at create (RX_VK_LOAD=create)

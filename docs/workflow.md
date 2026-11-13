@@ -1,6 +1,6 @@
 # Workflow: from report to release
 
-How work moves through Hookshot, and how to decide what to work on next. It is written for people and for AI agents
+How work moves through Longshot, and how to decide what to work on next. It is written for people and for AI agents
 alike (agents: [AGENTS.md](../AGENTS.md) sends you here). [CONTRIBUTING.md](../CONTRIBUTING.md) still holds the rules
 that never bend, above all that no game files or anything made from them leave your PC.
 
@@ -12,7 +12,7 @@ follow.
 
 | Source | What lands there |
 |---|---|
-| GitHub issues (game problem, build problem, idea) | the record: version, hardware, place in the game, `hookshot_log.txt` |
+| GitHub issues (game problem, build problem, idea) | the record: version, hardware, place in the game, `longshot_log.txt` |
 | Tracking issues (`[Tracking] ...`) | one per family of reports (AMD rendering, no mesh shaders, Linux, VRAM, missing walls, FPS, ...) |
 | Discord #bug-reporting (forum) | first reports, often without a log; turn the reproducible ones into issues |
 | Discord #dev-work | claims, progress, review requests |
@@ -82,14 +82,19 @@ problem with a log outranks an NVIDIA one of the same severity.
 4. **Test.**
    - A game-free test that fails without the change (see AGENTS.md: tests read the source).
    - `python -I -B tests/run_all.py`, all of it.
-   - In the game, on your hardware: what you did and what you saw, with numbers from `hookshot_log.txt` for performance.
+   - In the game, on your hardware: what you did and what you saw, with numbers from `longshot_log.txt` for performance.
    - Add a row to [tested configurations](tested-configurations.md) for each run you measured.
-   - Say what you could not test (another OS, another vendor, real input devices).
-5. **Pull request.** Open the description with why the PR is needed; then what changed, how it was tested, what was
-   not tested, and screenshots when it shows on screen. Link the issue and the tracking issue. Post the link in
-   #dev-work.
-6. **Review.** Answer every comment in the PR. Rebase onto `main` before asking for review again: a PR that does not
-   merge cleanly waits.
+   - Say what you could not test (another OS, another vendor, real input devices), and open a test request for
+     what others must test: the description's Testing section
+     ([CONTRIBUTING.md](../CONTRIBUTING.md#commits-and-pull-requests)).
+5. **Pull request.** Open it as work in progress (`forge.py pr create`, a `WIP:` title) and fill in
+   [the template](../.forgejo/pull_request_template.md) as
+   [CONTRIBUTING.md](../CONTRIBUTING.md#commits-and-pull-requests) says. Mark it ready (`pr ready`) only once it is
+   measured and every *For everyone* box is ticked. Link the issue and the tracking issue. Post the link in #dev-work.
+6. **Review.** Reviewers take PRs marked ready, not WIP ones; one that needs more work goes back to WIP (with the label
+   `needs measurements` when that is what it lacks). Answer every comment in the PR. For each new commit, measurement
+   or test run, update the description and comment what changed (`pr update`). Rebase onto `main` before asking for
+   review again: a PR that does not merge cleanly waits.
 7. **Merge and release.** Release branches are merged back into `main` right after a release, so that `main`'s builds
    carry the release's fixes and the right version string (`git describe` only sees tags on `main`'s history).
 8. **Verify.** Ask the reporter to retest on the release, then close the issue, or keep it open on the tracking issue

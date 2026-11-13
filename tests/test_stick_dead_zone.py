@@ -1,5 +1,5 @@
 """The sticks' dead zone is the player's: the Insert menu's "Stick dead zone" row (stick_dead_zone in
-hookshot_options.ini), issue 752.
+longshot_options.ini), issue 752.
 
 SDL and XInput share a circular dead zone so diagonal stick inputs retain their direction (#1480).
 The filter and the menu's row, labels and ini parsing are compiled alone (gcc, g++).
@@ -13,8 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/hookshot_env.h)
-ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "hookshot_env.h")
+# (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 
 RUN_ALL_ARGS = ["--cc", "gcc", "--cxx", "g++"]
 
@@ -58,7 +58,7 @@ def main():
     replay = (ROOT / "gpu" / "vk" / "vk_replay.cpp").read_text(encoding="utf-8")
     menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
     header = (ROOT / "gpu" / "vk" / "vk_menu.h").read_text(encoding="utf-8")
-    readme = (ROOT / "readme.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     check(not re.search(r"HOS_OPT_\w+ = 11\b", api), "a HOS_OPT_ enum also takes option 11")
     pads = block(hid, "static void pads_read(")
@@ -80,7 +80,7 @@ def main():
     check(row.group(0).rstrip().endswith("nullptr, false, true},"),
           "the row is not preset_exempt: changing the dead zone would set the quality preset to Custom")
     check("| | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |" in readme,
-          "readme.md's option table has no Stick dead zone row")
+          "README.md's option table has no Stick dead zone row")
 
     c = r'''#include <stdint.h>
 #include <stdio.h>

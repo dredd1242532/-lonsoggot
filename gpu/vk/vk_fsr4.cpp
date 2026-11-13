@@ -1,4 +1,4 @@
-// (hookshot) AMD FSR 4, one of the temporal upscaler's engines (vk_fsr4.h). The frame chain it draws with is
+// (longshot) AMD FSR 4, one of the temporal upscaler's engines (vk_fsr4.h). The frame chain it draws with is
 // vk_temporal.cpp's, the same as NVIDIA DLSS's: the colour as the game's network samples it, the depth, the motion (the
 // camera's and the skinned draws' own) and the camera jitter. Here are AMD's library, the upscale context and its dispatch.
 // The host side follows the API guide of FidelityFX SDK 2.4 (Kits/FidelityFX/docs/getting-started/ffx-api.md): a Vulkan
@@ -18,7 +18,7 @@
 #include "vk_internal.h"
 #include "vk_temporal.h"
 
-#ifdef HOOKSHOT_FSR
+#ifdef LONGSHOT_FSR
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -71,7 +71,7 @@ FsrWhy fsr4_why() {
     return w < 0 ? FSR_OK : (FsrWhy)w;
 }
 
-#ifdef HOOKSHOT_FSR
+#ifdef LONGSHOT_FSR
 
 namespace {
 
@@ -94,7 +94,7 @@ struct Library {
     uint64_t version_id = 0;
     VkDeviceContext device_context{};
 };
-// (lib() and st() are never destroyed: Hookshot leaves through ExitProcess / exit() with the device alive, and a destructor
+// (lib() and st() are never destroyed: Longshot leaves through ExitProcess / exit() with the device alive, and a destructor
 // then would call into AMD's library after its DLL_PROCESS_DETACH, or under a render thread still recording with it)
 Library& lib() {
     static Library& l = *new Library;
@@ -1233,7 +1233,7 @@ bool fsr4_wants_descriptor_buffer() {
 #endif
 }
 
-#else  // (no HOOKSHOT_FSR in this build: FSR is not there)
+#else  // (no LONGSHOT_FSR in this build: FSR is not there)
 
 bool fsr4_built() { return false; }
 const TemporalEngine* fsr4_engine() { return nullptr; }

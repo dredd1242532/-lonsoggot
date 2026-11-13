@@ -56,21 +56,21 @@ int main() {
     // ---- UTF-8 paths as NGX's wide strings, in the C locale (the decoding must not depend on it) ----
     std::setlocale(LC_ALL, "C");
     // (which paths NGX's Linux library takes as they are: ASCII only. The others go to it as /proc/self/fd/<n>)
-    CHECK("ASCII path", dc::ascii("/home/u/Games/Hookshot/ngx") && dc::ascii(""));
-    CHECK("accented path", !dc::ascii("/home/u/Games/Hookshot-Caf\xC3\xA9/ngx"));
+    CHECK("ASCII path", dc::ascii("/home/u/Games/Longshot/ngx") && dc::ascii(""));
+    CHECK("accented path", !dc::ascii("/home/u/Games/Longshot-Caf\xC3\xA9/ngx"));
     CHECK("CJK path", !dc::ascii("/g/\xE3\x82\xBC"));
     CHECK("a byte that is not UTF-8", !dc::ascii("/g/\xFF"));
     bool bad = false;
-    CHECK("ASCII", decode("/home/u/Games/Hookshot/ngx", bad) == L"/home/u/Games/Hookshot/ngx" && !bad);
-    CHECK("accented", decode("/home/u/Games/Hookshot-Caf\xC3\xA9/ngx", bad) == L"/home/u/Games/Hookshot-Café/ngx" && !bad);
+    CHECK("ASCII", decode("/home/u/Games/Longshot/ngx", bad) == L"/home/u/Games/Longshot/ngx" && !bad);
+    CHECK("accented", decode("/home/u/Games/Longshot-Caf\xC3\xA9/ngx", bad) == L"/home/u/Games/Longshot-Café/ngx" && !bad);
     CHECK("CJK", decode("/g/\xE3\x82\xBC\xE3\x83\xAB\xE3\x83\x80/ngx", bad) == L"/g/ゼルダ/ngx" && !bad);
     // (U+1F3AE: one wchar_t where it has 32 bits, a surrogate pair where it has 16, as on Windows)
     const std::wstring gamepad = sizeof(wchar_t) == 2 ? std::wstring{(wchar_t)0xD83C, (wchar_t)0xDFAE}
                                                       : std::wstring(1, (wchar_t)0x1F3AE);
     CHECK("four bytes", decode("/g/\xF0\x9F\x8E\xAE", bad) == L"/g/" + gamepad && !bad);
     CHECK("all together",
-          decode("/home/u/Games/Hookshot-dlss-utf8-Caf\xC3\xA9-\xE3\x82\xBC\xE3\x83\xAB\xE3\x83\x80/ngx", bad) ==
-              L"/home/u/Games/Hookshot-dlss-utf8-Café-ゼルダ/ngx" && !bad);
+          decode("/home/u/Games/Longshot-dlss-utf8-Caf\xC3\xA9-\xE3\x82\xBC\xE3\x83\xAB\xE3\x83\x80/ngx", bad) ==
+              L"/home/u/Games/Longshot-dlss-utf8-Café-ゼルダ/ngx" && !bad);
     // (the bug this replaces: each byte widened alone)
     const std::string cafe = "Caf\xC3\xA9";
     CHECK("the old widening was wrong", std::wstring(cafe.begin(), cafe.end()) != decode(cafe, bad));
@@ -116,6 +116,30 @@ int main() {
         // (a range NGX did not give (zeros) is never widened into)
         const dc::ModeRange z[] = {{0, 0, 0, 0}};
         CHECK("no range", dc::mode_for(1472, 622, 4416, 1864, z, 1, &took) == -1);
+    }
+    // ---- the DLSS model row stepped through (issue 17): K (11) to L (12) passes M (13) ----
+    {
+        const unsigned K = 11, L = 12, M = 13;
+        dc::PresetSettle p;
+        // (the first feature takes the row's preset at once)
+        CHECK("first feature", p.pick(K, ~0u, false, 100, 30) == K);
+        CHECK("held", p.pick(K, K, true, 101, 30) == K);
+        // (Right twice, 11 frames apart as in the report's log: neither press makes a feature until the row holds L)
+        CHECK("M stepped past", p.pick(M, K, true, 200, 30) == K);
+        CHECK("M still stepped past", p.pick(M, K, true, 205, 30) == K);
+        CHECK("L just picked", p.pick(L, K, true, 211, 30) == K);
+        CHECK("L not yet held", p.pick(L, K, true, 240, 30) == K);
+        CHECK("L held half a second", p.pick(L, K, true, 241, 30) == L);
+        CHECK("L made", p.pick(L, L, true, 242, 30) == L);
+        // (back to the feature's own preset before the wait ended: nothing to make)
+        CHECK("away", p.pick(M, L, true, 300, 30) == L);
+        CHECK("and back", p.pick(L, L, true, 305, 30) == L);
+        CHECK("and back, later", p.pick(L, L, true, 400, 30) == L);
+        // (no feature (let go, or not made): the row's preset at once, held or not)
+        CHECK("no feature", p.pick(M, L, false, 401, 30) == M);
+        // (NVIDIA's default (0) is a preset like the others)
+        CHECK("default stepped to", p.pick(0, M, true, 500, 30) == M);
+        CHECK("default held", p.pick(0, M, true, 530, 30) == 0);
     }
     std::puts("dlss checks: ok");
     return 0;

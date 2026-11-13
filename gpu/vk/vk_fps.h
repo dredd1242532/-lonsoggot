@@ -1,4 +1,4 @@
-// (hookshot) The FPS counter's measurements (vk_fps.cpp): each frame of the game, present to present on the thread that
+// (longshot) The FPS counter's measurements (vk_fps.cpp): each frame of the game, present to present on the thread that
 // presents, and from Breakdown on where its time went (fps_stats.h Part). vk_menu.cpp sets the level and draws them.
 // Off and FPS measure nothing here; Frame time and Graph read a clock at each present; Breakdown adds a clock read at the
 // renderer's entries and around its waits, and the counters the renderer keeps anyway (the GPU's timestamps, the pipelines

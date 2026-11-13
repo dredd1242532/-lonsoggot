@@ -1,8 +1,8 @@
 #include "hos.h"
 #include <stdlib.h>
 #include <string.h>
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 static int guest_libc(void) {
@@ -21,7 +21,7 @@ void rx_wait_writebacks_reading(const void *p, uint64_t n);   /* gpu/render/rx_n
 ENTRY_HOOK_SYM(memcpy) {
     if (guest_libc()) return 0;
     const uint64_t n = ARG(2);
-    if (!hos_guest_range(ARG(0), n) || !hos_guest_range(ARG(1), n)) return 0;   /* (hookshot: past the guest window, the game's own copy) */
+    if (!hos_guest_range(ARG(0), n) || !hos_guest_range(ARG(1), n)) return 0;   /* (longshot: past the guest window, the game's own copy) */
     if (n) {
         WAIT_WRITEBACKS(GP(ARG(1)), n);   /* (TOTK copies some rendered maps with the CPU) */
         memmove(GP(ARG(0)), GP(ARG(1)), (size_t)n);
@@ -33,7 +33,7 @@ ENTRY_HOOK_SYM(memcpy) {
 ENTRY_HOOK_SYM(memmove) {
     if (guest_libc()) return 0;
     const uint64_t n = ARG(2);
-    if (!hos_guest_range(ARG(0), n) || !hos_guest_range(ARG(1), n)) return 0;   /* (hookshot: past the guest window, the game's own copy) */
+    if (!hos_guest_range(ARG(0), n) || !hos_guest_range(ARG(1), n)) return 0;   /* (longshot: past the guest window, the game's own copy) */
     if (n) {
         WAIT_WRITEBACKS(GP(ARG(1)), n);
         memmove(GP(ARG(0)), GP(ARG(1)), (size_t)n);
@@ -45,7 +45,7 @@ ENTRY_HOOK_SYM(memmove) {
 ENTRY_HOOK_SYM(memset) {
     if (guest_libc()) return 0;
     const uint64_t n = ARG(2);
-    if (!hos_guest_range(ARG(0), n)) return 0;   /* (hookshot: past the guest window, the game's own copy) */
+    if (!hos_guest_range(ARG(0), n)) return 0;   /* (longshot: past the guest window, the game's own copy) */
     if (n) {
         memset(GP(ARG(0)), (int)(uint8_t)ARG(1), (size_t)n);
         HOS_WRITTEN(GP(ARG(0)), (size_t)n);

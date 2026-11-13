@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// (hookshot, #1001, #1971) How the game's task and mesh programs run: 0 Automatic (the GPU's own mesh shaders where it has
+// (longshot, #1001, #1971) How the game's task and mesh programs run: 0 Automatic (the GPU's own mesh shaders where it has
 // them, the compute fallback where not, and for the task + mesh draws of the GPUs vk_main.cpp names), 1 Native (no fallback
 // where there are mesh shaders), 2 Compute (the fallback on every GPU). A launch switch, RX_VK_MESH_SHADERS: the Graphics
 // tab's Mesh shaders row is gone, as changing it translated every shader again and dropped the pipeline caches for no gain a
-// player could see. Its old line in hookshot_options.ini, mesh_shaders=, no longer chooses. Nothing of Vulkan here:
+// player could see. Its old line in longshot_options.ini, mesh_shaders=, no longer chooses. Nothing of Vulkan here:
 // tests/test_mesh_mode_switch.py.
 #pragma once
 #include <cctype>
@@ -33,7 +33,7 @@ inline Choice choose(const char* env, const char* force_fallback) {
     return {0, "the default"};
 }
 
-/// A line of hookshot_options.ini: the old row's mesh_shaders= with Native (1) or Compute (2), which is no longer
+/// A line of longshot_options.ini: the old row's mesh_shaders= with Native (1) or Compute (2), which is no longer
 /// read (the log says so once, and the menu's next save drops the line). *value: what it held
 inline bool old_ini_choice(const char* line, int* value) {
     if (std::strncmp(line, "mesh_shaders=", 13)) return false;

@@ -2,7 +2,7 @@
 
 Issue 2063: listing the unpacked romfs\\Tex raised OSError [WinError 1392] (the file or directory is corrupted and
 unreadable) and the Builder said "The builder stopped on an error it did not expect ... Please send the text under Show
-details to the Hookshot issues page". The real make_game.cli() runs here with its build replaced by the error; no game
+details to the Longshot issues page". The real make_game.cli() runs here with its build replaced by the error; no game
 data, no tools, no process started.
 
 python -I -B tests/test_builder_drive_error.py
@@ -56,7 +56,7 @@ class DriveErrorTests(unittest.TestCase):
         self.assertIn(TEX, said)
         self.assertIn("Windows error 1392", said)
         self.assertIn('chkdsk D: /f', said)
-        self.assertIn("not of Hookshot or your game files", said)
+        self.assertIn("not of Longshot or your game files", said)
         self.assertNotIn("did not expect", said)
         self.assertNotIn("issues page", said)
 

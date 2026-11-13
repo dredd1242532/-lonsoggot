@@ -1,4 +1,4 @@
-"""The pipeline state lists (gpu/vk/vk_draw.cpp: hookshot_pipeline_states.bin, written as the game is played): show them, keep the
+"""The pipeline state lists (gpu/vk/vk_draw.cpp: longshot_pipeline_states.bin, written as the game is played): show them, keep the
 repository's sources of the list a release ships, and merge those into it.
 
 The repository keeps the list a release ships as separate sources in assets/pipeline_states/ (README.md there):
@@ -8,7 +8,7 @@ The repository keeps the list a release ships as separate sources in assets/pipe
     <source>.md                 beside each: where it comes from (who, GPU and driver, build, settings, route)
 
 nx2/make_game.py merges them (the tour's first, then the contributed ones by name; each pipeline once) into the game folder's
-hookshot_pipeline_states_shipped.bin, whose pipelines the first start's shader preparation builds before the title. The same
+longshot_pipeline_states_shipped.bin, whose pipelines the first start's shader preparation builds before the title. The same
 sources always merge into the same bytes.
 
     python -I nx2/pipeline_states.py <list>...                            what they hold
@@ -33,7 +33,7 @@ always give the same bytes): the repository's are, so that its history stays sma
 has lzma but not compression.zstd.
 
 A list holds no game code: each record is a pipeline's stage code keys (hashes of the game's shaders, which the player's own
-hookshot_shaders.bin turns back into the shaders), the program variant's hash, and the formats and draw state baked into the pipeline.
+longshot_shaders.bin turns back into the shaders), the program variant's hash, and the formats and draw state baked into the pipeline.
 A record can also name a compute program the game dispatched, by its compute stage's code key alone (a compute pipeline has no
 formats or draw state): the first start keeps those programs' pipelines ready with the others.
 
@@ -56,7 +56,7 @@ stage numbering; the game still reads it.
             kind 0: a graphics or mesh pipeline, as above (every list from before the kinds: the word was padding, 0).
             kind 1 (COMPUTE): a compute program, code[0] its compute stage's code key and every other field 0. The game keeps
             the pipelines of the shipped list's ready before the title (vk_draw.cpp computes_plan), with the ones its own play
-            dispatched (hookshot_computes.bin holds the same keys). A build from before the kinds leaves such a record out (0
+            dispatched (longshot_computes.bin holds the same keys). A build from before the kinds leaves such a record out (0
             samples is no pipeline's); version 1 has none
     <list>: "HKSTATE1", u32 record size (528), then the records:
             u64 code[4], u64 variant,

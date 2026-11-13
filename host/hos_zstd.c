@@ -1,4 +1,4 @@
-/* (hookshot) The game's zstd stream decode on the host's libzstd (third_party/zstd 1.5.7): HOS_NATIVE_ZSTD=1.
+/* (longshot) The game's zstd stream decode on the host's libzstd (third_party/zstd 1.5.7): HOS_NATIVE_ZSTD=1.
 
    The game decodes its .zs files on ParallelDecompThread: a job loop (f_80115bf0) hands each compressed chunk it has read to
    f_80115c80, the game's own wrapper around zstd's buffer-less streaming API (decompressBegin_usingDDict,
@@ -33,8 +33,8 @@
        decodes it), and a raw block with a NULL output fails as dstBuffer_null (-1) where the game's says dstSize_tooSmall
        (-2). A zstd compressor makes neither. */
 #include "hos.h"
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 #define ZSTD_STATIC_LINKING_ONLY
 #include "zstd.h"

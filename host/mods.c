@@ -70,8 +70,8 @@ static void put(const char *key, const char *host, uint64_t size, int is_dir) {
 
 /* a mod's romfs folder, recursively: rel is the path inside the RomFS so far ("" at its root) */
 static int index_romfs(const char *host_dir, const char *rel, int depth) {
-    if (depth > 32) return 0;   /* (hookshot: no RomFS is this deep) */
-    if (!depth) {   /* (hookshot) the romfs folder itself a link (to / in a mod's archive): the walk covered the whole disk */
+    if (depth > 32) return 0;   /* (longshot: no RomFS is this deep) */
+    if (!depth) {   /* (longshot) the romfs folder itself a link (to / in a mod's archive): the walk covered the whole disk */
         const DWORD at = GetFileAttributesA(host_dir);
         if (at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_REPARSE_POINT)) {
             hos_log("mods: %s is a link to a folder: left out", host_dir);
@@ -88,7 +88,7 @@ static int index_romfs(const char *host_dir, const char *rel, int depth) {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
         char host[MAX_PATH], key[MAX_PATH];
         snprintf(host, sizeof host, "%s\\%s", host_dir, fd.cFileName);
-        /* (hookshot) a link to a folder is not followed (two links back up made the walk endless); links to files are
+        /* (longshot) a link to a folder is not followed (two links back up made the walk endless); links to files are
            (mod managers place files as links) */
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
             hos_log("mods: %s is a link to a folder: left out", host);

@@ -8,7 +8,7 @@
    changes. HOS_NO_SDL=1 leaves SDL out. The inputs go by position (HOS_PAD_*: the bottom face button
    first, cross on a DualSense, A on an Xbox pad); nn_hid.c's controls make them the Switch's buttons.
 
-   (hookshot) Motion: with the Insert menu's Motion controls on (the default), the open pad with a gyroscope and an
+   (longshot) Motion: with the Insert menu's Motion controls on (the default), the open pad with a gyroscope and an
    accelerometer (Switch Pro and pads in Switch mode, DualSense, DualShock 4, others) that was used last has them read
    each poll and turned into the six-axis state OoT aims with (host/hos_motion.h), which nn_hid.c's
    GetSixAxisSensorStates gives the game; Motion sensitivity X/Y and Invert motion X/Y apply there. Off, or with no such pad, the game sees the pad
@@ -24,8 +24,8 @@
 #include "hos_motion.h"
 #include "steam_pads.h"
 #include "../gpu/vk/vk_api.h"   /* (HOS_PAD_*) */
-#ifndef HOOKSHOT_ENV_H   /* (env_on: the switches' one rule) */
-#include "../gpu/vk/compat/hookshot_env.h"
+#ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
+#include "../gpu/vk/compat/longshot_env.h"
 #endif
 
 void hos_host_thread_register_self(const char *name);   /* hos_prof.c */
@@ -51,12 +51,12 @@ static struct {
     int motion, motion_on;
     int64_t motion_retry_ns, used_ns;
     uint64_t input_sig;
-    unsigned rested;   /* (hookshot) the sticks' axes seen at rest since it was opened, a bit each: only those steer */
+    unsigned rested;   /* (longshot) the sticks' axes seen at rest since it was opened, a bit each: only those steer */
     signed char held[4];   /* (the way each axis was last held, -1, 0 or 1: one held the other way has passed its rest) */
     uint32_t serial;
     float bias[3], bias_t;
     int has_bias;
-    uint16_t vendor;      /* (hookshot) its USB vendor, and its Steam Input handle: not 0 for a Steam stand-in pad */
+    uint16_t vendor;      /* (longshot) its USB vendor, and its Steam Input handle: not 0 for a Steam stand-in pad */
     uint64_t steam;
     int motion_only;      /* (host/steam_pads.h) a real Valve pad while a Steam stand-in pad is open: motion, no input */
 } pads[MAX_PADS];
@@ -98,7 +98,7 @@ static int pads_start(void) {
     /* (with no window nothing reads SDL's quit event: SDL's own SIGINT/SIGTERM handlers turned a timeout's or a service
        manager's SIGTERM into that event, and the run went on until SIGKILL. Without them the signals end it as usual) */
     if (env_on("HOS_HEADLESS")) hos_sdl_hint("SDL_NO_SIGNAL_HANDLERS", "1");
-    /* (hookshot) Valve's own pads taken out of the ignore list Steam sets for the games it starts, so that their motion
+    /* (longshot) Valve's own pads taken out of the ignore list Steam sets for the games it starts, so that their motion
        sensors are read (host/steam_pads.h, #1897). Only with an SDL that tells Steam's stand-in pads apart: without
        that, a real pad and its stand-in would both play. A list emptied or unset in Steam's launch options is left as
        it is */
@@ -309,7 +309,7 @@ static void motion_poll(int64_t now, int count) {
     ReleaseSRWLockExclusive(&state_lock);
 }
 
-/* (hookshot) a motion-only pad's own presses (host/steam_pads.h): they are not the game's input, but they still mark it
+/* (longshot) a motion-only pad's own presses (host/steam_pads.h): they are not the game's input, but they still mark it
    the pad used last, which motion_poll reads motion from */
 static void motion_only_used(int i, int64_t now) {
     int rx_option(int id, int otherwise);
@@ -393,12 +393,12 @@ static void pads_poll(void) {
             hd_rumble_merge(felt[0], felt[1], felt[2]);
             hd_rumble_encode(felt[2], strength, side[2]);
         }
-        int stand_in = 0;   /* (hookshot) a Steam stand-in pad open (host/steam_pads.h) */
+        int stand_in = 0;   /* (longshot) a Steam stand-in pad open (host/steam_pads.h) */
         for (int i = 0; i < MAX_PADS; i++) stand_in |= pads[i].gc && pads[i].steam;
         for (int i = 0; i < MAX_PADS; i++) {
             void *gc = pads[i].gc;
             if (!gc) continue;
-            /* (hookshot) a real Valve pad beside its Steam stand-in: its motion is read (motion_poll), its buttons and
+            /* (longshot) a real Valve pad beside its Steam stand-in: its motion is read (motion_poll), its buttons and
                sticks come through the stand-in as the player's Steam layout maps them, so they are not merged twice,
                and its rumble goes through Steam too. Its own presses still mark it the pad used last, for motion */
             const int motion_only = steam_pads_motion_only(pads[i].vendor, pads[i].steam, stand_in);
@@ -426,7 +426,7 @@ static void pads_poll(void) {
             for (int k = BTN_RPADDLE1; k <= BTN_LPADDLE2; k++)
                 if (hos_sdl_pad_button(gc, k)) sig |= 1ULL << (HOS_PAD_RPADDLE1 + k - BTN_RPADDLE1);
             b |= sig;
-            /* (hookshot) a DualShock 4's or DualSense's touchpad click: it opens the Insert menu as F1 does (vk_menu.cpp).
+            /* (longshot) a DualShock 4's or DualSense's touchpad click: it opens the Insert menu as F1 does (vk_menu.cpp).
                SDL numbers it 20, past the buttons above; an SDL without it answers 0 */
             if (hos_sdl_pad_button(gc, BTN_TOUCHPAD)) b |= 1ULL << HOS_PAD_TOUCHPAD;
             if (hos_sdl_pad_axis(gc, AX_LT) > 8000) b |= 1ULL << HOS_PAD_LTRIGGER;
@@ -439,7 +439,7 @@ static void pads_poll(void) {
             hos_filter_stick(hos_sdl_pad_axis(gc, AX_RX), hos_sdl_pad_axis(gc, AX_RY), z, v + 2);
             v[1] = -v[1];   /* SDL's Y axes point down */
             v[3] = -v[3];
-            /* (hookshot) An axis steers once it has been seen at rest (inside the dead zone) since the pad was opened. The sticks are
+            /* (longshot) An axis steers once it has been seen at rest (inside the dead zone) since the pad was opened. The sticks are
                the strongest of all the pads', so a device whose axis reads held for good (a mapping that puts a trigger or an
                unused axis on a stick, a second virtual pad) turned the camera or walked Link in circles on its own, with the
                player's pad at rest (#1673: Xbox 360 pad, CachyOS; #1661: GameSir 2 Lite, wired). A real stick rests at the start. */

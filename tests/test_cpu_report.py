@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "cpu_report.py"
 
-EXE_MAP = """ hookshot
+EXE_MAP = """ longshot
 
  Preferred load address is 0000000140000000
 
@@ -24,7 +24,7 @@ EXE_MAP = """ hookshot
  0001:00004000       brand_new_function         0000000140005000     host_brand_new_file.o
  0001:00005000       mystery                    0000000140006000     zz_unknown.o
 """
-VK_MAP = """ hookshot_vk
+VK_MAP = """ longshot_vk
 
  Preferred load address is 0000000180000000
 
@@ -35,15 +35,15 @@ VK_MAP = """ hookshot_vk
 """
 # (one line a thread an instant: "<ms> <thread>|<leaf>;...;<root>", module+offset; offsets are relative to the image base)
 SAMPLES = [
-    "0 sead::MainThread|hookshot.exe+1010;hookshot.exe+2020",         # f_80001000 (game: core), under f_80900000
-    "0 Presentation_Thread|amdvlk64.dll+500;hookshot_vk.dll+1010",    # driver leaf, owner draw_one (render)
-    "2 sead::MainThread|hookshot.exe+3010;hookshot.exe+1010",         # LockMutex (os/sync), called from game
-    "2 Presentation_Thread|hookshot_vk.dll+2010",                     # take_capture (render/capture)
-    "4 sead::MainThread|hookshot.exe+1010",                           # game again
-    "4 Presentation_Thread|hookshot_vk.dll+1010",                     # draw_one
-    "4 BaseProcExecutor3|hookshot.exe+6010;hookshot.exe+2020",        # zz_unknown.o: unclassified
-    "6 sead::MainThread|hookshot.exe+4010;hookshot.exe+1010",         # a64_lookup: runtime/indirect-calls
-    "6 Presentation_Thread|ntdll.dll+1010;hookshot_vk.dll+1010",      # blocked in a wait: not CPU time
+    "0 sead::MainThread|longshot.exe+1010;longshot.exe+2020",         # f_80001000 (game: core), under f_80900000
+    "0 Presentation_Thread|amdvlk64.dll+500;longshot_vk.dll+1010",    # driver leaf, owner draw_one (render)
+    "2 sead::MainThread|longshot.exe+3010;longshot.exe+1010",         # LockMutex (os/sync), called from game
+    "2 Presentation_Thread|longshot_vk.dll+2010",                     # take_capture (render/capture)
+    "4 sead::MainThread|longshot.exe+1010",                           # game again
+    "4 Presentation_Thread|longshot_vk.dll+1010",                     # draw_one
+    "4 BaseProcExecutor3|longshot.exe+6010;longshot.exe+2020",        # zz_unknown.o: unclassified
+    "6 sead::MainThread|longshot.exe+4010;longshot.exe+1010",         # a64_lookup: runtime/indirect-calls
+    "6 Presentation_Thread|ntdll.dll+1010;longshot_vk.dll+1010",      # blocked in a wait: not CPU time
 ]
 NTDLL_MAP = """ ntdll
 
@@ -60,8 +60,8 @@ def run(tmp, cats_text=None, extra=(), candidates=None, guest=True, samples=None
     maps, rundir = tmp / "maps", tmp / "run1"
     maps.mkdir(exist_ok=True)
     rundir.mkdir(exist_ok=True)
-    (maps / "hookshot.map").write_text(EXE_MAP, encoding="utf-8")
-    (maps / "hookshot_vk.map").write_text(VK_MAP, encoding="utf-8")
+    (maps / "longshot.map").write_text(EXE_MAP, encoding="utf-8")
+    (maps / "longshot_vk.map").write_text(VK_MAP, encoding="utf-8")
     (maps / "ntdll.dll.map").write_text(NTDLL_MAP, encoding="utf-8")
     (rundir / "all.txt").write_text("\n".join(samples or SAMPLES) + "\n", encoding="utf-8")
     scripts = tmp / "scripts"
@@ -140,12 +140,12 @@ def main():
         if not row(md2.split("## By category: who executes it")[0], "**unclassified**") or row(md2, "os/sync"):
             failures.append("CONTROL: with no rules, everything should be unclassified")
         # (what may be published: no guest map, so no guest address and no game subsystem; lifted code is one row)
-        pub = run(Path(t), guest=False, samples=SAMPLES + ["6 Thread_8000abcd|hookshot.exe+1010"])   # (an unnamed thread)
+        pub = run(Path(t), guest=False, samples=SAMPLES + ["6 Thread_8000abcd|longshot.exe+1010"])   # (an unnamed thread)
         if re.search(r"Thread_[0-9a-fA-F]{8}", pub) or "unnamed thread" not in pub:
             failures.append("without --guest-map an unnamed thread's guest entry address must not be printed")
-# (a Linux capture names hookshot / hookshot_vk.so, whose maps are not read: refused, even with Windows maps present)
+# (a Linux capture names longshot / longshot_vk.so, whose maps are not read: refused, even with Windows maps present)
         try:
-            run(Path(t), samples=["0 sead::MainThread|hookshot+1010;hookshot+2020"])
+            run(Path(t), samples=["0 sead::MainThread|longshot+1010;longshot+2020"])
             failures.append("a Linux capture should be refused, not mislabelled")
         except SystemExit as e:
             if "Linux capture" not in str(e):

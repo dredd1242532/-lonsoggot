@@ -1,4 +1,4 @@
-/* (hookshot) The control bridge (host/control.c, docs/control.md): HOS_CONTROL=<socket path> lets a tool on the same PC
+/* (longshot) The control bridge (host/control.c, docs/control.md): HOS_CONTROL=<socket path> lets a tool on the same PC
    drive the running game over a local socket, one JSON request a line. Off unless that is set. */
 #pragma once
 
@@ -33,7 +33,7 @@ typedef struct HosControlGame {
     /* a PNG of the first present after `after`; done(ctx, present, ok) from any thread. 0: not taken */
     int (*shot)(const char *path, int64_t after, void (*done)(void *ctx, int64_t present, int ok), void *ctx);
     int (*setting)(int index, HosControlSetting *out);   /* the index-th settings row, to list them: 0 past the last */
-    /* the row whose hookshot_options.ini key is key set to value as the menu sets it, out the row after it: 1 set, 0 no such
+    /* the row whose longshot_options.ini key is key set to value as the menu sets it, out the row after it: 1 set, 0 no such
        row, -1 nothing to choose on this PC, -2 no step of a list row reaches value here, left as it was (out the row as it
        is) */
     int (*setting_set)(const char *key, int value, HosControlSetting *out);

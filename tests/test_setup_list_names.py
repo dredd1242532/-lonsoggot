@@ -10,18 +10,25 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "builder" / "py"))
-from hookshot_builder import setup_parts  # noqa: E402
+from longshot_builder import setup_parts  # noqa: E402
 
 SHA = "0123456789abcdef" * 4
 
 
-def read(tag="v2", sha=SHA, dest="HookshotBuilder/tools", size="100"):
+def read(tag="v2", sha=SHA, dest="LongshotBuilder/tools", size="100"):
     text = "tag %s\npart %s %s %s - llvm-mingw https://x/y.zip\nrun a.exe\n" % (tag, sha, size, dest)
-    with mock.patch.object(setup_parts.Http, "get", lambda self, url, **kw: text.encode()):
+    # (the list LONGSHOT_SETUP_LIST names: the builder looks up no release, the Longshot Launcher does)
+    with mock.patch.object(setup_parts.Http, "get", lambda self, url, **kw: text.encode()), \
+            mock.patch.dict(os.environ, {"LONGSHOT_SETUP_LIST": "https://x/longshot-setup.txt"}):
         return setup_parts.read_manifest(lambda s: None)
 
 
 class SetupListNamesTests(unittest.TestCase):
+    def test_no_list_given_is_no_lookup(self):
+        with mock.patch.dict(os.environ, {"LONGSHOT_SETUP_LIST": ""}), self.assertRaises(setup_parts.SetupError) as caught:
+            setup_parts.manifest_url()
+        self.assertIn("Longshot Launcher", str(caught.exception))
+
     def test_a_list_with_a_name_outside_the_install_folder_or_a_bad_checksum_or_size_is_refused(self):
         self.assertEqual(read()[0], "v2")
         for bad in ({"tag": ".."}, {"tag": "C:\\Users"}, {"tag": "/tmp"}, {"dest": "a/../.."}, {"sha": SHA.upper()},
@@ -30,7 +37,7 @@ class SetupListNamesTests(unittest.TestCase):
                 read(**bad)
 
     def test_a_part_is_reused_only_for_its_exact_checksum(self):
-        with tempfile.TemporaryDirectory() as base, mock.patch.dict(os.environ, {"HOOKSHOT_SETUP_BASE": base}):
+        with tempfile.TemporaryDirectory() as base, mock.patch.dict(os.environ, {"LONGSHOT_SETUP_BASE": base}):
             v = Path(base, "versions")
             (v / "v1" / "tools" / "llvm-mingw").mkdir(parents=True)
             (v / "current.txt").write_text("v1")

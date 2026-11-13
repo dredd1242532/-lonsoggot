@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
-using HookshotBuilder;
+using LongshotBuilder;
 
 static class Program
 {
-    const string Key = "HOOKSHOT_JOBS";
+    const string Key = "LONGSHOT_JOBS";
     static readonly MethodInfo InfoMethod = typeof(Runner).GetMethod("Info", BindingFlags.Static | BindingFlags.NonPublic)!;
     static int checks;
 
@@ -85,19 +85,19 @@ static class Program
         var emptyParent = args.Length == 2 && args[0] == "--empty-parent";
         var python = Path.GetFullPath(args[^1]);
         var original = Environment.GetEnvironmentVariable(Key);
-        var originalHome = Environment.GetEnvironmentVariable("HOOKSHOT_SETUP_BASE");
-        var originalPortable = Environment.GetEnvironmentVariable("HOOKSHOT_BUILDER_PORTABLE");
-        var root = Path.Combine(Path.GetTempPath(), "hookshot-workers-" + Guid.NewGuid().ToString("N"));
+        var originalHome = Environment.GetEnvironmentVariable("LONGSHOT_SETUP_BASE");
+        var originalPortable = Environment.GetEnvironmentVariable("LONGSHOT_BUILDER_PORTABLE");
+        var root = Path.Combine(Path.GetTempPath(), "longshot-workers-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(root, "nx2"));
-        Environment.SetEnvironmentVariable("HOOKSHOT_SETUP_BASE", root);
-        Environment.SetEnvironmentVariable("HOOKSHOT_BUILDER_PORTABLE", null);
+        Environment.SetEnvironmentVariable("LONGSHOT_SETUP_BASE", root);
+        Environment.SetEnvironmentVariable("LONGSHOT_BUILDER_PORTABLE", null);
         try
         {
             Require(BuilderHome.Base == root && !BuilderHome.Portable, "The worker fixture did not use its isolated standard home.");
             // This is authored test content, not the real pipeline, game files or a compiler invocation.
             File.WriteAllText(Path.Combine(root, "nx2", "make_game.py"), """
                 import json, os, sys
-                text = json.dumps({'argv': sys.argv[1:], 'jobs': os.environ.get('HOOKSHOT_JOBS'), 'memory': os.environ.get('HOOKSHOT_MEM_LIMIT_GB')})
+                text = json.dumps({'argv': sys.argv[1:], 'jobs': os.environ.get('LONGSHOT_JOBS'), 'memory': os.environ.get('LONGSHOT_MEM_LIMIT_GB')})
                 print(('@@check ok ' if '--check' in sys.argv else '') + text, flush=True)
                 """);
             var tools = new Tools(root, python);
@@ -137,7 +137,7 @@ static class Program
             Require(BuildMemory.Saved(menu, 12) is 12, "A saved memory choice must be selected again.");
             Require(BuildMemory.Saved(menu, null) is string none && none == BuildMemory.Automatic, "No saved choice must select Automatic.");
             Require(BuildMemory.Saved(menu, 64) is string gone && gone == BuildMemory.Automatic, "A choice this PC no longer offers must select Automatic.");
-            var settings = Path.Combine(Path.GetTempPath(), "hookshot-builder-settings-" + Guid.NewGuid().ToString("N") + ".json");
+            var settings = Path.Combine(Path.GetTempPath(), "longshot-builder-settings-" + Guid.NewGuid().ToString("N") + ".json");
             try
             {
                 File.WriteAllText(settings, System.Text.Json.JsonSerializer.Serialize(new BuilderSettings { MemoryGb = 16 }));
@@ -158,8 +158,8 @@ static class Program
             }
             {
                 var command = new[] { "--update", "authored existing game" };
-                Info(tools, command).Environment.TryGetValue("HOOKSHOT_MEM_LIMIT_GB", out var automatic);
-                Require(automatic == Environment.GetEnvironmentVariable("HOOKSHOT_MEM_LIMIT_GB"), "Automatic must leave the memory limit as inherited.");
+                Info(tools, command).Environment.TryGetValue("LONGSHOT_MEM_LIMIT_GB", out var automatic);
+                Require(automatic == Environment.GetEnvironmentVariable("LONGSHOT_MEM_LIMIT_GB"), "Automatic must leave the memory limit as inherited.");
                 var value = await Delivery(Info(tools, command, null, 12));
                 Require(value.GetProperty("memory").GetString() == "12", "The selected memory did not reach the child.");
             }
@@ -220,13 +220,13 @@ static class Program
             var emptyError = await empty.StandardError.ReadToEndAsync();
             await empty.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
             Require(empty.ExitCode == 0 && emptyError.Length == 0 && emptyOutput.Contains("Empty inherited worker entry passed."), "Empty inheritance check failed: " + emptyError);
-            Console.WriteLine($"Windows Builder worker checks passed ({checks} assertions). Only authored argv/HOOKSHOT_JOBS were inspected.");
+            Console.WriteLine($"Windows Builder worker checks passed ({checks} assertions). Only authored argv/LONGSHOT_JOBS were inspected.");
         }
         finally
         {
             Environment.SetEnvironmentVariable(Key, original);
-            Environment.SetEnvironmentVariable("HOOKSHOT_SETUP_BASE", originalHome);
-            Environment.SetEnvironmentVariable("HOOKSHOT_BUILDER_PORTABLE", originalPortable);
+            Environment.SetEnvironmentVariable("LONGSHOT_SETUP_BASE", originalHome);
+            Environment.SetEnvironmentVariable("LONGSHOT_BUILDER_PORTABLE", originalPortable);
             Directory.Delete(root, recursive: true);
         }
     }

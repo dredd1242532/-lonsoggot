@@ -21,7 +21,7 @@ WORK = os.environ.get("OOT_WORK", os.path.join(ROOT, "work"))
 
 
 def env_on(name):
-    """An on/off switch, the game's rule (gpu/vk/compat/hookshot_env.h env_on): unset, empty, 0, false, off or no (any
+    """An on/off switch, the game's rule (gpu/vk/compat/longshot_env.h env_on): unset, empty, 0, false, off or no (any
     case) is off; anything else is on"""
     return os.environ.get(name, "").strip().lower() not in ("", "0", "false", "off", "no")
 

@@ -1,8 +1,11 @@
-"""Linux builder updates, the same way Windows installs (builder/setup/setup.c, scripts/make_setup_parts.py).
+"""Installing a Linux builder from a parts list, the same way Windows installs (builder/setup/setup.c, scripts/make_setup_parts.py).
 
-A release publishes hookshot-linux.txt. Each part is a zip named by its SHA-256 and kept on the linux-parts release, so a
-part whose files did not change is not downloaded again. The player's copy lives at
-$XDG_DATA_HOME/hookshot/builder/versions/<tag> (AppRun at its root, the same layout as the AppImage). An unchanged part
+The builder no longer looks for releases itself: the Longshot Launcher (MagicBeanDev/LongshotLauncher) reads Longshot's signed
+releases, installs each version's builder and updates it (docs/releases.md). What is left here installs from a list given
+on this PC (LONGSHOT_LINUX_LIST), and the version rules the builder's buttons use. A release publishes longshot-linux.txt.
+Each part is a zip named by its SHA-256, so a part whose files did not change is not
+downloaded again. The player's copy lives at
+$XDG_DATA_HOME/longshot/builder/versions/<tag> (AppRun at its root, the same layout as the AppImage). An unchanged part
 is copied from the builder that is running now (the mounted AppImage, or the version installed last time).
 
     tag <tag>
@@ -22,12 +25,8 @@ import zipfile
 
 from part_links import SYSROOT_PART, is_absolute_link, relative_sysroot_link
 
-LIST_NAME = "hookshot-linux.txt"
-LATEST_LIST = "https://github.com/NotRexed/Hookshot/releases/latest/download/" + LIST_NAME
-LATEST_API = "https://api.github.com/repos/NotRexed/Hookshot/releases/latest"
-RELEASES_API = "https://api.github.com/repos/NotRexed/Hookshot/releases?per_page=20"
-# (the update tracks: the builder's Track choice, by default the track of the build installed. The game's own check,
-# host/hos_update.c, and the Windows builder, Updater.cs, use the same rules)
+LIST_NAME = "longshot-linux.txt"
+# (the tracks a version is on, from its name: the launcher's channels stable, rc and nightly; "release" is stable)
 TRACKS = ("release", "rc", "nightly")
 
 
@@ -51,13 +50,13 @@ class Manifest(object):
 
 
 def data_root():
-    base = os.environ.get("HOOKSHOT_BUILDER_HOME") or os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
-    return os.path.join(base, "hookshot", "builder")
+    base = os.environ.get("LONGSHOT_BUILDER_HOME") or os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "longshot", "builder")
 
 
 def parse_list(text, local=True):
     """The setup list. A part owns the following tree line, or the file lines, until the next part. local: a list from
-    this PC (the tools' own, HOOKSHOT_LINUX_LIST), whose parts may be file:// links; a downloaded one's are https"""
+    this PC (the tools' own, LONGSHOT_LINUX_LIST), whose parts may be file:// links; a downloaded one's are https"""
     tag, parts, cur = "", [], None
     for raw in text.splitlines():
         line = raw.strip()
@@ -122,17 +121,6 @@ def track_of(version):
     return "rc" if key and not key[1] else "release"
 
 
-def release_of(tag):
-    """The GitHub release that holds a version's files: the nightly's are on the rolling nightly release."""
-    return "nightly" if track_of(tag) == "nightly" else tag
-
-
-def list_url(tag=None):
-    if not tag:
-        return LATEST_LIST
-    return "https://github.com/NotRexed/Hookshot/releases/download/%s/%s" % (release_of(tag), LIST_NAME)
-
-
 def newest_release(tags):
     """The newest of a list of release tags (stable and release candidates), in semver order; None when none is one."""
     tags = [t for t in tags if t and re.fullmatch(r"v\d+\.\d+\.\d+(-rc\.\d+)?", t)]
@@ -178,7 +166,7 @@ def tools_tag(root):
     """The release these tools are, from the file a package writes (VERSION, or version.txt). A source checkout has neither."""
     if not root:
         return ""
-    for rel in ("usr/share/hookshot/VERSION", "usr/share/hookshot/version.txt", "VERSION", "version.txt"):
+    for rel in ("usr/share/longshot/VERSION", "usr/share/longshot/version.txt", "VERSION", "version.txt"):
         path = os.path.join(root, rel)
         try:
             with open(path, encoding="utf-8") as f:
@@ -195,9 +183,9 @@ def running_root():
     appdir = os.environ.get("APPDIR")
     if appdir and os.path.isfile(os.path.join(appdir, "AppRun")):
         return appdir
-    tools = os.environ.get("HOOKSHOT_TOOLS")
+    tools = os.environ.get("LONGSHOT_TOOLS")
     if tools:
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(tools))))   # (<root>/usr/share/hookshot)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(tools))))   # (<root>/usr/share/longshot)
         if os.path.isfile(os.path.join(root, "AppRun")):
             return root
     return None
@@ -216,10 +204,10 @@ def game_version(folder):
     """The release a folder was built with, when it still has the game files an update builds from."""
     if not folder:
         return None, False
-    kept = os.path.isdir(os.path.join(folder, ".hookshot_exefs")) and os.path.isdir(os.path.join(folder, "romfs"))
+    kept = os.path.isdir(os.path.join(folder, ".longshot_exefs")) and os.path.isdir(os.path.join(folder, "romfs"))
     version = None
     try:
-        with open(os.path.join(folder, "hookshot_version.txt"), encoding="utf-8") as f:
+        with open(os.path.join(folder, "longshot_version.txt"), encoding="utf-8") as f:
             for line in f:
                 if line.startswith("version="):
                     version = line[8:].strip() or None
@@ -230,13 +218,13 @@ def game_version(folder):
 
 
 def game_exe(folder):
-    """bin/hookshot under the launcher, or hookshot in a folder built before the launcher."""
+    """bin/longshot under the launcher, or longshot in a folder built before the launcher."""
     if not folder:
         return None
-    nested = os.path.join(folder, "bin", "hookshot")
+    nested = os.path.join(folder, "bin", "longshot")
     if os.path.isfile(nested) and os.path.isfile(os.path.join(folder, "image.bin")):
         return nested
-    flat = os.path.join(folder, "hookshot")
+    flat = os.path.join(folder, "longshot")
     if os.path.isfile(flat) and os.path.isfile(os.path.join(folder, "image.bin")):
         return flat
     return None
@@ -300,34 +288,13 @@ def _open(req, timeout):
 
 def _request(url, timeout, limit=MAX_DOWNLOAD, stop=None):
     # (no second argument: Request's second is the POST body, and a str body failed every download before connecting)
-    req = urllib.request.Request(_https(url), headers={"User-Agent": "Hookshot", "Accept": "application/vnd.github+json"})
+    req = urllib.request.Request(_https(url), headers={"User-Agent": "Longshot", "Accept": "application/vnd.github+json"})
     with _open(req, timeout) as response:
         return _read_at_most(response, limit, stop)
 
 
-def _api_download(url, stop=None):
-    """A GitHub release link that failed: the same file through the API (scripts/linux/deps.sh does this for 504s)."""
-    prefix = "https://github.com/"
-    mark = "/releases/download/"
-    if not url.startswith(prefix) or mark not in url:
-        return None
-    repo, _, rest = url[len(prefix):].partition(mark)
-    tag, _, name = rest.partition("/")
-    if not repo or not tag or not name or "/" in name:
-        return None
-    info = _request("https://api.github.com/repos/%s/releases/tags/%s" % (repo, tag), 30)
-    import json
-    for asset in json.loads(info.decode("utf-8")).get("assets", []):
-        if asset.get("name") == name:
-            req = urllib.request.Request(_https(asset.get("url")), headers={
-                "User-Agent": "Hookshot", "Accept": "application/octet-stream"})
-            with _open(req, 120) as response:
-                return _read_at_most(response, MAX_DOWNLOAD, stop)
-    return None
-
-
 def fetch_bytes(url, timeout=60, stop=None):
-    """The url's bytes. A GitHub download that the server fails (5xx) is tried again, then through the API. stop: an event
+    """The url's bytes. A download that the server fails (5xx) is tried again. stop: an event
     (threading.Event) that ends it with Cancelled once set, during a read or a wait between tries."""
     delay, last = 2, "the download failed"
     for attempt in range(4):
@@ -336,7 +303,7 @@ def fetch_bytes(url, timeout=60, stop=None):
         except Cancelled:
             raise
         except urllib.error.HTTPError as error:
-            last = "GitHub answered %s" % error.code
+            last = "the server answered %s" % error.code
             if error.code < 500 and error.code != 429:
                 break
         except Exception as error:
@@ -348,51 +315,7 @@ def fetch_bytes(url, timeout=60, stop=None):
                 stop.wait(delay)
                 _stopped(stop)
             delay = min(delay * 2, 20)
-    try:
-        got = _api_download(url, stop)
-    except Cancelled:
-        raise
-    except Exception as error:
-        got = None
-        last = str(error) or last
-    if got is not None:
-        return got
     raise RuntimeError(last)
-
-
-def latest_tag(get=None, track="release"):
-    """The newest build of a track, or None when GitHub did not answer. release: the latest release's tag, the API first
-    (60 an hour), the setup list's tag otherwise, which is a file download and not that limit (the same fallback as the
-    Windows builder). rc: the newest of the release candidates and the releases (an RC is offered its version's release
-    once that ships), the latest release when the API does not answer. nightly: the nightly's list's tag."""
-    get = get or (lambda url: fetch_bytes(url, 8))
-    if track == "nightly":
-        try:
-            return parse_list(get(list_url("nightly")).decode("utf-8"), local=False).tag
-        except Exception:
-            return None
-    if track == "rc":
-        try:
-            import json
-            newest = newest_release([r.get("tag_name") for r in json.loads(get(RELEASES_API).decode("utf-8"))
-                                     if not r.get("draft")])
-            if newest:
-                return newest
-        except Exception:
-            pass
-    try:
-        import json
-        body = json.loads(get(LATEST_API).decode("utf-8"))
-        tag = body.get("tag_name")
-        if tag:
-            return tag
-    except Exception:
-        pass
-    try:
-        text = get(LATEST_LIST).decode("utf-8")
-        return parse_list(text, local=False).tag
-    except Exception:
-        return None
 
 
 def _sha256(data):
@@ -562,19 +485,19 @@ def _check_links_inside(dest):
 def _finish_tree(dest):
     """AppRun at the root, from the tools just installed, so this folder starts the way the AppImage does."""
     _check_links_inside(dest)
-    for name in ("AppRun", "hookshot.png", "hookshot-builder.desktop"):
+    for name in ("AppRun", "longshot.png", "longshot-builder.desktop"):
         if os.path.islink(os.path.join(dest, name)):   # (written below: never through a link a part made)
             raise ValueError("the update has a link where %s goes" % name)
-    tools = os.path.join(dest, "usr", "share", "hookshot")
+    tools = os.path.join(dest, "usr", "share", "longshot")
     apprun = os.path.join(dest, "AppRun")
     shutil.copyfile(os.path.join(tools, "builder", "linux", "AppRun"), apprun)
     os.chmod(apprun, 0o755)   # (rwxr-xr-x: the launcher must run; only its owner may change it)
-    icon = os.path.join(tools, "assets", "hookshot.png")
+    icon = os.path.join(tools, "assets", "longshot.png")
     if os.path.isfile(icon):
-        shutil.copyfile(icon, os.path.join(dest, "hookshot.png"))
-    desktop = os.path.join(tools, "builder", "linux", "hookshot-builder.desktop")
+        shutil.copyfile(icon, os.path.join(dest, "longshot.png"))
+    desktop = os.path.join(tools, "builder", "linux", "longshot-builder.desktop")
     if os.path.isfile(desktop):
-        shutil.copyfile(desktop, os.path.join(dest, "hookshot-builder.desktop"))
+        shutil.copyfile(desktop, os.path.join(dest, "longshot-builder.desktop"))
     return apprun
 
 
@@ -634,23 +557,24 @@ def installed_apprun():
 
 
 def fetch_manifest(get=None, tag=None):
-    get = get or (lambda url: fetch_bytes(url, 30))
-    override = os.environ.get("HOOKSHOT_LINUX_LIST")
+    """The list given on this PC (LONGSHOT_LINUX_LIST). There is no other: the Longshot Launcher installs released versions"""
+    override = os.environ.get("LONGSHOT_LINUX_LIST")
     if override:
         with open(override, encoding="utf-8") as handle:
             return parse_list(handle.read())
-    return parse_list(get(list_url(tag)).decode("utf-8"), local=False)
+    raise RuntimeError("The builder does not download versions: the Longshot Launcher installs and updates it "
+                       "(https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases).")
 
 
 def startup_manifest(root, get=None, tag=None):
-    """The list begin_update installs on launch: the latest release, except when these tools ship a list of their own
+    """The list begin_update installs on launch: LONGSHOT_LINUX_LIST's, except when these tools ship a list of their own
     that is that same release and no older than it (a self-contained -rc or Actions tab AppImage). Reinstalling an
     older release's parts over those tools replaces files the working tools had (issue 990: a -rc shipped
     gpu/vk/oot_cheat_items.h, the release's zip did not, and every launch lost it). The comparison is update_target's:
-    a builder that is not an older release still updates. A HOOKSHOT_LINUX_LIST is a deliberate override: it wins. tag:
+    a builder that is not an older release still updates. A LONGSHOT_LINUX_LIST is a deliberate override: it wins. tag:
     that version's list instead (another track's, or the chosen track's newest), as asked."""
     latest = fetch_manifest(get, tag)
-    if not tag and not os.environ.get("HOOKSHOT_LINUX_LIST"):
+    if not tag and not os.environ.get("LONGSHOT_LINUX_LIST"):
         own = read_manifest(root)
         if own and own.tag == tools_tag(root) and update_target(latest.tag, own.tag) == own.tag:
             return own

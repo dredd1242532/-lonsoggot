@@ -1,5 +1,8 @@
 # Changelog
 
+Longshot is a fork of [Hookshot](https://github.com/NotRexed/Hookshot), made by NotRexed. The entries up to and
+including 2.2.0-rc.1 are Hookshot's releases, and their links point at Hookshot's repository.
+
 ## [2.2.0-rc.1](https://github.com/NotRexed/Hookshot/compare/v2.1.0...v2.2.0-rc.1) (2026-11-12)
 
 
@@ -655,4 +658,5 @@ Release candidate [v2.1.0-rc.2](https://github.com/NotRexed/Hookshot/releases/ta
 ## [2.0.14](https://github.com/NotRexed/Hookshot/releases/tag/v2.0.14) (2026-11-10)
 
 Entries from here on are written by release-please (docs/versioning.md). Releases up to v2.0.14 are described on their
-[release pages](https://github.com/NotRexed/Hookshot/releases), and the first one also in `changelog.txt`.
+[release pages](https://github.com/NotRexed/Hookshot/releases), and the first one also in Hookshot's
+[`changelog.txt`](https://github.com/NotRexed/Hookshot/blob/main/changelog.txt).

@@ -1,4 +1,4 @@
-/* (hookshot) The command a restart starts again (host/hos_relaunch.c, the Insert menu's Restart now), as plain C:
+/* (longshot) The command a restart starts again (host/hos_relaunch.c, the Insert menu's Restart now), as plain C:
    on Linux the arguments and the environment the process started with, read from /proc/self/cmdline and
    /proc/self/environ (strings ended by a NUL each). tests/test_menu_restart.py checks it. */
 #pragma once
@@ -71,7 +71,7 @@ static inline int hos_relaunch_command(const char *cmdline, const char *environ_
     return 1;
 }
 
-/* Windows' restart: the environment block the game started with (GetEnvironmentStringsW before hookshot_env.txt was read,
+/* Windows' restart: the environment block the game started with (GetEnvironmentStringsW before longshot_env.txt was read,
    strings ended by a NUL each and the block by one more), with name=value put in, in place of the same name in any case,
    at its place in the block's order (by name, case left out, as Windows keeps it). A new block (malloc), or NULL */
 static inline int hos_relaunch_env_cmp(const wchar_t *a, const wchar_t *b) {   /* (two names, each ended by '=' or a NUL) */

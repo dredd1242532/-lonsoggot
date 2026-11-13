@@ -1,6 +1,6 @@
 // The Insert menu's Bug report (vk_menu.cpp, the Gameplay tab): one press writes what an issue needs into a folder of its
 // own, bug-reports/<date>_<time> in the game folder, and nothing else. report.txt holds the answers the issue form asks for
-// (.github/ISSUE_TEMPLATE/1-game-problem.yml: the version, where the player is, the GPU and its driver, CPU, RAM and system,
+// (.forgejo/ISSUE_TEMPLATE/1-game-problem.yml: the version, where the player is, the GPU and its driver, CPU, RAM and system,
 // the options and switches changed from their defaults) under the form's own headings, so scripts/hardware_report.py reads
 // them as it reads an issue; beside it this run's log and the last run's, the home folder and the user's name taken out of
 // their paths, and a picture of the game's frame without the menu (vk_replay.cpp's shot_ask takes it at its next present). Nothing is
@@ -17,7 +17,7 @@ namespace mkwvk::bug_report {
 
 /// What a report is made of: the menu's part (version, gpu, options, game_dir) and this process's (fill_here)
 struct Inputs {
-    std::string version;   // HOOKSHOT_VERSION, as the log's first line has it
+    std::string version;   // LONGSHOT_VERSION, as the log's first line has it
     std::string gpu;       // the device the game runs on and its driver, as the form asks: "NVIDIA GeForce RTX 4090, NVIDIA 580.95.05"
     std::string options;   // the menu's rows that are not at their defaults, a "Name: value (default: value)" line each
     std::string system;    // CPU, RAM and system (system_text)
