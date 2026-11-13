@@ -4062,10 +4062,12 @@ void do_present(const nvn_tex* t, const int crop[4]) {
                 if (fx_img) full_barrier(r.cmd), blit_crop(r.cmd, fx_img, kShotW, kShotH, nullptr, shot_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kShotW, kShotH);
                 else blit_crop(r.cmd, src, sw, sh, crop, shot_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, kShotW, kShotH);
                 if (shot_menu && dev.offscreen) {
-                    const auto rsrc = present_source_rect(sw, sh, crop);
-                    coop_overlay_viewport(0, 0, (float)kShotW, (float)kShotH,
-                        sw ? (float)rsrc.x / sw : 0, sh ? (float)rsrc.y / sh : 0,
-                        sw ? (float)rsrc.w / sw : 0, sh ? (float)rsrc.h / sh : 0);
+                    if (coop_overlay_wants_camera()) {
+                        const auto rsrc = present_source_rect(sw, sh, crop);
+                        coop_overlay_viewport(0, 0, (float)kShotW, (float)kShotH,
+                            sw ? (float)rsrc.x / sw : 0, sh ? (float)rsrc.y / sh : 0,
+                            sw ? (float)rsrc.w / sw : 0, sh ? (float)rsrc.h / sh : 0);
+                    }
                     menu_record_image(r.cmd, shot_image, shot_view, kShotW, kShotH);
                 }
                 image_barrier(r.cmd, shot_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -4697,10 +4699,12 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
             logf("vk: present geometry: limit of %u changes reached; further geometry messages suppressed", PresentGeometryTrace::kLimit);
         }
     }
-    const auto overlay_source = present_source_rect(sw, sh, crop);
-    coop_overlay_viewport((float)rect.x, (float)rect.y, (float)rect.w, (float)rect.h,
-        sw ? (float)overlay_source.x / sw : 0, sh ? (float)overlay_source.y / sh : 0,
-        sw ? (float)overlay_source.w / sw : 0, sh ? (float)overlay_source.h / sh : 0);
+    if (coop_overlay_wants_camera()) {
+        const auto overlay_source = present_source_rect(sw, sh, crop);
+        coop_overlay_viewport((float)rect.x, (float)rect.y, (float)rect.w, (float)rect.h,
+            sw ? (float)overlay_source.x / sw : 0, sh ? (float)overlay_source.y / sh : 0,
+            sw ? (float)overlay_source.w / sw : 0, sh ? (float)overlay_source.h / sh : 0);
+    }
     menu_record(f.cmd, index, dev.swap_extent.width, dev.swap_extent.height);   // (longshot) Dear ImGui's overlays, over all of it
     image_barrier(f.cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     if (vkEndCommandBuffer(f.cmd) == VK_ERROR_DEVICE_LOST) device_lost();

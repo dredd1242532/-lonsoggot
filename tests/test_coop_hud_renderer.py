@@ -59,6 +59,7 @@ int main() {
     MkwVkHost h{};h.coop_overlay=snapshot;host=&h;
     MkwVkCoopOverlay v{};
     assert(!coop_overlay_read(v,0)&&reads==0&&!coop_overlay_wants_camera());
+    coop_overlay_viewport(1,2,3,4,0,0,1,1); assert(destination[2]==0);
     assert(coop_overlay_read(v,2)&&reads==1&&coop_overlay_wants_camera());
     Draw draw;ui::Ctx c; c.d=&draw;
     coop_overlay_viewport(20,40,1280,720,0,0,1,1);

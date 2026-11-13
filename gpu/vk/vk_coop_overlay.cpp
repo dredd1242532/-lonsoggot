@@ -32,6 +32,7 @@ void coop_overlay_camera(const float matrix[16], const float jitter[2], uint64_t
     scene_frame=frame;
 }
 void coop_overlay_viewport(float x,float y,float w,float h,float u,float v,float uw,float vh) {
+    if (!coop_overlay_wants_camera()) return;
     destination[0]=x; destination[1]=y; destination[2]=w; destination[3]=h;
     source_crop[0]=u; source_crop[1]=v; source_crop[2]=uw; source_crop[3]=vh;
 }
