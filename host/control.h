@@ -26,7 +26,7 @@ typedef struct HosControlSetting {
 } HosControlSetting;
 
 /* OoT samples are bounded JSON objects, made on Link's update, never from guest memory on the socket thread.
-   A subscription owns its watch list and its change baseline. The slot is the bridge's connection slot. */
+   Watches have separate bounded pending changes; the table baselines are shared. The slot is a connection slot. */
 #define HOS_CONTROL_OOT_JSON 32768
 #define HOS_CONTROL_OOT_CLIENTS 8
 #define HOS_CONTROL_OOT_FLAGS 64
@@ -85,9 +85,10 @@ typedef struct HosControlGame {
     uint64_t (*oot_sample_ask)(void);
     void (*oot_sample_cancel)(uint64_t ticket);
     /* Copy a snapshot that satisfies ticket, or 0 while pending. Ticket 0 reads the last retained snapshot.
-       No guest reads here; frame/t still date the sample, including a retained one during pause/loading. */
+       No guest reads here; frame/t still date retained samples. status falls back to oot_state for null
+       event/loading/age, so those fields keep their protocol-1 types inside a non-null game. */
     int (*oot_sample)(uint64_t ticket, char *out, size_t cap);
-    /* Replace a connection's watch (NULL cancels and forgets its baseline); no guest reads here. */
+    /* Replace a connection's watch (NULL cancels and forgets pending changes); no guest reads here. */
     void (*oot_watch)(int slot, const HosControlOotWatch *watch);
     /* Consume the latest pending sample for that connection, 0 when none. No guest reads or socket I/O. */
     int (*oot_poll)(int slot, char *out, size_t cap);

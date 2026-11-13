@@ -115,14 +115,24 @@ static void state_put(StateLine *l, const char *fmt, ...) {
     if (k > 0) l->n = l->n + (size_t)k < sizeof l->text ? l->n + (size_t)k : sizeof l->text - 1;
 }
 
-/* a text as a JSON string: quotes and backslashes escaped, control and non-ASCII bytes as \u00XX */
+/* Preserve valid UTF-8; invalid/truncated sequences become U+FFFD, never Latin-1 byte escapes. */
 static void state_put_text(StateLine *l, const char *s) {
     state_put(l, "\"");
-    for (; *s; s++) {
-        const unsigned char ch = (unsigned char)*s;
+    while (*s) {
+        const unsigned char ch = (unsigned char)*s++;
         if (ch == '"' || ch == '\\') state_put(l, "\\%c", ch);
-        else if (ch < 0x20 || ch > 0x7e) state_put(l, "\\u%04x", ch);
-        else state_put(l, "%c", ch);
+        else if (ch < 0x20) state_put(l, "\\u%04x", ch);
+        else if (ch < 0x80) state_put(l, "%c", ch);
+        else {
+            unsigned cp = ch & (ch < 0xe0 ? 31 : ch < 0xf0 ? 15 : 7);
+            const int n = ch >= 0xc2 && ch <= 0xdf ? 1 : ch >= 0xe0 && ch <= 0xef ? 2 :
+                          ch >= 0xf0 && ch <= 0xf4 ? 3 : 0;
+            int i = 0;
+            for (; i < n && ((unsigned char)s[i] & 0xc0) == 0x80; i++) cp = (cp << 6) | (s[i] & 63);
+            if (!n || i != n || cp < (n == 1 ? 0x80u : n == 2 ? 0x800u : 0x10000u) ||
+                cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) state_put(l, "\\ufffd");
+            else { state_put(l, "%.*s", n + 1, s - 1); s += n; }
+        }
     }
     state_put(l, "\"");
 }
@@ -202,60 +212,113 @@ static int state_camera(double *yaw) {
     return 1;
 }
 
-/* ---- per-connection watches and baselines ---- */
-
+/* ---- shared, bounded changes scan (only Link's serialized update touches these baselines) ---- */
 
 static const int state_tracked[] = {KIND_BOOL, KIND_INT, KIND_ENUM, KIND_UINT};
 #define STATE_TRACKED (int)(sizeof state_tracked / sizeof state_tracked[0])
+#define STATE_SCAN_SLOTS 4096u
+typedef struct { uint32_t key, value; int kind; } StateChange;
+typedef struct { StateChange item[32]; unsigned n, more; } StateChanges;
+typedef struct { uint64_t entries, table; uint32_t count, size; } StateTable;
 typedef struct {
-    uint64_t table;
-    uint32_t size;
-    uint32_t *key, *value;
+    StateTable table;
+    struct StatePair { uint32_t key, value; } *slot;
+    uint32_t capacity, cursor;
+    int valid;
+    StateChanges changes;
 } StateSeen;
+static StateSeen state_seen[STATE_TRACKED];
+static int state_scan_kind;
 
-/* ,"changed":{"0x<hash>":<value>,...} for the flags whose value changed since the last call; a table seen for the first
-   time (or moved, or resized: a save loaded) is only remembered */
-static void state_put_changes(StateLine *l, uint64_t mgr, StateSeen seen[STATE_TRACKED]) {
-    int shown = 0, more = 0;
+static void state_change(StateChanges *to, StateChange value) {
+    for (unsigned i = 0; i < to->n; i++)
+        if (to->item[i].key == value.key) { to->item[i] = value; return; }
+    if (to->n < 32) to->item[to->n++] = value;
+    else if (to->more != UINT32_MAX) to->more++;
+}
+
+static void state_merge(StateChanges *to, const StateChanges *from) {
+    for (unsigned i = 0; i < from->n; i++) state_change(to, from->item[i]);
+    to->more = UINT32_MAX - to->more < from->more ? UINT32_MAX : to->more + from->more;
+}
+
+static int state_table(uint64_t mgr, int kind, StateTable *h) {
+    const uint64_t box = mgr + state_kind[kind].at;
+    if (!mgr || !state_peek(box + 16, &h->entries, 8) || !state_peek(box + 24, &h->table, 8) ||
+        !state_peek(box + 8, &h->count, 4) || !state_peek(box + 36, &h->size, 4)) return 0;
+    return h->entries >= 0x100000 && h->table >= 0x100000 && h->size && h->size <= (1u << 22) &&
+        h->count <= h->size && hos_guest_range(h->table, (uint64_t)h->size * 8) &&
+        (!h->count || hos_guest_range(h->entries, (uint64_t)h->count * state_kind[kind].stride));
+}
+
+static int state_same_table(const StateTable *a, const StateTable *b) {
+    return a->entries == b->entries && a->table == b->table && a->size == b->size && a->count == b->count;
+}
+
+/* At most one slice per present, shared by every watch. No bridge lock, and no allocation unless size changes.
+   A changed/unreadable header or slot discards that table's unfinished diff and establishes a fresh baseline.
+   The checked local size bounds allocation even if the guest changes its header during a save load. */
+static int state_scan(uint64_t mgr, StateChanges *out) {
+    unsigned budget = STATE_SCAN_SLOTS;
+    for (; state_scan_kind < STATE_TRACKED && budget; state_scan_kind++) {
+        const int kind = state_tracked[state_scan_kind];
+        StateSeen *seen = &state_seen[state_scan_kind];
+        StateTable h, after;
+        if (!state_table(mgr, kind, &h) || !state_table(mgr, kind, &after) || !state_same_table(&h, &after))
+            goto invalid;
+        if (!state_same_table(&seen->table, &h)) {
+            seen->valid = 0, seen->cursor = 0, seen->changes = (StateChanges){0};
+            if (seen->capacity != h.size) {
+                struct StatePair *p = realloc(seen->slot, (size_t)h.size * sizeof *p);
+                if (!p) goto invalid;
+                seen->slot = p, seen->capacity = h.size;
+            }
+            seen->table = h;
+        }
+        while (seen->cursor < h.size && budget) {
+            const uint32_t slot = seen->cursor++;
+            uint32_t pair[2], again[2], v = 0;
+            uint8_t b;
+            budget--;
+            if (!state_peek(h.table + slot * 8ULL, pair, sizeof pair)) goto invalid;
+            if (pair[0]) {
+                if (pair[1] >= h.count) goto invalid;
+                const uint64_t at = h.entries + (uint64_t)pair[1] * state_kind[kind].stride + state_kind[kind].value;
+                if (kind == KIND_BOOL) {
+                    if (!state_peek(at, &b, 1)) goto invalid;
+                    v = b;
+                } else if (!state_peek(at, &v, 4)) goto invalid;
+                if (!state_peek(h.table + slot * 8ULL, again, sizeof again) || memcmp(pair, again, sizeof pair))
+                    goto invalid;
+            }
+            if (seen->valid && pair[0] && seen->slot[slot].key == pair[0] && seen->slot[slot].value != v)
+                state_change(&seen->changes, (StateChange){pair[0], v, kind});
+            seen->slot[slot] = (struct StatePair){pair[0], v};
+        }
+        if (!state_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;
+        state_merge(out, &seen->changes);
+        seen->changes = (StateChanges){0};
+        if (seen->cursor < h.size) return 1;
+        seen->valid = 1, seen->cursor = 0;
+        continue;
+    invalid:
+        seen->valid = 0, seen->cursor = 0, seen->changes = (StateChanges){0};
+    }
+    if (state_scan_kind < STATE_TRACKED) return 1;
+    state_scan_kind = 0;
+    return 0;
+}
+
+static void state_put_changes(StateLine *l, const StateChanges *changes) {
     state_put(l, ",\"changed\":{");
-    for (int t = 0; t < STATE_TRACKED; t++) {
-        const int kind = state_tracked[t];
-        const uint64_t box = mgr + state_kind[kind].at, entries = state_u64(box + 16), table = state_u64(box + 24);
-        const uint32_t count = state_u32(box + 8), size = state_u32(box + 36);
-        if (!mgr || !entries || !table || !size || size > (1u << 22)) continue;
-        int fresh = 0;
-        if (seen[t].table != table || seen[t].size != size) {
-            uint32_t *key = (uint32_t *)realloc(seen[t].key, size * sizeof *key);
-            uint32_t *value = key ? (uint32_t *)realloc(seen[t].value, size * sizeof *value) : NULL;
-            if (key) seen[t].key = key;
-            if (!key || !value) continue;
-            seen[t].value = value, seen[t].table = table, seen[t].size = size;
-            fresh = 1;
-        }
-        for (uint32_t slot = 0; slot < size; slot++) {
-            uint32_t pair[2] = {0, 0}, v = 0;
-            uint8_t b = 0;
-            int valid = state_peek(table + slot * 8ULL, pair, sizeof pair) && pair[0] && pair[1] < count;
-            if (valid) {
-                const uint64_t at = entries + (uint64_t)pair[1] * state_kind[kind].stride + state_kind[kind].value;
-                if (kind == KIND_BOOL) valid = state_peek(at, &b, 1), v = b;
-                else valid = state_peek(at, &v, 4);
-            }
-            if (!fresh && valid && seen[t].key[slot] == pair[0] && seen[t].value[slot] != v) {
-                if (shown < 32) {
-                    if (kind == KIND_INT) state_put(l, "%s\"0x%08x\":%d", shown ? "," : "", pair[0], (int)(int32_t)v);
-                    else if (kind == KIND_ENUM) state_put(l, "%s\"0x%08x\":\"#%08x\"", shown ? "," : "", pair[0], v);
-                    else state_put(l, "%s\"0x%08x\":%u", shown ? "," : "", pair[0], v);
-                    shown++;
-                } else {
-                    more++;
-                }
-            }
-            seen[t].key[slot] = valid ? pair[0] : 0, seen[t].value[slot] = v;
-        }
+    for (unsigned i = 0; i < changes->n; i++) {
+        const StateChange *c = &changes->item[i];
+        if (c->kind == KIND_INT) state_put(l, "%s\"0x%08x\":%d", i ? "," : "", c->key, (int)(int32_t)c->value);
+        else if (c->kind == KIND_ENUM) state_put(l, "%s\"0x%08x\":\"#%08x\"", i ? "," : "", c->key, c->value);
+        else state_put(l, "%s\"0x%08x\":%u", i ? "," : "", c->key, c->value);
     }
     state_put(l, "}");
-    if (more) state_put(l, ",\"more\":%d", more);
+    if (changes->more) state_put(l, ",\"more\":%u", changes->more);
 }
 
 static SRWLOCK state_lock = SRWLOCK_INIT;
@@ -263,7 +326,8 @@ static StateLine state_latest;
 static struct {
     HosControlOotWatch watch;
     uint32_t hashes[HOS_CONTROL_OOT_FLAGS];
-    StateSeen seen[STATE_TRACKED];
+    StateChanges changes;
+    uint64_t generation;
     StateLine line;
     int active, ready;
     int64_t last;
@@ -273,11 +337,15 @@ static struct {
 static int64_t state_due = INT64_MAX, state_last = -1;
 static uint64_t state_serial, state_requested, state_published;
 static unsigned state_waiters;
+static uint64_t state_watch_serial;
+static int state_scanning;
 
 static void state_schedule(void) {   /* state_lock held */
     int64_t due = state_waiters ? state_last + 1 : INT64_MAX;
     for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) {
-        if (!state_sub[i].active || state_sub[i].ready) continue;
+        if (!state_sub[i].active) continue;
+        if (state_scanning && state_sub[i].watch.changes) due = state_last + 1;
+        if (state_sub[i].ready) continue;
         int64_t next = state_sub[i].last < 0 ? 0 : state_sub[i].last + state_sub[i].watch.every;
         if (next <= state_last) next = state_last + 1;
         if (next < due) due = next;
@@ -317,11 +385,8 @@ int hos_oot_sample(uint64_t ticket, char *out, size_t cap) {
 void hos_oot_watch(int slot, const HosControlOotWatch *watch) {
     if (slot < 0 || slot >= HOS_CONTROL_OOT_CLIENTS) return;
     AcquireSRWLockExclusive(&state_lock);
-    for (int t = 0; t < STATE_TRACKED; t++) {
-        free(state_sub[slot].seen[t].key);
-        free(state_sub[slot].seen[t].value);
-    }
     memset(&state_sub[slot], 0, sizeof state_sub[slot]);
+    state_sub[slot].generation = ++state_watch_serial;
     if (watch) {
         state_sub[slot].watch = *watch;
         state_sub[slot].active = 1;
@@ -363,10 +428,45 @@ void hos_oot_state_tap(uint64_t actor) {
         return;
     }
     state_last = frame;
+    const uint64_t requested = state_requested;
+    /* Small immutable work descriptions; replacement/disconnect is checked again at publication. */
+    static struct {
+        HosControlOotWatch watch;
+        uint32_t hashes[HOS_CONTROL_OOT_FLAGS];
+        StateChanges changes;
+        uint64_t generation;
+        int active, due, started;
+    } work[HOS_CONTROL_OOT_CLIENTS];
+    int scan = 0, watching_changes = 0;
+    for (int slot = 0; slot < HOS_CONTROL_OOT_CLIENTS; slot++) {
+        work[slot].watch = state_sub[slot].watch;
+        memcpy(work[slot].hashes, state_sub[slot].hashes, sizeof work[slot].hashes);
+        work[slot].changes = state_sub[slot].changes;
+        work[slot].generation = state_sub[slot].generation;
+        work[slot].active = state_sub[slot].active;
+        work[slot].started = state_sub[slot].last >= 0;
+        work[slot].due = 0;
+        const HosControlOotWatch *w = &work[slot].watch;
+        if (!state_sub[slot].active) continue;
+        watching_changes |= w->changes;
+        scan |= state_scanning && w->changes;
+        if (state_sub[slot].ready) continue;
+        if (state_sub[slot].last >= 0 && frame - state_sub[slot].last < w->every) continue;
+        work[slot].due = 1;
+        scan |= w->changes;
+    }
+    ReleaseSRWLockExclusive(&state_lock);
+    StateChanges changes = {0};
+    const uint64_t mgr = state_u64(state_u64(STATE_GAMEDATA_SLOT));
+    const int scanning = scan ? state_scan(mgr, &changes) : 0;
+    if (!watching_changes) {
+        state_scan_kind = 0;
+        for (int t = 0; t < STATE_TRACKED; t++)
+            state_seen[t].valid = 0, state_seen[t].cursor = 0, state_seen[t].changes = (StateChanges){0};
+    }
 
     static StateLine line;
     StateLine *l = &line;
-    const uint64_t mgr = state_u64(state_u64(STATE_GAMEDATA_SLOT));
     l->n = 0;
     state_put(l, "{\"t\":%.3f,\"frame\":%lld", (double)hos_now_ns() / 1e9, (long long)frame);
     state_put_flag_text(l, mgr, "map", STATE_MAP);
@@ -395,34 +495,49 @@ void hos_oot_state_tap(uint64_t actor) {
     state_put_flag_text(l, mgr, "music", STATE_MUSIC);
     state_put(l, "}");
 
+    AcquireSRWLockExclusive(&state_lock);
     state_latest.n = l->n;
     memcpy(state_latest.text, l->text, l->n + 1);
-    for (int slot = 0; slot < HOS_CONTROL_OOT_CLIENTS; slot++) {
-        const HosControlOotWatch *w = &state_sub[slot].watch;
-        if (!state_sub[slot].active || (state_sub[slot].last >= 0 && frame - state_sub[slot].last < w->every)) continue;
-        /* A slow bridge keeps the pending sample, including its changes, until consumed. Sampling resumes after it;
-           no changes are silently overwritten while socket output is backlogged. */
-        if (state_sub[slot].ready) continue;
-        StateLine *s = &state_sub[slot].line;
-        s->n = l->n - 1;   /* append optional fields inside the copied object */
-        memcpy(s->text, l->text, s->n);
-        if (w->nflags) {
-            state_put(s, ",\"flags\":{");
-            for (int i = 0; i < w->nflags; i++) {
-                state_put(s, "%s\"%s\":", i ? "," : "", w->flags[i]);
-                state_put_any(s, mgr, state_sub[slot].hashes[i]);
-            }
-            state_put(s, "}");
-        }
-        if (w->changes) state_put_changes(s, mgr, state_sub[slot].seen);
-        state_put(s, "}");
-        state_sub[slot].last = frame;
-        state_sub[slot].ready = 1;
-    }
-    if (state_waiters) {
-        __atomic_store_n(&state_published, state_requested, __ATOMIC_RELEASE);
+    state_scanning = scanning;
+    if (state_waiters && state_requested == requested) {
+        __atomic_store_n(&state_published, requested, __ATOMIC_RELEASE);
         state_waiters = 0;
     }
+    ReleaseSRWLockExclusive(&state_lock);
+    for (int slot = 0; slot < HOS_CONTROL_OOT_CLIENTS; slot++) {
+        const HosControlOotWatch *w = &work[slot].watch;
+        if (!work[slot].active) continue;
+        if (w->changes && work[slot].started) state_merge(&work[slot].changes, &changes);
+        static StateLine sample;
+        StateLine *s = &sample;
+        if (work[slot].due) {
+            s->n = l->n - 1;   /* append optional fields inside the copied object */
+            memcpy(s->text, l->text, s->n);
+            if (w->nflags) {
+                state_put(s, ",\"flags\":{");
+                for (int i = 0; i < w->nflags; i++) {
+                    state_put(s, "%s\"%s\":", i ? "," : "", w->flags[i]);
+                    state_put_any(s, mgr, work[slot].hashes[i]);
+                }
+                state_put(s, "}");
+            }
+            if (w->changes) state_put_changes(s, &work[slot].changes);
+            state_put(s, "}");
+        }
+        AcquireSRWLockExclusive(&state_lock);
+        if (state_sub[slot].generation == work[slot].generation) {
+            state_sub[slot].changes = work[slot].changes;
+            if (work[slot].due) {
+                state_sub[slot].line.n = s->n;
+                memcpy(state_sub[slot].line.text, s->text, s->n + 1);
+                state_sub[slot].changes = (StateChanges){0};
+                state_sub[slot].last = frame;
+                state_sub[slot].ready = 1;
+            }
+        }
+        ReleaseSRWLockExclusive(&state_lock);
+    }
+    AcquireSRWLockExclusive(&state_lock);
     state_schedule();
     ReleaseSRWLockExclusive(&state_lock);
 }

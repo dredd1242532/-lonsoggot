@@ -881,6 +881,35 @@ static int exclusive_now(int *active) {
     *active = n;
     return ex;
 }
+/* Protocol 1's three original fields stay typed even when a sampled guest read failed. */
+static void status_game(Buf *b, const char *sample) {
+    int event = 0, loading = 0, child = 0;
+    const int have = G.game->oot_state && G.game->oot_state(&event, &loading, &child);
+    if (!sample) {
+        if (have) buf_printf(b, "{\"event\":%s,\"loading\":%s,\"age\":\"%s\"}",
+                             event ? "true" : "false", loading ? "true" : "false", child ? "child" : "adult");
+        else buf_puts(b, "null");
+        return;
+    }
+    static JDoc d;
+    static char strings[HOS_CONTROL_OOT_JSON];
+    const int root = j_parse(&d, sample, strlen(sample), strings);
+    if (root < 0) { buf_puts(b, "null"); return; }
+    const char *keys[] = {"event", "loading", "age"};
+    int changed = 0;
+    for (int i = 0; i < 3; i++) {
+        const JNode *n = j_get(&d, root, keys[i]);
+        if (!n || n->type != J_NULL) continue;
+        if (!have) { buf_puts(b, "null"); return; }
+        JNode *value = &d.n[j_index(&d, n)];
+        value->type = i == 2 ? J_STR : (i == 0 ? event : loading) ? J_TRUE : J_FALSE;
+        if (i == 2) value->s = child ? "child" : "adult";
+        changed = 1;
+    }
+    if (changed) j_write(b, &d, root);
+    else buf_puts(b, sample);
+}
+
 static void status_reply(int ci, const char *id, const char *sample, int64_t now) {
     stats_tick(now);   /* the reply's frame must not precede the snapshot just copied */
     int active = 0, clients = 0;
@@ -900,8 +929,7 @@ static void status_reply(int ci, const char *id, const char *sample, int64_t now
     if (G.map[0]) buf_str(&b, G.map);
     else buf_puts(&b, "null");
     buf_puts(&b, ",\"game\":");
-    if (sample) buf_puts(&b, sample);
-    else buf_puts(&b, "null");
+    status_game(&b, sample);
     buf_puts(&b, ",\"version\":");
     buf_str(&b, G.game->version ? G.game->version : "unknown");
     const char *r = G.game->renderer ? G.game->renderer() : NULL;

@@ -86,7 +86,7 @@ Match replies by `id`. Lines with an `"event"` key and no `"ok"` key are subscri
 
 `protocol:1` allows additive fields, commands and explicitly requested event kinds. Clients ignore unknown fields.
 The OoT snapshot fields and `oot` subscription below are compatible additions: existing fields keep their types and
-the default subscription is unchanged. No second state-file channel is needed.
+the default subscription is unchanged.
 
 A client may shut its sending side once its requests are sent (`printf '...\n' | socat - UNIX-CONNECT:<path>`): the
 bridge reads no more from it, ends its subscription, answers what it waits for, and closes the connection once those
@@ -149,7 +149,7 @@ every 250 ms: the last one known, so it stays through loads and menus, and it is
 `game` is OoT's read-only snapshot from Link's update. A `status` request asks for one fresh snapshot; requests
 waiting together share that capture. The socket thread never reads the guest or blocks waiting for the game.
 If no Link update arrives within 250 ms (title, pause or loading), the reply keeps the last snapshot and its
-original `frame`/`t`, or `null` if none has ever been captured. A reply does not make a retained sample fresh.
+original `frame`/`t`. Before a snapshot is available it returns only the original typed fields if known, or `null`.
 
 | `game` field | meaning |
 |---|---|
@@ -161,9 +161,10 @@ original `frame`/`t`, or `null` if none has ever been captured. A reply does not
 | `life`, `max_life`, `rupees` | Current and maximum quarter hearts, rupees |
 | `prompt`, `music` | A-button action and music, as named by the game |
 
-Every unreadable or non-finite field is `null`, not a made-up zero. The guest reads are range-checked and run under
-the debug tools' lock in Link's update, never on the socket thread; only copied snapshots cross threads. This
-serializes Link's workers, not every other game thread, so this is not a whole-game atomic snapshot.
+Unreadable or non-finite sampled fields are `null`, except that `status.game` keeps the original `event`,
+`loading` and `age` types by falling back to their last typed values. If neither source has those values,
+`status.game` is `null`; `oot` events keep unreadable fields as `null`. Guest reads are range-checked in Link's
+update, never on the socket thread. This is not a whole-game atomic snapshot.
 Samples stop on the title, while paused and wherever Link is not updated. Compare `game.frame` with the reply's
 `frame` before steering: a retained snapshot during a load is not evidence of current control. Scripts wait for
 fresh samples with `event` and `loading` false before their next step.
@@ -172,10 +173,6 @@ fresh samples with `event` and `loading` false before their next step.
 With no pending `status` request and no due `oot` subscriber, the snapshot path returns after a cheap atomic
 deadline check: it does not read the guest, query the clock, format JSON or take its snapshot lock. Merely
 opening the bridge does not capture every present. A disconnected/timed-out status request drops its demand.
-
-The snapshot request/copy/cancel callbacks are separate from the typed `oot_state` callback used by `age`.
-Both read in the same player-update hook, but the typed map/age sample keeps its existing 250 ms cadence;
-it need not have the JSON snapshot's timestamp. The `age` action rechecks the live age when taken.
 
 `state` is a guess from the draws a frame, the way test scripts read the log:
 
@@ -288,9 +285,22 @@ it. Arguments:
   array of strings. Values are looked up in Bool, Int, Float, Enum, String64 and UInt order; absent/unreadable values
   are `null`. An Enum value is `"#"` followed by eight hex digits (MurmurHash3 of its value's name).
 - `changes`: with `oot`, `true` includes changed Bool/Int/Enum/UInt flags by hash (`false` by default). The first
-  sample establishes a baseline and reports `{}`; at most 32 changes per sample, with `more` counting any left out.
-  Baselines are per connection, reset by replacing the subscription, unsubscribe, disconnect, or a moved/resized
-  table (for example a loaded save). Both direct lookups and change scans reject tables above 2^22 slots.
+  sample reports `{}`. One baseline per table is shared by all subscribers, with at most 4096 slots scanned per
+  present across the four tables. A moved, resized, torn or unreadable table discards its current slice and starts
+  a fresh baseline. Both direct lookups and change scans reject tables above 2^22 slots.
+  Each subscriber keeps up to 32 distinct pending changes until its next sample, including while an earlier
+  sample waits to be consumed; a later change to a queued key replaces its value. If that queue is full, the
+  existing `more` field counts omitted changes (saturating at 4294967295): any nonzero `more` means the client must
+  re-read the flags it cares about. Replacement, unsubscribe and disconnect clear that subscriber's queue.
+
+A change is reported when a value differs from the shared baseline when its slice is scanned, so a value that changes
+and changes back between scans of that slice is not reported. With continuously due subscribers and stable tables, a
+full pass takes `ceil(total table slots / 4096)` presents, which bounds detection delay; delivery also waits for the
+subscriber's cadence and any pending sample (the fixture's four 2049-slot tables take three presents, and real table
+sizes and cost have not been measured).
+
+A `flags` or `changes` subscription can read any GameDataMgr value, the save's whole flag state, without
+`HOS_CONTROL_MEM`. This is part of what a same-user client can see when the control bridge is enabled.
 
 The events carry `sub`, the subscribe request's `id`:
 

@@ -48,21 +48,44 @@ typedef pthread_mutex_t SRWLOCK;
 #endif
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 volatile LONG64 hos_present_count;
-static _Thread_local int measuring_tap;
-static unsigned tap_reads, tap_formats, tap_clocks, tap_locks, tap_captures;
+static _Thread_local int measuring_tap, snapshot_depth;
+static SRWLOCK *snapshot_lock;
+static unsigned tap_reads, tap_formats, tap_clocks, tap_locks, tap_captures, tap_allocations, scan_visits, scan_calls;
 static void counted_exclusive(SRWLOCK *p) {
     if (measuring_tap) tap_locks++;
     AcquireSRWLockExclusive(p);
+    if (p == snapshot_lock) snapshot_depth++;
 }
 static void counted_shared(SRWLOCK *p) {
     if (measuring_tap) tap_locks++;
     AcquireSRWLockShared(p);
+    if (p == snapshot_lock) snapshot_depth++;
+}
+static void counted_release_exclusive(SRWLOCK *p) {
+    if (p == snapshot_lock) { CHECK(snapshot_depth > 0); snapshot_depth--; }
+    ReleaseSRWLockExclusive(p);
+}
+static void counted_release_shared(SRWLOCK *p) {
+    if (p == snapshot_lock) { CHECK(snapshot_depth > 0); snapshot_depth--; }
+    ReleaseSRWLockShared(p);
 }
 #undef AcquireSRWLockExclusive
 #undef AcquireSRWLockShared
+#undef ReleaseSRWLockExclusive
+#undef ReleaseSRWLockShared
 #define AcquireSRWLockExclusive(p) counted_exclusive(p)
 #define AcquireSRWLockShared(p) counted_shared(p)
+#define ReleaseSRWLockExclusive(p) counted_release_exclusive(p)
+#define ReleaseSRWLockShared(p) counted_release_shared(p)
+static void *counted_realloc(void *p, size_t n) {
+    CHECK(!snapshot_depth);
+    CHECK(n <= (1u << 22) * 8u);
+    if (measuring_tap) tap_allocations++;
+    return realloc(p, n);
+}
+#define realloc counted_realloc
 static int counted_vsnprintf(char *out, size_t cap, const char *fmt, va_list args) {
+    CHECK(!snapshot_depth);
     if (measuring_tap) tap_formats++;
     return vsnprintf(out, cap, fmt, args);
 }
@@ -75,16 +98,21 @@ static int64_t hos_now_ns(void) {
 #define SLOTS 0x84c00000ull
 #define HEAP 0x10000000ull
 static unsigned char slots[0x100000], heap[0x100000];
+static int allow_large_range;
 static void *hos_guest_range(uint64_t a, uint64_t n) {
+    CHECK(!snapshot_depth);
     if (measuring_tap) tap_reads++;
     if (a >= SLOTS && n <= sizeof slots && a - SLOTS <= sizeof slots - n) return slots + (a - SLOTS);
     if (a >= HEAP && n <= sizeof heap && a - HEAP <= sizeof heap - n) return heap + (a - HEAP);
+    if (allow_large_range) return heap;   /* range-validation-only boundary fixture; never copied */
     return NULL;
 }
+static void scan_probe(void);
 '''
 
 FIXTURE_MAIN = r'''
 #undef vsnprintf
+#undef realloc
 static void expect_status_pending(unsigned expected) {
     for (int i = 0; i < 2000; i++) {
         AcquireSRWLockShared(&state_lock);
@@ -121,8 +149,7 @@ static uint64_t text(const char *s) {
     return a;
 }
 static uint32_t H(const char *s) { return state_murmur(s, strlen(s)); }
-/* Entries and linear-probed {hash, entry} slots, as in the old file-tap fixture. Twice the table storage permits an
-   in-place resize case without changing its address. */
+/* Entries and linear-probed {hash, entry} slots. Twice the table storage permits an in-place resize. */
 static void container(uint64_t mgr, int kind, uint32_t size) {
     const uint64_t b = mgr + state_kind[kind].at;
     w64(b + 16, alloc((uint64_t)state_kind[kind].stride * size));
@@ -150,19 +177,17 @@ static void table_caps(void) {
     CHECK(state_entry(mgr, KIND_UINT, 1) == value - state_kind[KIND_UINT].value);
     w32(box + 36, (1u << 22) + 1);
     CHECK(state_entry(mgr, KIND_UINT, 1) == 0);
-    StateSeen seen[STATE_TRACKED] = {0};
-    StateLine line = {0};
-    state_put_changes(&line, mgr, seen);
-    for (int i = 0; i < STATE_TRACKED; i++) CHECK(!seen[i].size && !seen[i].key && !seen[i].value);
+    StateTable h;
+    allow_large_range = 1;
+    CHECK(!state_table(mgr, KIND_UINT, &h));
     w32(box + 36, 1u << 22);
-    line.n = 0;
-    state_put_changes(&line, mgr, seen);
-    CHECK(!strcmp(line.text, ",\"changed\":{}"));
-    for (int i = 0; i < STATE_TRACKED; i++) {
-        CHECK(seen[i].size == (state_tracked[i] == KIND_UINT ? 1u << 22 : 0));
-        free(seen[i].key);
-        free(seen[i].value);
-    }
+    CHECK(state_table(mgr, KIND_UINT, &h));
+    allow_large_range = 0;
+    /* A size within the cap still needs mapped table/entry ranges before any allocation. */
+    w32(box + 36, 1u << 22);
+    CHECK(!state_table(mgr, KIND_UINT, &h));
+    w32(box + 36, 16);
+    CHECK(state_table(mgr, KIND_UINT, &h) && h.size == 16);
 }
 
 static uint64_t mgr, holder, events, eholder, view, actor, map_value, map_text, prompt, music;
@@ -170,6 +195,15 @@ static uint64_t test_flag, rupees, child, loading, rotation, bursts[40], escaped
 static SRWLOCK map_lock = SRWLOCK_INIT;
 static char last_map[64];
 static int poll_held;
+static int typed_event = 1, typed_loading, typed_child = 1;
+static int fake_state(int *event, int *loading, int *child) {
+    AcquireSRWLockShared(&map_lock);
+    const int have = last_map[0] != 0;
+    ReleaseSRWLockShared(&map_lock);
+    if (!have) return 0;
+    *event = typed_event, *loading = typed_loading, *child = typed_child;
+    return 1;
+}
 static unsigned watch_mask;
 static int64_t fake_frame(void) { return __atomic_load_n(&hos_present_count, __ATOMIC_ACQUIRE); }
 static int fake_map(char *out, size_t cap) {
@@ -193,7 +227,7 @@ static void fake_watch(int slot, const HosControlOotWatch *watch) {
 }
 static void fake_log(const char *line) { fprintf(stderr, "%s\n", line); }
 static HosControlGame game = {
-    .frame = fake_frame, .map = fake_map, .oot_sample_ask = hos_oot_sample_ask,
+    .frame = fake_frame, .map = fake_map, .oot_state = fake_state, .oot_sample_ask = hos_oot_sample_ask,
     .oot_sample_cancel = hos_oot_sample_cancel, .oot_sample = hos_oot_sample,
     .oot_watch = fake_watch, .oot_poll = fake_poll, .log = fake_log, .version = "state-fixture"
 };
@@ -261,10 +295,98 @@ static void resize_int_table(void) {
     w32(box + 36, 256);
     CHECK(r32(table + 112 * 8) == 0x60000070u);
 }
+/* A deterministic lock-order check, not a timing race: while the scan is suspended at each visited slot,
+   execute the bridge's read/poll paths. They must finish before the game thread resumes its scan. */
+static uint64_t tear_at, tear_target;
+static uint32_t tear_value;
+static int replace_during_scan;
+static void scan_probe(void) {
+    CHECK(!snapshot_depth);
+    char scratch[HOS_CONTROL_OOT_JSON];
+    (void)hos_oot_sample(0, scratch, sizeof scratch);
+    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) (void)hos_oot_poll(i, scratch, 1);
+    if (tear_at && scan_visits == tear_at) {
+        w32(tear_target, tear_value);
+        tear_at = 0;
+    }
+    if (replace_during_scan) {
+        hos_oot_watch(0, NULL);
+        replace_during_scan = 0;
+    }
+}
+
+static void shared_scan_cases(void) {
+    /* Four large synthetic tables need three presents for one full pass. */
+    const uint64_t small_mgr = mgr, large = alloc(0x800);
+    const uint32_t size = 2049;
+    uint64_t values[STATE_TRACKED];
+    for (int t = 0; t < STATE_TRACKED; t++) {
+        const int kind = state_tracked[t];
+        container(large, kind, size);
+        values[t] = flag(large, kind, 0x100 + (uint32_t)t);
+    }
+    w64(holder, large);
+    HosControlOotWatch watch = {.every = 1, .changes = 1};
+    hos_control_on = 1;
+    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) hos_oot_watch(i, &watch);
+    unsigned allocations = 0;
+    for (int f = 1; f <= 6; f++) {
+        scan_visits = scan_calls = 0;
+        hos_present_count = f;
+        measuring_tap = 1;
+        hos_oot_state_tap(actor);
+        measuring_tap = 0;
+        CHECK(scan_calls == 1 && scan_visits <= STATE_SCAN_SLOTS);
+        CHECK(scan_visits == (f % 3 ? 4096u : 4u));
+        if (f == 3) allocations = tap_allocations;
+        if (f > 3) CHECK(tap_allocations == allocations);
+        char first[HOS_CONTROL_OOT_JSON], next[HOS_CONTROL_OOT_JSON];
+        CHECK(hos_oot_poll(0, first, sizeof first));
+        for (int i = 1; i < HOS_CONTROL_OOT_CLIENTS; i++) {
+            CHECK(hos_oot_poll(i, next, sizeof next));
+            CHECK(!strcmp(first, next));
+        }
+    }
+    /* A mid-slice size change discards the diff; the next pass resets its baseline. */
+    w8(values[0], 1);
+    tear_at = 1000, tear_target = large + state_kind[KIND_BOOL].at + 36, tear_value = size - 1;
+    scan_visits = 0;
+    StateChanges changes = {0};
+    state_scan(large, &changes);
+    CHECK(!tear_at && !changes.n && !state_seen[0].valid);
+    w32(tear_target, size);
+    state_scan_kind = 0;
+    changes = (StateChanges){0};
+    state_scan(large, &changes);
+    CHECK(!changes.n);
+    /* A torn {hash,index} pair is rejected too, not read from an unrelated entry. */
+    state_scan_kind = 0;
+    scan_visits = 0;
+    const uint64_t table = r64(large + state_kind[KIND_BOOL].at + 24);
+    tear_at = 0x101, tear_target = table + 0x100 * 8 + 4, tear_value = UINT32_MAX;
+    changes = (StateChanges){0};
+    state_scan(large, &changes);
+    CHECK(!tear_at && !changes.n && !state_seen[0].valid);
+    /* Publication must not resurrect a watch cancelled during the scan. */
+    replace_during_scan = 1;
+    hos_present_count = 7;
+    hos_oot_state_tap(actor);
+    char out[HOS_CONTROL_OOT_JSON];
+    CHECK(!hos_oot_poll(0, out, sizeof out));
+    for (int i = 0; i < HOS_CONTROL_OOT_CLIENTS; i++) hos_oot_watch(i, NULL);
+    w64(holder, small_mgr);
+    state_scan_kind = state_scanning = 0;
+    state_last = -1;
+    state_latest.n = 0;
+    hos_present_count = 0;
+    hos_control_on = 0;
+}
 int main(int argc, char **argv) {
     CHECK(argc == 2);
+    snapshot_lock = &state_lock;
     table_caps();
     setup();
+    shared_scan_cases();
     char scratch[HOS_CONTROL_OOT_JSON];
     CHECK(!hos_oot_sample(0, scratch, sizeof scratch));
     hos_oot_watch(-1, NULL), hos_oot_watch(HOS_CONTROL_OOT_CLIENTS, NULL);
@@ -280,7 +402,7 @@ int main(int argc, char **argv) {
     char command[128];
     while (fgets(command, sizeof command, stdin)) {
         long long f;
-        int v, r;
+        int v, r, count;
         if (sscanf(command, "sample %lld", &f) == 1) {
             __atomic_store_n(&hos_present_count, f, __ATOMIC_RELEASE);
             const unsigned formats = tap_formats;
@@ -298,6 +420,9 @@ int main(int argc, char **argv) {
             __atomic_store_n(&hos_present_count, f, __ATOMIC_RELEASE);
         } else if (sscanf(command, "values %d %d", &v, &r) == 2) {
             w8(test_flag, (uint8_t)v), w32(rupees, (uint32_t)r);
+        } else if (sscanf(command, "burst_part %d %d %d", &v, &count, &r) == 3) {
+            CHECK(v >= 0 && count >= 0 && v + count <= 40);
+            for (int i = v; i < v + count; i++) w32(bursts[i], (uint32_t)r);
         } else if (sscanf(command, "holdpoll %d", &v) == 1) {
             __atomic_store_n(&poll_held, v, __ATOMIC_RELEASE);
         } else if (sscanf(command, "burst %d", &v) == 1) {
@@ -324,6 +449,8 @@ int main(int argc, char **argv) {
             resize_int_table();
         } else if (!strcmp(command, "escape\n")) {
             w64(map_value, escaped_text), w64(prompt, escaped_text), w64(music, escaped_text);
+        } else if (!strcmp(command, "utf8\n")) {
+            w64(prompt, text("\xc3\xa9\xe7\x8c\xab"));
         } else if (sscanf(command, "expect_watches %d", &v) == 1) {
             CHECK(__builtin_popcount(__atomic_load_n(&watch_mask, __ATOMIC_ACQUIRE)) == v);
         } else if (sscanf(command, "expect_status_pending %d", &v) == 1) {
@@ -392,8 +519,7 @@ def wiring(root, tap, mutation):
     check(0 <= took < call < gave, "hos_oot_lift_player does not call hos_oot_state_tap under its lock")
     check("hos_oot_lift_player(c, c->x[19]);" in patches, "Link's update does not call hos_oot_lift_player")
     check("void hos_oot_state_tap(uint64_t actor) {" in tap, "the tap's hook has another signature")
-    for name in ("HOS_OOT_STATE_FILE", "HOS_OOT_STATE_EVERY", "HOS_OOT_STATE_FLAGS", "HOS_OOT_STATE_CHANGES"):
-        check(name not in tap and name not in docs, "obsolete file tap switch remains: " + name)
+    check("HOS_CONTROL_MEM" in protocol and "GameDataMgr" in protocol, "flag access boundary is not documented")
     for name in ("oot_sample_ask", "oot_sample_cancel", "oot_sample", "oot_watch", "oot_poll"):
         check(".%s = hos_%s" % (name, name) in control, "production control callback missing: " + name)
     check("control.md" in docs, "development guide no longer points to the control protocol")
@@ -426,7 +552,9 @@ MUTATIONS = tuple("drop-" + field for field in CORE_FIELDS) + (
     "cadence", "default-cadence", "independent", "null-range", "nonfinite", "lookup-cap", "changes-cap", "hash",
     "watch-hash", "collision", "changes", "changes-limit", "changes-more", "overflow-baseline", "moved-table",
     "resized-table", "replace", "unsubscribe", "disconnect", "pending", "retained", "json-cap", "flag-validation",
-    "changes-validation", "hook", "demand-guard", "due-guard", "status-demand", "status-fresh", "status-cancel")
+    "changes-validation", "hook", "demand-guard", "due-guard", "status-demand", "status-fresh", "status-cancel",
+    "scan-budget", "scan-sharing", "scan-lock", "scan-recheck", "scan-allocation", "watch-generation",
+    "status-types", "utf8")
 
 
 def mutate_sources(tap, control, mode):
@@ -451,14 +579,15 @@ def mutate_sources(tap, control, mode):
         control = within(control, "static void cmd_subscribe(", 'num_arg(d, req, "every", 60, &bad)',
                          'num_arg(d, req, "every", 6, &bad)')
     elif mode == "independent":
-        tap = once(tap, "state_put_changes(s, mgr, state_sub[slot].seen)", "state_put_changes(s, mgr, state_sub[0].seen)")
+        tap = once(tap, "state_put_changes(s, &work[slot].changes)", "state_put_changes(s, &work[0].changes)")
     elif mode == "null-range":
         tap = within(tap, "static int state_peek(", "if (!p) return 0;", "if (!p) { memset(dst, 0, n); return 1; }")
     elif mode == "nonfinite":
         tap = once(tap, "isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2])", "1")
-    elif mode in ("lookup-cap", "changes-cap"):
-        head = "static uint64_t state_entry(" if mode == "lookup-cap" else "static void state_put_changes("
-        tap = within(tap, head, "size > (1u << 22)", "0")
+    elif mode == "lookup-cap":
+        tap = within(tap, "static uint64_t state_entry(", "size > (1u << 22)", "0")
+    elif mode == "changes-cap":
+        tap = within(tap, "static int state_table(", "h->size <= (1u << 22)", "1")
     elif mode == "hash":
         tap = within(tap, "static uint32_t state_murmur(", "return h;", "return h ^ 1u;")
     elif mode == "watch-hash":
@@ -466,22 +595,19 @@ def mutate_sources(tap, control, mode):
     elif mode == "collision":
         tap = within(tap, "static uint64_t state_entry(", "probe < size", "probe < 1")
     elif mode == "changes":
-        tap = within(tap, "static void state_put_changes(", "seen[t].value[slot] != v", "0 && seen[t].value[slot] != v")
+        tap = within(tap, "static int state_scan(", "seen->slot[slot].value != v", "0 && seen->slot[slot].value != v")
     elif mode == "changes-limit":
-        tap = within(tap, "static void state_put_changes(", "shown < 32", "shown < 31")
+        tap = within(tap, "static void state_change(", "to->n < 32", "to->n < 31")
     elif mode == "changes-more":
-        tap = within(tap, "static void state_put_changes(", "more++;", "more += 0;")
+        tap = within(tap, "static void state_change(", "to->more++;", "to->more += 0;")
     elif mode == "overflow-baseline":
-        tap = within(tap, "static void state_put_changes(",
-                     "seen[t].key[slot] = valid ? pair[0] : 0, seen[t].value[slot] = v;",
-                     "if (!more) seen[t].key[slot] = valid ? pair[0] : 0, seen[t].value[slot] = v;")
+        tap = within(tap, "static int state_scan(", "seen->slot[slot] = (struct StatePair){pair[0], v};",
+                     "if (!seen->changes.more) seen->slot[slot] = (struct StatePair){pair[0], v};")
     elif mode == "moved-table":
-        tap = within(tap, "static void state_put_changes(", "seen[t].table != table || seen[t].size != size",
-                     "seen[t].size != size")
+        tap = within(tap, "static int state_same_table(", "a->table == b->table && ", "")
     elif mode == "resized-table":
-        tap = within(tap, "static void state_put_changes(", "int fresh = 0;",
-                     "const int moved = seen[t].table != table;\n        int fresh = 0;")
-        tap = within(tap, "static void state_put_changes(", "fresh = 1;", "fresh = moved;")
+        tap = once(tap, "seen->valid = 0, seen->cursor = 0, seen->changes = (StateChanges){0};\n            if",
+                   "seen->valid = seen->valid && seen->table.table == h.table, seen->cursor = 0, seen->changes = (StateChanges){0};\n            if")
     elif mode == "replace":
         control = once(control, "if (G.game->oot_watch) G.game->oot_watch(ci, oot ? &watch : NULL);",
                        "if (G.game->oot_watch && !c->sub_oot) G.game->oot_watch(ci, oot ? &watch : NULL);")
@@ -518,6 +644,28 @@ def mutate_sources(tap, control, mode):
                    "(void)ticket; /* answer with an old snapshot before demand is fulfilled */")
     elif mode == "status-cancel":
         tap = once(tap, "state_waiters--;", "(void)ticket; /* unanswered demand leaked */")
+    elif mode == "scan-budget":
+        tap = once(tap, "unsigned budget = STATE_SCAN_SLOTS;", "unsigned budget = STATE_SCAN_SLOTS * 8;")
+    elif mode == "scan-sharing":
+        tap = once(tap, "const int scanning = scan ? state_scan(mgr, &changes) : 0;",
+                   "int scanning = 0; for (int i = 0; i < 8 && scan; i++) scanning = state_scan(mgr, &changes);")
+    elif mode == "scan-lock":
+        tap = once(tap, "const int scanning = scan ? state_scan(mgr, &changes) : 0;",
+                   "AcquireSRWLockExclusive(&state_lock);\n    const int scanning = scan ? state_scan(mgr, &changes) : 0;\n"
+                   "    ReleaseSRWLockExclusive(&state_lock);")
+    elif mode == "scan-recheck":
+        tap = once(tap, "if (!state_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;",
+                   "/* mutation: no post-slice header check */")
+    elif mode == "scan-allocation":
+        tap = once(tap, "if (seen->capacity != h.size)", "if (1)")
+        tap = once(tap, "if (!state_same_table(&seen->table, &h))", "if (1)")
+    elif mode == "watch-generation":
+        tap = once(tap, "if (state_sub[slot].generation == work[slot].generation)", "if (1)")
+    elif mode == "status-types":
+        control = once(control, "status_game(&b, sample);", "if (sample) buf_puts(&b, sample); else status_game(&b, sample);")
+    elif mode == "utf8":
+        tap = once(tap, 'else { state_put(l, "%.*s", n + 1, s - 1); s += n; }',
+                   'else { state_put(l, "\\\\u%04x", ch); }')
     return tap, control
 
 
@@ -696,7 +844,7 @@ def socket_cases(fixture, module, address):
               "unreadable text/view or stopped event: %r" % three)
         check(three["life"] == 12 and three["prompt"] == "Open" and three["changed"] == {},
               "unreadable map discarded readable fields")
-        check(slow.event("slow", 112)["changed"] == expected_changes, "subscribers shared a changes baseline")
+        check(slow.event("slow", 112)["changed"] == expected_changes, "slow subscriber lost queued shared changes")
         fixture.step("no_mgr")
         fixture.step("sample 118")
         four = fast.event("fast", 118)
@@ -706,6 +854,8 @@ def socket_cases(fixture, module, address):
         retained = status_at(118)
         check(retained["map"] == "KokiriForest_Child" and retained["game"]["map"] is None,
               "top-level map did not retain the last known map")
+        check(retained["game"]["event"] is False and retained["game"]["loading"] is False and
+              retained["game"]["age"] == "child", "status changed protocol-1 field types or lost the typed fallback")
         fixture.step("present 150")
         retained = status_at(150)
         check(retained["game"]["frame"] == 118 and retained["game"]["t"] == four["t"],
@@ -825,6 +975,8 @@ def socket_cases(fixture, module, address):
         fixture.step("nulls")
         fixture.step("sample 228")
         nulls = fast.event("new-connection", 228)
+        # The typed source remains available even when the new sampler cannot read EventMgr.
+        check(status_at(228)["game"]["event"] is True, "status did not fall back for unreadable EventMgr")
         check(nulls["pos"] is None and nulls["facing"] is None and nulls["event"] is None,
               "non-finite coordinates or unreadable EventMgr leaked into JSON")
         fast.ask("unsubscribe")
@@ -847,6 +999,30 @@ def socket_cases(fixture, module, address):
               "pending sample discarded changes while the bridge could not poll")
         fast.ask("unsubscribe")
         print("PASS: pending sample is retained, status stays current, and polling resumes without losing changes")
+        fast.ask("subscribe", rid="utf8", events=["oot"], every=1)
+        fixture.step("utf8")
+        fixture.step("sample 313")
+        check(fast.event("utf8", 313)["prompt"] == "é猫", "UTF-8 text became Latin-1 byte escapes")
+        fast.ask("unsubscribe")
+        fast.ask("subscribe", rid="queue-fast", events=["oot"], every=1, changes=True)
+        slow.ask("subscribe", rid="queue-slow", events=["oot"], every=3, changes=True)
+        fixture.step("sample 314")
+        fast.event("queue-fast", 314)
+        slow.event("queue-slow", 314)
+        fixture.step("burst_part 0 20 8")
+        fixture.step("sample 315")
+        check(len(fast.event("queue-fast", 315)["changed"]) == 20, "first shared change batch missing")
+        fixture.step("burst_part 20 20 8")
+        fixture.step("sample 316")
+        check(len(fast.event("queue-fast", 316)["changed"]) == 20, "second shared change batch missing")
+        fixture.step("sample 317")
+        fast.event("queue-fast", 317)
+        overflow = slow.event("queue-slow", 317)
+        check(len(overflow["changed"]) == 32 and overflow["more"] == 8,
+              "full subscriber queue silently dropped changes instead of telling the client to reread")
+        fast.ask("unsubscribe")
+        slow.ask("unsubscribe")
+        print("PASS: slow subscriber queue overflow is explicit through more; no silent change loss")
 
         # Worst allowed payload: 64 distinct 47-character keys, 63 six-byte escapes per value, the same escaped core
         # strings, 32 changed entries and a longest allowed request id. Parsing the actual line catches truncation.
@@ -861,7 +1037,7 @@ def socket_cases(fixture, module, address):
         fixture.step("escape")
         fixture.step("sample 400")
         escaped = fast.event(long_id, 400)
-        want_text = "\x01" + "\x80" * 62
+        want_text = "\x01" + "\ufffd" * 62
         check(escaped["flags"] == dict.fromkeys(long_names, want_text), "longest escaped watched strings were truncated")
         check(all(escaped[key] == want_text for key in ("map", "prompt", "music")), "longest escaped core strings were truncated")
         fixture.step("burst 5")
@@ -981,9 +1157,13 @@ def main():
     if args.mutate:
         tap, control = mutate_sources(tap, control, args.mutate)
         print("MUTATION: %s (temporary production source; expected behavioral failure)" % args.mutate, flush=True)
-    # Only platform/game declarations are substituted: every production helper and callback compiles unchanged.
+    # Substitute platform declarations and count scan entry/slots; production decisions stay unchanged.
     body = "".join(line for line in tap.splitlines(keepends=True)
                    if not line.startswith('#include "hos.h"') and not line.startswith("#include <windows.h>"))
+    check(body.count("budget--;") == 1, "scan slot counter has no unique instrumentation point")
+    body = body.replace("budget--;", "budget--; scan_visits++; scan_probe();")
+    body = body.replace("static int state_scan(uint64_t mgr, StateChanges *out) {",
+                        "static int state_scan(uint64_t mgr, StateChanges *out) { scan_calls++;")
     spec = importlib.util.spec_from_file_location("state_tap_client", ROOT / "scripts" / "longshot_ctl.py")
     client_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(client_module)
@@ -1001,10 +1181,7 @@ def main():
                         "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), str(src),
                         str(bridge_src), "-o", str(exe)] + warnings + libraries, check=True)
         address = "longshot-oot-test-%d" % os.getpid() if windows else str(tmp / "control.sock")
-        # Legacy switches deliberately set: none may create a file, change cadence, flags or changed-field opt-in.
-        old_file = tmp / "obsolete.jsonl"
-        env = dict(os.environ, HOS_OOT_STATE_FILE=str(old_file), HOS_OOT_STATE_EVERY="1", HOS_OOT_STATE_FLAGS="Bad-Name",
-                   HOS_OOT_STATE_CHANGES="1")
+        env = dict(os.environ)
         env.pop("HOS_CONTROL_MEM", None)
         with (tmp / "stderr.txt").open("w+") as errors:
             fixture = None
@@ -1020,8 +1197,7 @@ def main():
                 if fixture is not None:
                     fixture.close()
             check(fixture.proc.returncode == 0, "sampler fixture failed on shutdown")
-        check(not old_file.exists(), "the removed file switch still wrote a state file")
-    print("PASS: OoT socket sampler, preserved hash/constants/lock wiring, both table caps and no file switches")
+    print("PASS: OoT socket sampler, shared bounded scans, bridge lock-order model, UTF-8 and protocol-1 types")
 
 
 if __name__ == "__main__":
