@@ -106,7 +106,6 @@ export class ProgressBoard extends HTMLElement {
       feed?.warning || (old ? 'This snapshot is over 15 minutes old. Check the linked Forgejo pages for newer activity.' : '');
     this.region('warning').textContent = warning;
     this.region('warning').hidden = !warning;
-    if (feed) this.region('coverage').textContent = `Coverage: all open items; closed items updated since ${new Date(feed.closedSince).toLocaleDateString()}; up to 20 recent published releases plus the latest stable release. Forgejo can change during collection. Filters use report categories, labels or reviewed summaries; unspecified does not mean unaffected.`;
   }
   populateVersions() {
     const select = this.form.elements.namedItem('version') as HTMLSelectElement;
