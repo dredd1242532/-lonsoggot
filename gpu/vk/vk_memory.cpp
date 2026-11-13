@@ -670,8 +670,10 @@ void stamp_page(uint64_t p, uint32_t g) {
 namespace {
 /// (longshot) Whether addresses asked in ascending order fall in sorted, disjoint [lo, hi) ranges: a cursor that only
 /// moves forward, one pass over the ranges for a whole scan, where a binary search for every page cost log2(ranges)
-/// compares each (the collections give their pages in address order: host/rx_backend.c's collect_in walks
-/// hos_gpu_guest_ranges' sorted ranges). An address below the last one asked searches again: any order, the same answer
+/// compares each (the collections give their pages in address order: host/rx_backend.c's collect_in walks sorted, merged
+/// ranges, hos_gpu_guest_ranges' for memory_collect_written, and capture_make's own `mirrored` list for the pages of a
+/// Capture, which capture_make's staging and take_capture walk). An address below the last one asked searches again: any
+/// order, the same answer
 struct RangeWalk {
     const std::vector<std::pair<uint64_t, uint64_t>>& r;
     size_t next = 0;   // (the first range that starts past the last address asked)
@@ -1811,12 +1813,12 @@ std::unique_ptr<Capture> capture_make() {
                 c->sidx.assign((size_t)n, -1);
                 int32_t tn = 0;
                 size_t lj = 0;
+                RangeWalk in_texr{texr};   // (pages in address order: collect_in over `mirrored`)
                 for (int64_t i = 0; i < n; i++) {
                     while (lj < c->late.size() && c->late[lj] < (uint32_t)i) lj++;
                     if (lj < c->late.size() && c->late[lj] == (uint32_t)i) continue;
                     const uint64_t g = (uint64_t)pages[i] << kPageShift;
-                    auto it = std::upper_bound(texr.begin(), texr.end(), std::make_pair(g, ~uint64_t(0)));
-                    if (it != texr.begin() && g < std::prev(it)->second) c->sidx[(size_t)i] = tn++;
+                    if (in_texr.in(g)) c->sidx[(size_t)i] = tn++;
                 }
                 if (!tn || !stage_get(*c, (size_t)tn * 4096)) c->sidx.clear();
             }

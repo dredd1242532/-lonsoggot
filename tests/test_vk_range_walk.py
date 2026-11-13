@@ -2,8 +2,9 @@
 every page a submit collects, by a cursor that walks the sorted ranges once instead of a binary search for each page.
 
 Its answers must be the binary search's for any order of pages: ascending (as the collections give them), random,
-descending and repeated, over no range, one, and many. memory_collect_written and take_capture's texture shadow must
-ask it, not search again. The fixture also prints both ways' time for a scan (a measure on this PC, not a check).
+descending and repeated, over no range, one, and many, with gaps between the ranges, from address 0, and touching (one's
+end the next one's start). memory_collect_written, capture_make's staging and take_capture's texture shadow must ask it,
+not search again. The fixture also prints both ways' time for a scan (a measure on this PC, not a check).
 
 python -I -B tests/test_vk_range_walk.py [--cxx g++]
 """
@@ -12,6 +13,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+
+RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,11 +47,14 @@ static bool searched(const Ranges& r, uint64_t a) {   // (the binary search it r
     return it != r.begin() && a < std::prev(it)->second;
 }
 
-static Ranges ranges(std::mt19937_64& rng, int n) {   // (sorted, disjoint, page-aligned, gaps between)
+// (sorted, disjoint, page-aligned. shape 0: gaps before and between; 1: the first from address 0, gaps between; 2: from 0,
+// every one touching the next (hi == the next lo); 3: from 0, touching or not at random)
+static Ranges ranges(std::mt19937_64& rng, int n, int shape = 0) {
     Ranges r;
-    uint64_t at = (rng() % 64) << 12;
+    uint64_t at = shape ? uint64_t(0) : (rng() % 64) << 12;
     for (int i = 0; i < n; i++) {
-        at += (1 + rng() % 256) << 12;
+        const bool gap = shape == 0 || (shape == 1 && i) || (shape == 3 && i && rng() % 2);
+        if (gap) at += (1 + rng() % 256) << 12;
         const uint64_t hi = at + ((1 + rng() % 512) << 12);
         r.push_back({at, hi});
         at = hi;
@@ -59,12 +65,17 @@ static Ranges ranges(std::mt19937_64& rng, int n) {   // (sorted, disjoint, page
 int main() {
     std::mt19937_64 rng(2515);
     long checked = 0;
+    for (int shape = 0; shape < 4; shape++)
     for (int n : {0, 1, 2, 3, 40, 700})
-        for (int round = 0; round < 200; round++) {
-            const Ranges r = ranges(rng, n);
+        for (int round = 0; round < (shape ? 50 : 200); round++) {
+            const Ranges r = ranges(rng, n, shape);
             const uint64_t top = (r.empty() ? 1ull << 24 : r.back().second + (64ull << 12)) >> 12;
             std::vector<uint64_t> pages(1 + rng() % 3000);
             for (auto& p : pages) p = (rng() % top) << 12;
+            if (shape) {   // (address 0 and every range's ends asked, so the start at 0 and each touching end are seen)
+                pages.push_back(0);
+                for (const auto& [lo, hi] : r) pages.push_back(lo), pages.push_back(hi);
+            }
             for (int order = 0; order < 4; order++) {
                 if (order == 0) std::sort(pages.begin(), pages.end());
                 else if (order == 1) std::shuffle(pages.begin(), pages.end(), rng);
@@ -82,8 +93,8 @@ int main() {
                         if (at < a) continue;
                         const bool want = searched(r, at);
                         if (w.in(at) != want) {
-                            std::printf("FAIL: %d ranges, order %d, address %llx: %d, the search says %d\n", n, order,
-                                        (unsigned long long)at, !want, want);
+                            std::printf("FAIL: %d ranges, shape %d, order %d, address %llx: %d, the search says %d\n", n,
+                                        shape, order, (unsigned long long)at, !want, want);
                             return 1;
                         }
                         checked++;
@@ -128,6 +139,9 @@ def main():
     collect = block(source, "void memory_collect_written(")
     if "RangeWalk in_capture{capture_ranges_merged()}" not in collect or "upper_bound" in collect:
         raise SystemExit("memory_collect_written: the captured ranges are not walked with RangeWalk")
+    make = block(source, "std::unique_ptr<Capture> capture_make() {")
+    if "RangeWalk in_texr{texr}" not in make or "in_texr.in(" not in make or "upper_bound(texr" in make:
+        raise SystemExit("capture_make: the staging's texture ranges are not walked with RangeWalk")
     take = block(source, "bool take_capture(")
     if take.count("in_tex.in(") != 3 or "upper_bound" in take:
         raise SystemExit("take_capture: the texture shadow's three page tests are not RangeWalk's")
