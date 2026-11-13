@@ -246,7 +246,12 @@ The build reads your game and never changes it.
 | The launcher, each version's builder and its tools (`toolchains`), the build files (`work`) | `%LOCALAPPDATA%\LongshotLauncher` (the installed program in `%LOCALAPPDATA%\Programs\LongshotLauncher`; the portable one's data in `LongshotLauncher-data` beside it) | `~/.local/share/longshot/launcher` (the portable AppImage's in `<AppImage>.home` beside it) |
 | A builder without the launcher (`--cli`) and its tools | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
 | The in-game menu's choices | `longshot_options.ini` in the game folder | `longshot_options.ini` in the game folder |
+| The shader and pipeline caches, and the logs | `cache` and `logs` in the game folder | `cache` and `logs` in the game folder |
 
+- **Caches and logs:** the game keeps its shader and pipeline caches in the game folder's `cache` folder (several GB, made
+  for this version and this graphics card) and its logs in `logs`. `cache` can be deleted at any time: the next start
+  prepares the shaders again (minutes on some PCs). A game folder from an older build has them loose beside the game: the
+  first start moves them into these folders.
 - **Saves elsewhere:** start the game with `--user <folder>` ([command line arguments](#running-the-game-from-the-command-line)).
   A `user` folder from an earlier Linux build is moved to `~/.local/share/longshot` once. To carry on with a save from
   Hookshot, an emulator (Lichii, Eglantine, Orchid, ...) or NX2navi, or to take yours there, see the
@@ -285,7 +290,7 @@ anywhere else may not be ours.
 
 ### If something goes wrong
 
-**Start with the log:** `longshot_log.txt` in the game folder holds the last run, and `longshot_log.1.txt` to `.4.txt`
+**Start with the log:** `longshot_log.txt` in the game folder's `logs` folder holds the last run, and `longshot_log.1.txt` to `.4.txt`
 the four before it (started from a terminal, the game prints there instead). Every 600 frames it writes a `vk: status:`
 line with the video memory in use against what the driver allows, and DLSS's details while it draws;
 `vk: over the driver's video-memory allowance` says when the game went past it.
