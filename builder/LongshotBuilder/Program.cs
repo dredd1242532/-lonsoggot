@@ -7,6 +7,8 @@ namespace LongshotBuilder;
 /// The Windows builder has no window: players use the Longshot Launcher, which builds and starts the game. What is left:
 ///   LongshotBuilder.exe --cli <make_game.py's options>   (RecompLauncher, through the setup) no window; make_game.py's lines on
 ///                                                        stdout, and its result as the exit code
+///   LongshotBuilder.exe --crash <folder>                 (the game's crash window, host/hos_crash_window.c, when this builder
+///                                                        built the folder) nothing: the window is the Longshot Launcher's
 ///   LongshotBuilder.exe                                  anything else: a message, get the Longshot Launcher
 static class Program
 {
@@ -36,6 +38,7 @@ static class Program
             }
             return Cli(args.Skip(1).ToList());
         }
+        if (args.Length > 0 && args[0] == "--crash") return 0;   // (no message box at a crash: the launcher offers it at its start)
         Say(UseTheLauncher);
         return 1;
     }

@@ -6,7 +6,9 @@ stand-in builder, no game:
   - once per process: a second crash starts no second window;
   - nothing at all with crash_reports=0, LONGSHOT_NO_CRASH_WINDOW on (env_on: 0, false, off and no are off) or no builder= line (no marker either: the next
     launch has nothing to offer from a window that was turned off);
-  - the window starts with no signal blocked (the crash's is, in the handler) and none of the game's files;
+  - the window starts with the crash's signal unblocked (it is blocked in the handler), every signal at its default and
+    none of the game's files;
+  - Longshot's own command-line builders (builder= of a folder they made) answer --crash with nothing;
   - the wiring: report_crash opens it after the log is flushed, and the game's start makes the command once the log is
     open.
 
@@ -57,6 +59,7 @@ int main(int argc, char **argv) {
     sigemptyset(&segv);
     sigaddset(&segv, SIGSEGV);
     sigprocmask(SIG_BLOCK, &segv, NULL);
+    signal(SIGUSR1, SIG_IGN);   /* (a disposition of the game's, not the window's) */
     char leak[4096];
     snprintf(leak, sizeof leak, "%s/the game's file", argv[1]);
     if (open(leak, O_WRONLY | O_CREAT, 0644) < 0) return 2;
@@ -69,6 +72,7 @@ int main(int argc, char **argv) {
 BUILDER = """#!/bin/sh
 d="$(dirname "$0")"
 grep '^SigBlk:' /proc/$$/status > "$d/mask.txt"
+grep '^SigIgn:' /proc/$$/status > "$d/ignored.txt"
 ls -l /proc/$$/fd | grep -c "the game's file" > "$d/files.txt"
 printf '%s\\n' "$@" > "$d/started.txt"
 echo "builder output"
@@ -112,6 +116,15 @@ def main():
     check(re.search(r'hos_log\("longshot %s", LONGSHOT_VERSION\);[^\n]*\n\s*hos_crash_window_init\(\);', main_c) is not None,
           "the game's start makes the command after its first log line")
 
+    # (a folder Longshot's own command-line builders made names them as builder=: --crash is nothing to them, no
+    # "get the launcher" message at the moment of a crash)
+    apprun = (ROOT / "builder" / "linux" / "AppRun").read_text(encoding="utf-8")
+    check(re.search(r'if \[ "\$\{1:-\}" = "--crash" \]; then\s*\n\s*exit 0', apprun) is not None
+          and apprun.index('"--crash"') < apprun.index("MESSAGE="), "the AppImage answers --crash with nothing")
+    program = (ROOT / "builder" / "LongshotBuilder" / "Program.cs").read_text(encoding="utf-8")
+    check(re.search(r'args\[0\] == "--crash"\) return 0;', program) is not None
+          and program.index('"--crash"') < program.index("Say(UseTheLauncher)"), "LongshotBuilder.exe answers --crash with nothing")
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / "driver.c").write_text(DRIVER, encoding="utf-8")
@@ -154,6 +167,9 @@ def main():
         check(len(mask) == 2 and not int(mask[1], 16) & 1 << (signal.SIGSEGV - 1),
               "the window starts with the crash's signal unblocked (%s)" % " ".join(mask))
         check((f / "tools" / "files.txt").read_text().strip() == "0", "the game's files aren't passed to the window")
+        ignored = (f / "tools" / "ignored.txt").read_text().split()
+        check(len(ignored) == 2 and not int(ignored[1], 16) & 1 << (signal.SIGUSR1 - 1),
+              "the game's signal dispositions are back to their defaults (%s)" % " ".join(ignored))
         check("crash window: on a crash" in out, "the game's log says where the window comes from")
         time.sleep(0.5)
         check(len(list(f.glob("tools/started*"))) == 1, "once per process")

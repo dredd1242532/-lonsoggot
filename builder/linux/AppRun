@@ -10,6 +10,8 @@
 #   Longshot.AppImage --play <folder>  start the game in that folder (RecompLauncher's start)
 #   Longshot.AppImage <folder>         the same
 #   Longshot.AppImage --launch <dir>  the same (a game folder's longshot, builder/linux/longshot-folder, when --cli built it)
+#   Longshot.AppImage --crash <dir>   nothing (the game's crash window, host/hos_crash_window.c, when --cli built the folder: the
+#                                      window is the Longshot Launcher's, which offers the crash at its next start)
 #   Longshot.AppImage                  a message: get the Longshot Launcher
 HERE="$(dirname "$(readlink -f "$0")")"
 LIB="$HERE/usr/lib/longshot"
@@ -41,6 +43,9 @@ if [ "${1:-}" = "--play" ]; then
 fi
 if [ "${1:-}" = "--launch" ] && [ -n "${2:-}" ] && [ -d "$2" ]; then
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$2"
+fi
+if [ "${1:-}" = "--crash" ]; then
+    exit 0
 fi
 if [ -n "${1:-}" ] && [ -d "$1" ]; then
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$1"

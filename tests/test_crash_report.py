@@ -160,6 +160,8 @@ class CrashReportTest(unittest.TestCase):
         self.assertEqual(cr.redact(r"Z:\home\gabriel\Games\Longshot\bin", home="C:\\Users\\steamuser", user="steamuser"),
                          r"~\Games\Longshot\bin")
         self.assertEqual(cr.redact("z:/var/home/gabriel/Games", home="C:\\Users\\steamuser", user="steamuser"), "~/Games")
+        # (a URL's path is no drive: file:///home/<name> keeps its file://)
+        self.assertEqual(cr.redact("file:///home/alice/x cache:/home/bob/y", home="", user=""), "file://~/x cache:~/y")
         # (a user name anywhere as a word of its own, as in a temporary folder named after the home: not inside a word)
         self.assertEqual(cr.redact("/tmp/x-1000/-home-alice-Desktop/tools/longshot", home=HOME, user="alice"),
                          "/tmp/x-1000/-home-<user>-Desktop/tools/longshot")
@@ -422,15 +424,51 @@ class CrashReportTest(unittest.TestCase):
                 self.assertEqual((out["sent"], out["kept"]), (False, kept))
                 self.assertEqual(Path(f.path, cr.MARKER).exists(), kept)
             Path(f.path, cr.MARKER).write_text("log=longshot_log.txt\ntime=%d\n" % time.time(), encoding="utf-8")
-            cr.send = lambda report: (True, cr.ISSUE_URL + "#issuecomment-12", False)
-            out = cr.send_json(f.path, "1")   # (another crash's time: this marker is a later crash's, and stays)
+            cr.send = lambda report: sent.append(report) or (True, cr.ISSUE_URL + "#issuecomment-12", False)
+            out = cr.send_json(f.path, "1")   # (the window showed another crash: this later one was never shown)
+            self.assertEqual((out["sent"], out["kept"]), (False, True))
+            self.assertEqual(len(sent), 2, "a crash the player never saw is not sent")
+            self.assertTrue(Path(f.path, cr.MARKER).exists(), "and it stays, to be offered on its own")
+            out = cr.send_json(f.path, cr.marker_time(f.path))
             self.assertEqual((out["sent"], out["link"]), (True, cr.ISSUE_URL + "#issuecomment-12"))
-            self.assertTrue(Path(f.path, cr.MARKER).exists())
+            self.assertFalse(Path(f.path, cr.MARKER).exists())
         finally:
             cr.send = real
-        self.assertEqual(len(sent), 2)
-        # (the command line itself, against no server: nx2/addresses.ini's relay isn't reached from a test)
-        self.assertEqual(self.run_cli(f.path, "--window")["crash"], True)
+        self.assertEqual(len(sent), 3)
+        # (the command line itself, as the launcher runs it. Against no server: --time of another crash sends nothing,
+        # so nx2/addresses.ini's relay isn't reached from a test, and the time is read as a time, not as the folder)
+        Path(f.path, cr.MARKER).write_text("log=longshot_log.txt\ntime=%d\n" % time.time(), encoding="utf-8")
+        out = self.run_cli("--send", "--json", "--time", "1", f.path)
+        self.assertEqual((out["sent"], out["kept"]), (False, True))
+        out = self.run_cli(f.path, "--send", "--json", "--time", "1")
+        self.assertEqual((out["sent"], out["kept"]), (False, True))
+        self.assertTrue(Path(f.path, cr.MARKER).exists())
+        self.assertEqual(self.run_cli(f.path, "--window")["time"], cr.marker_time(f.path))
+
+    def test_the_launcher_gets_json_even_when_the_report_cant_be_made(self):
+        f = self.make()
+        real = cr.build
+        try:
+            cr.build = lambda *a, **kw: 1 / 0
+            # (main()'s JSON branch, in this process: the stand-in build is this module's)
+            import contextlib
+            import io
+            for args, key in (([f.path, "--window"], "crash"), ([f.path, "--send", "--json"], "sent")):
+                out = io.StringIO()
+                saved = sys.argv
+                sys.argv = ["crash_report.py"] + args
+                try:
+                    with contextlib.redirect_stdout(out):
+                        cr.main()
+                finally:
+                    sys.argv = saved
+                answer = json.loads(out.getvalue())
+                self.assertFalse(answer[key])
+                self.assertIn("ZeroDivisionError", answer.get("error", "") + answer.get("said", ""))
+                if key == "sent":
+                    self.assertTrue(answer["kept"])
+        finally:
+            cr.build = real
 
     def test_the_addresses_are_in_addresses_ini(self):
         self.assertTrue(cr.ENDPOINT.startswith("https://") and cr.ENDPOINT.endswith("/crash"))

@@ -23,14 +23,14 @@ the hardware hashes, anything else from the game folder, and the user's name in 
 
 For the launcher's window, one JSON object on stdout, nothing sent:
     python -I nx2/crash_report.py <game folder> --window
-        {"crash": false} with no crash waiting; else {"crash": true, "time": the marker's time=, "report": the report,
+        {"crash": false} with no crash waiting (with "error" when the report couldn't be made); else {"crash": true, "time": the marker's time=, "report": the report,
         "rows": the card's [name, value, show], "settings": and "log": the Show texts, "issue_place", "issue_number",
         "always_send"}
 and, after Send Help (or with Always send), the send's answer:
     python -I nx2/crash_report.py <game folder> --send --json [--time <the --window's time>]
         {"sent": true|false, "said": why (not sent) or the comment's link, "link": where the Sent page's link goes,
-        "kept": whether the report is kept for next time}; the marker is dropped when it isn't kept (only that crash's
-        with --time). The send is its own process: a window closed while it runs leaves it to finish, and the report
+        "kept": whether the report is kept for next time}; the marker is dropped when it isn't kept. With --time, only
+        that crash is sent: a later crash that took the marker since was never shown, and is kept for its own window. The send is its own process: a window closed while it runs leaves it to finish, and the report
         is kept unless it was sent or refused.
 """
 import configparser
@@ -101,8 +101,9 @@ NOT_SENT = re.compile(r"^(key_|pad_)|^(microphone_device|auto_for|auto_tuned)$")
 # (most specific first: /var/home/<name> before /home/<name>, and a drive's \home\<name> before either matches its tail)
 HOMES = [  # (Wine and Proton: the Linux side through a drive, Z:\home\<name>\Games\Longshot, while the prefix's own home
          # is C:\users\steamuser)
-         (re.compile(r"[A-Za-z]:[\\/]+(?:var[\\/]+)?home[\\/]+[^\\/\s]+", re.I), "~"),
-         (re.compile(r"[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s]+", re.I), "%USERPROFILE%"),
+         # (a drive is a letter on its own: file:///home/<name> is a URL's path, not a drive e:)
+         (re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]+(?:var[\\/]+)?home[\\/]+[^\\/\s]+", re.I), "~"),
+         (re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s]+", re.I), "%USERPROFILE%"),
          (re.compile(r"/var/home/[^/\s]+"), "~"), (re.compile(r"/home/[^/\s]+"), "~"), (re.compile(r"/Users/[^/\s]+"), "~")]
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -206,14 +207,20 @@ def crash_log(folder, marker):
 def pending(folder):
     """The crash waiting for the player's answer: (log path, its lines), or None (no marker, or its log has no crash: a
     process killed from outside, which has nothing to report, and the marker is dropped)"""
+    found = pending_with_time(folder)
+    return found and found[1:]
+
+
+def pending_with_time(folder):
+    """pending()'s answer with the marker's time= in front, from the same read: (time, log path, lines), or None"""
     marker = read_marker(folder)
     if marker is None:
         return None
     path, lines = crash_log(folder, marker)
     if path is None:
-        clear(folder)
+        clear(folder, marker.get("time"))
         return None
-    return path, lines
+    return marker.get("time"), path, lines
 
 
 def marker_time(folder):
@@ -490,22 +497,27 @@ def send(report, url=ENDPOINT, timeout=10):
 
 def window(folder):
     """--window: what the launcher's crash window shows, nothing sent"""
-    found = pending(folder)
+    found = pending_with_time(folder)
     if not found:
         return {"crash": False}
-    report = build(folder, found[1])
+    when, _path, lines = found
+    report = build(folder, lines)
     rows = settings(folder)
-    return {"crash": True, "time": marker_time(folder), "report": report, "rows": [list(r) for r in card(report, rows)],
+    return {"crash": True, "time": when, "report": report, "rows": [list(r) for r in card(report, rows)],
             "settings": settings_text(rows), "log": log_text(report), "issue_place": issue_place(),
             "issue_number": issue_number(), "always_send": always_send(folder)}
 
 
 def send_json(folder, when=None):
-    """--send --json: the window's send, in its own process"""
-    found = pending(folder)
+    """--send --json: the window's send, in its own process. With when (the time --window gave), only that crash: a later
+    one that took the marker since was never shown, and is not sent; it is offered on its own"""
+    found = pending_with_time(folder)
     if not found:
         return {"sent": False, "said": "There is no crash report waiting.", "link": "", "kept": False}
-    ok, said, keep = send(build(folder, found[1]))
+    if when is not None and found[0] != when:
+        return {"sent": False, "said": "Another crash came since this report was shown. It is offered on its own: this one "
+                                       "was not sent.", "link": "", "kept": True}
+    ok, said, keep = send(build(folder, found[2]))
     if not keep:
         clear(folder, when)
     return {"sent": ok, "said": said, "link": comment_link(said) if ok else "", "kept": keep}
@@ -518,7 +530,14 @@ def main():
     if not folder:
         sys.exit(__doc__)
     if "--window" in args or "--json" in args:   # (one line of JSON for the launcher; ensure_ascii: whatever its console)
-        print(json.dumps(send_json(folder, when) if "--send" in args else window(folder)))
+        sending = "--send" in args
+        try:
+            answer = send_json(folder, when) if sending else window(folder)
+        except Exception as e:   # (a file the report can't read: an answer still, never a traceback the window can't show)
+            why = "The crash report could not be made (%s: %s)." % (type(e).__name__, e)
+            answer = {"sent": False, "said": why + " It is kept.", "link": "", "kept": True} if sending else \
+                {"crash": False, "error": why}
+        print(json.dumps(answer))
         return
     found = pending(folder)
     if not found:

@@ -154,11 +154,14 @@ runs, through the Win32 layer. After `hos_log_flush()`, it:
 2. Starts the window: `<launcher> --crash <game folder>`. The command is built **at startup**, not in the handler (no
    allocation, no path lookup in a crashing process), from the program the game folder's `longshot` starts too:
    `builder=` in the folder's `longshot_version.txt`, which `make_game.py` writes from `LONGSHOT_BUILDER_EXE`, the
-   Longshot Launcher that built the folder (`builder_args=`, when there is one, goes before `--crash`). The handler
-   only calls `CreateProcessW` (Windows) or `vfork` and `execve` (Linux), detached, then lets the game die as it does
-   today. On Linux the child clears its signal mask first (the crash's signal is blocked in the handler and `execve`
-   keeps it: the window, and a game it starts, would die on a fault without the handler) and closes the game's files
-   (`close_range`), which the window would otherwise keep after the game is gone.
+   Longshot Launcher that built the folder. Longshot's own command-line builders (the AppImage's `--cli`,
+   `LongshotBuilder.exe --cli`) answer `--crash` with nothing, and the marker waits for the launcher's next start. The
+   handler only calls `CreateProcessW` (Windows) or `posix_spawn` (Linux, with attributes made at startup), detached,
+   then lets the game die as it does today. On Linux the window starts with every signal at its default and none
+   blocked (the crash's signal is blocked in the handler, and the mask survives exec: the window, and a game it starts,
+   would die on a fault without a handler; and the game's handlers never run in the child), in a session of its own,
+   with its output to `/dev/null` and none of the game's files (`addclosefrom_np`), which it would otherwise keep after
+   the game is gone. glibc's `posix_spawn` runs no fork handler and allocates nothing.
 3. Does nothing when crash reports are turned off (`crash_reports=0`, step 5), when the game was started with
    `LONGSHOT_NO_CRASH_WINDOW=1` (tests, benchmarks, CI), or when `longshot_version.txt` has no `builder=` line (a
    folder built from a checkout: make_game.py writes the file only with a release's `VERSION` or `version.txt`).
@@ -181,8 +184,10 @@ Linux alike. The builders' own windows left Longshot (#171, #181).
   report's fields, redaction and limits stay here, in one place, with their tests.
 - The send is a process of its own: the window can close while it runs (a slow network, DNS), and the send finishes
   without it. A report that couldn't reach the server is kept for the next start.
-- Each window drops only the marker of the crash it opened for (`--time`, the marker's time when it opened): one left
-  open doesn't drop the marker of a crash that came after it. *I am sorry* drops it.
+- Each window sends and drops only the crash it opened for (`--time`, the marker's time when it opened): one left open
+  neither sends nor drops a crash that came after it, which is offered on its own. *I am sorry* drops it.
+- `--window` and `--send --json` always answer one line of JSON, even when the report can't be made (`"error"`, or
+  not sent and kept).
 
 ### 3. The report: one module
 

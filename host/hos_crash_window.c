@@ -7,18 +7,26 @@
    one does as little as it can: the command is made at startup (hos_crash_window_init), so the handler allocates nothing
    and reads no file. It writes the marker and starts the process:
      Windows: CreateProcessW, detached, as the unhandled exception filter may;
-     Linux: vfork and execve (report_crash runs in the signal handler there: fork would run glibc's fork handlers, which
-     take malloc's lock, and a crash inside malloc would hang on it). The window's output goes to /dev/null, not into the
-     log the report reads. The child also clears its signal mask (the crash's signal is blocked in the handler, and
-     execve keeps the mask: the window, and a game it starts with Play, would die on a fault with no handler run) and
-     closes the game's other files (the log, sockets, the GPU device: the window outlives the game).
+     Linux: posix_spawn (report_crash runs in the signal handler there: fork would run glibc's fork handlers, which
+     take malloc's lock, and a crash inside malloc would hang on it; glibc's posix_spawn runs no fork handler and
+     allocates nothing, the child on a stack of its own). Its attributes and file actions are made at startup:
+       - every signal back to its default and none blocked before the exec (the crash's signal is blocked in the
+         handler, and the mask survives exec: the window, and a game it starts with Play, would die on a fault with no
+         handler run; and the game's handlers never run in the child);
+       - a session of its own (it outlives this process, and a terminal's Ctrl+C doesn't reach it);
+       - its output to /dev/null, not into the log the report reads, and the game's other files closed (the log,
+         sockets, the GPU device: the window outlives the game).
    If the window doesn't start (the launcher moved, the process was killed before), the marker stays, and the launcher
    offers the report at its next start.
 
-   The launcher is longshot_version.txt's builder= (and builder_args=, when a builder needs arguments before --crash), as
-   nx2/make_game.py writes it from LONGSHOT_BUILDER_EXE: the launcher that built the folder. Nothing happens with
+   The launcher is longshot_version.txt's builder=, as nx2/make_game.py writes it from LONGSHOT_BUILDER_EXE: the program
+   that built the folder (the Longshot Launcher; Longshot's own command-line builders take --crash and do nothing, the
+   marker left for the launcher's next start). Nothing happens with
    crash_reports=0 in longshot_options.ini, LONGSHOT_NO_CRASH_WINDOW=1 (test runs, benchmarks), or no builder= line (a
    folder built from a checkout without LONGSHOT_BUILDER_EXE). */
+#if !defined(_WIN32) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE   /* (before any header: posix_spawn's POSIX_SPAWN_SETSID and addclosefrom_np) */
+#endif
 #include "hos_paths.h"   /* (first: hos_game_path_a, and windows.h on Windows) */
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,13 +45,43 @@ static wchar_t command_w[CW_PATH * 3];   /* (CreateProcessW may write into it) *
 #else
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/syscall.h>
+#include <spawn.h>
 #include <unistd.h>
 #define CW_SEP '/'
 extern char **environ;
 static char marker_path[CW_PATH];
 static char builder[CW_PATH], folder_arg[CW_PATH], crash_flag[] = "--crash";
 static char *window_argv[4];
+static posix_spawnattr_t spawn_attr;
+static posix_spawn_file_actions_t spawn_files;
+static int spawn_made;
+
+/* The window's start, made once at startup (no allocation in the handler: addopen copies its path here) */
+static int make_spawn(void) {
+    if (spawn_made) return 1;
+    sigset_t none, all;
+    sigemptyset(&none);
+    sigfillset(&all);
+    if (posix_spawnattr_init(&spawn_attr)) return 0;
+    if (posix_spawn_file_actions_init(&spawn_files)) {
+        posix_spawnattr_destroy(&spawn_attr);
+        return 0;
+    }
+    int bad = posix_spawnattr_setsigmask(&spawn_attr, &none) || posix_spawnattr_setsigdefault(&spawn_attr, &all) ||
+              posix_spawnattr_setflags(&spawn_attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSID) ||
+              posix_spawn_file_actions_addopen(&spawn_files, 0, "/dev/null", O_RDWR, 0) ||
+              posix_spawn_file_actions_adddup2(&spawn_files, 0, 1) || posix_spawn_file_actions_adddup2(&spawn_files, 0, 2);
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    bad = bad || posix_spawn_file_actions_addclosefrom_np(&spawn_files, 3);   /* (every fd above 2, whatever the limit) */
+#endif
+    if (bad) {
+        posix_spawn_file_actions_destroy(&spawn_files);
+        posix_spawnattr_destroy(&spawn_attr);
+        return 0;
+    }
+    spawn_made = 1;
+    return 1;
+}
 #endif
 static volatile LONG ready;
 
@@ -91,26 +129,23 @@ void hos_crash_window_init_in(const char *folder) {
         hos_log("crash window: off (crash_reports=0)");
         return;
     }
-    char exe[CW_PATH], args[CW_PATH];
+    char exe[CW_PATH];
     version_value(folder, "builder=", exe, sizeof exe);
     if (!exe[0]) {
         hos_log("crash window: no builder= in longshot_version.txt: a crash is offered at the launcher's next start instead");
         return;
     }
-    version_value(folder, "builder_args=", args, sizeof args);
     char marker[CW_PATH];
     if ((size_t)snprintf(marker, sizeof marker, "%s%ccrash_pending.txt", folder, CW_SEP) >= sizeof marker) return;
 #ifdef _WIN32
-    /* (one command line: the builder quoted, its own arguments as builder_args= has them, then --crash and the folder) */
+    /* (one command line: the launcher quoted, then --crash and the folder) */
     char line[CW_PATH * 3];
-    if ((size_t)snprintf(line, sizeof line, "\"%s\" %s%s--crash \"%s\"", exe, args, args[0] ? " " : "", folder) >= sizeof line)
-        return;
+    if ((size_t)snprintf(line, sizeof line, "\"%s\" --crash \"%s\"", exe, folder) >= sizeof line) return;
     if (!MultiByteToWideChar(CP_UTF8, 0, line, -1, command_w, (int)(sizeof command_w / sizeof *command_w)) ||
         !MultiByteToWideChar(CP_UTF8, 0, marker, -1, marker_w, (int)(sizeof marker_w / sizeof *marker_w)))
         return;
 #else
-    (void)args;   /* (the launcher's AppImage takes --crash itself) */
-    if (strlen(exe) >= sizeof builder || strlen(folder) >= sizeof folder_arg) return;
+    if (strlen(exe) >= sizeof builder || strlen(folder) >= sizeof folder_arg || !make_spawn()) return;
     strcpy(builder, exe);
     strcpy(folder_arg, folder);
     strcpy(marker_path, marker);
@@ -172,20 +207,7 @@ void hos_crash_window_open(void) {
         if (write(fd, text, (size_t)len) < 0) { /* (the next launch finds no marker: nothing worse) */ }
         close(fd);
     }
-    const pid_t child = vfork();
-    if (child == 0) {
-        setsid();   /* (its own session: it outlives this process, and a terminal's Ctrl+C doesn't reach it) */
-        const int null = open("/dev/null", O_RDWR);
-        if (null >= 0) dup2(null, 0), dup2(null, 1), dup2(null, 2);
-        sigset_t none;   /* (sigprocmask and close are async-signal-safe; close_range is one system call, Linux 5.9) */
-        sigemptyset(&none);
-        sigprocmask(SIG_SETMASK, &none, NULL);
-#ifdef SYS_close_range
-        if (syscall(SYS_close_range, 3u, ~0u, 0u) != 0)
-#endif
-            for (int fd = 3; fd < 4096; fd++) close(fd);
-        execve(builder, window_argv, environ);
-        _exit(127);
-    }
+    pid_t child;
+    posix_spawn(&child, builder, &spawn_files, &spawn_attr, window_argv, environ);   /* (not waited for: the game ends) */
 #endif
 }
