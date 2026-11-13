@@ -549,7 +549,151 @@ class PR(unittest.TestCase):
                         self.assertRaisesRegex(forge.ForgeError, want):
                     forge.upload_picture(12, "a.png", PNG, "image/png")
 
-    # --- review ---
+    # --- reading reviews ---
+
+    def feedback_review(self, rid=1, **extra):
+        data = {"id": rid, "state": "REQUEST_CHANGES", "user": {"login": "reviewer"},
+                "submitted_at": "2026-11-13T12:30:00Z", "commit_id": "a" * 40, "body": "Fix the boundary.",
+                "html_url": "https://example.invalid/pulls/25#review-%d" % rid, "comments_count": 0}
+        data.update(extra)
+        return data
+
+    def view_feedback(self, reviews=(), inline=None, comments=(), routes=None, flag=True):
+        base = "/repos/MagicBeanDev/Longshot"
+        pr = self.forgejo.add(25, "fix: x", "PR body")
+        replies = {base + "/pulls/25": pr, base + "/issues/25/comments": list(comments),   # (old reader's route too)
+                   base + "/issues/25/comments?limit=50&page=1": list(comments),
+                   base + "/pulls/25/reviews?limit=50&page=1": list(reviews)}
+        for rid, rows in (inline or {}).items():
+            replies[base + "/pulls/25/reviews/%d/comments?limit=50&page=1" % rid] = rows
+        replies.update(routes or {})
+        for path, rows in list(replies.items()):
+            if "?limit=50&page=" in path and isinstance(rows, list) and rows:
+                prefix, page = path.rsplit("=", 1)
+                replies.setdefault(prefix + "=" + str(int(page) + 1), [])
+        calls = []
+
+        def api(method, path, body=None):
+            self.assertEqual((method, body), ("GET", None), "view must be read-only")
+            calls.append(path)
+            self.assertIn(path, replies, "unexpected request (no attachment or other URL is fetched)")
+            reply = replies[path]
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        with mock.patch.object(forge, "api", side_effect=api):
+            code, out, err = self.run_forge("pr", "view", "25", *(["--comments"] if flag else []))
+        return code, out, err, calls
+
+    def test_review_view_shows_submitted_feedback(self):
+        review = self.feedback_review(comments_count=1, dismissed=True, stale=True)
+        inline = {1: [{"id": 9, "path": "src/work.py", "position": 17, "body": "Keep the old entries.",
+                       "html_url": "https://example.invalid/pulls/25#comment-9"}]}
+        code, out, err, calls = self.view_feedback([review], inline)
+        self.assertEqual((code, err), (0, ""))
+        for want in ("review by reviewer, 2026-11-13 12:30", "request changes, dismissed, stale", "commit aaaaaaaa",
+                     "Fix the boundary.", "inline src/work.py:17", "Keep the old entries.",
+                     "https://example.invalid/pulls/25#comment-9"):
+            self.assertIn(want, out)
+        self.assertEqual(len(calls), 6)
+
+    def test_review_view_deduplicates_by_url_and_comment_id(self):
+        review = self.feedback_review(77, comments_count=2, body="One summary.")
+        comment = {"id": 9, "path": "src/work.py", "position": 17, "body": "One inline body.",
+                   "html_url": "https://example.invalid/pulls/25#comment-9"}
+        ordinary = [{"id": 500, "html_url": review["html_url"], "body": review["body"]},
+                    {"id": 9, "body": comment["body"]},
+                    {"id": 77, "body": "Ordinary comment with the same number as a review ID."}]
+        for c in ordinary:
+            c.update(user={"login": "reader"}, created_at="2026-11-13T12:00:00Z")
+        code, out, err, _ = self.view_feedback([review], {77: [comment, comment]}, ordinary)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.count("One summary."), 1)
+        self.assertEqual(out.count("One inline body."), 1)
+        self.assertIn("inline src/work.py:17", out)
+        self.assertIn("Ordinary comment with the same number as a review ID.", out)
+
+    def test_review_view_skips_pending_and_keeps_empty_approval(self):
+        pending = self.feedback_review(1, state="PENDING", body="UNSUBMITTED DRAFT", comments_count=4)
+        requested = self.feedback_review(3, state="REQUEST_REVIEW", body="UNSUBMITTED REQUEST", comments_count=0)
+        approval = self.feedback_review(2, state="APPROVED", body="", user=None, commit_id=None)
+        code, out, err, calls = self.view_feedback([pending, requested, approval])
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("UNSUBMITTED DRAFT", out)
+        self.assertNotIn("UNSUBMITTED REQUEST", out)
+        self.assertIn("review by deleted user", out)
+        self.assertIn("(approved), commit ?", out)
+        self.assertFalse(any("/reviews/1/comments" in path for path in calls))
+
+    def test_review_view_keeps_original_and_resolved_locations(self):
+        review = self.feedback_review(comments_count=2)
+        inline = {1: [{"id": 8, "path": "old.py", "position": 0, "original_position": 27,
+                       "resolver": {"login": "author"}, "body": "Fixed already."},
+                      {"id": 9, "path": "name\n\x1b.cpp", "position": -6, "body": "Unicode body: \N{GREEK SMALL LETTER DELTA}"}]}
+        code, out, err, _ = self.view_feedback([review], inline)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("inline old.py:27 (original) (resolved)", out)
+        self.assertIn("inline name\\n\\u001b.cpp:-6", out)
+        self.assertIn("Unicode body: \N{GREEK SMALL LETTER DELTA}", out)
+        self.assertNotIn("\x1b", out)
+
+    def test_review_view_paginates_discussion_reviews_and_inline(self):
+        base = "/repos/MagicBeanDev/Longshot"
+        for cap in (20, 50):   # (Forgejo may cap the requested 50 rows below 50)
+            with self.subTest(server_cap=cap):
+                ordinary = [{"id": 1000 + i, "user": {"login": "reader"}, "created_at": "2026-11-13T12:00:00Z",
+                             "body": "ordinary %d" % i} for i in range(cap)]
+                last = dict(ordinary[0], id=1999, body="Last ordinary comment.")
+                reviews = [self.feedback_review(i, body="Review body %d." % i) for i in range(1, cap + 1)]
+                rid = cap + 1
+                final_review = self.feedback_review(rid, comments_count=cap + 1, body="Final review.")
+                lines = [{"id": 2000 + i, "path": "src/work.py", "position": i + 1, "body": "Inline body %d." % i}
+                         for i in range(cap)]
+                routes = {base + "/issues/25/comments?limit=50&page=2": [last],
+                          base + "/pulls/25/reviews?limit=50&page=2": [reviews[0], final_review],
+                          base + "/pulls/25/reviews/%d/comments?limit=50&page=2" % rid:
+                              [dict(lines[0], id=2999, position=rid, body="Final inline.")]}
+                code, out, err, calls = self.view_feedback(reviews, {rid: lines}, ordinary, routes)
+                self.assertEqual((code, err), (0, ""))
+                for want in ("Last ordinary comment.", "Final review.", "inline src/work.py:%d" % rid, "Final inline."):
+                    self.assertIn(want, out)
+                self.assertEqual(out.count("Review body 1."), 1)
+                self.assertEqual(len(calls), 10)
+
+    def test_review_view_default_stays_read_only_and_unchanged(self):
+        for flag in (False, True):
+            with self.subTest(flag=flag):
+                code, out, err, calls = self.view_feedback(flag=flag)
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, "#25 fix: x\nopen, by alice: alice:fix -> main, mergeable\n"
+                                     "https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/25\n\nPR body\n")
+                self.assertEqual(len(calls), 3 if flag else 1)
+
+    def test_review_view_stops_when_server_ignores_page(self):
+        base = "/repos/MagicBeanDev/Longshot"
+        ordinary = [{"id": 100, "user": {"login": "reader"}, "created_at": "2026-11-13T12:00:00Z",
+                     "body": "One discussion comment."}]
+        review = self.feedback_review(comments_count=1)
+        inline = [{"id": 200, "path": "src/work.py", "position": 17, "body": "One inline comment."}]
+        routes = {base + "/issues/25/comments?limit=50&page=2": ordinary,
+                  base + "/pulls/25/reviews?limit=50&page=2": [review],
+                  base + "/pulls/25/reviews/1/comments?limit=50&page=2": inline}
+        code, out, err, calls = self.view_feedback([review], {1: inline}, ordinary, routes)
+        self.assertEqual((code, err), (0, ""))
+        for text in ("One discussion comment.", "Fix the boundary.", "One inline comment."):
+            self.assertEqual(out.count(text), 1)
+        self.assertEqual(len(calls), 7)
+
+    def test_review_view_reports_review_fetch_failure(self):
+        base = "/repos/MagicBeanDev/Longshot"
+        code, out, err, _ = self.view_feedback(routes={base + "/pulls/25/reviews?limit=50&page=1":
+                                                      forge.ForgeError("reading reviews failed")})
+        self.assertEqual(code, 1)
+        self.assertIn("PR body", out)
+        self.assertIn("reading reviews failed", err)
+
+    # --- writing reviews ---
 
     REVIEW_DIFF = """diff --git a/gpu/vk/a.cpp b/gpu/vk/a.cpp
 index 1111111..2222222 100644

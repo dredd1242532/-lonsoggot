@@ -286,9 +286,72 @@ def cmd_credential(args):
     return 0
 
 
+def show_comment(c):
+    print("\n--- %s, %s\n%s" % (c["user"]["login"], c["created_at"][:16].replace("T", " "), c["body"].strip()))
+
+
 def show_comments(number):
     for c in api("GET", "/repos/%s/issues/%d/comments" % (REPO, number)) or []:
-        print("\n--- %s, %s\n%s" % (c["user"]["login"], c["created_at"][:16].replace("T", " "), c["body"].strip()))
+        show_comment(c)
+
+
+def api_pages(path):
+    page, seen = 1, set()
+    while True:
+        rows = api("GET", "%s?limit=50&page=%d" % (path, page)) or []
+        before = len(seen)
+        for row in rows:
+            if row["id"] not in seen:
+                seen.add(row["id"])
+                yield row
+        # (some endpoints ignore page; others cap the requested limit below 50)
+        if len(seen) == before:
+            return
+        page += 1
+
+
+def show_pr_comments(number):
+    comments = list(api_pages("/repos/%s/issues/%d/comments" % (REPO, number)))
+    reviews, seen_reviews, urls, inline_ids = [], set(), set(), set()
+    for r in api_pages("/repos/%s/pulls/%d/reviews" % (REPO, number)):
+        if r["state"] in ("PENDING", "REQUEST_REVIEW") or r["id"] in seen_reviews:
+            continue
+        seen_reviews.add(r["id"])
+        inline = list(api_pages("/repos/%s/pulls/%d/reviews/%d/comments" % (REPO, number, r["id"]))) \
+            if r.get("comments_count") != 0 else []
+        reviews.append((r, inline))
+        urls.update(c["html_url"] for c in [r] + inline if c.get("html_url"))
+        inline_ids.update(c["id"] for c in inline if c.get("id") is not None)
+    # (a review's ID is not an issue-comment ID; its URL identifies an overlapping summary)
+    for c in comments:
+        if c.get("html_url") not in urls and c.get("id") not in inline_ids:
+            show_comment(c)
+    shown_inline = set()
+    for r, inline in reviews:
+        tags = [r["state"].lower().replace("_", " ")]
+        tags += [tag for tag in ("dismissed", "stale") if r.get(tag)]
+        print("\n--- review by %s, %s (%s), commit %s\n%s" % (
+            (r.get("user") or {}).get("login", "deleted user"), (r.get("submitted_at") or "")[:16].replace("T", " "),
+            ", ".join(tags), (r.get("commit_id") or "?")[:8], (r.get("body") or "").strip()))
+        if r.get("html_url"):
+            print(json.dumps(r["html_url"])[1:-1])
+        for c in inline:
+            key = c.get("id") if c.get("id") is not None else c.get("html_url")
+            if key is not None and key in shown_inline:
+                continue
+            if key is not None:
+                shown_inline.add(key)
+            where = json.dumps(c.get("path") or "?")[1:-1]
+            if c.get("position"):
+                where += ":%s" % c["position"]
+            elif c.get("original_position"):
+                where += ":%s (original)" % c["original_position"]
+            else:
+                where += ":?"
+            print("\n--- inline %s%s\n%s" % (where, " (resolved)" if c.get("resolver") else "",
+                                            (c.get("body") or "").strip()))
+            if c.get("html_url"):
+                print(json.dumps(c["html_url"])[1:-1])
 
 
 # --- pull requests: work in progress, ready, the description and the comments ------------------------------------
@@ -851,7 +914,7 @@ def cmd_pr(args):
             p["number"], p["title"], state, p["user"]["login"], p["head"]["label"], p["base"]["ref"],
             "mergeable" if p.get("mergeable") else "not mergeable as it is", p["html_url"], (p.get("body") or "").strip()))
         if args.comments:
-            show_comments(args.number)
+            show_pr_comments(args.number)
     elif args.action == "comment":
         if args.attach:
             post_with_pictures(args.number, text_arg(args), args.attach)

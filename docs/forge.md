@@ -117,6 +117,12 @@ Pick the verdict by what the review asks for:
 - `--comment` for questions and suggestions the author may take or leave.
 - `--approve` when the PR can merge as it is. Nits may ride along as inline comments; a blocking change may not.
 
+`pr view N --comments` includes submitted review summaries and inline feedback, with their commit, state, file
+positions and thread links. Drafts and unanswered review requests are omitted; dismissed/stale reviews and resolved
+inline threads are marked.
+Discussion, reviews and inline feedback are paged, and overlapping API entries are shown once. Endpoints that
+ignore the page number stop when they return no new entries.
+
 ## Other commands
 
 ```
