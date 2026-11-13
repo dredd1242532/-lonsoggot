@@ -16,7 +16,7 @@
 # Secret (RELEASING.md, One-time setup): RELEASE_SIGNING_KEY (the release key's private PEM). Releases are made with the job's
 # own token (forgejo.token, passed to scripts/release.py as RELEASE_TOKEN; no secret, no bot account): on a push to this repository Forgejo gives it write access to this repository's every
 # unit (routers/api/v1/permissions/repo_access.go), so it may make, upload to, publish and delete releases and delete tags
-# here, and nowhere else. No `permissions:` key: Forgejo 17 ignores it (with a warning). Variable: FORGEJO_UPLOAD_API, the
+# here, and nowhere else. No `permissions:` key: Forgejo 17 ignores it (with a warning). Variable: RELEASE_UPLOAD_API (passed to release.py as FORGEJO_UPLOAD_API; Forgejo reserves the FORGEJO_ prefix for variables), the
 # API's address without Cloudflare in front, when a file is larger than its 100 MB upload limit.
 name: Release
 on:
@@ -93,7 +93,7 @@ jobs:
       TAG: ${{ needs.version.outputs.tag }}
       REF: ${{ needs.version.outputs.ref }}
       RELEASE_TOKEN: ${{ forgejo.token }}
-      FORGEJO_UPLOAD_API: ${{ vars.FORGEJO_UPLOAD_API }}
+      FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
