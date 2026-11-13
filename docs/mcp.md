@@ -11,7 +11,7 @@ His guide and checks are retained in the import history, changed only by the pro
 The command-line client works without MCP. The scenario runner and contributor-process proposals from that original work
 are separate, not requirements of this server.
 This server is part 2 of 3, stacked on [Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47);
-review only commits after `9f5f6dd292efd5727b3dc6503d8c8003acb98333`. It becomes reviewable on its own once 47 is merged.
+review only commits after `23cc17be6ac3bf11e5553f0c3008b05325b3249c`. It becomes reviewable on its own once 47 is merged.
 The third part is the separate scenario runner.
 
 ## Install
