@@ -1,21 +1,21 @@
 /* Match the main UI's bundled fallback fonts; original files use SIL OFL 1.1. */
 @font-face {
   font-family: 'Libertinus Sans';
-  src: url('../assets/fonts/libertinus/LibertinusSans-Regular.ttf') format('truetype');
+  src: url('../assets/fonts/libertinus/LibertinusSans-Regular.woff2') format('woff2');
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: 'Libertinus Sans';
-  src: url('../assets/fonts/libertinus/LibertinusSans-Bold.ttf') format('truetype');
+  src: url('../assets/fonts/libertinus/LibertinusSans-Bold.woff2') format('woff2');
   font-style: normal;
   font-weight: 700;
   font-display: swap;
 }
 @font-face {
   font-family: 'Libertinus Serif';
-  src: url('../assets/fonts/libertinus/LibertinusSerif-Semibold.ttf') format('truetype');
+  src: url('../assets/fonts/libertinus/LibertinusSerif-Semibold.woff2') format('woff2');
   font-style: normal;
   font-weight: 600;
   font-display: swap;

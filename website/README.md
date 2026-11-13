@@ -30,6 +30,9 @@ The front page has Guides, Help, Development, Team and About navigation, site se
 controls, and team credits. The main Grappling Hook Bean becomes the Glowing Fairy
 Bean after three clicks, taps or keyboard button activations. Reload resets it.
 A failed image load keeps the original artwork and allows a retry.
+The hero artwork gently bobs over six seconds, matching the main MagicBean homepage.
+Hovering or focusing the bean pauses it; reduced-motion preferences disable the sway.
+The button and focus outline stay stationary, including after the fairy swap.
 
 The homepage's bean punchline changes once per page load from ten short lines.
 Session storage prevents an immediate repeat across reloads in the same tab when
@@ -48,8 +51,12 @@ own `../assets/longshot.png` is preserved separately.
 
 Body text and controls use self-hosted Atkinson Hyperlegible Next, weights 200–800,
 upright and italic. Libertinus Serif Semibold remains for large headings; code stays
-monospace. Font provenance and original notices are retained in `src/assets/fonts/`
-and `public/fonts/`. No external font service or game-extracted fonts are used.
+monospace. Libertinus is served as full-character WOFF2 files to reduce font downloads;
+the original TTFs remain alongside them. `src/assets/fonts/libertinus/WOFF2-PROVENANCE.json`
+records the encoder, source hashes and reproduction command. No encoder is required
+for normal website builds. Font provenance and original notices are retained in
+`src/assets/fonts/` and `public/fonts/`. No external font service or game-extracted
+fonts are used.
 
 ## Team roster
 

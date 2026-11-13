@@ -75,6 +75,15 @@
 .studio-bean-status { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .studio-art-halo { position: absolute; inset: 10% -5% 12%; z-index: -1; background: radial-gradient(ellipse, #a6d95820, transparent 68%); }
 .studio-hero-art img { width: 100%; max-width: 520px; height: auto; object-fit: contain; filter: drop-shadow(0 22px 22px #0003); }
+/* Match the main MagicBean site's gentle bob; the button and focus ring stay still. */
+@media (prefers-reduced-motion: no-preference) {
+  .studio-bean-button > img { animation: studio-bean-sway 6s ease-in-out infinite; }
+  .studio-bean-button:is(:hover, :focus) > img { animation-play-state: paused; }
+}
+@keyframes studio-bean-sway {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-8px) rotate(-1.5deg); }
+}
 .studio-hero-art figcaption { display: flex; align-items: center; gap: .6rem; text-align: center; color: var(--sl-color-gray-2); font-size: .8rem; font-weight: 600; letter-spacing: .02em; margin-top: .8rem; }
 .studio-hero-art figcaption span { color: var(--sl-color-text-accent); font-size: 1rem; }
 .studio-home h2, .studio-home h3, .studio-home h4 { font-family: var(--longshot-font-heading); font-weight: 600; color: var(--sl-color-white); letter-spacing: -.025em; line-height: 1.15; }
