@@ -52,6 +52,11 @@ std::string pcache_dir, pcache_path;
 std::atomic<int> creates{0}, destroys{0}, merges{0}, compiles{0}, failed_moves{0};
 std::atomic<int> fail_moves{0};   // (the next moves into place that fail)
 FakePipeline the_pipeline;
+// (vk_draw.cpp PcacheFetch: on Intel a fetch of a cache's data waits for the builds under way; none here)
+struct PcacheFetch {
+    explicit PcacheFetch(bool) {}
+    bool held() const { return true; }
+};
 
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); return 1; } } while (0)
 

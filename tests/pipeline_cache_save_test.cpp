@@ -158,6 +158,11 @@ using mkwvk::PipelineCacheFile;
 #undef rename
 #endif
 #endif
+// (vk_draw.cpp PcacheFetch: on Intel the fetch waits for the builds under way; none here)
+struct PcacheFetch {
+    explicit PcacheFetch(bool) {}
+    bool held() const { return true; }
+};
 #include "pipeline_cache_save.inc"
 #ifdef CACHE_VECTOR_BASELINE
 #undef fwrite
