@@ -444,6 +444,7 @@ def test_outputs_before_prepare(d):
         calls.append(("prepare", list(argv[1:])))
         game = Path(kw["cwd"])
         write(game / "mkw_vk_pipelines.stamp", b"stamp")
+        write(game / "longshot_pipelines.bin.predicted_keys", b"keys")
         write(game / "longshot_some_future_cache.dat", b"a file a later renderer writes")
         return packs.subprocess.CompletedProcess(argv, 0)
     saved = packs.make_game, packs.changed_files, packs.git, packs.subprocess.run
@@ -460,8 +461,53 @@ def test_outputs_before_prepare(d):
         check("the preparation runs once, after the build, with the Compile shaders level (%s)" % prep,
               len(prep) == 1 and prep[0][1][:1] == ["--prepare-shaders"] and "--compile-shaders" in prep[0][1])
         check("what the preparation wrote is not an output (%s)" % outputs,
-              "mkw_vk_pipelines.stamp" not in outputs and "longshot_some_future_cache.dat" not in outputs)
+              not {"mkw_vk_pipelines.stamp", "longshot_pipelines.bin.predicted_keys", "longshot_some_future_cache.dat"} & set(outputs))
     check("what make_game.py made is (%s)" % outputs, "longshot_shaders.bin" in outputs)
+
+
+def test_prepare_outcomes(d):
+    """A base whose preparation fails (exit 3: no usable Vulkan) is kept, base.json written with the reason, as make_game.py's
+    own preparation leaves the work to the first start; LONGSHOT_NO_PREPARE skips it by value (0 still prepares)"""
+    if packs.CROSS:
+        return
+
+    def fake_make_game(tree, b, work, game, env):
+        for m in packs.MODULES:
+            write(Path(game) / m[0], b"built")
+            if m[1]:
+                write(Path(work) / "sa" / "build" / m[1], b"map")
+    for name, env, code, prepares, why in (("vulkan", None, 3, True, "no usable Vulkan here"),
+                                           ("skip", "1", 0, False, "LONGSHOT_NO_PREPARE is set"),
+                                           ("zero", "0", 0, True, None)):
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(argv)
+            if kw.get("check") and code:   # (as subprocess.run does)
+                raise packs.subprocess.CalledProcessError(code, argv)
+            return packs.subprocess.CompletedProcess(argv, code)
+        saved = packs.make_game, packs.changed_files, packs.git, packs.subprocess.run, os.environ.get("LONGSHOT_NO_PREPARE")
+        packs.make_game, packs.changed_files, packs.git = fake_make_game, (lambda tree, commit: set()), (lambda tree, *a: "c" * 40)
+        packs.subprocess.run = fake_run
+        if env is None:
+            os.environ.pop("LONGSHOT_NO_PREPARE", None)
+        else:
+            os.environ["LONGSHOT_NO_PREPARE"] = env
+        try:
+            packs.main(["base", str(d / name), "--romfs", "r", "--exefs", "e", "--tree", str(ROOT)])
+        except packs.subprocess.CalledProcessError:
+            pass
+        finally:
+            packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved[:4]
+            if saved[4] is None:
+                os.environ.pop("LONGSHOT_NO_PREPARE", None)
+            else:
+                os.environ["LONGSHOT_NO_PREPARE"] = saved[4]
+        bj = d / name / "base.json"
+        check("%s: the base is kept (base.json written)" % name, bj.exists())
+        b = json.loads(bj.read_text()) if bj.exists() else {}
+        check("%s: the preparation %s (%d runs)" % (name, "runs" if prepares else "is skipped", len(calls)), (len(calls) == 1) == prepares)
+        check("%s: base.json says why it was not prepared (%r)" % (name, b.get("not_prepared")), b.get("not_prepared") == why)
 
 
 def test_seed(d):
@@ -469,7 +515,7 @@ def test_seed(d):
     nothing else"""
     seed = d / "seed"
     for name, data in (("mkw_vk_pipelines.bin", b"p"), ("mkw_vk_pipelines_play_3.bin", b"play"), (packs.CACHES[0], b"c"),
-                       ("mkw_vk_pipelines.stamp", b"stamp"),
+                       ("mkw_vk_pipelines.stamp", b"stamp"), ("longshot_pipelines.bin.predicted_keys", b"keys"),
                        ("longshot_log.txt", b"log"), ("image.bin", b"game")):
         write(seed / name, data)
 
@@ -486,7 +532,8 @@ def test_seed(d):
     finally:
         packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved
     game = d / "b" / "game"
-    for name in ("mkw_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin", packs.CACHES[0], "mkw_vk_pipelines.stamp"):
+    for name in ("mkw_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin", packs.CACHES[0], "mkw_vk_pipelines.stamp",
+                 "longshot_pipelines.bin.predicted_keys"):
         check("the seed's %s is copied" % name, (game / name).exists())
     for name in ("longshot_log.txt", "image.bin"):
         check("the seed's %s is not" % name, not (game / name).exists())
@@ -562,7 +609,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="longshot-dev-packs-") as d:
         d = Path(d)
         for name, t in (("mc", test_module_changed), ("pf", test_pack_folders), ("rt", test_generated_and_runtime),
-                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("outputs", test_outputs_before_prepare), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy)):
+                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("outputs", test_outputs_before_prepare), ("prepare", test_prepare_outcomes), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy)):
             (d / name).mkdir()
             t(d / name)
     print("test_dev_packs: ok")

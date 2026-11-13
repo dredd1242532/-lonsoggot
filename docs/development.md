@@ -369,6 +369,9 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   - **Prepare:** the runtime prepares again when the shader translator (`gpu/vk/{eden,sirit,compat}/`,
     `vk_shader.cpp`, `vk_bank.cpp`, `vk_state.h`, `vk_api.h`: what `build.py` stamps the shader caches with) or the
     shader seed changed; `--prepare` / `--no-prepare` decide instead.
+    A base prepares once its outputs are recorded, as `make_game.py` does: `LONGSHOT_NO_PREPARE` (set and not `0`)
+    skips it, and a preparation that fails (no usable Vulkan, a driver that stopped responding) keeps the base, with
+    the reason in `base.json`'s `not_prepared`, and leaves the work to its first start.
   - **Where:** game packs share one work folder per base (`<base>/game-work`). The lift key holds that folder's
     path, so the first game pack translates the game once and the later ones skip the lift while the translator,
     the HLE functions and the hot list stay the same; the base's compiled objects are linked in. Build one pack at

@@ -292,19 +292,30 @@ def base_env(predict_s):
     return {"RX_VK_PREDICT_S": str(predict_s)} if predict_s > 0 else {}
 
 
-def prepare(game, b):
+PREPARE_FAILED = {3: "no usable Vulkan here", 4: "the GPU driver stopped responding"}   # (make_game.py prepare_shaders' codes)
+
+
+def prepare(game, b, required=True):
     """The game's own preparation in a game folder, as make_game.py runs it (the game's environment, without the build's
-    switches), with the base's budget; nothing on a Windows game built on Linux, which prepares at its first start"""
+    switches), with the base's budget; nothing on a Windows game built on Linux, which prepares at its first start. required:
+    a failure stops (a runtime); otherwise (a base) it leaves the work to the first start, as make_game.py's own preparation
+    does. Returns why the shaders were not prepared now, or None"""
     if CROSS:
-        print("the shaders were not prepared now (a Windows game built on Linux): the game prepares them at its first start", flush=True)
-        return
+        why = "a Windows game built on Linux"
+        print("the shaders were not prepared now (%s): the game prepares them at its first start" % why, flush=True)
+        return why
     mg = load_make_game()
     # (make_game.py's Compile shaders level, as its own preparation passes it: the folder's choice, else Most; none on a tree
     # from before the levels)
     level = (getattr(mg, "folder_compile_level", lambda g: None)(game) or "most") if hasattr(mg, "COMPILE_LEVELS") else None
     cmd = [os.path.join(game, GAME), "--prepare-shaders"] + (["--compile-shaders", level] if level else [])
     print("+ %s%s" % (" ".join([GAME] + cmd[1:]), " (RX_VK_PREDICT_S=%d)" % b["predict_s"] if b.get("predict_s") else ""), flush=True)
-    subprocess.run(cmd, cwd=game, check=True, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0))))
+    code = subprocess.run(cmd, cwd=game, check=required, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0)))).returncode
+    if code:
+        why = PREPARE_FAILED.get(code, "the game stopped with exit status %d" % code)
+        print("the shaders were not prepared now (%s): the game prepares them at its first start" % why, flush=True)
+        return why
+    return None
 
 
 def make_game(tree, b, work, game, env):
@@ -405,7 +416,11 @@ def cmd_base(a):
     # here, with the budget if one is set, which so never reaches make_game.py's lift key)
     make_game(tree, b, work, game, {"LONGSHOT_NO_PREPARE": "1"})
     b["outputs"] = build_outputs(game)
-    prepare(game, b)
+    if os.environ.get("LONGSHOT_NO_PREPARE", "0") != "0":   # (as make_game.py reads it: set and not 0)
+        b["not_prepared"] = "LONGSHOT_NO_PREPARE is set"
+        print("the shaders were not prepared now (LONGSHOT_NO_PREPARE is set): the game prepares them at its first start", flush=True)
+    else:   # (a failure keeps the compiled base, its reason in base.json)
+        b["not_prepared"] = prepare(game, b, required=False)
     b["build_s"] = round(time.time() - t)
     for m in MODULES:   # (the maps beside the modules, for profilers)
         if m[1]:
