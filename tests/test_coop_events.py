@@ -15,7 +15,7 @@ import tempfile
 RUN_ALL_ARGS = ["--cc", "gcc"]
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("no-loss", "loss", "reorder", "parts", "duplicate", "queue", "acceptance", "codec", "threads",
-         "cancel", "cancel-accept", "reset-ack", "delayed-ack", "reaccept-step", "save-scope", "presence-scope")
+         "cancel", "cancel-accept", "reset-ack", "delayed-ack", "reaccept-step", "save-scope", "presence-scope", "counters")
 
 
 def compile_fixture(cc, source, folder, tsan=False, mutation=None):
@@ -34,8 +34,8 @@ def compile_fixture(cc, source, folder, tsan=False, mutation=None):
             text = text.replace("if (!save_kind(kind)) return accepted_locked(s, member) || (presentation_kind(kind) && presence_locked(s, member));",
                                 "(void)kind; return accepted_locked(s, member);")
         elif mutation == "cancel":
-            text = text.replace("if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) e->id = 0;",
-                                "if (0 && e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) e->id = 0;")
+            text = text.replace("if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);",
+                                "if (0 && e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);")
         (folder / "coop.c").write_text(text)
     commands = [
         [cc, "-std=c99", "-O2", "-w", "-c", str(source / "third_party/monocypher/monocypher.c"), "-o", str(mono)] + flags,

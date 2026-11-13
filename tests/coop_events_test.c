@@ -6,7 +6,12 @@
 #include "coop.c"
 #include <assert.h>
 
-void hos_log(const char *fmt, ...) { (void)fmt; }
+static char stats_line[512];
+void hos_log(const char *fmt, ...) {
+    char line[512];
+    va_list ap; va_start(ap, fmt); vsnprintf(line, sizeof line, fmt, ap); va_end(ap);
+    if (strstr(line, "stats:")) snprintf(stats_line, sizeof stats_line, "%s", line);
+}
 int hos_ini_option(const char *key, int otherwise) { (void)key; return otherwise; }
 int hos_ini_text(const char *key, char *out, size_t n) { (void)key; (void)out; (void)n; return 0; }
 
@@ -423,6 +428,37 @@ static void test_presence_scope(void) {
     puts("PASS events: presence-only chat, unaccepted arrival drop, every non-presentation kind closed, independent downloads, partial revoke and leave");
 }
 
+static void test_counters(void) {
+    assert(coop_sess_send_event(a,2,COOP_K_TEST,NULL,0)==COOP_EVENT_QUEUED);
+    pump(1000,0,0);
+    assert(!queued() && !a->n_event_retries && !a->n_event_given_up);
+    const unsigned first=sent_parts[0];
+    ack_loss=1;
+    assert(coop_sess_send_event(a,2,COOP_K_TEST,NULL,0)==COOP_EVENT_QUEUED);
+    pump(1000,0,0);
+    assert(queued()==1 && a->n_event_retries==sent_parts[0]-first-1 && a->n_event_retries>0);
+    grant(a,0); assert(a->n_event_given_up==1 && !queued());
+    grant(a,0); events_tick(a,clock_ms); assert(a->n_event_given_up==1);
+    CoopView view; coop_sess_view(a,&view); coop_sess_download_members(a,&view,1u<<2);
+    uint8_t transfer[16]={1};
+    assert(coop_sess_send_save_event(a,2,COOP_K_SAVE_CHUNK,transfer,clock_ms+100,NULL,0)==COOP_EVENT_QUEUED);
+    events_tick(a,clock_ms+100); assert(a->n_event_given_up==2 && !queued());
+    assert(coop_sess_send_save_event(a,2,COOP_K_SAVE_CHUNK,transfer,clock_ms+1000,NULL,0)==COOP_EVENT_QUEUED);
+    coop_sess_cancel_save_events(a,transfer); coop_sess_cancel_save_events(a,transfer);
+    assert(a->n_event_given_up==3 && !queued());
+    grant(a,1u<<2);
+    assert(coop_sess_send_event(a,2,COOP_K_TEST,NULL,0)==COOP_EVENT_QUEUED);
+    events_reset(a); events_reset(a); assert(a->n_event_given_up==4 && !queued());
+    a->last_rx=clock_ms; a->next_ping=UINT64_MAX; a->next_stats=0;
+    timers(a,clock_ms);
+    assert(strstr(stats_line,"reliable retries ") && strstr(stats_line,"events given up 4, round trip "));
+    a->n_event_retries=a->n_event_given_up=UINT64_MAX;
+    a->n_tx=a->n_rx=a->n_lost=a->n_bad_tag=a->n_sender=a->n_malformed=a->n_dup=a->n_test_drop=a->n_outbox_full=UINT32_MAX;
+    a->next_stats=0; timers(a,clock_ms);
+    assert(strstr(stats_line,"reliable retries 18446744073709551615, events given up 18446744073709551615, round trip "));
+    puts("PASS events: retry attempts, acknowledged success, cancellation/deadline/revoke/leave abandonment once, and complete stats line");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     setup();
@@ -442,6 +478,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "reaccept-step")) test_reaccept_between_steps();
     else if (!strcmp(argv[1], "save-scope")) test_save_scope();
     else if (!strcmp(argv[1], "presence-scope")) test_presence_scope();
+    else if (!strcmp(argv[1], "counters")) test_counters();
     else assert(0);
     coop_sess_free(a), coop_sess_free(b), coop_udp_close(relay);
     return 0;

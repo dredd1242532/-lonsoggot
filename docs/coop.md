@@ -209,7 +209,7 @@ so that the maker can give one to friends; it never logs the room secret.
 | `connecting to the relay`, `the relay answered in <n> ms` | each attempt; the first answer of one |
 | `room XXX… created (member 1)`, `joined room XXX… as member <n>`, `rejoined room XXX… as member <n>` | in the room |
 | `<name> (member <n>) joined the room`, `... left the room`, `... is away`, `... is back`, `member <n> is now <name>` | the others, from the relay's roster |
-| `stats: sent <n>, accepted <n>, thrown away <n> (tag, sender, not co-op, replay), dropped by the test <n>, outbox full <n>, round trip <n> ms` | every minute in a room while datagrams flow (the keep-alives count) |
+| `stats: sent <n>, accepted <n>, thrown away <n> (tag, sender, not co-op, replay), dropped by the test <n>, outbox full <n>, reliable retries <n>, events given up <n>, round trip <n> ms` | every minute in a room when counters change (keep-alives count) |
 | `relay lost; rejoining`, `room XXX… is gone from the relay`, `creating room XXX… again`, `room XXX… is open already; joining it` | the relay went silent or restarted |
 | `left room (<why>)` | leaving: `leave requested`, `the game is closing`, `co-op turned off`, `the server changed`, `the room's maker removed this player`, ... |
 | `no room: <why>` | an attempt refused: `no such room`, `the room is full`, `a room with this secret is already open on the relay: join it`, `update required: ...`, ... |
@@ -290,6 +290,10 @@ handler. It never dispatches an event through `coop_on_message`, nor lets an ord
 - Missing parts are retried after 250 ms; every retry is sealed anew, with a new envelope counter and the same event
   id. Event data is paced to one unicast fragment per 32 ms for the session, with recipients taking turns; ACKs have
   their separate bound. An event stuck at one recipient does not hold up delivery to the others or ordinary messages.
+  The stats line counts repeated fragment-send attempts as **reliable retries**. **Events given up** counts
+  unacknowledged recipient deliveries retired by leave/session/consent change, an explicit cancellation or a save
+  deadline, once each. Successful final ACKs do not count. These session-lifetime totals are not packet loss:
+  deliberate cancellations count too, and a still-pending ordinary event is not called lost.
 - Eight outgoing events fit; `COOP_EVENT_FULL` (-1) means none was queued. `COOP_EVENT_QUEUED` (1), `UNAVAILABLE` (0,
   no accepted recipient) and `INVALID` (-2, bad kind/size/destination or exhausted ids) are distinct. Never treat a
   full queue as success. An event holds at most 16 KiB, split into 1,024-byte parts: large enough for an initial body

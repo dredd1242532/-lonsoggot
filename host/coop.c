@@ -74,7 +74,7 @@ enum { EVENT_RETRY_MS = 250, EVENT_ACK_MS = 50, EVENT_SEND_MS = 32 };
 typedef struct { CoopEventFn fn; void *user; } EventHandler;
 typedef struct {
     uint64_t session, next, ack_epoch;
-    uint16_t acked, sent;
+    uint16_t acked, sent, attempted;
 } EventTarget;
 typedef struct {
     uint64_t id;
@@ -181,9 +181,19 @@ struct CoopSess {
     uint64_t log_at[L_CAUSES];
     uint32_t n_tx, n_rx, n_lost;                // (read by other threads for the view: written with bump)
     uint32_t n_malformed, n_bad_tag, n_sender, n_dup, n_test_drop, n_outbox_full;
-    uint32_t stats_seen;
+    uint64_t n_event_retries, n_event_given_up, stats_seen; /* lock: repeated fragments and retired recipient deliveries */
     uint8_t rx[2048];
 };
+
+/* Caller holds s->lock. Completion ACKs clear the session without going through this path. */
+static void event_drop_target(CoopSess *s, EventTarget *target) {
+    if (target->session) s->n_event_given_up++, target->session = 0;
+}
+static void event_discard(CoopSess *s, EventOut *event) {
+    if (!event->id) return;
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) event_drop_target(s, &event->target[id]);
+    event->id = 0;
+}
 
 // ---- logging
 
@@ -197,7 +207,7 @@ static int trace_on(void) {
 static void say(const CoopSess *s, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 static void say(const CoopSess *s, const char *fmt, ...) {
-    char msg[256];
+    char msg[384];   /* includes worst-case decimal stats counters without dropping the final fields */
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(msg, sizeof msg, fmt, ap);
@@ -575,7 +585,7 @@ void coop_sess_presence_members(CoopSess *s, const CoopView *view, uint32_t memb
         if (!presentation_kind(e->kind)) continue;
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
-            if (!bound_locked(s, id, e->kind)) e->target[id].session = 0;
+            if (!bound_locked(s, id, e->kind)) event_drop_target(s, &e->target[id]);
             any |= e->target[id].session != 0;
         }
         if (!any) e->id = 0;
@@ -609,7 +619,7 @@ void coop_sess_accept_members(CoopSess *s, const CoopView *view, uint32_t member
         if (save_kind(e->kind)) continue;
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
-            if (!bound_locked(s, id, e->kind)) e->target[id].session = 0;
+            if (!bound_locked(s, id, e->kind)) event_drop_target(s, &e->target[id]);
             any |= e->target[id].session != 0;
         }
         if (!any) e->id = 0;
@@ -639,7 +649,7 @@ void coop_sess_download_members(CoopSess *s, const CoopView *view, uint32_t memb
         if (!save_kind(e->kind)) continue;
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
-            if (!bound_locked(s, id, e->kind)) e->target[id].session = 0;
+            if (!bound_locked(s, id, e->kind)) event_drop_target(s, &e->target[id]);
             any |= e->target[id].session != 0;
         }
         if (!any) e->id = 0;
@@ -658,7 +668,7 @@ static void events_reset(CoopSess *s) {
     memset(s->download, 0, sizeof s->download);
     memset(s->download_epoch, 0, sizeof s->download_epoch);
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
-        s->event_out[i].id = 0;
+        event_discard(s, &s->event_out[i]);
         memset(s->event_out[i].target, 0, sizeof s->event_out[i].target);
     }
     coop_unlock(&s->lock);
@@ -743,7 +753,7 @@ void coop_sess_cancel_save_events(CoopSess *s, const uint8_t transfer[16]) {
     coop_lock(&s->lock);
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
         EventOut *e = &s->event_out[i];
-        if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) e->id = 0;
+        if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) event_discard(s, e);
     }
     coop_unlock(&s->lock);
 }
@@ -872,12 +882,12 @@ static void events_tick(CoopSess *s, uint64_t now) {
     for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
         EventOut *e = &s->event_out[i];
         if (!e->id) continue;
-        if (e->deadline && now >= e->deadline) { e->id = 0; continue; }
+        if (e->deadline && now >= e->deadline) { event_discard(s, e); continue; }
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
             EventTarget *t = &e->target[id];
             const CoopMemberInfo *m = member_of(s, id);
-            if (!m || m->session != t->session || !bound_locked(s, id, e->kind)) t->session = 0;
+            if (!m || m->session != t->session || !bound_locked(s, id, e->kind)) event_drop_target(s, t);
             any |= t->session != 0;
         }
         if (!any) e->id = 0;
@@ -903,6 +913,8 @@ static void events_tick(CoopSess *s, uint64_t now) {
         CoopEventPart p = {.recipient_session = t->session, .id = first->id, .total = first->len,
                            .kind = first->kind, .part = part, .bytes = first->bytes + (size_t)part * COOP_EVENT_PART};
         n = coop_event_part_pack(bytes, sizeof bytes, &p);
+        if (n && (t->attempted & (1u << part))) s->n_event_retries++;
+        if (n) t->attempted |= (uint16_t)(1u << part);
         if (save_kind(first->kind)) s->save_next_send = now + (2 * (n + 54) * 1000 + 12287) / 12288;
         t->sent |= (uint16_t)(1u << part);
         if ((t->sent | t->acked) == full) t->next = now + EVENT_RETRY_MS;
@@ -1499,15 +1511,17 @@ static void timers(CoopSess *s, uint64_t now) {
         }
         if (now >= s->next_stats) {
             s->next_stats = now + STATS_MS;
-            uint32_t seen = s->n_rx + s->n_tx + s->n_lost + s->n_test_drop;
+            coop_lock(&s->lock);
+            const uint64_t retries = s->n_event_retries, given_up = s->n_event_given_up;
+            const uint32_t ping = s->view.ping_ms;
+            coop_unlock(&s->lock);
+            const uint64_t seen = (uint64_t)s->n_rx + s->n_tx + s->n_lost + s->n_test_drop + retries + given_up;
             if (seen != s->stats_seen) {
                 s->stats_seen = seen;
-                coop_lock(&s->lock);
-                const uint32_t ping = s->view.ping_ms;
-                coop_unlock(&s->lock);
-                say(s, "stats: sent %u, accepted %u, thrown away %u (tag %u, sender %u, not co-op %u, replay %u), dropped by the test %u, outbox full %u, round trip %u ms",
+                say(s, "stats: sent %u, accepted %u, thrown away %u (tag %u, sender %u, not co-op %u, replay %u), dropped by the test %u, outbox full %u, reliable retries %llu, events given up %llu, round trip %u ms",
                     s->n_tx, s->n_rx, s->n_lost, s->n_bad_tag, s->n_sender, s->n_malformed, s->n_dup, s->n_test_drop,
-                    __atomic_load_n(&s->n_outbox_full, __ATOMIC_RELAXED), ping);
+                    __atomic_load_n(&s->n_outbox_full, __ATOMIC_RELAXED), (unsigned long long)retries,
+                    (unsigned long long)given_up, ping);
             }
         }
         break;
