@@ -31,7 +31,9 @@ inline bool project(const float m[16], const float p[3], const float viewport[4]
         double dx=c[0]*viewport[2]/crop[2], dy=-c[1]*viewport[3]/crop[3];
         if (front) dx=(u-.5)*viewport[2],dy=(v-.5)*viewport[3];
         if (std::abs(dx)+std::abs(dy)<1e-9) dy=1; // straight behind: turn around, indicated at the bottom
-        const double length=std::hypot(dx,dy); dx/=length; dy/=length;
+        const double scale=std::max(std::abs(dx),std::abs(dy));
+        dx/=scale; dy/=scale;
+        const double length=std::sqrt(dx*dx+dy*dy); dx/=length; dy/=length;
         const double hx=viewport[2]*.5-margin-text_w*.5, hy=viewport[3]*.5-margin-text_h;
         if (!(hx>0 && hy>0)) return false;
         const double t=std::min(std::abs(dx)>1e-9?hx/std::abs(dx):1e30,std::abs(dy)>1e-9?hy/std::abs(dy):1e30);

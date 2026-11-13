@@ -142,6 +142,8 @@ def main():
     spec.loader.exec_module(env_fixture)
     block, definition = env_fixture.block, env_fixture.definition
     cpp = env_fixture.fixture(root)
+    # This fixture replaces the environment test's main and never calls its Windows-only setenv helper.
+    cpp = cpp.replace(definition(cpp, "static int setenv("), "")
     feature_type = block(api, api.index("typedef struct MkwVkCoopFeature {")) + " MkwVkCoopFeature;"
     setting_type = block(api, api.index("typedef struct MkwVkSetting {")) + " MkwVkSetting;"
     max_features = re.search(r"enum \{ HOS_COOP_RULE_CATEGORIES = \d+, HOS_COOP_FEATURES = \d+ \};", api).group(0)
