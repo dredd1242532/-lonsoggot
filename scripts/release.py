@@ -305,10 +305,24 @@ def pem_of(spki):
     return "-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n" % "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
 
 
+def strip_cs_comments(text):
+    """C# text with its // and /* */ comments blanked out (strings, verbatim strings and chars kept as they are)"""
+    return re.sub(r'//[^\n]*|/\*.*?\*/|@"(?:[^"]|"")*"|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'',
+                  lambda m: " " if m.group(0)[0] == "/" else m.group(0), text, flags=re.S)
+
+
 def keys_from_cs(text):
-    """[spki] of the launcher's ReleaseKeys.BuiltIn: the ReleaseKey.FromSpki("...") entries of its initializer"""
-    start = text.index("BuiltIn =")
-    return [base64.b64decode(k) for k in re.findall(r'ReleaseKey\.FromSpki\("([A-Za-z0-9+/=]+)"\)', text[start:text.index(";", start)])]
+    """[spki] of the launcher's ReleaseKeys.BuiltIn: the ReleaseKey.FromSpki("...") entries inside its initializer's braces
+    (comments left out first, so a ; { or } in one changes nothing)"""
+    code = strip_cs_comments(text)
+    m = re.search(r"\bBuiltIn\s*=[^{;]*\{", code)
+    if not m:
+        return []
+    depth, end = 1, m.end()
+    while depth and end < len(code):
+        depth += {"{": 1, "}": -1}.get(code[end], 0)
+        end += 1
+    return [base64.b64decode(k) for k in re.findall(r'ReleaseKey\.FromSpki\(\s*"([A-Za-z0-9+/=]+)"\s*\)', code[m.end():end])]
 
 
 def trusted_keys(root=ROOT):
@@ -371,7 +385,7 @@ def repo_of(product):
     return os.environ.get("GITHUB_REPOSITORY") or PRODUCTS[product]["repo"]
 
 
-def api(method, path, body=None, data=None, content_type=None, upload=False):
+def api(method, path, body=None, data=None, content_type=None, upload=False, missing_ok=False):
     base = (os.environ.get("FORGEJO_UPLOAD_API") if upload else None) or os.environ.get("FORGEJO_API") or SERVER + "/api/v1"
     headers = {"User-Agent": "longshot-release", "Accept": "application/json"}
     token = os.environ.get("RELEASE_TOKEN")
@@ -386,18 +400,25 @@ def api(method, path, body=None, data=None, content_type=None, upload=False):
         with urllib.request.urlopen(req, timeout=600) as r:
             text = r.read()
     except urllib.error.HTTPError as e:
+        if missing_ok and e.code == 404:
+            return None
         fail("%s %s: HTTP %d %s" % (method, path, e.code, e.read().decode("utf-8", "replace")[:300]))
     return json.loads(text) if text else None
 
 
-def releases(repo):
-    out, page = [], 1
-    while True:
-        items = api("GET", "/repos/%s/releases?draft=true&limit=50&page=%d" % (repo, page)) or []
-        out += items
-        if len(items) < 50:
+def releases(repo, pages=1000):
+    """Every release of repo, page by page until an empty one: published ones, and drafts too with a writer token (each
+    says which it is in draft and prerelease). No draft= or pre-release= filter is sent: on Forgejo they keep only the
+    releases whose field equals the value (draft=true lists the drafts alone)"""
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        items = api("GET", "/repos/%s/releases?limit=50&page=%d" % (repo, page)) or []
+        new = [r for r in items if r["id"] not in seen]
+        if not new:
             return out
-        page += 1
+        seen.update(r["id"] for r in new)
+        out += new
+    fail("%s: more than %d pages of releases" % (repo, pages))
 
 
 def multipart(name, data):
@@ -442,12 +463,16 @@ def publish(tag, target, notes_file, files, product):
 
 
 def prune(keep, product):
+    """The published nightlies past the newest keep, and the drafts of nightlies older than the newest published one (left
+    by failed runs), with their tags; never a stable, a release candidate or the tools release"""
     repo = repo_of(product)
-    nightlies = sorted((r for r in releases(repo) if NIGHTLY.match(r["tag_name"])),
-                       key=lambda r: int(NIGHTLY.match(r["tag_name"]).group(1)), reverse=True)
-    for r in nightlies[keep:]:
+    count = lambda r: int(NIGHTLY.match(r["tag_name"]).group(1))
+    nightlies = sorted((r for r in releases(repo) if NIGHTLY.match(r["tag_name"])), key=count, reverse=True)
+    published = [r for r in nightlies if not r.get("draft")]
+    gone = published[keep:] + [r for r in nightlies if r.get("draft") and published and count(r) < count(published[0])]
+    for r in gone:
         api("DELETE", "/repos/%s/releases/%d" % (repo, r["id"]))
-        api("DELETE", "/repos/%s/tags/%s" % (repo, urllib.parse.quote(r["tag_name"])))
+        api("DELETE", "/repos/%s/tags/%s" % (repo, urllib.parse.quote(r["tag_name"])), missing_ok=True)   # (a draft has no tag yet)
         print("pruned %s" % r["tag_name"])
 
 

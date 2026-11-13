@@ -21,6 +21,7 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
+import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release", ROOT / "scripts" / "release.py")
@@ -88,6 +89,18 @@ class Keys(unittest.TestCase):
                       '        ReleaseKey.FromSpki("QUJD"),\n    };\n')
         self.assertEqual(release.trusted_keys(str(self.dir)), [b"ABC"])
         self.assertEqual(release.product_of(str(self.dir)), "launcher")
+        # (comments with ; { } before, inside and after the initializer change nothing; a commented-out key is no key)
+        cs.write_text('/* BuiltIn = { ReleaseKey.FromSpki("WFla") }; */\n'
+                      '    // the keys; one per line { as keygen prints them }\n'
+                      '    public static readonly IReadOnlyList<ReleaseKey> BuiltIn = new ReleaseKey[]\n    {\n'
+                      '        // id 5e18330371d7f5aa, keygen 2026-11-13; RELEASING.md { "One-time setup" }\n'
+                      '        ReleaseKey.FromSpki("QUJD"),   /* the first; } */\n'
+                      '        // ReleaseKey.FromSpki("WFla"),\n'
+                      '        ReleaseKey.FromSpki( "REVG" ),\n    };\n'
+                      '    static readonly string Other = "ReleaseKey.FromSpki(\\"R0hJ\\")";\n')
+        self.assertEqual(release.trusted_keys(str(self.dir)), [b"ABC", b"DEF"])
+        cs.write_text('class ReleaseKeys {}\n')
+        self.assertEqual(release.trusted_keys(str(self.dir)), [])
         (self.dir / "scripts").mkdir()
         (self.dir / "scripts" / "release_keys.json").write_text('{"keys": ["REVG"]}')
         cs.unlink()
@@ -198,6 +211,9 @@ class Bump(unittest.TestCase):
         self.assertEqual(release.previous_tag("v3.1.0", 3, str(self.dir)), "v3.0.0")   # (a stable: since the stable before)
 
 
+NIGHTLY_OF = lambda tag: release.NIGHTLY.match(tag)
+
+
 class FakeForgejo(http.server.BaseHTTPRequestHandler):
     releases, deleted, uploads = [], [], []
 
@@ -215,8 +231,21 @@ class FakeForgejo(http.server.BaseHTTPRequestHandler):
     def body(self):
         return self.rfile.read(int(self.headers.get("Content-Length") or 0))
 
+    max_items = 50   # (the server's max_response_items: /api/v1/settings/api)
+
     def do_GET(self):
-        self.answer(200, self.releases if "page=1" in self.path else [])
+        # (as Forgejo 17's GET /repos/{owner}/{repo}/releases: drafts only with a writer token; draft= and pre-release= keep
+        # only the releases whose field equals the value; limit (default 30, at most max_response_items) and page; newest first)
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        rels = sorted(self.releases, key=lambda r: r["id"], reverse=True)
+        if not self.headers.get("Authorization"):
+            rels = [r for r in rels if not r["draft"]]
+        for param, field in (("draft", "draft"), ("pre-release", "prerelease")):
+            if param in q:
+                rels = [r for r in rels if r[field] == (q[param][0] == "true")]
+        limit = min(int(q.get("limit", ["30"])[0]), self.max_items)
+        page = int(q.get("page", ["1"])[0])
+        self.answer(200, rels[(page - 1) * limit:page * limit])
 
     def do_POST(self):
         data = self.body()
@@ -238,16 +267,23 @@ class FakeForgejo(http.server.BaseHTTPRequestHandler):
         rel.update(json.loads(self.body()))
         self.answer(200, rel)
 
+    tags = set()   # (the tags there are: a draft's tag is made when it is published)
+
     def do_DELETE(self):
         self.deleted.append(self.path)
-        if "/releases/" in self.path and "/assets/" not in self.path:
+        if "/tags/" in self.path:
+            tag = urllib.parse.unquote(self.path.rsplit("/", 1)[1])
+            if tag not in self.tags:
+                return self.answer(404, {"message": "tag not found"})
+            self.tags.discard(tag)
+        elif "/releases/" in self.path and "/assets/" not in self.path:
             FakeForgejo.releases = [r for r in self.releases if r["id"] != int(self.path.rsplit("/", 1)[1])]
         self.answer(204)
 
 
 class Publish(unittest.TestCase):
     def setUp(self):
-        FakeForgejo.releases, FakeForgejo.deleted, FakeForgejo.uploads = [], [], []
+        FakeForgejo.releases, FakeForgejo.deleted, FakeForgejo.uploads, FakeForgejo.tags = [], [], [], set()
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeForgejo)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.shutdown)
@@ -288,14 +324,66 @@ class Publish(unittest.TestCase):
         self.assertIn("/api/v1/repos/MagicBeanDev/Test/releases/1/assets/9", FakeForgejo.deleted)
         self.assertEqual((FakeForgejo.releases[0]["draft"], FakeForgejo.releases[0]["prerelease"]), (False, False))
 
+    def releases_of(self, *rows):
+        """FakeForgejo's releases from (tag, draft, prerelease) rows; a published one has its tag"""
+        FakeForgejo.releases = [{"id": i + 1, "tag_name": t, "draft": d, "prerelease": p, "assets": []}
+                                for i, (t, d, p) in enumerate(rows)]
+        FakeForgejo.tags = {t for t, d, _ in rows if not d}
+
     def test_prune_keeps_the_newest_nightlies_and_everything_else(self):
-        tags = ["nightly-%d-%08x" % (n, n) for n in (3, 12, 7, 100, 50, 9, 1)] + ["tools", "v3.0.0", "v3.1.0-rc.1"]
-        FakeForgejo.releases = [{"id": i + 1, "tag_name": t, "draft": False, "prerelease": True, "assets": []} for i, t in enumerate(tags)]
+        nightly = lambda n: "nightly-%d-%08x" % (n, n)
+        self.releases_of(*[(nightly(n), False, True) for n in (3, 12, 7, 100, 50, 9, 1)],
+                         ("tools", False, True), ("v3.0.0", False, False), ("v3.1.0-rc.1", False, True), ("v2.9.0", False, False),
+                         (nightly(4), True, True), (nightly(101), True, True))   # (drafts a failed run left; 101: still to come)
         run("--product", "longshot", "prune", "--keep", "5")
         left = sorted(r["tag_name"] for r in FakeForgejo.releases)
-        self.assertEqual(left, sorted(["nightly-%d-%08x" % (n, n) for n in (100, 50, 12, 9, 7)] + ["tools", "v3.0.0", "v3.1.0-rc.1"]))
+        self.assertEqual(left, sorted([nightly(n) for n in (101, 100, 50, 12, 9, 7)] + ["tools", "v3.0.0", "v3.1.0-rc.1", "v2.9.0"]))
         self.assertIn("/api/v1/repos/MagicBeanDev/Test/tags/nightly-1-00000001", FakeForgejo.deleted)
         self.assertIn("/api/v1/repos/MagicBeanDev/Test/tags/nightly-3-00000003", FakeForgejo.deleted)
+        self.assertEqual(FakeForgejo.tags, {nightly(n) for n in (100, 50, 12, 9, 7)} | {"tools", "v3.0.0", "v3.1.0-rc.1", "v2.9.0"})
+        kept = [r["id"] for r in FakeForgejo.releases if not NIGHTLY_OF(r["tag_name"])]
+        self.assertFalse([p for p in FakeForgejo.deleted if p.rsplit("/", 1)[1] in [str(i) for i in kept] + ["tools", "v3.0.0", "v3.1.0-rc.1", "v2.9.0"]])
+
+    def test_every_release_on_every_page(self):
+        # (more than a page, at a smaller max_response_items than release.py asks for: pages until an empty one)
+        FakeForgejo.max_items = 20
+        self.addCleanup(setattr, FakeForgejo, "max_items", 50)
+        self.releases_of(*[("nightly-%d-%08x" % (n, n), n % 7 == 0, True) for n in range(1, 46)], ("v3.0.0", False, False))
+        got = release.releases("MagicBeanDev/Test")
+        self.assertEqual(len(got), 46)
+        self.assertEqual(sum(r["draft"] for r in got), 6)
+        self.assertEqual(release.newest(got, "nightly", 3), "nightly-45-0000002d")
+        self.assertEqual(release.newest(got, "stable", 3), "v3.0.0")
+
+    def test_check_tag_against_the_published_releases(self):
+        # (check-tag asks Forgejo: a tag at or below a published release is refused; a draft is no release yet)
+        repo = Path(tempfile.mkdtemp(prefix="release-git-"))
+        self.addCleanup(shutil.rmtree, repo, True)
+        g = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "tag.gpgsign=false",
+                                       *a], cwd=repo, check=True, capture_output=True)
+        g("init", "-q", "-b", "main")
+        g("commit", "-q", "--allow-empty", "-m", "feat: a")
+        g("tag", "v3.0.0-rc.1")
+        self.releases_of(("v3.0.0", False, False), ("v3.1.0-rc.1", True, True), ("tools", False, True))
+        with mock.patch.object(release, "ROOT", str(repo)), mock.patch.object(release, "git",
+                lambda *a, root=None, check=True, _g=release.git: _g(*a, root=str(repo), check=check)):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(run("--product", "longshot", "check-tag", "v3.0.0-rc.1", "--main", "main")[0], 1)
+            self.assertIn("not above every release there is: v3.0.0", err.getvalue())
+            FakeForgejo.releases[0]["draft"] = True   # (back to a draft: no longer in the way)
+            self.assertEqual(run("--product", "longshot", "check-tag", "v3.0.0-rc.1", "--main", "main")[0], 0)
+
+    def test_publish_refuses_a_published_tag_on_a_later_page(self):
+        self.releases_of(("v3.0.0", False, False), *[("nightly-%d-%08x" % (n, n), False, True) for n in range(1, 80)])
+        notes = self.dir / "notes.md"
+        notes.write_text("notes\n")
+        f = self.dir / "SHA256SUMS"
+        f.write_text("x\n")
+        with self.assertRaises(SystemExit) as e:
+            run("--product", "longshot", "publish", "v3.0.0", "--target", "abc", "--notes", notes, f)
+        self.assertIn("already published", str(e.exception))
+        self.assertEqual(FakeForgejo.uploads, [])
 
 
 if __name__ == "__main__":
