@@ -1,0 +1,54 @@
+---
+import DefaultHero from '@astrojs/starlight/components/Hero.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+const isHome = Astro.url.pathname.replace(/\/$/, '') === base.replace(/\/$/, '');
+---
+{isHome ? (
+<section class="adventure-hero studio-hero" aria-labelledby="_top">
+  <div class="studio-hero-copy">
+    <div class="studio-eyebrow"><span class="studio-signal" aria-hidden="true"></span> LONGSHOT <span class="studio-preview">LOCAL PREVIEW</span></div>
+    <h1 id="_top" data-page-title>Serious<br />recompilation.<br /><em>Slightly emotional<br class="studio-wide-break" /> beans.</em></h1>
+    <p class="studio-intro">Your PC adventure, with <strong>team magicbean</strong>. Get set up, follow development, and find help without the side quest.</p>
+    <div class="studio-hero-actions"><a class="studio-button primary" href={`${base}guides/getting-started/`}>Get started <span aria-hidden="true">↗</span></a><a class="studio-button secondary" href={`${base}#development`}>Explore development <span aria-hidden="true">↓</span></a></div>
+    <p class="studio-hero-note">Bring your own supported game files. We’ll bring the beans.</p>
+  </div>
+  <figure class="studio-hero-art">
+    <div class="studio-art-halo" aria-hidden="true"></div>
+    <button class="studio-bean-button" type="button" aria-label="Poke the bean" data-bean-secret data-fairy-src={`${base}branding/glowing-fairy-bean.png`}>
+      <img src={`${base}branding/grappling-hook-bean.png`} alt="A delighted blue bean adventurer swinging a grappling hook." width="1254" height="1254" fetchpriority="high" decoding="async" />
+    </button>
+    <span class="studio-bean-status" data-bean-status role="status" aria-live="polite"></span>
+    <figcaption><span aria-hidden="true">↳</span> COURAGE: QUESTIONABLE. COMMITMENT: ABSOLUTE.</figcaption>
+  </figure>
+</section>
+) : <DefaultHero />}
+
+<script>
+  const bean = document.querySelector<HTMLButtonElement>('[data-bean-secret]');
+  const artwork = bean?.querySelector('img');
+  const status = document.querySelector<HTMLElement>('[data-bean-status]');
+  if (bean && artwork && status) {
+    let pokes = 0;
+    // Native button clicks also cover touch, Enter and Space. Reload resets the secret.
+    bean.addEventListener('click', async () => {
+      if (pokes >= 3) return;
+      if (++pokes !== 3) return;
+      bean.setAttribute('aria-busy', 'true');
+      try {
+        const fairy = new Image();
+        fairy.src = bean.dataset.fairySrc!;
+        await fairy.decode();
+        artwork.src = fairy.src;
+        artwork.alt = 'A glowing blue fairy bean with luminous wings and a flower crown.';
+        bean.setAttribute('aria-label', 'Fairy bean unlocked');
+        bean.setAttribute('aria-disabled', 'true');
+        status.textContent = 'Secret unlocked: fairy bean!';
+      } catch {
+        pokes = 2;
+        status.textContent = 'The fairy bean is taking a moment. Poke again to retry.';
+      } finally {
+        bean.removeAttribute('aria-busy');
+      }
+    });
+  }
+</script>

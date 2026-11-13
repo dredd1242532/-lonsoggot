@@ -1,0 +1,13 @@
+---
+import Search from '@astrojs/starlight/components/Search.astro';
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+---
+<div class="studio-header">
+  <a class="studio-brand" href={base} aria-label="Longshot by team magicbean home">
+    <img class="studio-brand-mark" src={`${base}branding/longshot.png`} alt="" width="512" height="512" decoding="async" />
+    <span>longshot<small>TEAM MAGICBEAN</small></span>
+  </a>
+  <nav class="studio-nav" aria-label="Main navigation"><a href={`${base}#guides`}>Guides</a><a href={`${base}#development`}>Development</a><a href={`${base}#help`}>Help</a></nav>
+  <div class="studio-tools"><Search /><ThemeSelect /></div>
+</div>
