@@ -806,6 +806,13 @@ static void pads_read(uint64_t *buttons, int32_t stick[4]) {
 static int pads_in_background(const char *env, int menu) {
     return env ? atoi(env) != 0 : menu != 0;
 }
+/* (read_input's rule for the background, for the ocarina's notes there: oc_pad_word) */
+static int pads_behind(void) {
+    static const char *env;
+    static int looked;
+    if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
+    return pads_in_background(env, rx_option(4, 0));
+}
 
 /* (longshot) Whether a pad's motion counts: when its buttons do, with the game's window in front, or behind another
    window when the player asked for the pads there. Otherwise GetSixAxisSensorStates hands out the pad at rest, so a
@@ -916,10 +923,12 @@ static void oc_notes(void) {
         hos_oc_note_bits = 0;
         return;
     }
+    /* (behind another window the keys are not the player's input, only the pads may be: oc_pad_word) */
+    const int keys = game_in_front();
     AcquireSRWLockShared(&pad_bind_lock);
     for (int i = 0; i < 5; i++) {
         const int row = HOS_KEY_OC_NOTE_L + i;
-        int held = bound_down(row, 0);
+        int held = keys && bound_down(row, 0);
         for (int k = 0; k < 2 && !held; k++)
             if (pad_bind[row][k] >= 0 && (pad_raw_now >> pad_bind[row][k] & 1)) held = 1;
         if (held) bits |= 1ULL << i;
@@ -939,8 +948,9 @@ static void oc_notes(void) {
 /* (npad_states writes the game's one merged word: during a button wait its five note buttons are the note controls) */
 static uint64_t oc_pad_word(uint64_t buttons) {
     if (hos_oc_wait != 1) return buttons;
-    /* (no notes where read_input gives the game no player input either: menu open, pads held after it, background) */
-    if (rx_option(1, 0) || pad_after_menu || !game_in_front()) return buttons;
+    /* (no notes where read_input gives the game no player input either: menu open, pads held after it, background
+       unless the pads count there) */
+    if (rx_option(1, 0) || pad_after_menu || (!game_in_front() && !pads_behind())) return buttons;
     static const uint64_t note_to[5] = {1ULL << HOS_SW_L, 1ULL << HOS_SW_R, 1ULL << HOS_SW_A,
                                         1ULL << HOS_SW_Y, 1ULL << HOS_SW_X};
     uint64_t w = buttons;
