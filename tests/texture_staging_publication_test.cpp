@@ -47,6 +47,8 @@ VkResult vmaFlushAllocation(VmaAllocator, VmaAllocation a, uint64_t offset, uint
     std::copy(a->cpu.begin() + lo, a->cpu.begin() + hi, a->gpu.begin() + lo); flushes++; return VK_SUCCESS;
 }
 void logf(const char*, ...) {}
+enum LogLevel : int { log_error, log_warn, log_info, log_debug, log_trace };   // (gpu/vk/vk_internal.h's, for the cut code's logf_at)
+void logf_at(LogLevel, const char*, ...) {}
 void consume(VkCommandBuffer) {
     for (auto& a : allocations) {
         if (!a->alive) continue;
