@@ -414,8 +414,8 @@ def main():
             check("Monitor's shape (default depends on this PC)" in context and
                   "NVIDIA DLSS (default depends on this PC)" in context, "PC values/default uncertainty lost")
             check("Switches set" in changes and "Switches set" not in context, "switches moved into the wrong section")
-            link = next(line for line in report.splitlines() if line.startswith("https://github.com/NotRexed/Hookshot/issues/new?"))
-            settings = parse_qs(urlsplit(link).query)["settings"][0]
+            link = next(line for line in report.splitlines() if line.startswith("https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new?"))
+            settings = parse_qs(urlsplit(link).query)["field:settings"][0]
             if mode == "context":
                 check("with a fixed default" in changes and "with a fixed default" in settings, "claims every option has a known default")
             else:
