@@ -56,17 +56,23 @@ as a file that is suddenly missing (`longshot.exe`, or the launcher itself). Put
    `Wacatac` detection), choose **Actions**, then **Restore**. Do this for each Longshot entry.
 3. Back on **Virus & threat protection**, under **Virus & threat protection settings**, choose **Manage settings**.
 4. Scroll to **Exclusions**, choose **Add or remove exclusions**, then **Add an exclusion** → **Folder**, and add these
-   two folders, one at a time:
-   - `%LOCALAPPDATA%\LongshotBuilder`: the builder and its tools.
+   folders, one at a time:
+   - `%LOCALAPPDATA%\LongshotLauncher`: the launcher's data, with each version's builder and build tools (in
+     `toolchains`) and the build files. The portable launcher keeps it in `LongshotLauncher-data` beside
+     `LongshotLauncher.exe` instead: add that folder.
+   - `%LOCALAPPDATA%\Programs\LongshotLauncher`: the installed launcher itself.
    - Your game folder: `%USERPROFILE%\Games\Longshot` unless you chose another.
 
    You can type the `%...%` paths straight into the folder picker's address bar.
-5. In the launcher, press **Repair**. It downloads the removed files again and checks them.
+5. In the launcher, build again. If a file is still missing, delete that version's folder in
+   `%LOCALAPPDATA%\LongshotLauncher\toolchains` (named after the version, such as `v3.0.0`): the next build downloads
+   it again and checks it.
 
 Or do steps 3 and 4 in one go, in PowerShell started with **Run as administrator**:
 
 ```powershell
-Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\LongshotBuilder"
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\LongshotLauncher"
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Programs\LongshotLauncher"
 Add-MpPreference -ExclusionPath "$env:USERPROFILE\Games\Longshot"
 ```
 
@@ -78,8 +84,8 @@ protection: they protect you from everything else.
 ### Another antivirus (Avast, AVG, Norton, Bitdefender, Kaspersky, ...)
 
 The steps are the same, with that program's names for them: restore the files from its quarantine (sometimes called the
-"vault" or "chest"), then add `%LOCALAPPDATA%\LongshotBuilder` and your game folder as **exceptions** (or "exclusions").
-Then press **Repair** in the launcher.
+"vault" or "chest"), then add `%LOCALAPPDATA%\LongshotLauncher`, `%LOCALAPPDATA%\Programs\LongshotLauncher` and your
+game folder as **exceptions** (or "exclusions"). Then build again in the launcher.
 
 ## 3. Help get it fixed
 

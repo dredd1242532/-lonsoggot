@@ -234,7 +234,8 @@ The build reads your game and never changes it.
 |---|---|---|
 | The game | The folder you chose (`Games\Longshot` by default) | The folder you chose (`~/Games/Longshot` by default) |
 | Your saves | `user` in the game folder | `~/.local/share/longshot` |
-| The builder and its tools, without the launcher (`--cli`) | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
+| The launcher, each version's builder and its tools (`toolchains`), the build files (`work`) | `%LOCALAPPDATA%\LongshotLauncher` (the installed program in `%LOCALAPPDATA%\Programs\LongshotLauncher`; the portable one's data in `LongshotLauncher-data` beside it) | `~/.local/share/longshot/launcher` (the portable AppImage's in `<AppImage>.home` beside it) |
+| A builder without the launcher (`--cli`) and its tools | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
 | The in-game menu's choices | `longshot_options.ini` in the game folder | `longshot_options.ini` in the game folder |
 
 - **Saves elsewhere:** start the game with `--user <folder>` ([command line arguments](#running-the-game-from-the-command-line)).
@@ -245,7 +246,8 @@ The build reads your game and never changes it.
   needed to play. To keep them, so that an update compiles only what changed, set `LONGSHOT_KEEP_BUILD_FILES=1` for the
   build; **Free up space** in the launcher's settings deletes them later. Their folder can be moved there before a build
   (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
-- **Uninstall:** delete the game folder, the builder's folder and the shortcuts.
+- **Uninstall:** uninstall the launcher (Windows: *Apps & features*), then delete its folder, the game folder and the
+  shortcuts.
 
 ### What Longshot connects to
 
@@ -283,7 +285,7 @@ line with the video memory in use against what the driver allows, and DLSS's det
 |---|---|
 | **Building** | |
 | "Longshot supports build e0f3ccfa" or "This version isn't supported" | Check that you chose the right game, with its update installed. |
-| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, or add the launcher's folder to its exclusions, then build again. |
+| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, and add `%LOCALAPPDATA%\LongshotLauncher` and `%LOCALAPPDATA%\Programs\LongshotLauncher` to its exclusions, then build again ([common problems](docs/common-issues.md#your-antivirus-removed-part-of-the-build-tools)). |
 | **Starting** | |
 | The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
 | Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
