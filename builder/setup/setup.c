@@ -1,6 +1,8 @@
 /* LongshotBuilder.exe in LongshotBuilder-<version>-windows-x64.zip (docs/releases.md): installs the Longshot Builder the zip
    carries, with the build tools tools.lock names, and starts it. It looks for no release itself: the Longshot Launcher
    (MagicBeanDev/LongshotLauncher) installs and updates the builder from Longshot's releases, and RecompLauncher runs this.
+   The builder has no window: only --cli installs and starts it, --play starts a built game, and this file as a game folder's
+   longshot.exe starts that game. Started any other way (by hand), it says to get the Longshot Launcher and does nothing else.
    The zip holds this setup, LongshotBuilder\ (the builder and Longshot's sources), tools.lock and VERSION: the builder is
    copied into %LOCALAPPDATA%\LongshotBuilder\versions\<version>, and each tool of tools.lock (`tool <name> <version> <system>
    <sha256> <size> <dest> <prefix> <url> [<url>]`) is downloaded from the first URL that answers, checked by its SHA-256,
@@ -39,7 +41,7 @@ static wchar_t g_app[MAX_PATH];   /* (LongshotBuilder\ beside this setup, the bu
 static HbHome g_home;
 static int g_home_ok;
 /* (RecompLauncher) --cli <make_game.py's options>: no window, the builder's lines on this process's stdout and stderr, its exit code
-   as ours; --play <game folder>: the game itself, waited for. Neither is used by the builder's own start, which is unchanged. */
+   as ours; --play <game folder>: the game itself, waited for. */
 static int g_headless;
 static DWORD g_exit;
 
@@ -544,9 +546,7 @@ static int retryable(DWORD status) {
 static int builder_ready(const wchar_t *exe) {
     static const wchar_t *const required[] = {
         L"LongshotBuilder.dll", L"LongshotBuilder.deps.json", L"LongshotBuilder.runtimeconfig.json",
-        L"hostfxr.dll", L"hostpolicy.dll", L"coreclr.dll", L"System.Private.CoreLib.dll",
-        L"WindowsBase.dll", L"PresentationCore.dll", L"PresentationFramework.dll",
-        L"PresentationNative_cor3.dll", L"wpfgfx_cor3.dll"
+        L"hostfxr.dll", L"hostpolicy.dll", L"coreclr.dll", L"System.Private.CoreLib.dll"
     };
     wchar_t path[MAX_PATH];
     const size_t n = wcslen(exe);
@@ -571,14 +571,12 @@ static int builder_ready(const wchar_t *exe) {
 
 static DWORD WINAPI work(LPVOID unused) {
     (void)unused;
-    /* (--repair, from the builder's Repair button: every part checked again and the version unpacked anew, after the builder that
-       started this has closed. It is not passed on) */
+    /* (--repair, with --cli: every part checked again and the version unpacked anew. It is not passed on) */
     int repair = 0;
     wchar_t *flag = wcsstr(g_cmdline, L"--repair");
     if (flag) {
         repair = 1;
         wmemmove(flag, flag + 8, wcslen(flag + 8) + 1);
-        Sleep(2000);
     }
     wchar_t base[MAX_PATH], downloads[MAX_PATH];
     if (!g_home_ok || (g_home.portable && hb_home_marked(g_home.root) != 1)) fail(L"The Builder home is unavailable or its portable marker is invalid.");
@@ -908,16 +906,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
                 CloseHandle(pi.hThread), CloseHandle(pi.hProcess);
                 return 0;
             }
-            MessageBoxW(NULL, L"The game (bin\\longshot.exe) is missing from this folder. Build it again with the Longshot Builder.", L"Longshot",
+            MessageBoxW(NULL, L"The game (bin\\longshot.exe) is missing from this folder. Build it again with the Longshot Launcher.", L"Longshot",
                         MB_ICONERROR);
             return 1;
         }
         if (wcsstr(g_cmdline, L"--launch") && launch_installed(g_cmdline)) return 0;
     }
+    if (!g_headless) {   /* (started by hand: the builder has no window to install and open) */
+        MessageBoxW(NULL, L"The Longshot Builder has no window of its own: the Longshot Launcher builds the game and starts it. "
+                          L"Get the launcher from " LAUNCHER_DOWNLOAD, L"Longshot Builder", MB_OK | MB_ICONINFORMATION);
+        return 1;
+    }
     if (!g_home_ok) {
         const wchar_t *why = L"The Builder home is unavailable or its portable marker is invalid. For a new portable install, put this setup in a writable folder and start it with --portable.";
-        if (g_headless) say_error(why);
-        else MessageBoxW(NULL, why, L"Longshot Builder setup", MB_OK | MB_ICONERROR);
+        say_error(why);
         return 1;
     }
     INITCOMMONCONTROLSEX icc = {sizeof icc, ICC_PROGRESS_CLASS};

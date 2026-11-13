@@ -1,4 +1,4 @@
-"""The Linux builder shows an @@error sentence whole. The old split kept only what followed its second word.
+"""make_game.reported gives an @@error sentence whole. The old split kept only what followed its second word.
 
 python -I -B tests/test_builder_status.py
 """
@@ -38,13 +38,6 @@ class BuilderStatusTests(unittest.TestCase):
         self.assertIsNone(make_game.reported("@@stage compile Compiling"))
         self.assertIsNone(make_game.reported("@@done /tmp/Longshot"))
         self.assertIsNone(make_game.reported("compiled in 10s"))
-
-    def test_the_builder_asks_make_game(self):
-        source = (ROOT / "builder" / "linux" / "longshot_builder.py").read_text(encoding="utf-8")
-        start = source.index("def check_version")
-        body = source[start:source.index("\n    def ", start + 1)]
-        self.assertIn("make_game.reported", body)
-        self.assertNotIn('.split(" ", 2)[-1]', body)
 
 
 if __name__ == "__main__":

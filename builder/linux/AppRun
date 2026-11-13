@@ -1,15 +1,16 @@
 #!/bin/sh
-# The Longshot AppImage: the builder window (builder/linux/longshot_builder.py), its Python and Longshot's sources, with the
-# Vulkan back end built already. The build tools (clang and lld, a glibc 2.35 sysroot, FFmpeg, SDL2, the Vulkan headers) are
+# The Longshot AppImage: the Linux builder, for the command line. Its Python, Longshot's sources and nx2/make_game.py, with the
+# Vulkan back end built already. It has no window: players use the Longshot Launcher, which unpacks this AppImage and runs
+# make_game.py with its Python. The build tools (clang and lld, a glibc 2.35 sysroot, FFmpeg, SDL2, the Vulkan headers) are
 # tools.lock's linux-x64 lines, outside the image: builder/linux/linux_tools.py finds them (the Longshot Launcher's, or the
-# builder's own toolchains folder) and, at the first start, downloads what is missing.
-#   Longshot.AppImage                  the builder window (Play is in the window, once a game is built)
-#   Longshot.AppImage --play           start the game the builder saved, without opening the window
-#   Longshot.AppImage --play <folder>  start the game in that folder
-#   Longshot.AppImage <folder>         the same
+# builder's own toolchains folder) and, for --cli, downloads what is missing.
 #   Longshot.AppImage --cli <args>     nx2/make_game.py itself, e.g. --cli --nup game.nup --out ~/Games/Longshot
-#   Longshot.AppImage --launch <dir>  the game folder's launcher: Play, and Update when this builder is newer than the game
-#   Longshot.AppImage --update <dir>  that folder built again with this builder's version (make_game.py --update)
+#                                      (RecompLauncher's prepare: --cli --prepare --game <copy>)
+#   Longshot.AppImage --play           start the game in ~/.config/longshot/builder.ini's out= folder
+#   Longshot.AppImage --play <folder>  start the game in that folder (RecompLauncher's start)
+#   Longshot.AppImage <folder>         the same
+#   Longshot.AppImage --launch <dir>  the same (a game folder's longshot, when a 2.x builder AppImage made it: builder/linux/longshot-folder)
+#   Longshot.AppImage                  a message: get the Longshot Launcher
 HERE="$(dirname "$(readlink -f "$0")")"
 LIB="$HERE/usr/lib/longshot"
 export LONGSHOT_TOOLS="$HERE/usr/share/longshot"
@@ -22,10 +23,9 @@ else
 fi
 PY="$HERE/usr/python/bin/python3"
 # The build tools' places (EMSDK, LONGSHOT_SYSROOT, LONGSHOT_FFMPEG, LONGSHOT_SDL2, RX_CPM), each downloaded first when it is
-# missing ("$@": --gui shows that in a window). A tool that cannot be had is left out: the window opens all the same, and
-# its build says what is missing; --cli stops
+# missing, its progress on stderr. A tool that cannot be had stops --cli
 build_tools() {
-    tools_env=$("$PY" -I "$LONGSHOT_TOOLS/builder/linux/linux_tools.py" env --install "$@") && tools_ok=1 || tools_ok=
+    tools_env=$("$PY" -I "$LONGSHOT_TOOLS/builder/linux/linux_tools.py" env --install) && tools_ok=1 || tools_ok=
     eval "$tools_env"
     [ -n "$tools_ok" ]
 }
@@ -39,8 +39,20 @@ if [ "${1:-}" = "--play" ]; then
     shift
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$@"
 fi
+if [ "${1:-}" = "--launch" ] && [ -n "${2:-}" ] && [ -d "$2" ]; then
+    exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$2"
+fi
 if [ -n "${1:-}" ] && [ -d "$1" ]; then
     exec "$LONGSHOT_TOOLS/builder/linux/longshot-launch" "$1"
 fi
-build_tools --gui || true
-exec "$PY" -I "$LONGSHOT_TOOLS/builder/linux/longshot_builder.py" "$@"
+# Anything else (started from the applications menu or a file manager, or a 2.x builder's --update): no window, a message
+MESSAGE="The Longshot Builder has no window of its own: the Longshot Launcher builds the game and starts it. Get the launcher from https://longshot.magicbean.dev/download"
+echo "$MESSAGE" >&2
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ ! -t 2 ]; then
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --info --title="Longshot Builder" --text="$MESSAGE" >/dev/null 2>&1 || true
+    elif command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "Longshot Builder" --msgbox "$MESSAGE" >/dev/null 2>&1 || true
+    fi
+fi
+exit 1
