@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 24
+#define MKWVK_API_VERSION 25
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -130,6 +130,7 @@ enum { HOS_TEXT_OFF, HOS_TEXT_ON, HOS_TEXT_PASTE };
    anything in the view */
 enum { HOS_COOP_STATE_OFF, HOS_COOP_STATE_LEFT, HOS_COOP_STATE_CONNECTING, HOS_COOP_STATE_JOINED, HOS_COOP_STATE_RECONNECTING };
 enum { HOS_COOP_MEMBERS = 8 };
+enum { HOS_COOP_RULE_CATEGORIES = 7, HOS_COOP_FEATURES = 64 };
 typedef struct MkwVkCoopMember {
     int32_t id;   /* 1 to 8 */
     uint8_t self, maker, away, accepted;
@@ -147,18 +148,22 @@ typedef struct MkwVkCoopView {
     uint32_t offer;
     int32_t accepted, unidentified;
     int32_t remedies;
+    /* (version 25) received signed terms, not this player's saved defaults. No Ready capability in this build. */
+    uint32_t rules_epoch;
+    uint8_t category[HOS_COOP_RULE_CATEGORIES], feature_count, feature_id[HOS_COOP_FEATURES];
+    int16_t feature_value[HOS_COOP_FEATURES];
+    char maker_key[24], room_title[40];
 } MkwVkCoopView;
 /* what the tab asks (coop_command's cmd): make a room, join one (text: its secret as typed), leave it, accept the offer
    (number: its offer), the player's name and the relay ("host[:port]") as the fields set them (text; number 1: the field's
    Enter, applied at once to a session that runs, 0: the saved value at the start, kept for the next Make or Join); the
    maker's remedies: remove the player of that key (text: its fingerprint), reset the pools */
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
-       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS };
+       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED };
 
 /* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
    registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most
    63 bytes of name and 255 bytes of help. key is the exact options-file key, never the display label. */
-enum { HOS_COOP_FEATURES = 64 };
 typedef struct MkwVkCoopFeature {
     int32_t id, lo, hi, def;
     const char *key, *name, *help;

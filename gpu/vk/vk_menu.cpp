@@ -698,12 +698,13 @@ const char* hn_resolution(int v, int variant) {
     return "A steady size: lower is faster, and softer.";
 }
 /// A row with nothing else to choose here: shown without its arrows, Left and Right leave it (and the saved value) alone
+bool coop_term_fixed(const int* value);
 bool row_fixed(const int* value) {
     return (value == &opts.dlss && ur::upscaler_fixed(upscalers_available())) ||
            (value == &opts.resolution && ur::render_fixed(upscaler())) || (value == &opts.upscale && !filter_needed()) ||
            (value == &opts.dlss_model && ur::model_fixed(upscaler(), dlss_preset_env() != nullptr)) ||
            (value == &opts.astc_rgba8 && getenv("RX_VK_ASTC_RGBA8")) ||   // (set for the run: vk_texture.cpp reads it first)
-           (value == &opts.intel_compiles && getenv("RX_VK_NO_INTEL_SERIAL"));
+           (value == &opts.intel_compiles && getenv("RX_VK_NO_INTEL_SERIAL")) || coop_term_fixed(value);
 }
 const char* tx_output_res(int v) {
     static char b[40];
@@ -1777,6 +1778,26 @@ void outputs_sync() {
          custom_output.w ? ", and one of the player's own" : "", list.c_str());
 }
 
+// A joined player's read-only signed terms have their own storage: no option/default is overwritten by an offer.
+struct CoopTermRow {
+    int value = 0;
+    char key[32]{}, name[64]{}, help[256]{};
+    Row row{};
+};
+CoopTermRow coop_terms[HOS_COOP_RULE_CATEGORIES + HOS_COOP_FEATURES];
+int coop_terms_count = 0;
+bool coop_rules_readonly = false;
+bool coop_term_fixed(const int* value) {
+    for (int i = 0; i < coop_terms_count; i++) if (value == &coop_terms[i].value) return true;
+    return false;
+}
+const char* tx_room_mode(int value) {
+    return value == 0 ? "Co-op" : value == 1 ? "PvP setup (no fighting)" : value == -1 ? "Off" : "Unknown";
+}
+const char* tx_signed_category(int value) {
+    return value == 1 ? "Shared" : value == 2 ? "One pool" : "Per player";
+}
+
 // Compiled feature rules append ordinary rows to Room rules. The host owns the registry's immutable strings; only
 // the bounded display text is copied, once. Unlabelled/older entries stay off the page and their file lines stay opaque.
 struct CoopFeatureRow {
@@ -1805,15 +1826,20 @@ void coop_feature_init() {
         snprintf(f.help, sizeof f.help, "%s", d.help ? d.help :
                  "Rule for rooms this game makes. The maker signs it; each player must accept changed rules.");
         f.row = {TAB_RULES, f.name, &f.value, d.lo, d.hi, 1,
-                 d.lo == 0 && d.hi == 1 ? tx_onoff : tx_feature, f.help, nullptr, false, true};
+                 d.id == 80 ? tx_room_mode : d.lo == 0 && d.hi == 1 ? tx_onoff : tx_feature, f.help, nullptr, false, true};
     }
 }
-int menu_row_count() { return kRows + coop_feature_count; }
-Row& menu_row(int i) { return i < kRows ? rows[i] : coop_feature_rows[i - kRows].row; }
+int menu_row_count() { return kRows + coop_feature_count + coop_terms_count; }
+Row& menu_row(int i) {
+    return i < kRows ? rows[i] : i < kRows + coop_feature_count ? coop_feature_rows[i - kRows].row :
+           coop_terms[i - kRows - coop_feature_count].row;
+}
 const char* coop_feature_row_key(const Row& r) {
     if (r.tab == TAB_RULES)
         for (int i = 0; i < coop_feature_count; i++)
             if (r.value == &coop_feature_rows[i].value) return coop_feature_rows[i].def.key;
+    for (int i = 0; i < coop_terms_count; i++)
+        if (r.value == &coop_terms[i].value) return coop_terms[i].key;
     return nullptr;
 }
 bool coop_feature_saved_key(const char* key) {
@@ -1844,6 +1870,8 @@ bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !
 // coop_refresh), its rows known by their names (as is_motion_row), its three text fields ----
 MkwVkCoopView coop_now{};
 bool coop_secret_shown = false;   // (Room secret: masked until Enter shows it; masked again at every opening of the menu)
+uint32_t coop_accept_token = 0, coop_accept_epoch = 0;
+bool coop_terms_changed = false;
 enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
@@ -1884,10 +1912,46 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopRemove: return makers && coop_removable(v, &chosen) > 0;
     case kCoopReset: return makers;
     case kCoopLeave: return coop_in_room(v);
-    case kCoopRules: return makers || !coop_in_room(v);
+    case kCoopRules: return makers || v.rules_epoch || !coop_in_room(v);
     default: return true;
     }
 }
+void coop_preview_refresh() {
+    coop_rules_readonly = coop_in_room(coop_now) && (!coop_now.remedies || !coop_now.accepted);
+    coop_terms_count = 0;
+    if (!coop_rules_readonly || !coop_now.rules_epoch) return;
+    static const char* const names[] = {"Progress", "Items", "Songs", "Quest items", "Small keys", "Rupees", "Ammunition"};
+    static const char* const keys[] = {"coop_progress", "coop_items", "coop_songs", "coop_quest", "coop_keys", "coop_rupees", "coop_ammo"};
+    static_assert(sizeof names / sizeof *names == HOS_COOP_RULE_CATEGORIES);
+    for (int i = 0; i < HOS_COOP_RULE_CATEGORIES + std::min<int>(coop_now.feature_count, HOS_COOP_FEATURES); i++) {
+        CoopTermRow& t = coop_terms[coop_terms_count++];
+        t = CoopTermRow{};
+        const bool category = i < HOS_COOP_RULE_CATEGORIES;
+        const int f = i - HOS_COOP_RULE_CATEGORIES, id = category ? 0 : coop_now.feature_id[f];
+        t.value = category ? coop_now.category[i] : coop_now.feature_value[f];
+        if (category) {
+            snprintf(t.name, sizeof t.name, "%s", names[i]);
+            snprintf(t.key, sizeof t.key, "%s", keys[i]);
+        } else {
+            snprintf(t.name, sizeof t.name, "Unknown rule %d", id);
+            snprintf(t.key, sizeof t.key, "coop_rule_%d", id);
+            for (int n = 0; host && host->coop_feature && n < HOS_COOP_FEATURES; n++) {
+                MkwVkCoopFeature d{};
+                if (!host->coop_feature(n, &d)) break;
+                if (d.id != id) continue;
+                snprintf(t.name, sizeof t.name, "%s", d.name && d.name[0] ? d.name : d.key);
+                snprintf(t.key, sizeof t.key, "%s", d.key);
+                break;
+            }
+        }
+        snprintf(t.help, sizeof t.help, "Signed terms, read only. Maker: %s. %s%s",
+                 coop_now.maker_key, coop_now.room_title, id == 80 && t.value == 1 ?
+                 ". This build cannot start a fight. Ready is unavailable." : ". Accept pins these exact terms.");
+        t.row = {TAB_RULES, t.name, &t.value, t.value, t.value, 0,
+                 category ? tx_signed_category : id == 80 ? tx_room_mode : tx_feature, t.help, nullptr, false, true};
+    }
+}
+
 /// (the name: any printable ASCII, the session cleans it; the relay: a host name, an IPv4 or [IPv6] address, a port; a room's
 /// secret: letters and digits, the dashes and spaces it may be typed with)
 bool relay_char(char c) { return isalnum((unsigned char)c) || c == '.' || c == '-' || c == ':' || c == '[' || c == ']' || c == '_'; }
@@ -1969,7 +2033,9 @@ bool intel_compiler_row() {
 #endif
 }
 bool row_shown(int i) {
-    if (i >= kRows) return i < menu_row_count();   // (registered Room rules rows have no device-dependent visibility)
+    if (i >= kRows + coop_feature_count) return i < menu_row_count();
+    if (i >= kRows) return !coop_rules_readonly;
+    if (rows[i].tab == TAB_RULES && coop_rules_readonly) return false;
     const int* v = rows[i].value;
     return ((rows[i].cheat < 0 && v != &opts.damage_taken) || cheats_on()) && (v != &opts.reflex || reflex_available()) &&
            (v != &opts.antilag || antilag_available()) && (v != &opts.intel_compiles || intel_compiler_row()) &&
@@ -1982,10 +2048,12 @@ bool row_shown(int i) {
 int tab_row_count(int t) {
     int c = 0;
     for (int i = 0; i < kRows; i++) if (rows[i].tab == (MenuTab)t && row_shown(i)) c++;
-    return c + (t == TAB_RULES ? coop_feature_count : 0);
+    return c + (t == TAB_RULES ? (coop_rules_readonly ? coop_terms_count : coop_feature_count) : 0);
 }
 
 int tab_row_to_global(int t, int local_idx) {
+    if (t == TAB_RULES && coop_rules_readonly)
+        return local_idx >= 0 && local_idx < coop_terms_count ? kRows + coop_feature_count + local_idx : 0;
     int count = 0;
     for (int i = 0; i < kRows; i++) {
         if (rows[i].tab == (MenuTab)t && row_shown(i)) {
@@ -2266,6 +2334,7 @@ void save() {
             fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
         fclose(f);
+        if (host && host->coop_command) host->coop_command(HOS_COOP_CMD_RULES_CHANGED, nullptr, 0);
     }
 }
 
@@ -2868,13 +2937,28 @@ void coop_press(const Row& r) {
     }
     if ((k == kCoopAccept || k == kCoopRemove || k == kCoopReset || k == kCoopLeave) && pending != &r) {
         pending = &r;
+        if (k == kCoopAccept) {
+            coop_accept_token = coop_now.offer, coop_accept_epoch = coop_now.rules_epoch;
+            coop_terms_changed = false;
+            cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;   // read the signed terms before the confirming press
+        }
         return;
     }
     pending = nullptr;
     if (!host || !host->coop_command) return;
     const MkwVkCoopMember* chosen = nullptr;
     if (k == kCoopMake) host->coop_command(HOS_COOP_CMD_MAKE, nullptr, 0);
-    else if (k == kCoopAccept) host->coop_command(HOS_COOP_CMD_ACCEPT, nullptr, coop_now.offer);
+    else if (k == kCoopAccept) {
+        MkwVkCoopView fresh{};
+        if (host->coop_view) host->coop_view(&fresh);
+        if (fresh.offer != coop_accept_token || fresh.rules_epoch != coop_accept_epoch) {
+            coop_now = fresh, coop_terms_changed = true;
+            coop_preview_refresh();
+            cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;
+            return;
+        }
+        if (!host->coop_command(HOS_COOP_CMD_ACCEPT, nullptr, coop_accept_token)) coop_terms_changed = true;
+    }
     else if (k == kCoopRemove && coop_removable(coop_now, &chosen) && chosen) host->coop_command(HOS_COOP_CMD_REMOVE, chosen->key, 0);
     else if (k == kCoopReset) host->coop_command(HOS_COOP_CMD_RESET_POOLS, nullptr, 0);
     else if (k == kCoopLeave) host->coop_command(HOS_COOP_CMD_LEAVE, nullptr, 0);
@@ -2888,7 +2972,12 @@ void coop_refresh(bool* changed) {
     memset(&now, 0, sizeof now);
     host->coop_view(&now);
     if (!memcmp(&now, &coop_now, sizeof now)) return;
+    if (pending && coop_kind(*pending) == kCoopAccept &&
+        (now.offer != coop_accept_token || now.rules_epoch != coop_accept_epoch)) {
+        pending = nullptr, coop_terms_changed = true;
+    }
     coop_now = now;
+    coop_preview_refresh();
     *changed = true;
     int shown = 0, at = -1;
     for (int i = 0; i < kRows; i++) {
@@ -3636,12 +3725,13 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     const bool known = v.state >= 0 && v.state <= HOS_COOP_STATE_RECONNECTING;
     c.d->PushClipRect(ImVec2(cx0, top - 8 * s), ImVec2(cx1, std::max(top, bottom) + 8 * s), true);
     ui::box(c, ImVec2(left, top), ImVec2(right, top + box_h));
-    std::string head = known ? states[v.state] : "";
+    std::string head = v.room_title[0] ? v.room_title : known ? states[v.state] : "";
     if (v.state == HOS_COOP_STATE_JOINED) head += ", " + std::to_string(v.n) + (v.n == 1 ? " player" : " players");
     ui::text_mid(c, c.f.strong, 19 * s, left + 20 * s, top + 22 * s, coop_in_room(v) ? ui::kGoldHi : ui::kInk, head.c_str());
     if (v.ping_ms && v.state == HOS_COOP_STATE_JOINED)
         ui::text_mid_right(c, c.f.body, 16 * s, right - 20 * s, top + 22 * s, ui::kSoft, (std::to_string(v.ping_ms) + " ms").c_str());
-    if (const char* line = v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
+    if (const char* line = coop_terms_changed ? "The terms changed. Read the new Room rules before accepting." :
+                           v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 50 * s, ui::kSoft, fit(c, c.f.body, 16 * s, right - left - 40 * s, line, false).c_str());
     const int count = tab_row_count(TAB_COOP);
     float y = top + box_h + 16 * s;

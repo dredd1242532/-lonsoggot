@@ -69,9 +69,9 @@ Row rows[] = {
 @@ROWS@@
 };
 constexpr int kRows = sizeof rows / sizeof rows[0];
-constexpr int coop_feature_count = 0;   // (this fixture isolates room actions; the registry rows have their own compiled test)
 const Row* pending = nullptr;
 int tab_selected[TAB_RULES + 1] = {};
+int cur_tab = TAB_COOP;
 static int saves = 0;
 void save() { saves++; }
 struct Asked { int cmd; char text[64]; uint32_t number; } asked[32];
@@ -85,8 +85,15 @@ static int host_command(int cmd, const char* text, uint32_t number) {
     n_asked++;
     return answer;
 }
-struct { void (*coop_view)(MkwVkCoopView*); int (*coop_command)(int, const char*, uint32_t); } the_host{host_view, host_command},
+static int host_feature(int index, MkwVkCoopFeature* out) {
+    if (index) return 0;
+    *out = MkwVkCoopFeature{80, -1, 1, 0, "coop_room_mode", "Mode", "Signed room mode"};
+    return 1;
+}
+struct { void (*coop_view)(MkwVkCoopView*); int (*coop_command)(int, const char*, uint32_t);
+         int (*coop_feature)(int, MkwVkCoopFeature*); } the_host{host_view, host_command, host_feature},
     *host = &the_host;
+@@PREVIEW@@
 @@COOP@@
 bool row_shown(int i) { return rows[i].tab != TAB_COOP || coop_row_shown(rows[i], coop_now); }   // (vk_menu.cpp's Co-op clause)
 @@ROWMAP@@
@@ -239,6 +246,30 @@ int main() {
         coop_refresh(&changed);
         CHECK(shows({kCoopName, kCoopRelay, kCoopSecret, kCoopLeave}));
     }
+    // The real received preview keeps local defaults separate and displays every signed category/feature.
+    coop_feature_init();
+    room.rules_epoch = 3, room.offer = 91, room.accepted = 0;
+    room.category[0] = 0, room.feature_count = 1, room.feature_id[0] = 80, room.feature_value[0] = 1;
+    std::snprintf(room.room_title, sizeof room.room_title, "PvP room setup");
+    std::snprintf(room.maker_key, sizeof room.maker_key, "1234-5678-9abc-def0");
+    bool changed = false;
+    coop_refresh(&changed);
+    CHECK(coop_rules_readonly && coop_terms_count == HOS_COOP_RULE_CATEGORIES + 1);
+    CHECK(coop_terms[0].value == 0 && opts.coop_progress == 1 && coop_feature_rows[0].value == 0);
+    CHECK(coop_term_fixed(coop_terms[0].row.value) && coop_terms[0].row.lo == coop_terms[0].row.hi);
+    CHECK(!std::strcmp(coop_terms[7].row.text(1), "PvP setup (no fighting)"));
+    CHECK(std::strstr(coop_terms[7].help, "Ready is unavailable") && std::strstr(coop_terms[7].help, room.maker_key));
+    const int requests_before = n_asked;
+    coop_press(row(kCoopAccept));
+    CHECK(pending && cur_tab == TAB_RULES && n_asked == requests_before);
+    room.offer++, room.rules_epoch++;   // changes between presses, before the next menu refresh
+    coop_press(row(kCoopAccept));
+    CHECK(!pending && coop_terms_changed && n_asked == requests_before && coop_now.offer == room.offer);
+    CHECK(opts.coop_progress == 1 && coop_feature_rows[0].value == 0);   // no join-view/default write
+    coop_press(row(kCoopAccept));
+    room.offer++;   // refresh also disarms, rather than silently confirming a new offer
+    coop_refresh(&changed);
+    CHECK(!pending && coop_terms_changed && n_asked == requests_before);
     // ---- the Room rules page's values and what is said under them ----
     CHECK(!std::strcmp(tx_rule_shared(1), "Shared") && !std::strcmp(tx_rule_shared(0), "Per player"));
     CHECK(!std::strcmp(tx_rule_pool(2), "One pool") && !std::strcmp(tx_rule_pool(0), "Per player"));
@@ -338,6 +369,7 @@ int hos_oot_coop_accept(uint32_t token) { accepted_token = token; return sync_ha
 int hos_oot_coop_is_maker(void) { return sync_maker; }
 int hos_oot_coop_reset_pools(void) { resets++; return sync_maker; }
 int hos_oot_coop_remove_key(const char *key) { snprintf(removed_key, sizeof removed_key, "%s", key); return sync_maker; }
+int hos_oot_coop_rules_changed(void) { return sync_maker; }
 int hos_oot_coop_contributors(CoopContributor *out, int max) {
     if (max < 1) return 0;
     memset(out, 0, sizeof *out);
@@ -496,6 +528,8 @@ def main():
                                block(menu, "int text_edit("), block(menu, "void text_set(")]),
         "@@RULES@@": between(menu, "const char* tx_rule_shared(int v)", "const char* tx_onoff(int v)"),
         "@@ROWS@@": between(menu, "    // (longshot) Co-op (host/coop_menu.c)", "    // (longshot) the Gameplay tab's Bug report"),
+        "@@PREVIEW@@": block(menu, "const char* tx_onoff(") + "\n" +
+                       between(menu, "struct CoopTermRow {", "\nint cur_tab ="),
         "@@COOP@@": between(menu, "MkwVkCoopView coop_now{};", "// ---- the rows that take a restart"),
         "@@ROWMAP@@": block(menu, "int tab_row_to_global("),
         "@@APPLY@@": between(menu, "/// (longshot) Enter on the Co-op tab's Your name", "/// Custom output size: the Output"),

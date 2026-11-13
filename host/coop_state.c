@@ -143,6 +143,7 @@ typedef struct {
     char raw[NAME_CAP];             // and as it was signed
     uint64_t ch_kid;                // the signer of the charter its last digest carried, 0 none
     int ch_seen;                    // a digest of its identity was read (ch_kid tells its charter)
+    int format, bad_rules;          // observed progress format and malformed/unsupported charter, never gameplay authority
     uint32_t sums[COOP_SYNC_SECTIONS];
     uint64_t want;                  // sections to send it, a bit each
     uint64_t answered_at[COOP_SYNC_SECTIONS];
@@ -334,6 +335,9 @@ int coop_cat_is_pool(int cat) { return cat == COOP_CAT_KEYS || cat == COOP_CAT_R
 #endif
 static const CoopFeatureRule feature_rules[] = {
     {0, NULL, 0, 0, 0},
+    // Room setup only. PvP is not playable until its separate readiness, kit and collision capabilities exist.
+    {COOP_RULE_ROOM_MODE, "coop_room_mode", -1, 1, COOP_ROOM_COOP, "Mode",
+     "Co-op, or PvP room setup. This build cannot start a fight. Off refuses acceptance."},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -372,6 +376,16 @@ static int features_valid(const CoopFeatures *f) {
 
 static int features_equal(const CoopFeatures *a, const CoopFeatures *b) {
     return a->count == b->count && !memcmp(a->bytes, b->bytes, 3u * a->count);
+}
+
+int coop_feature_present(const CoopRules *r, int id, int *value) {
+    if (!r || !features_valid(&r->features)) return 0;
+    for (unsigned i = 0; i < r->features.count; i++)
+        if (r->features.bytes[3 * i] == id) {
+            if (value) *value = feature_value(r->features.bytes + 3 * i);
+            return 1;
+        }
+    return 0;
 }
 
 int coop_feature_rule(const CoopRules *r, int id) {
@@ -1291,6 +1305,8 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
         const Peer *p = &s->peer[id];
         if (!p->present) continue;
+        if (p->format == 4) snprintf(o->refusal, sizeof o->refusal, "Format-4 peer: update every game to signed room mode (format 5).");
+        else if (p->bad_rules) snprintf(o->refusal, sizeof o->refusal, "Unsupported room rules or unknown mode: update every game.");
         CoopOfferMember *m = &o->member[o->n++];
         int ident = p->ident && !disputed(s, p);   // two keys for its session: identified as neither
         m->id = id, m->heard = ident, m->removed = ident && removed(s, p->kid);
@@ -1317,6 +1333,16 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     o->maker_moved = s->maker && s->maker != s->self && s->peer[s->maker].ident && s->peer[s->maker].kid != s->ch.kid;
     o->new_save = s->accepted && s->save_gen != s->acc_save_gen;
     o->copy = s->copy_gen == s->save_gen ? s->copy : 0;
+    int mode = COOP_ROOM_OFF, combat = 0;
+    if (!coop_feature_present(&o->rules, COOP_RULE_ROOM_MODE, &mode))
+        snprintf(o->refusal, sizeof o->refusal, "Missing signed room mode: update the maker's game.");
+    else if (mode == COOP_ROOM_OFF)
+        snprintf(o->refusal, sizeof o->refusal, "Room mode is off: the maker must choose Co-op or PvP room setup.");
+    else if (mode != COOP_ROOM_COOP && mode != COOP_ROOM_PVP_SETUP)
+        snprintf(o->refusal, sizeof o->refusal, "Unknown room mode: update every game.");
+    else if (mode == COOP_ROOM_COOP && coop_feature_present(&o->rules, 16, &combat) && combat)
+        snprintf(o->refusal, sizeof o->refusal, "Combat rules conflict with Co-op mode: ask the maker to correct them.");
+    if (o->refusal[0]) return 0;
     if (waiting) return 0;
     // the number: keyed with this start's random value, over everything the acceptance covers (each key with the name it
     // signed: a known key under another name is another offer)
@@ -1406,7 +1432,10 @@ void coop_sync_copied(CoopSync *s, int ok) {
 
 int coop_sync_open(CoopSync *s) {
     CoopOffer o;
-    return coop_sync_offer(s, &o, s->now) && o.accepted && s->copy == 1 && s->copy_gen == s->save_gen;
+    int mode;
+    return coop_sync_offer(s, &o, s->now) && o.accepted &&
+           coop_feature_present(&o.rules, COOP_RULE_ROOM_MODE, &mode) && mode == COOP_ROOM_COOP &&
+           s->copy == 1 && s->copy_gen == s->save_gen;
 }
 
 // ---- the room
@@ -1638,7 +1667,7 @@ static void send_digest(CoopSync *s, int to, CoopSyncSendFn send, void *user) {
 }
 
 static void on_digest(CoopSync *s, int from, const uint8_t *b, size_t n, uint64_t now) {
-    if (n < 5 + COOP_PK_LEN + 9 || b[0] != COOP_K_DIGEST_VER || get32(b + 1) != s->schema) return;
+    if (n < 5 + COOP_PK_LEN + 9 || (b[0] != COOP_K_DIGEST_VER && b[0] != 4) || get32(b + 1) != s->schema) return;
     Peer *p = &s->peer[from];
     size_t at = 5;
     const uint8_t *pk = b + at;
@@ -1707,10 +1736,13 @@ static void on_digest(CoopSync *s, int from, const uint8_t *b, size_t n, uint64_
         // roster nor a replayed message or identity ends a session the member still holds
         if (prev && prev != p->session) end_pair(s, kid, prev);
     }
+    p->format = b[0];
+    if (p->format != COOP_K_DIGEST_VER) return;   // identify the incompatible peer, never read its charter or progress
     Charter c;
     int has = b[at++];
     size_t cl = has ? charter_parse(b + at, n - at, &c) : 0;
-    if (has && !cl) return;
+    p->bad_rules = has && !cl;
+    if (p->bad_rules) return;
     at += cl;
     p->ch_kid = has ? c.kid : 0, p->ch_seen = 1;
     if (removed(s, p->kid)) return;

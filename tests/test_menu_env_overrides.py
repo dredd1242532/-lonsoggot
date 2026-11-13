@@ -86,7 +86,8 @@ struct { int steps = 0; bool went_down = false; } auto_tuning;   // (and its tun
 constexpr int HOS_KEY_N = 1, HOS_SW_N = 1, HOS_BIND_PAD = 0, HOS_BIND_KEY = 1;
 constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;   /* (the note rows: past this stub's one row) */
 const char* const bind_names[1] = {"a"};
-struct Host { int (*binding)(int, int, int); } host_value{nullptr}, *host = &host_value;
+enum { HOS_COOP_CMD_RULES_CHANGED = 9 };
+struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t); } host_value{nullptr, nullptr}, *host = &host_value;
 bool can_bind() { return host->binding != nullptr; }
 /* INI_KEY */
 // (the Co-op tab's part of save(): its name and relay fields, and row_key for the Room rules rows' keys; none of them in

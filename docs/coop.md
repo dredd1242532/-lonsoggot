@@ -596,6 +596,20 @@ whoever has both act as the room's maker: never hand out a copy of your user fol
 during the session (each player accepts the new offer), remove a player by their key's fingerprint (every game drops
 that key and what it took from the pools) and reset the pools.
 
+#### Signed mode and preview
+
+`coop_room_mode` is signed feature 80: **0 Co-op** (the maker's default), **1 PvP room setup**, or **-1 Off**.
+PvP setup is not a playable fight: **this build cannot start a fight and Ready is unavailable**. Even after accepting
+its terms it never opens the ordinary progress-apply gate. Missing or off mode, unsupported values, contradictory
+combat rules and format-4 peers refuse acceptance with a reason. Every participant must update to format 5.
+
+Before the confirming Accept press, Room rules opens the received signed categories and every numbered value,
+including unknown values, with the signing maker's fingerprint. A joiner sees a read-only snapshot; it never replaces
+or saves that joiner's local defaults. Back returns to the room; the next Accept confirms the exact offer first shown.
+A changed offer or rules epoch disarms confirmation and displays the new terms. The maker may edit its local Room
+rules after accepting; saving asks the existing engine to sign the changed draft and everyone must accept it again.
+The normal copy-before-progress rule remains in force. Joining, accepting and readiness are separate decisions.
+
 The menu and control bridge use these named `coop_*` settings; the runtime reads the same keys from the options file.
 There is no separate numeric host-option interface for room rules, so adding unrelated menu options does not renumber
 them or require migrating a player's saved settings.

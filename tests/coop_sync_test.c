@@ -1319,7 +1319,7 @@ static size_t make_digest(uint8_t *out, const char *code, const uint8_t seed[32]
         p = put_le(p, 0, 4);
         *p++ = 0, *p++ = 0;
         memcpy(p, charter_pk, COOP_PK_LEN), p += COOP_PK_LEN;
-        *p++ = 0;   // no numbered feature rules in this fixture's charter
+        *p++ = 1, *p++ = COOP_RULE_ROOM_MODE, *p++ = COOP_ROOM_COOP, *p++ = 0;
         for (int i = 0; i < COOP_SIG_LEN; i++) *p++ = (uint8_t)(epoch * 31 + (uint32_t)i);
     }
     *p++ = COOP_SYNC_SECTIONS;
@@ -1778,7 +1778,7 @@ static size_t digest_signed(uint8_t *out, const char *code, const uint8_t sk[COO
         *p++ = (uint8_t)ngone;
         for (int i = 0; i < ngone; i++) p = put_le(p, gone[i], 8);
         memcpy(p, pk, COOP_PK_LEN), p += COOP_PK_LEN;
-        *p++ = 0;   // no numbered feature rules in this fixture's charter
+        *p++ = 1, *p++ = COOP_RULE_ROOM_MODE, *p++ = COOP_ROOM_COOP, *p++ = 0;
         at = m;
         PUT_ROLE(at, ROLE_RULES);
         memcpy(at, ctx, sizeof ctx), at += sizeof ctx;

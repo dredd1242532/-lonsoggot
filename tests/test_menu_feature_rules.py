@@ -139,13 +139,14 @@ def main():
     cpp = env_fixture.fixture(root)
     feature_type = block(api, api.index("typedef struct MkwVkCoopFeature {")) + " MkwVkCoopFeature;"
     setting_type = block(api, api.index("typedef struct MkwVkSetting {")) + " MkwVkSetting;"
-    max_features = re.search(r"enum \{ HOS_COOP_FEATURES = \d+ \};", api).group(0)
+    max_features = re.search(r"enum \{ HOS_COOP_RULE_CATEGORIES = \d+, HOS_COOP_FEATURES = \d+ \};", api).group(0)
     host = '''@@TYPES@@
 extern "C" int hos_coop_menu_feature(int, MkwVkCoopFeature*);
 static float test_aspect() { return 4.0f / 3.0f; }
-struct Host { int (*binding)(int, int, int); int (*coop_feature)(int, MkwVkCoopFeature*); float (*aspect_ratio)(); }
-    host_value{nullptr, hos_coop_menu_feature, test_aspect}, *host = &host_value;'''
-    cpp = replace_once(cpp, "struct Host { int (*binding)(int, int, int); } host_value{nullptr}, *host = &host_value;",
+struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t);
+              int (*coop_feature)(int, MkwVkCoopFeature*); float (*aspect_ratio)(); }
+    host_value{nullptr, nullptr, hos_coop_menu_feature, test_aspect}, *host = &host_value;'''
+    cpp = replace_once(cpp, "struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char*, uint32_t); } host_value{nullptr, nullptr}, *host = &host_value;",
                        host.replace("@@TYPES@@", max_features + "\n" + feature_type + "\n" + setting_type))
     cpp = replace_once(cpp, '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},',
                        '    {TAB_GAMEPLAY, "Game speed", &opts.realtime, 0, 1, 1, tx, ""},\n'
@@ -154,7 +155,7 @@ struct Host { int (*binding)(int, int, int); int (*coop_feature)(int, MkwVkCoopF
     text_field = block(menu, menu.index("struct TextField {")) + ";"
     cpp = replace_once(cpp, 'struct { int len; const char* text; } coop_name_field{0, ""}, coop_relay_field{0, ""};',
                        text_field + "\nTextField coop_name_field{}, coop_relay_field{};\n" + definition(menu, "void text_set"))
-    feature_helpers = menu[menu.index("struct CoopFeatureRow {"):menu.index("\nint cur_tab =")]
+    feature_helpers = menu[menu.index("struct CoopTermRow {"):menu.index("\nint cur_tab =")]
     options = menu[menu.index("const struct { int* value; const char* key; } coop_options[]"):menu.index("// (longshot) the row's choice to the host:")]
     helpers = definition(menu, "const char* tx_onoff") + "\n" + feature_helpers + "\n" + options
     helpers += "\nbool row_shown(int) { return true; }\n" + definition(menu, "int tab_row_count") + "\n" + definition(menu, "int tab_row_to_global")

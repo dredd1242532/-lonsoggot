@@ -179,6 +179,7 @@ static void room_rules(void) {
     CoopSync *a = engine(1), *b = engine(2);
     CoopRules r, got;
     coop_rules_default(&r);
+    assert(coop_feature_set(&r, COOP_RULE_ROOM_MODE, COOP_ROOM_COOP));
     assert(coop_feature_set(&r, 249, 31) && coop_feature_set(&r, 250, 9));
     coop_sync_settings(a, &r, 1);
     originate(a);

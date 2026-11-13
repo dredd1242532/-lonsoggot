@@ -86,6 +86,7 @@ typedef struct {
     const char *name;
     const char *help;
 } CoopFeatureRule;
+enum { COOP_RULE_ROOM_MODE = 80, COOP_ROOM_OFF = -1, COOP_ROOM_COOP = 0, COOP_ROOM_PVP_SETUP = 1 };
 typedef struct {
     uint8_t count;
     uint8_t bytes[3 * COOP_FEATURE_MAX];   // ascending unique u8 ID, little-endian i16 value; ID 0 is reserved
@@ -199,7 +200,10 @@ typedef struct {
     int copy;           // the copy of the save for this acceptance: 0 not yet, 1 made, -1 failed (accept again to retry)
     int unidentified;   // members in the room that never identified themselves: the room cannot be accepted meanwhile
     int disagree;       // members carry rules signed by different keys (or by another than the one in force)
+    char refusal[96];   // why this room cannot be accepted; host-authored, not remote text
 } CoopOffer;
+// A signed, explicitly present rule; unlike coop_feature_rule, absence never substitutes a local default.
+int coop_feature_present(const CoopRules *rules, int id, int *value);
 int coop_sync_offer(CoopSync *s, CoopOffer *out, uint64_t now_ms);   // 1 when there is an offer
 // Accepts the offer of that number: its identities, rules and maker's key (pinned from now on in this room). 1 when
 // token is the current offer's and no member in the room is unidentified. A copy of the save is wanted when none was

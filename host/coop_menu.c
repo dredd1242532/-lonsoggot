@@ -34,6 +34,7 @@ int hos_oot_coop_is_maker(void);
 int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
 int hos_oot_coop_contributors(CoopContributor *out, int max);
+int hos_oot_coop_rules_changed(void);
 
 static char g_name[64], g_server[64];   /* as the tab's fields have them */
 _Static_assert(HOS_COOP_STATE_OFF == (int)COOP_OFF && HOS_COOP_STATE_LEFT == (int)COOP_LEFT &&
@@ -203,7 +204,27 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
     /* (progress sync: the others' keys from the offer, which it makes while the room is not accepted and keeps, accepted,
        with its acceptance; this player's own key from the pools' list, which marks it) */
     CoopOffer offer;
-    if (hos_oot_coop_offer(&offer)) {
+    const int has = hos_oot_coop_offer(&offer);
+    if (offer.refusal[0]) copy_text(out->status, sizeof out->status, offer.refusal);
+    if (offer.rules.epoch) {
+        out->rules_epoch = offer.rules.epoch;
+        _Static_assert((int)COOP_CAT_N == (int)HOS_COOP_RULE_CATEGORIES, "all signed categories are previewed");
+        memcpy(out->category, offer.rules.mode, sizeof out->category);
+        copy_text(out->maker_key, sizeof out->maker_key, offer.maker_key);
+        out->feature_count = offer.rules.features.count <= HOS_COOP_FEATURES ? offer.rules.features.count : 0;
+        for (unsigned i = 0; i < out->feature_count; i++) {
+            const uint8_t *p = offer.rules.features.bytes + 3 * i;
+            const unsigned v = (unsigned)p[1] | (unsigned)p[2] << 8;
+            out->feature_id[i] = p[0], out->feature_value[i] = (int16_t)(v >= 32768 ? (int)v - 65536 : (int)v);
+            if (p[0] == COOP_RULE_ROOM_MODE) {
+                copy_text(out->room_title, sizeof out->room_title, out->feature_value[i] == COOP_ROOM_COOP ? "CO-OP" :
+                          out->feature_value[i] == COOP_ROOM_PVP_SETUP ? "PvP room setup" : "Unsupported room mode");
+                if (!offer.refusal[0] && out->feature_value[i] == COOP_ROOM_PVP_SETUP)
+                    copy_text(out->status, sizeof out->status, "This build cannot start a fight. Ready is unavailable; no progress is shared.");
+            }
+        }
+    }
+    if (has) {
         out->offer = offer.token, out->accepted = offer.accepted, out->unidentified = offer.unidentified;
         for (int j = 0; j < offer.n && j < COOP_MAX_MEMBERS; j++)
             for (int k = 0; k < out->n; k++)
@@ -256,6 +277,8 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return text && *text && hos_oot_coop_remove_key(text);
     case HOS_COOP_CMD_RESET_POOLS:
         return hos_oot_coop_reset_pools();
+    case HOS_COOP_CMD_RULES_CHANGED:
+        return hos_oot_coop_rules_changed();
     default:
         return 0;
     }

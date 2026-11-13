@@ -846,7 +846,7 @@ int hos_oot_coop_offer(CoopOffer *out) {
 int hos_oot_coop_accept(uint32_t token) {
     AcquireSRWLockShared(&G.pub_lock);
     const int same = token && G.pub_has && token == G.pub.token, done = same && G.pub.accepted;
-    const int ok = same && !G.pub.accepted && !G.pub.unidentified;
+    const int ok = same && !G.pub.accepted && !G.pub.unidentified && !G.pub.refusal[0];
     ReleaseSRWLockShared(&G.pub_lock);
     if (ok) __atomic_store_n(&G.want_accept, token, __ATOMIC_RELEASE);
     return ok || done;
@@ -858,6 +858,17 @@ int hos_oot_coop_is_maker(void) {
     ReleaseSRWLockShared(&G.pub_lock);
     return maker;
 }
+/* The menu saved the maker's local draft. Publish it through the existing locked engine, never the joiner's defaults. */
+int hos_oot_coop_rules_changed(void) {
+    CoopRules mine;
+    read_rules(&mine, 0);
+    AcquireSRWLockExclusive(&G.lock);
+    const int maker = G.eng && coop_sync_is_maker(G.eng);
+    if (maker) coop_sync_settings(G.eng, &mine, 1);
+    ReleaseSRWLockExclusive(&G.lock);
+    return maker;
+}
+
 
 /* The maker's pool reset (G.lock held). A player still in the room when the pools are reset joins the new ones with
    what it took already taken, so a drainer is removed first. */
