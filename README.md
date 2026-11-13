@@ -13,6 +13,7 @@
 </h4>
 
 <p align="center">
+  <a href="https://magicbean.dev/download"><b>Download</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#build-from-source">Build from source</a> |
@@ -58,6 +59,27 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 
 ## Install and play
 
+# ⬇️ Download Longshot Launcher
+
+### [🪟 &nbsp;Download for Windows](https://magicbean.dev/download/launcher/windows)
+
+### [🐧 &nbsp;Download for Linux (AppImage)](https://magicbean.dev/download/launcher/linux)
+
+Windows without installing: [portable zip](https://magicbean.dev/download/launcher/windows-portable) · Not sure? [magicbean.dev/download](https://magicbean.dev/download) picks for your computer.
+
+These links always give the newest launcher: the stable one, or until there is one, the release candidate, then the
+nightly. To pick a channel:
+
+- **Stable** (for playing): [Windows](https://magicbean.dev/download/launcher/stable/windows) · [portable zip](https://magicbean.dev/download/launcher/stable/windows-portable) · [Linux](https://magicbean.dev/download/launcher/stable/linux) · [release page](https://magicbean.dev/download/launcher/stable)
+- **Release candidate** (the next version, before it is stable): [Windows](https://magicbean.dev/download/launcher/rc/windows) · [portable zip](https://magicbean.dev/download/launcher/rc/windows-portable) · [Linux](https://magicbean.dev/download/launcher/rc/linux) · [release page](https://magicbean.dev/download/launcher/rc)
+- **Nightly** (every change, untested): [Windows](https://magicbean.dev/download/launcher/nightly/windows) · [portable zip](https://magicbean.dev/download/launcher/nightly/windows-portable) · [Linux](https://magicbean.dev/download/launcher/nightly/linux) · [release page](https://magicbean.dev/download/launcher/nightly)
+
+**Download the launcher, not the builder.** The files on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases)
+(`LongshotBuilder-…-windows-x64.zip`, `Longshot-…-x86_64.AppImage`, `tools.lock`) are what the launcher installs for you;
+you don't need them.
+
+---
+
 The game does not come ready-made: it is built on your PC from your copy. The **[Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)** does it
 for you: it installs this version's Longshot Builder (checked against the release's signed checksums), builds the game, starts
 it, and keeps it and itself up to date. Longshot's first version will be **v3.0.0**; the launcher's first will be
@@ -85,8 +107,10 @@ it, and keeps it and itself up to date. Longshot's first version will be **v3.0.
 
 ### On Windows
 
-1. Download `LongshotLauncher-<version>-windows-x64.exe` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and run it. It is one
-   program; nothing else to install.
+1. [Download the launcher for Windows](https://magicbean.dev/download/launcher/windows) (`LongshotLauncher-<version>-windows-x64-setup.exe`) and run it.
+   It asks once: **Install** (for you, no administrator rights, with a Start menu shortcut) or **Run portable**. To skip
+   the question, take the [portable zip](https://magicbean.dev/download/launcher/windows-portable) (`LongshotLauncher-<version>-windows-x64-portable.zip`),
+   unzip it and run `LongshotLauncher.exe`.
 2. Press **Build the game** and pick the channel: **Stable** for playing.
 3. Pick your game. The launcher looks for `.nup` files in your Downloads, Desktop and Documents folders; not listed? Point
    it at the file or at the `romfs` and `exefs` folders. It checks that it is the right version, while that version's
@@ -101,14 +125,14 @@ For a portable install on an external SSD, see [Portable Longshot Builder](docs/
 
 ### On Linux
 
-1. Download `LongshotLauncher-<version>-x86_64.AppImage` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases).
+1. [Download the launcher for Linux](https://magicbean.dev/download/launcher/linux) (`LongshotLauncher-<version>-x86_64.AppImage`).
 2. Allow it to run as a program. In most file managers: right-click it, open **Properties**, and turn on
    "Allow executing file as program" (the words differ between desktops). Or in a terminal:
    `chmod +x LongshotLauncher-*-x86_64.AppImage`.
 3. Double-click it, and build the game as on Windows above (the game goes to `~/Games/Longshot` by default).
 
-The launcher can add the game to your applications menu as "Longshot". Each Longshot version's builder is also released
-alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases), for building without the
+The launcher can add the game to your applications menu as "Longshot". (Advanced; players don't need it.) Each Longshot
+version's builder is also released alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases), for building without the
 launcher: Longshot Builder alone (about 95 MB). At its first start it downloads its build tools (the compiler, the C
 library it links against, FFmpeg, SDL2: about 170 MB) into `~/.local/share/longshot/builder/toolchains`, and later
 versions take the ones that did not change from there. The launcher downloads the same tools itself.
@@ -167,8 +191,16 @@ From a clone: `git pull`, then `python -I nx2/make_game.py --update <game folder
 
 ### Latest development build
 
-Want a fix before it is in a release? Choose the **Nightly** channel in the launcher: it is built from `main` after every
-change, and the newest five stay on the releases page. It is untested and may break your saves or settings: copy them
+Want a fix before it is in a release? Get the nightly launcher:
+
+### [🪟 &nbsp;Nightly for Windows](https://magicbean.dev/download/launcher/nightly/windows)
+
+### [🐧 &nbsp;Nightly for Linux (AppImage)](https://magicbean.dev/download/launcher/nightly/linux)
+
+Windows without installing: [nightly portable zip](https://magicbean.dev/download/launcher/nightly/windows-portable) · [the newest nightly's release page](https://magicbean.dev/download/launcher/nightly)
+
+A nightly launcher builds Longshot's nightlies by default; in any launcher, choose the **Nightly** channel for a build.
+Both are built from `main` after every change, and the newest five stay on the releases page. It is untested and may break your saves or settings: copy them
 first (see above). **Release candidate** is the next version, before it is released. To go back, build a version
 from the **Stable** channel.
 
@@ -218,7 +250,7 @@ the network or with other programs:
 - On Linux the game starts through a small script (`play-diagnostics.sh`). It keeps the game's first error messages in
   `longshot_startup.log` in the game folder, using a private temporary folder there that it removes when the game exits.
 
-Only download Longshot from [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev. Each version's
+Only download Longshot from [magicbean.dev/download](https://magicbean.dev/download), [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev. Each version's
 files are named, with their SHA-256, in its `SHA256SUMS`, signed by the release key, which the launcher checks. A copy from
 anywhere else may not be ours.
 
