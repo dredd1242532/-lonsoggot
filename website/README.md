@@ -113,6 +113,12 @@ disclosures work without JavaScript, and the shared print handling expands every
 
 ## Validation and limits
 
+Public pages use neutral game and console wording. Imported menu descriptions and activity text pass through
+`src/lib/public-copy.ts` before publication; source records and links remain intact. `npm run check` rejects the
+listed game-brand terms in generated page prose and the public progress feed. Literal commands, required save
+paths, technical product names and third-party attribution are preserved. Update public wording and its tests if
+an upstream description introduces a new term; never rename a real file path or runtime setting to hide it.
+
 `npm run check` verifies generated routes, links, anchors, edit destinations, artwork
 bytes, search output, source guards and the website's test suite. `build:preview`
 runs both the build and checks. These do not build or launch the game.

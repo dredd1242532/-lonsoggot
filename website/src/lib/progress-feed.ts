@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { REPOSITORY, normalizeItem, validateCuration, validateFeed } from './progress.ts';
+import { publicProgressItem } from './public-copy.ts';
 
 // Collects the public progress feed from Forgejo. The site's build calls buildFeed() once, and publishes the result
 // as /progress-feed.json and on the front page: the data is as fresh as the last build.
@@ -96,7 +97,7 @@ export async function collectFeed({ fetcher = fetch, token = '', curation = {}, 
   return validateFeed({ version: 1, repository: REPOSITORY, collectionStartedAt: new Date(now).toISOString(),
     generatedAt: new Date().toISOString(), closedSince, warning: '',
     stableRelease: latestItem ? { tag: latest.tag_name, url: latestItem.url, publishedAt: latest.published_at } : null,
-    items: [...items.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) });
+    items: [...items.values()].map(publicProgressItem).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)) });
 }
 
 let built;

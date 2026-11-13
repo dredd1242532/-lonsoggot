@@ -1,4 +1,5 @@
 import { sectionsAt } from './format-install.ts';
+import { publicGameText } from '../lib/public-copy.ts';
 
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -159,7 +160,7 @@ export async function formatGraphicsSettings(text, readme, menu, processor) {
   if (text.split(marker).length !== 2) throw new Error('Expected one graphics-settings insertion marker');
   const groups = readGraphicsSettings(readme, menu);
   const count = groups.reduce((sum, group) => sum + group.settings.length, 0);
-  const inline = async value => (await processor.render(value)).code.trim().replace(/^<p>([\s\S]*)<\/p>$/, '$1');
+  const inline = async value => (await processor.render(publicGameText(value))).code.trim().replace(/^<p>([\s\S]*)<\/p>$/, '$1');
   const rendered = [];
   for (const group of groups) {
     const cards = [];
@@ -169,9 +170,9 @@ export async function formatGraphicsSettings(text, readme, menu, processor) {
       const short = setting.choices.length <= SHORT_CHOICES;
       // (one row a setting: its name and badges, what it does with its choices, then its default)
       cards.push(`<article class="graphics-row" data-setting>
-<div class="graphics-name"><h4 id="${setting.id}"><a href="#${setting.id}">${escape(setting.name)}</a></h4>
+<div class="graphics-name"><h4 id="${setting.id}"><a href="#${setting.id}">${escape(publicGameText(setting.name))}</a></h4>
 ${badges.length ? `<ul class="graphics-badges" aria-label="Conditions">${badges.map(badge => `<li${badge === RESTART_BADGE ? ' class="graphics-badge-restart"' : ''}>${escape(badge)}</li>`).join('')}</ul>` : ''}</div>
-<div class="graphics-about">${setting.summary ? `<p class="graphics-summary">${escape(setting.summary)}</p>` : ''}
+<div class="graphics-about">${setting.summary ? `<p class="graphics-summary">${escape(publicGameText(setting.summary))}</p>` : ''}
 ${short ? `<p class="graphics-choices"><span>Choices</span> ${choices}</p>` : `<details><summary>Choices and requirements</summary><p>${choices}</p></details>`}</div>
 <p class="graphics-default"><span>Default</span> ${await inline(setting.defaultValue)}</p>
 </article>`);

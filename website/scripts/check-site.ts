@@ -13,9 +13,14 @@ const html = new Map(await Promise.all(pages.map(async (file) => [file, await re
 const ids = new Map([...html].map(([file, text]) => [file, new Set([...text.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]))]));
 
 const errors: string[] = [];
+const gameBranding = /\b(?:Nintendo|Zelda|Ocarina|OoT|Hyrule|Kokiri|Kakariko|Deku|Goron|Zora|Ganon|Ganondorf|Epona|Triforce|Navi)\b|\bSwitch 2\b|\bJoy-Cons?\b/i;
 let links = 0;
 for (const [file, text] of html) {
   const route = '/' + path.relative(dist, file).replaceAll(path.sep, '/').replace(/index\.html$/, '');
+  // Audit published prose. Literal code/file paths and link destinations must remain usable and exact.
+  const prose = text.replace(/<(script|style|code|pre)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<!--[^]*?-->/g, '').replace(/<[^>]+>/g, ' ');
+  if (gameBranding.test(prose)) errors.push(`${route}: game branding remains in published text`);
   for (const [, url] of text.matchAll(/href="(https:\/\/git\.magicbean\.dev\/[^"]+\/_edit\/[^"]+)"/g)) {
     if (!url.startsWith(editBase)) errors.push(`${route}: edit link to another repository or branch: ${url}`);
     else await stat(path.join('..', url.slice(editBase.length))).catch(() => errors.push(`${route}: edit link to a missing file: ${url}`));
@@ -38,6 +43,11 @@ for (const [file, text] of html) {
     const anchor = url.pathname === '/progress/' && readProblemSearchHash(url.hash) ? 'problem-search' : decodeURIComponent(url.hash.slice(1));
     if (tag === 'a' && anchor && ids.has(target) && !ids.get(target)!.has(anchor)) errors.push(`${route}: missing anchor: ${raw}`);
   }
+}
+const feed = JSON.parse(await readFile(path.join(dist, 'progress-feed.json'), 'utf8'));
+for (const item of feed.items || []) {
+  if ([item.title, item.originalTitle, item.summary, item.workaround, ...(item.labels || [])]
+    .some(value => gameBranding.test(value || ''))) errors.push(`Progress ${item.id}: game branding remains in public copy`);
 }
 if (!pages.length) errors.push('No pages in dist/: run the build first.');
 if (errors.length) {
