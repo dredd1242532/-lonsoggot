@@ -21,7 +21,7 @@ Standard library only (Windows and Linux), so any agent can use it; people may p
     python -I scripts/forge.py pr checkout N                       its head as the local branch pr/N
 
     python -I scripts/forge.py issue list [--state open|closed|all] [--label L]
-    python -I scripts/forge.py issue view N [--comments]
+    python -I scripts/forge.py issue view N [--comments]            with the files attached (a report's log): name, link
     python -I scripts/forge.py issue create --title T [--body TEXT | --body-file F]
     python -I scripts/forge.py issue comment N (TEXT | --body-file F)
 
@@ -286,9 +286,21 @@ def cmd_credential(args):
     return 0
 
 
+def show_attachments(item):
+    """The files attached to an issue or a comment, each by name, size and link: a report's log is there, not in its
+    text. The link is printed and nothing is fetched. A file the text already links (pr comment --attach) is not said
+    twice"""
+    for a in item.get("assets") or []:
+        size, link = a.get("size") or 0, a["browser_download_url"]
+        if link not in (item.get("body") or ""):
+            print("attached: %s (%s) %s" % (a["name"], "%d bytes" % size if size < 1024 else "%.1f KiB" % (size / 1024)
+                                            if size < 1 << 20 else "%.1f MiB" % (size / (1 << 20)), link))
+
+
 def show_comments(number):
     for c in api("GET", "/repos/%s/issues/%d/comments" % (REPO, number)) or []:
         print("\n--- %s, %s\n%s" % (c["user"]["login"], c["created_at"][:16].replace("T", " "), c["body"].strip()))
+        show_attachments(c)
 
 
 # --- pull requests: work in progress, ready, the description and the comments ------------------------------------
@@ -891,6 +903,7 @@ def cmd_issue(args):
         i = api("GET", "/repos/%s/issues/%d" % (REPO, args.number))
         print("#%d %s\n%s, by %s\n%s\n\n%s" % (i["number"], i["title"], i["state"], i["user"]["login"], i["html_url"],
                                              (i.get("body") or "").strip()))
+        show_attachments(i)
         if args.comments:
             show_comments(args.number)
     elif args.action == "create":

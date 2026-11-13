@@ -13,7 +13,8 @@ fork and the PR's head use the login Forgejo has now, not the one saved at sign-
 account can be renamed); pr status shows the state, the check, the checklist, the reviews and the last comments (and
 for a work-in-progress PR, which Forgejo never calls mergeable, whether main has moved past its base); pr
 review posts one review (approve, comment or request changes) with its inline comments on lines of the diff, refusing
-a line outside the diff's hunks before posting anything, and an approval of a work-in-progress PR.
+a line outside the diff's hunks before posting anything, and an approval of a work-in-progress PR; issue view lists
+the files attached to the issue and to its comments (name, size, link), fetching none.
 
     python -I -B tests/test_forge_pr.py
 """
@@ -107,7 +108,7 @@ class Forgejo:
             return dict(self.comment(int(parts[2])))
         number = int(parts[1])
         pr = self.prs[number]
-        if parts[0] == "pulls" and len(parts) == 2:
+        if parts[0] in ("pulls", "issues") and len(parts) == 2:   # (an issue: the same record, as on Forgejo)
             if method == "PATCH":
                 pr.update(body)
                 pr["draft"] = self.draft(pr["title"])
@@ -674,6 +675,31 @@ deleted file mode 100644
     def test_view_shows_wip(self):
         self.forgejo.add(5, "[wip] fix: x", FILLED)
         self.assertIn("work in progress, by alice", self.run_forge("pr", "view", "5")[1])
+
+    def test_issue_view_lists_the_attachments(self):
+        # (a report's log is an attachment, not text: issue view names each file of the issue and of its comments, by
+        # size and link, fetching none; a picture the text already links, as pr comment --attach leaves it, once only)
+        issue = self.forgejo.add(9, "Game: crash at launch", "The log is attached.")
+        issue["assets"] = [{"name": "longshot_log.txt", "size": 13700, "browser_download_url": ATTACHMENT % 1},
+                           {"name": "dump.zip", "size": 3 << 20, "browser_download_url": ATTACHMENT % 2}]
+        self.forgejo.comments[9] = [
+            {"id": 1, "body": "Another run.", "user": {"login": "bob"}, "created_at": "2026-11-13T19:50:00Z",
+             "assets": [{"name": "env.txt", "size": 26, "browser_download_url": ATTACHMENT % 3}]},
+            {"id": 2, "body": "![shot](%s)" % (ATTACHMENT % 4), "user": {"login": "bob"},
+             "created_at": "2026-11-13T19:51:00Z",
+             "assets": [{"name": "shot.png", "size": 900, "browser_download_url": ATTACHMENT % 4}]}]
+        code, out, _ = self.run_forge("issue", "view", "9", "--comments")
+        self.assertEqual(code, 0)
+        for want in ("attached: longshot_log.txt (13.4 KiB) " + ATTACHMENT % 1,
+                     "attached: dump.zip (3.0 MiB) " + ATTACHMENT % 2,
+                     "Another run.\nattached: env.txt (26 bytes) " + ATTACHMENT % 3):
+            self.assertIn(want, out)
+        self.assertEqual(out.count("attached:"), 3, out)
+        self.assertLess(out.index("dump.zip"), out.index("--- bob"))   # (the issue's own before its comments')
+        self.assertEqual(self.forgejo.writes(), [])
+        self.assertEqual(self.run_forge("issue", "view", "9")[1].count("attached:"), 2)   # (no --comments: its own)
+        self.forgejo.add(10, "Idea: x", "No files.")   # (none attached: as before)
+        self.assertEqual(self.run_forge("issue", "view", "10", "--comments")[1].count("attached"), 0)
 
 
 if __name__ == "__main__":

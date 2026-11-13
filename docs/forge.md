@@ -131,6 +131,9 @@ python -I scripts/forge.py issue create --title "..." --body-file issue.md
 python -I scripts/forge.py issue comment 40 "..."
 ```
 
+`issue view` and `--comments` also list the files attached to the issue and to each comment (a report's log is usually
+one): `attached: NAME (SIZE) LINK`. The link is printed, nothing is downloaded.
+
 ## Pictures in a comment
 
 A test result or a review often needs screenshots: `pr comment --attach` puts them in the comment. In the text,
