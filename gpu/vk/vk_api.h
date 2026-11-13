@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 25
+#define MKWVK_API_VERSION 27
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -153,6 +153,9 @@ typedef struct MkwVkCoopView {
     uint8_t category[HOS_COOP_RULE_CATEGORIES], feature_count, feature_id[HOS_COOP_FEATURES];
     int16_t feature_value[HOS_COOP_FEATURES];
     char maker_key[24], room_title[40];
+    /* (version 27; 26 belongs to the temporary-profile view) cancellation explanations only, not consent tokens. */
+    uint32_t membership_revision;   /* signed admission/removal sets changed, even with an unchanged visible roster */
+    uint32_t pool_epoch;            /* signed pool reset, not a member or category/feature edit */
 } MkwVkCoopView;
 /* what the tab asks (coop_command's cmd): make a room, join one (text: its secret as typed), leave it, accept the offer
    (number: its offer), the player's name and the relay ("host[:port]") as the fields set them (text; number 1: the field's

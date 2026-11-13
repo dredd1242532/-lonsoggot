@@ -793,7 +793,10 @@ static void offer_update(uint64_t now) {
     int has = offer_of(&o, now);
     const char *how = !has || o.accepted ? NULL : menu == o.token ? "in the menu" : accept_always() ? "HOS_COOP_ACCEPT=always" : NULL;
     if (how && coop_sync_accept(G.eng, o.token)) {
-        hos_log("coop: sync: room accepted (%s); %s", how, coop_sync_copy_wanted(G.eng) ? "the save is copied first" : "values from it are applied");
+        int mode = COOP_ROOM_OFF;
+        coop_feature_present(&o.rules, COOP_RULE_ROOM_MODE, &mode);
+        hos_log("coop: sync: room accepted (%s); %s", how, mode == COOP_ROOM_PVP_SETUP ? "PvP setup only; no progress is shared" :
+                coop_sync_copy_wanted(G.eng) ? "the save is copied first" : "values from it are applied");
         has = offer_of(&o, now);
     }
     if (o.token && !o.accepted && (o.token != G.logged || o.unidentified != G.logged_unid)) {

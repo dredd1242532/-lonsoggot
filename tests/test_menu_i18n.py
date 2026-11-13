@@ -1,12 +1,15 @@
 """gpu/vk/menu_i18n.h, the Insert menu's translations: every table's texts are the menu's own (vk_menu.cpp writes each
 English text), every translation keeps its text's printf conversions in order and its leading and trailing spaces (the menu
 joins pieces), and the language list holds what vk_menu_i18n.cpp expects. The controls and Automatic prompt hints
-must remain present in every translated table. No game, no compiler.
+must remain present in every translated table, as must the Co-op consent notices and PvP setup help (English fallback
+until translated). No game, no compiler.
 
-Run with: python -I tests/test_menu_i18n.py
+Run with: python -I tests/test_menu_i18n.py [--source-root OLD_CHECKOUT]
 """
+import argparse
 from pathlib import Path
 import re
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,6 +104,22 @@ class MenuI18nTests(unittest.TestCase):
                 self.assertNotIn("Custom output size", hint)
                 self.assertIn(translated["Custom output size"], hint)
 
+    def test_coop_consent_texts_are_translated(self):
+        texts = (
+            "Room members changed. Review the players before accepting.",
+            "Room rules changed. Read the new Room rules before accepting.",
+            "Room members and rules changed. Review both before accepting.",
+            "The room changed. Review its members and Room rules before accepting.",
+            "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
+            "fingerprints aloud to each other before: a name can be anyone's. Press twice.",
+        )
+        for text in texts:
+            with self.subTest(menu_text=text):
+                self.assertIn(text, self.menu)
+            for table, pairs in self.tables.items():
+                with self.subTest(table=table, text=text):
+                    self.assertIn(text, dict(pairs), "missing consent text (English fallback is allowed)")
+
     def test_plural_forms(self):
         # (i18n::plural: Russian and Polish ask for a third form, " settings (many)", for 5 and up; the menu shows it
         # nowhere else, so only their tables have it)
@@ -123,4 +142,8 @@ class MenuI18nTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--source-root", type=Path, default=ROOT)
+    args, remaining = parser.parse_known_args()
+    VK = args.source_root.resolve() / "gpu" / "vk"
+    unittest.main(argv=[sys.argv[0], *remaining])

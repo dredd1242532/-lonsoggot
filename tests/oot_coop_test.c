@@ -275,7 +275,67 @@ static void check_consent_publication(void) {
     coop_sync_free(one), coop_sync_free(two);
 }
 
-int main(void) {
+static void check_accept_log(int mode) {
+    CoopSync *one = coop_sync_new(1, 77), *two = coop_sync_new(2, 77);
+    uint8_t seed[32] = {1};
+    coop_sync_seed(one, seed);
+    seed[0] = 2, coop_sync_seed(two, seed);
+    coop_sync_name(one, "One"), coop_sync_name(two, "Two");
+    const int ids[] = {1, 2};
+    const uint64_t sessions[] = {101, 202};
+    CoopRules rules;
+    coop_rules_default(&rules);
+    CHECK(coop_feature_set(&rules, COOP_RULE_ROOM_MODE, mode));
+    coop_sync_settings(one, &rules, 1), coop_sync_settings(two, &rules, 0);
+    coop_sync_room(one, "CONSENT", 1, ids, sessions, 2, 1, now_ms);
+    coop_sync_room(two, "CONSENT", 2, ids, sessions, 2, 1, now_ms);
+    ConsentLink to_one = {one, 2}, to_two = {two, 1};
+    G.eng = one, G.logged = 0, G.logged_unid = 0, G.said_disagree = 0, G.pub_contrib_at = 0;
+    current_view = (CoopView){.state = COOP_JOINED, .self = 1, .session = 101, .n = 2,
+                             .member = {{.id = 1, .session = 101}, {.id = 2, .session = 202}}};
+    G.view = current_view;
+    const int failed_before = failures;
+    for (int copied = 0; copied < 2; copied++) {
+        if (copied) {
+            coop_sync_copied(one, 1);
+            CHECK(coop_sync_open(one) == (mode == COOP_ROOM_COOP));
+            CHECK(coop_feature_set(&rules, 249, 17));   /* a new signed offer on the already-copied save */
+            coop_sync_settings(one, &rules, 1);
+        }
+        for (int i = 0; i < 60; i++) {
+            now_ms += 100;
+            coop_sync_tick(one, now_ms, consent_send, &to_two);
+            coop_sync_tick(two, now_ms, consent_send, &to_one);
+        }
+        CoopOffer offer;
+        CHECK(coop_sync_offer(one, &offer, now_ms) && !offer.accepted);
+        G.want_accept = offer.token;
+        logat = 0, logbuf[0] = 0;
+        offer_update(now_ms);   /* the production menu-accept path, not a reconstructed log expression */
+        fputs(logbuf, stdout);
+        CHECK(!G.want_accept && G.pub.accepted);
+        CHECK(coop_sync_copy_wanted(one) == !copied);
+        CHECK(G.open == (copied && mode == COOP_ROOM_COOP));
+        CHECK(strstr(logbuf, "coop: sync: room accepted (in the menu); "));
+        if (mode == COOP_ROOM_PVP_SETUP) {
+            CHECK(strstr(logbuf, "PvP setup only; no progress is shared"));
+            CHECK(!strstr(logbuf, "values from it are applied"));
+        } else {
+            CHECK(strstr(logbuf, copied ? "values from it are applied" : "the save is copied first"));
+            CHECK(!strstr(logbuf, "PvP setup"));
+        }
+    }
+    G.eng = NULL;
+    coop_sync_free(one), coop_sync_free(two);
+    if (failures == failed_before)
+        printf("PASS: %s acceptance log before and after a completed copy\n", mode == COOP_ROOM_PVP_SETUP ? "PvP setup" : "Co-op");
+}
+
+int main(int argc, char **argv) {
+    if (argc == 2) {
+        check_accept_log(!strcmp(argv[1], "accept-log-pvp") ? COOP_ROOM_PVP_SETUP : COOP_ROOM_COOP);
+        return failures ? 1 : 0;
+    }
     for (int i = 0; i < 2; i++) regions[i].mem = calloc(1, regions[i].size);
     Ctx c;
     memset(&c, 0, sizeof c);
@@ -687,6 +747,8 @@ int main(void) {
     }
 
     check_consent_publication();
+    check_accept_log(COOP_ROOM_COOP);
+    check_accept_log(COOP_ROOM_PVP_SETUP);
     if (failures) {
         fprintf(stderr, "%d checks failed; the log:\n%s", failures, logbuf);
         return 1;

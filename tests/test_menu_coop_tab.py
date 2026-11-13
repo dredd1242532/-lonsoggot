@@ -12,9 +12,13 @@ HOS_COOP_DEMO=1's made-up room walked through on a made-up clock. The Room rules
 is checked against the engine itself: a C program with host/coop_state.h's categories, modes and defaults and the rows'
 keys, ranges, steps and defaults as the source has them. Then the wiring is checked in the source: the interface's
 two new members last and its version bumped, the host's table, the tab in the strip, the page, the options file's
-coop_name= and coop_server=. No GPU, game, window or network.
+coop_name= and coop_server=. The actual status/help expressions and footer construction are also exercised: membership-only,
+rules-only, combined and opaque offer changes cancel safely; PvP help is setup-only; only editable rules advertise Change.
+No GPU, game, window or network.
 
-    python -I -B tests/test_menu_coop_tab.py [--cxx g++] [--cc gcc]
+    python -I -B tests/test_menu_coop_tab.py [--cxx g++] [--cc gcc] [--source-root OLD_CHECKOUT]
+    Add --menu-case members|identity|rules|combined|other|rejected|help|footer for one isolated menu regression.
+    admission|removal|pools|charter-rules|admission-rules|admission-pools use the real signed engine and host view.
 """
 import argparse
 import os
@@ -59,10 +63,13 @@ MENU_FIXTURE = r'''#include <algorithm>
 enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25,
        VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_INSERT = 0x2d, VK_DELETE = 0x2e };
 @@API@@
+#ifdef COOP_MENU_REAL_ENGINE
+extern "C" void coop_test_charter_views(MkwVkCoopView* before, MkwVkCoopView* after, const char* kind);
+#endif
 @@TABS@@
 @@ROW@@
 @@TEXT@@
-static struct { int coop_progress = 1; } opts;
+static struct { int coop_progress = 1, compact_menu_key = 0; } opts;
 @@RULES@@
 Row rows[] = {
     {TAB_GAMEPLAY, "Restart", nullptr, 0, 0, 0, nullptr, nullptr},
@@ -99,6 +106,32 @@ bool row_shown(int i) { return rows[i].tab != TAB_COOP || coop_row_shown(rows[i]
 @@ROWMAP@@
 @@APPLY@@
 @@PRESS@@
+// Cut from the actual drawing functions, so an old source still compiles and fails on what it would display.
+static const char* status_line() {
+    const MkwVkCoopView& v = coop_now;
+@@STATUS@@
+}
+static const char* accept_help(const Row& selr, bool narrow) {
+    return narrow ? @@HELP_NARROW@@ : @@HELP_WIDE@@;
+}
+namespace ui {
+enum { kUpDown, kPaste, kConfirm, kBack, kLeftRight, kCompact, kTabs, kAddChar, kRemoveChar };
+struct Prompt { int action; const char* text; const char* key = nullptr; };
+}
+struct FieldRow { TextField* field; };
+constexpr int kRestartRow = 0, kQuitRow = 0, kBugReportRow = 0;
+static bool cheat_chooses(int) { return false; }
+static bool age_shown(int) { return false; }
+static const char* cheat_confirm(int) { return nullptr; }
+static bool is_share_row(const Row&) { return false; }
+static bool has_prompt(const Row& selr, int action, const char* text) {
+    const FieldRow* field = nullptr;
+    const TextField* editing = nullptr;
+@@PROMPTS@@
+    for (int i = 0; i < prompts_n; i++)
+        if (prompt_list[i].action == action && !std::strcmp(prompt_list[i].text, text)) return true;
+    return false;
+}
 static void tick_pending(const Row& r, bool mine = false) {
     bool changed = false;
 @@PENDING@@
@@ -153,10 +186,6 @@ static void set_room(int state, const char* code, uint32_t offer, int accepted) 
     coop_refresh(&changed);
     CHECK(changed);
 }
-namespace ui {
-enum Glyph { kLeftRight, kUpDown, kAddChar, kRemoveChar, kPaste, kConfirm, kBack };
-struct Prompt { Glyph g; const char* what; };
-}
 static unsigned edit_prompts(TextField& f, bool pad) {
     const struct { TextField* field; } row{&f};
     const auto* field = &row;
@@ -164,12 +193,164 @@ static unsigned edit_prompts(TextField& f, bool pad) {
     const struct { bool pad; } c{pad};
     ui::Prompt prompt_list[7]{};
     int prompts_n = 0;
-    @@PROMPTS@@
+    @@EDIT_PROMPTS@@
     unsigned mask = 0;
-    for (int i = 0; i < prompts_n; i++) mask |= 1u << prompt_list[i].g;
+    for (int i = 0; i < prompts_n; i++) mask |= 1u << prompt_list[i].action;
     return mask;
 }
-int main() {
+static void prepare_offer() {
+    pending = nullptr, n_asked = 0, answer = 1, cur_tab = TAB_COOP;
+    room = MkwVkCoopView{};
+    room.state = HOS_COOP_STATE_JOINED, room.offer = 101, room.rules_epoch = 7, room.n = 2;
+    std::snprintf(room.code, sizeof room.code, "K7XG2M-RTB9DH-W4PZ5N");
+    std::snprintf(room.status, sizeof room.status, "Room is ready");
+    std::snprintf(room.maker_key, sizeof room.maker_key, "1234-5678-9abc-def0");
+    room.member[0].id = 1, room.member[0].self = 1;
+    room.member[1].id = 2, room.member[1].maker = 1;
+    std::snprintf(room.member[1].name, sizeof room.member[1].name, "Maker");
+    std::snprintf(room.member[1].key, sizeof room.member[1].key, "%s", room.maker_key);
+    room.category[0] = 1;
+    room.feature_count = 1, room.feature_id[0] = 80, room.feature_value[0] = 0;
+    if (!coop_feature_count) coop_feature_init();
+    bool changed = false;
+    coop_refresh(&changed);
+}
+static void check_disarm(const char* kind) {
+    const bool member = !std::strcmp(kind, "members"), identity = !std::strcmp(kind, "identity");
+    const bool rules = !std::strcmp(kind, "rules"), combined = !std::strcmp(kind, "combined");
+    const bool rejected = !std::strcmp(kind, "rejected");
+    for (int refresh = 0; refresh < (rejected ? 1 : 2); refresh++) {
+        for (int variant = 0; variant < 3; variant++) {
+            prepare_offer();
+            coop_press(row(kCoopAccept));
+            CHECK(pending && !std::strcmp(status_line(), "Room is ready") && !n_asked);
+            // Presentation-only changes must not cancel an unchanged offer.
+            room.member[1].away = 1, room.ping_ms = 17, room.version++;
+            bool changed = false;
+            coop_refresh(&changed);
+            CHECK(pending && !n_asked);
+            if (member || combined) {
+                room.n = 3, room.member[2].id = 3;
+                std::snprintf(room.member[2].name, sizeof room.member[2].name, "New player");
+                std::snprintf(room.member[2].key, sizeof room.member[2].key, "ffff-1111-2222-3333");
+            }
+            if (identity) {
+                if (!variant) std::snprintf(room.member[1].name, sizeof room.member[1].name, "Renamed");
+                else if (variant == 1) std::snprintf(room.member[1].key, sizeof room.member[1].key, "ffff-1111-2222-3333");
+                else std::snprintf(room.maker_key, sizeof room.maker_key, "ffff-1111-2222-3333");
+            }
+            if (rules || combined) {
+                if (!variant) room.category[0] = 0;
+                else if (variant == 1) room.feature_value[0] = 1;
+                else room.feature_count = 2, room.feature_id[1] = 249, room.feature_value[1] = 17;
+            }
+            if (rejected) answer = 0;
+            else {
+                if (variant != 1) room.offer++;
+                if (variant != 0) room.rules_epoch++;   // a membership-only charter advance is not a rule edit
+            }
+            if (refresh) coop_refresh(&changed);
+            else coop_press(row(kCoopAccept));   // stale second press before the next menu refresh
+            CHECK(!pending && n_asked == (rejected ? 1 : 0));
+            const char* expected = combined ? "Room members and rules changed. Review both before accepting." :
+                                   member || identity ? "Room members changed. Review the players before accepting." :
+                                   rules ? "Room rules changed. Read the new Room rules before accepting." :
+                                   "The room changed. Review its members and Room rules before accepting.";
+            CHECK(status_line() && !std::strcmp(status_line(), expected));
+            answer = 1;
+            coop_press(row(kCoopAccept));   // a fresh first press clears the notice, never silently confirms
+            CHECK(pending && n_asked == (rejected ? 1 : 0) && !std::strcmp(status_line(), "Room is ready"));
+            coop_press(row(kCoopAccept));
+            CHECK(!pending && n_asked == (rejected ? 2 : 1) && asked[n_asked - 1].number == room.offer);
+        }
+    }
+}
+static void check_accept_help() {
+    for (int mode : {0, 1}) {
+        prepare_offer();
+        room.feature_value[0] = (int16_t)mode;
+        bool changed = false;
+        coop_refresh(&changed);
+        for (bool narrow : {false, true}) {
+            const char* text = accept_help(row(kCoopAccept), narrow);
+            if (mode) {
+                CHECK(std::strstr(text, "PvP setup") && std::strstr(text, "No progress is shared") &&
+                      std::strstr(text, "no fight can start") && !std::strstr(text, "Shares your progress"));
+            } else CHECK(!std::strcmp(text, row(kCoopAccept).help) && std::strstr(text, "Shares your progress") &&
+                         std::strstr(text, "Your save is copied first"));
+            CHECK(std::strstr(text, "fingerprints aloud") && std::strstr(text, "Press twice"));
+            CHECK(!std::strcmp(accept_help(row(kCoopLeave), narrow), row(kCoopLeave).help));
+        }
+    }
+}
+static void check_rules_footer() {
+    prepare_offer();
+    cur_tab = TAB_RULES;
+    CHECK(coop_rules_readonly && coop_terms_count);
+    for (int i = 0; i < coop_terms_count; i++) {
+        const Row& r = coop_terms[i].row;
+        CHECK(!has_prompt(r, ui::kLeftRight, "Change"));
+        CHECK(has_prompt(r, ui::kUpDown, "Choose") && has_prompt(r, ui::kBack, "Back"));
+    }
+    room.accepted = 1, room.remedies = 1;   // the maker's editable draft still advertises its control
+    bool changed = false;
+    coop_refresh(&changed);
+    CHECK(!coop_rules_readonly && has_prompt(coop_feature_rows[0].row, ui::kLeftRight, "Change"));
+    CHECK(has_prompt(coop_feature_rows[0].row, ui::kBack, "Back"));
+    coop_rules_readonly = true, cur_tab = TAB_GAMEPLAY;
+    CHECK(has_prompt(coop_feature_rows[0].row, ui::kLeftRight, "Change"));   // no unrelated footer changes
+}
+#ifdef COOP_MENU_REAL_ENGINE
+static void check_charter_notice(const char* name) {
+    MkwVkCoopView before{}, after{};
+    coop_test_charter_views(&before, &after, name);
+    CHECK(before.offer && after.offer && !before.accepted && !after.accepted);
+    CHECK(before.rules_epoch != after.rules_epoch);
+    CHECK(before.n == after.n && !std::memcmp(before.member, after.member, sizeof before.member));
+    CHECK(!std::strcmp(before.maker_key, after.maker_key));
+    CHECK(!std::memcmp(before.category, after.category, sizeof before.category));
+    const bool changed_rules = !std::strcmp(name, "charter-rules") || !std::strcmp(name, "admission-rules");
+    if (!changed_rules) {
+        CHECK(before.feature_count == after.feature_count);
+        CHECK(!std::memcmp(before.feature_id, after.feature_id, sizeof before.feature_id));
+        CHECK(!std::memcmp(before.feature_value, after.feature_value, sizeof before.feature_value));
+    }
+    if (!std::strcmp(name, "admission") || !std::strcmp(name, "pools") || !std::strcmp(name, "admission-pools"))
+        CHECK(before.offer == after.offer);   // epoch-only disarm: the acceptance token and visible roster did not change
+    const bool combined = !std::strcmp(name, "admission-rules") || !std::strcmp(name, "admission-pools");
+    const bool rules_only = !std::strcmp(name, "pools") || !std::strcmp(name, "charter-rules");
+    const char* expected = combined ? "Room members and rules changed. Review both before accepting." :
+                           rules_only ? "Room rules changed. Read the new Room rules before accepting." :
+                           "Room members changed. Review the players before accepting.";
+    for (int refresh = 0; refresh < 2; refresh++) {
+        pending = nullptr, n_asked = 0, answer = 1, cur_tab = TAB_COOP;
+        room = before;
+        bool changed = false;
+        coop_refresh(&changed);
+        coop_press(row(kCoopAccept));
+        CHECK(pending == &row(kCoopAccept) && !n_asked);
+        tick_pending(coop_terms[0].row);
+        room = after;
+        if (refresh) coop_refresh(&changed);
+        else coop_press(row(kCoopAccept));
+        CHECK(!pending && !n_asked);
+        CHECK(status_line() && !std::strcmp(status_line(), expected));
+    }
+}
+#endif
+static void check_menu_case(const char* name) {
+    if (!std::strcmp(name, "help")) check_accept_help();
+    else if (!std::strcmp(name, "footer")) check_rules_footer();
+#ifdef COOP_MENU_REAL_ENGINE
+    else if (!std::strcmp(name, "admission") || !std::strcmp(name, "removal") || !std::strcmp(name, "pools") ||
+             !std::strcmp(name, "charter-rules") || !std::strcmp(name, "admission-rules") || !std::strcmp(name, "admission-pools"))
+        check_charter_notice(name);
+#endif
+    else check_disarm(name);
+    std::printf("PASS: Co-op menu %s\n", name);
+}
+int main(int argc, char** argv) {
+    if (argc == 2) { check_menu_case(argv[1]); return 0; }
     const unsigned text_prompts = (1u << ui::kLeftRight) | (1u << ui::kPaste) | (1u << ui::kConfirm) | (1u << ui::kBack);
     CHECK(edit_prompts(coop_name_field, false) == text_prompts);
     CHECK(edit_prompts(coop_name_field, true) == (text_prompts | (1u << ui::kRemoveChar)));
@@ -326,12 +507,14 @@ int main() {
     CHECK(pending == &row(kCoopAccept));
     room.offer++, room.rules_epoch++;   // changes between presses, before the next menu refresh
     coop_press(row(kCoopAccept));
-    CHECK(!pending && coop_terms_changed && n_asked == requests_before && coop_now.offer == room.offer);
+    CHECK(!pending && status_line() && !std::strcmp(status_line(), "The room changed. Review its members and Room rules before accepting.") &&
+          n_asked == requests_before && coop_now.offer == room.offer);
     CHECK(opts.coop_progress == 1 && coop_feature_rows[0].value == 0);   // no join-view/default write
     coop_press(row(kCoopAccept));
     room.offer++;   // refresh also disarms, rather than silently confirming a new offer
     coop_refresh(&changed);
-    CHECK(!pending && coop_terms_changed && n_asked == requests_before);
+    CHECK(!pending && status_line() && !std::strcmp(status_line(), "The room changed. Review its members and Room rules before accepting.") &&
+          n_asked == requests_before);
     // ---- the Room rules page's values and what is said under them ----
     CHECK(!std::strcmp(tx_rule_shared(1), "Shared") && !std::strcmp(tx_rule_shared(0), "Per player"));
     CHECK(!std::strcmp(tx_rule_pool(2), "One pool") && !std::strcmp(tx_rule_pool(0), "Per player"));
@@ -366,6 +549,10 @@ int main() {
     CHECK(coop_name_apply() == nullptr && saves == 2 && asked[1].cmd == HOS_COOP_CMD_NAME && !std::strcmp(asked[1].text, "Malon") &&
           asked[1].number == 1);
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
+    for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
+#ifdef COOP_MENU_REAL_ENGINE
+    for (const char* name : {"admission", "removal", "pools", "charter-rules", "admission-rules", "admission-pools"}) check_menu_case(name);
+#endif
 }
 '''
 
@@ -389,7 +576,11 @@ static void set_env(const char *name, const char *value) {
 }
 void hos_coop_menu_view(MkwVkCoopView *out);
 int hos_coop_menu_command(int cmd, const char *text, uint32_t number);
+#ifndef COOP_MENU_REAL_ENGINE
 const CoopFeatureRule *coop_feature_at(int index) { (void)index; return NULL; }   /* no registry rows in this fixture */
+#else
+static CoopSync *view_engine;
+#endif
 static int64_t clock_ms;
 int64_t hos_now_ns(void) { return clock_ms * 1000000; }
 void hos_log(const char *fmt, ...) { (void)fmt; }
@@ -426,19 +617,112 @@ static CoopOffer sync_offer;
 static int sync_has, sync_maker, resets;
 static uint32_t accepted_token;
 static char removed_key[32];
-int hos_oot_coop_offer(CoopOffer *out) { *out = sync_offer; return sync_has; }
+int hos_oot_coop_offer(CoopOffer *out) {
+#ifdef COOP_MENU_REAL_ENGINE
+    if (view_engine) return coop_sync_offer(view_engine, out, (uint64_t)clock_ms);
+#endif
+    *out = sync_offer;
+    return sync_has;
+}
 int hos_oot_coop_accept(uint32_t token) { accepted_token = token; return sync_has && token == sync_offer.token; }
-int hos_oot_coop_is_maker(void) { return sync_maker; }
+int hos_oot_coop_is_maker(void) {
+#ifdef COOP_MENU_REAL_ENGINE
+    if (view_engine) return coop_sync_is_maker(view_engine);
+#endif
+    return sync_maker;
+}
 int hos_oot_coop_reset_pools(void) { resets++; return sync_maker; }
 int hos_oot_coop_remove_key(const char *key) { snprintf(removed_key, sizeof removed_key, "%s", key); return sync_maker; }
 int hos_oot_coop_rules_changed(void) { return sync_maker; }
 int hos_oot_coop_contributors(CoopContributor *out, int max) {
+#ifdef COOP_MENU_REAL_ENGINE
+    if (view_engine) return coop_sync_contributors(view_engine, out, max);
+#endif
     if (max < 1) return 0;
     memset(out, 0, sizeof *out);
     out->self = 1, out->member = 2;
     snprintf(out->key, sizeof out->key, "4be1-07d2-9a3f-c615");
     return 1;
 }
+#ifdef COOP_MENU_REAL_ENGINE
+typedef struct { CoopSync *peer[3]; int sender, count; } CharterLink;
+static int charter_send(int to, uint8_t kind, const uint8_t *bytes, size_t n, void *user) {
+    CharterLink *link = user;
+    for (int i = 0; i < link->count; i++)
+        if (i != link->sender && (!to || to == i + 1))
+            coop_sync_receive(link->peer[i], link->sender + 1, kind, bytes, n, (uint64_t)clock_ms);
+    return 1;
+}
+static void charter_pump(CharterLink *link) {
+    for (int tick = 0; tick < 60; tick++) {
+        clock_ms += 100;
+        for (link->sender = 0; link->sender < link->count; link->sender++)
+            coop_sync_tick(link->peer[link->sender], (uint64_t)clock_ms, charter_send, link);
+    }
+}
+static void maker_accept(CoopSync *maker) {
+    CoopOffer offer;
+    CHECK(coop_sync_offer(maker, &offer, (uint64_t)clock_ms) && coop_sync_accept(maker, offer.token));
+}
+/* Real signed traffic, real offers, real host view. The reader is admitted first, so its own displayed key is stable
+   while the maker later admits an already-visible third player. No view fields or charter bytes are synthesized. */
+void coop_test_charter_views(MkwVkCoopView *before, MkwVkCoopView *after, const char *kind) {
+    const int ids[] = {1, 2, 3};
+    const uint64_t sessions[] = {101, 202, 303};
+    const char *names[] = {"Maker", "Reader", "New player"};
+    CharterLink link = {{NULL, NULL, NULL}, 0, 2};
+    CoopRules rules;
+    coop_rules_default(&rules);
+    clock_ms = 1000;
+    for (int i = 0; i < 3; i++) {
+        link.peer[i] = coop_sync_new((uint64_t)i + 1, 77);
+        CHECK(link.peer[i]);
+        uint8_t seed[32] = {0};
+        seed[0] = (uint8_t)(i + 1);
+        coop_sync_seed(link.peer[i], seed);
+        coop_sync_name(link.peer[i], names[i]);
+        coop_sync_settings(link.peer[i], &rules, i == 0);
+        if (i < 2) coop_sync_room(link.peer[i], "CONSENT", i + 1, ids, sessions, 2, 1, (uint64_t)clock_ms);
+    }
+    charter_pump(&link);
+    maker_accept(link.peer[0]);
+    charter_pump(&link);   /* the reader's identity is already admitted before the third player arrives */
+    link.count = 3;
+    for (int i = 0; i < 3; i++)
+        coop_sync_room(link.peer[i], "CONSENT", i + 1, ids, sessions, 3, 1, (uint64_t)clock_ms);
+    charter_pump(&link);   /* everyone sees all three identities, but the third is not yet admitted */
+    const int later = !strcmp(kind, "removal") || !strcmp(kind, "pools") || !strcmp(kind, "charter-rules");
+    if (later) {
+        maker_accept(link.peer[0]);
+        charter_pump(&link);
+    }
+    session = (CoopView){.state = COOP_JOINED, .self = 2, .maker = 1, .n = 3};
+    snprintf(session.code, sizeof session.code, "CONSENT");
+    for (int i = 0; i < 3; i++) {
+        session.member[i].id = ids[i], session.member[i].session = sessions[i];
+        snprintf(session.member[i].name, sizeof session.member[i].name, "%s", names[i]);
+    }
+    view_engine = link.peer[1];
+    hos_coop_menu_view(before);
+    CHECK(before->member[1].self && before->member[1].key[0]);
+    if (!later) maker_accept(link.peer[0]);
+    if (!strcmp(kind, "admission-rules") || !strcmp(kind, "charter-rules")) {
+        CHECK(coop_feature_set(&rules, 249, 17));
+        coop_sync_settings(link.peer[0], &rules, 1);
+    }
+    if (!strcmp(kind, "pools") || !strcmp(kind, "admission-pools")) CHECK(coop_sync_reset_pools(link.peer[0]));
+    if (!strcmp(kind, "removal")) CHECK(coop_sync_remove(link.peer[0], 3));
+    charter_pump(&link);
+    hos_coop_menu_view(after);
+    CHECK(before->n == after->n && !memcmp(before->member, after->member, sizeof before->member));
+    CHECK(!strcmp(before->maker_key, after->maker_key));
+    CHECK(!memcmp(before->category, after->category, sizeof before->category));
+    printf("signed %s: epoch %u -> %u; token %s; roster/names/keys/maker/categories unchanged\n",
+           kind, before->rules_epoch, after->rules_epoch, before->offer == after->offer ? "unchanged" : "changed");
+    view_engine = NULL;
+    for (int i = 0; i < 3; i++) coop_sync_free(link.peer[i]);
+}
+#endif
 static void real(void) {
     MkwVkCoopView v;
     hos_coop_menu_view(&v);
@@ -575,13 +859,25 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cxx", default="g++")
     p.add_argument("--cc", default="gcc")
+    p.add_argument("--source-root", type=Path, default=ROOT,
+                   help="production checkout; the fixture always comes from this test driver")
+    charter_cases = ("admission", "removal", "pools", "charter-rules", "admission-rules", "admission-pools")
+    p.add_argument("--menu-case", choices=("all", "members", "identity", "rules", "combined", "other", "rejected", "help", "footer") + charter_cases,
+                   default="all", help="run one menu regression; charter cases include the actual signed engine and host view")
     a = p.parse_args()
-    menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
-    api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
-    backend = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
+    root = a.source_root.resolve()
+    menu = (root / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
+    api = (root / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
+    backend = (root / "host/rx_backend.c").read_text(encoding="utf-8")
     if "HOS_COOP_STATE_OFF" not in api:
         raise SystemExit("FAIL: vk_api.h: no Co-op tab's view (MkwVkCoopView)")
     api_cut = between(api, "enum { HOS_TEXT_KEY", "\n") + "\n" + between(api, "enum { HOS_COOP_STATE_OFF", "/* what the executable gives")
+    draw = block(menu, "void draw_options(ui::Ctx& c) {")
+    coop_draw = block(menu, "void draw_coop_rows(")
+    status = re.search(r"if \(const char\* line = (.*?)\)\n", coop_draw, re.S).group(1)
+    help_text = re.findall(r"help_box\(c,.*?selr\.name, (.*?), hint,", draw, re.S)
+    if len(help_text) != 2:
+        raise SystemExit("FAIL: expected the narrow and wide help boxes in draw_options")
     cut = {
         "@@API@@": api_cut,
         "@@TABS@@": re.search(r"enum MenuTab \{.*?\};", menu, re.S).group(0),
@@ -596,11 +892,16 @@ def main():
         "@@ROWMAP@@": block(menu, "int tab_row_to_global("),
         "@@APPLY@@": between(menu, "/// (longshot) Enter on the Co-op tab's Your name", "/// Custom output size: the Output"),
         "@@PRESS@@": between(menu, "/// (longshot) Enter (or a click) on a Co-op row", "// ---- (longshot) the Controls page"),
-        "@@PROMPTS@@": block(menu, "if (field && editing == field->field) {"),
+        "@@EDIT_PROMPTS@@": block(menu, "if (field && editing == field->field) {"),
         "@@PENDING@@": between(menu, "        // (Restart and Quit armed only", "        if (press[7] && confirm_selected)"),
         "@@RULES_BACK@@": re.search(r"^        if \(press\[5\] && cur_tab == TAB_RULES\).*$", menu, re.M).group(0),
         "@@TAB_AWAY@@": between(menu, "        // (the tabs: LB and RB", "        const int tab_count ="),
         "@@CLOSED@@": block(block(menu, "void menu_tick() {"), "if (!now_open) {"),
+        "@@STATUS@@": block(coop_draw, "static const char* const meaning[]") + "\n" +
+                      between(coop_draw, "const bool known =", "    c.d->PushClipRect") + "\nreturn " + status + ";",
+        "@@HELP_NARROW@@": help_text[0],
+        "@@HELP_WIDE@@": help_text[1],
+        "@@PROMPTS@@": between(draw, "    const bool confirms =", "    const float bar_top ="),
     }
     source = MENU_FIXTURE
     for k, v in cut.items():
@@ -608,22 +909,37 @@ def main():
     with tempfile.TemporaryDirectory(prefix="menu-coop-") as tmp:
         tmp = Path(tmp)
         (tmp / "menu.cpp").write_text(source, encoding="utf-8")
+        mono = root / "third_party" / "monocypher"
+        real_engine = a.menu_case == "all" or a.menu_case in charter_cases
+        objects = []
+        if real_engine:
+            (tmp / "host").mkdir()
+            (tmp / "host" / "fixture.c").write_text(HOST_FIXTURE, encoding="utf-8")
+            run([a.cc, "-std=c99", "-O1", "-w", "-c", str(mono / "monocypher.c"), "-o", str(tmp / "monocypher.o")])
+            cflags = [a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
+                      "-I" + str(root / "host"), "-I" + str(mono)]
+            sources = [(tmp / "host" / "fixture.c", ["-DCOOP_MENU_REAL_ENGINE=1", "-Dmain=coop_host_fixture_main"])]
+            sources += [(root / "host" / name, []) for name in ("coop_menu.c", "coop_state.c", "coop_proto.c")]
+            for index, (path, defines) in enumerate(sources):
+                obj = tmp / ("charter-%d.o" % index)
+                run(cflags + defines + ["-c", str(path), "-o", str(obj)])
+                objects.append(str(obj))
+            objects.append(str(tmp / "monocypher.o"))
         run([a.cxx, "-std=c++20", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
-             "-Wno-missing-field-initializers", str(tmp / "menu.cpp"), "-o", str(tmp / "menu")])
-        run([str(tmp / "menu")])
-        (tmp / "host").mkdir()
-        (tmp / "host" / "fixture.c").write_text(HOST_FIXTURE, encoding="utf-8")
-        mono = ROOT / "third_party" / "monocypher"
-        run([a.cc, "-std=c99", "-O1", "-w", "-c", str(mono / "monocypher.c"), "-o", str(tmp / "monocypher.o")])
-        run([a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(ROOT / "host"), "-I" + str(mono), str(tmp / "host" / "fixture.c"),
-             str(ROOT / "host" / "coop_menu.c"), str(ROOT / "host" / "coop_proto.c"), str(tmp / "monocypher.o"),
-             "-o", str(tmp / "host_test")])
+             "-Wno-missing-field-initializers"] + (["-DCOOP_MENU_REAL_ENGINE=1"] if real_engine else []) +
+            [str(tmp / "menu.cpp")] + objects + ["-o", str(tmp / "menu")])
         env = {k: v for k, v in os.environ.items() if not k.startswith("HOS_COOP")}
+        run([str(tmp / "menu")] + ([a.menu_case] if a.menu_case != "all" else []), env=env)
+        if a.menu_case != "all":
+            return
+        run([a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
+             "-I" + str(root / "host"), "-I" + str(mono), str(tmp / "host" / "fixture.c"),
+             str(root / "host" / "coop_menu.c"), str(root / "host" / "coop_proto.c"), str(tmp / "monocypher.o"),
+             "-o", str(tmp / "host_test")])
         run([str(tmp / "host_test")], env=env)
         run([str(tmp / "host_test"), "demo"], env=dict(env, HOS_COOP_DEMO="1"))
         # ---- the Room rules page against the engine: the rows as the source has them ----
-        header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
+        header = (root / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
         order = re.findall(r'\{&opts\.(\w+), "(\w+)"\}', between(menu, "} coop_options[] = {", "};"))
         if len(order) != 8 or order[0] != ("coop", "coop"):
             raise SystemExit("FAIL: vk_menu.cpp: coop_options is not co-op at the start and the seven rules")
@@ -636,8 +952,8 @@ def main():
             table.append('    {"%s", %s, %s, %s, %s},' % (key, *r.groups(), default.group(1)))
         (tmp / "rules.c").write_text(RULES_FIXTURE.replace("@@TABLE@@", "\n".join(table)), encoding="utf-8")
         run([a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
-             "-I" + str(ROOT / "host"), "-I" + str(mono), str(tmp / "rules.c"), str(ROOT / "host" / "coop_state.c"),
-             str(ROOT / "host" / "coop_proto.c"), str(tmp / "monocypher.o"), "-o", str(tmp / "rules")])
+             "-I" + str(root / "host"), "-I" + str(mono), str(tmp / "rules.c"), str(root / "host" / "coop_state.c"),
+             str(root / "host" / "coop_proto.c"), str(tmp / "monocypher.o"), "-o", str(tmp / "rules")])
         run([str(tmp / "rules")])
 
     # ---- the wiring ----
@@ -649,8 +965,8 @@ def main():
                         "int (*coop_feature)(int index, MkwVkCoopFeature *out);"]:
         raise SystemExit("FAIL: vk_api.h: the Co-op calls are not after take_text in MkwVkHost's appended order "
                          "(host/rx_backend.c fills it by position)")
-    if version < 24:
-        raise SystemExit("FAIL: vk_api.h: MkwVkHost grew without an MKWVK_API_VERSION bump")
+    if version < 27:
+        raise SystemExit("FAIL: vk_api.h: the membership/pool view needs API 27 (26 is already allocated)")
     need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*\};",
          "rx_backend.c: vk_host does not end with the Co-op tab's calls")
     need(menu, r"TAB_DEBUG = 4,[^\n]*\n\s*TAB_COOP = 5,[^\n]*\n\s*TAB_COUNT = 6,", "vk_menu.cpp: the Co-op tab is not the strip's last")

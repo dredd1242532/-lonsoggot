@@ -206,6 +206,7 @@ struct CoopSync {
     int maker;                      // the member id the relay names as the room's maker, 0 none in the room
     uint64_t originated_at;
     unsigned rules_ver;
+    uint32_t membership_revision;   // local observation of signed admission/removal sets, not a consent token
     int want_reset;                 // the maker asked for a pool reset
     uint64_t want_remove;           // the key id the maker removes, 0 none
     uint64_t *gone;                 // every key a charter of this room removed, kept while the room's code stays
@@ -964,10 +965,21 @@ static int member_of_kid(const CoopSync *s, uint64_t kid) {
     return 0;
 }
 
+static int charter_members_changed(const Charter *a, const Charter *b) {
+    if (a->nadmit != b->nadmit || a->nremoved != b->nremoved) return 1;
+    for (int i = 0; i < a->nadmit; i++)
+        if (!in_list(b->admit, b->nadmit, a->admit[i])) return 1;
+    for (int i = 0; i < a->nremoved; i++)
+        if (!in_list(b->removed, b->nremoved, a->removed[i])) return 1;
+    return 0;
+}
+
 static void adopt_charter(CoopSync *s, const Charter *c) {
     int had = s->have_room;
     uint32_t old_pool_epoch = s->ch.pool_epoch;
     CoopRules old = s->room;
+    if (!had || charter_members_changed(&s->ch, c))
+        if (!++s->membership_revision) ++s->membership_revision;   // zero means no received charter
     s->ch = *c;
     s->have_room = 1;
     memcpy(s->room.mode, c->mode, COOP_CAT_N);
@@ -1328,6 +1340,8 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     o->disagree = differ;
     if (!s->have_room) return 0;
     o->rules = s->room;
+    o->membership_revision = s->membership_revision;
+    o->pool_epoch = s->ch.pool_epoch;
     o->rules.maker = (uint8_t)member_of_kid(s, s->ch.kid);
     fingerprint(s->ch.kid, o->maker_key);
     o->maker_moved = s->maker && s->maker != s->self && s->peer[s->maker].ident && s->peer[s->maker].kid != s->ch.kid;

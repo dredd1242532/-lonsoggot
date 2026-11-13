@@ -606,9 +606,18 @@ combat rules and format-4 peers refuse acceptance with a reason. Every participa
 Before the confirming Accept press, Room rules opens the received signed categories and every numbered value,
 including unknown values, with the signing maker's fingerprint. A joiner sees a read-only snapshot; it never replaces
 or saves that joiner's local defaults. Back returns to the room; the next Accept confirms the exact offer first shown.
-A changed offer or rules epoch disarms confirmation and displays the new terms. The maker may edit its local Room
-rules after accepting; saving asks the existing engine to sign the changed draft and everyone must accept it again.
+A changed offer or rules epoch still disarms confirmation. The notice distinguishes changed members/identities from
+changed category/feature rules or pool resets (or both). The preview carries a local revision of the signed admission
+and removal sets, separate from the pool epoch: admitting an already-visible player is a member change even when
+every displayed name and key stays the same. These observations only explain cancellation; they do not replace or
+relax consent. Other changes not exposed in the preview ask you to review both. Read-only rules show no left/right
+**Change** footer; the maker's editable draft keeps it. The maker may edit its local Room rules after accepting;
+saving asks the existing engine to sign the changed draft and everyone must accept it again.
+PvP Accept help and the acceptance log describe setup only:
+no progress is shared and no fight starts. Co-op keeps its progress-sharing help and copy/apply log wording.
 The normal copy-before-progress rule remains in force. Joining, accepting and readiness are separate decisions.
+The host/renderer view uses API 27 for the added membership revision and pool epoch (26 is already allocated to the
+temporary-profile view). Both binaries must use the matching interface.
 
 The first Accept stays armed across menu frames while you read the signed terms, including moving between their rows.
 Back returns to the same Accept row for confirmation. Selecting a different room action, closing the menu or receiving

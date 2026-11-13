@@ -208,6 +208,8 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
     if (offer.refusal[0]) copy_text(out->status, sizeof out->status, offer.refusal);
     if (offer.rules.epoch) {
         out->rules_epoch = offer.rules.epoch;
+        out->membership_revision = offer.membership_revision;
+        out->pool_epoch = offer.pool_epoch;
         _Static_assert((int)COOP_CAT_N == (int)HOS_COOP_RULE_CATEGORIES, "all signed categories are previewed");
         memcpy(out->category, offer.rules.mode, sizeof out->category);
         copy_text(out->maker_key, sizeof out->maker_key, offer.maker_key);

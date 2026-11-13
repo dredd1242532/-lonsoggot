@@ -1871,7 +1871,11 @@ bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !
 MkwVkCoopView coop_now{};
 bool coop_secret_shown = false;   // (Room secret: masked until Enter shows it; masked again at every opening of the menu)
 uint32_t coop_accept_token = 0, coop_accept_epoch = 0;
-bool coop_terms_changed = false;
+const char* coop_accept_notice = nullptr;
+const char* const coop_pvp_accept_help =
+    "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
+    "fingerprints aloud to each other before: a name can be anyone's. Press twice.";
+const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
 enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
@@ -1891,6 +1895,35 @@ int coop_kind(const Row& r) {
     for (int k = 0; r.tab == TAB_COOP && k < kCoopRows; k++)
         if (!strcmp(r.name, coop_row_names[k])) return k;
     return -1;
+}
+const char* coop_row_help(const Row& r) {
+    if (coop_kind(r) == kCoopAccept && coop_now.rules_epoch)
+        for (int i = 0; i < std::min<int>(coop_now.feature_count, HOS_COOP_FEATURES); i++)
+            if (coop_now.feature_id[i] == 80 && coop_now.feature_value[i] == 1) return coop_pvp_accept_help;
+    return r.help;
+}
+/// Explain a cancelled confirmation from the signed membership revision, pool epoch and displayed terms, not the
+/// charter epoch alone. Other hidden changes (a save generation, for example) stay generic.
+const char* coop_accept_change(const MkwVkCoopView& now) {
+    const size_t features = std::min<int>(now.feature_count, HOS_COOP_FEATURES);
+    const bool rules = now.pool_epoch != coop_now.pool_epoch ||
+                       memcmp(now.category, coop_now.category, sizeof now.category) ||
+                       now.feature_count != coop_now.feature_count ||
+                       memcmp(now.feature_id, coop_now.feature_id, features * sizeof *now.feature_id) ||
+                       memcmp(now.feature_value, coop_now.feature_value, features * sizeof *now.feature_value);
+    bool members = now.membership_revision != coop_now.membership_revision ||
+                   now.n != coop_now.n || strcmp(now.maker_key, coop_now.maker_key);
+    for (int i = 0; !members && i < now.n && i < HOS_COOP_MEMBERS; i++) {
+        const MkwVkCoopMember& a = now.member[i];
+        const MkwVkCoopMember* b = nullptr;
+        for (int j = 0; j < coop_now.n && j < HOS_COOP_MEMBERS; j++)
+            if (coop_now.member[j].id == a.id) { b = &coop_now.member[j]; break; }
+        members = !b || a.self != b->self || a.maker != b->maker || strcmp(a.name, b->name) || strcmp(a.key, b->key);
+    }
+    if (members && rules) return "Room members and rules changed. Review both before accepting.";
+    if (members) return "Room members changed. Review the players before accepting.";
+    if (rules) return "Room rules changed. Read the new Room rules before accepting.";
+    return coop_accept_unknown;
 }
 /// In a room, or on the way into one or back
 bool coop_in_room(const MkwVkCoopView& v) {
@@ -2958,7 +2991,7 @@ void coop_press(const Row& r) {
         pending = &r;
         if (k == kCoopAccept) {
             coop_accept_token = coop_now.offer, coop_accept_epoch = coop_now.rules_epoch;
-            coop_terms_changed = false;
+            coop_accept_notice = nullptr;
             cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;   // read the signed terms before the confirming press
         }
         return;
@@ -2971,12 +3004,14 @@ void coop_press(const Row& r) {
         MkwVkCoopView fresh{};
         if (host->coop_view) host->coop_view(&fresh);
         if (fresh.offer != coop_accept_token || fresh.rules_epoch != coop_accept_epoch) {
-            coop_now = fresh, coop_terms_changed = true;
+            coop_accept_notice = coop_accept_change(fresh);
+            coop_now = fresh;
             coop_preview_refresh();
             cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;
             return;
         }
-        if (!host->coop_command(HOS_COOP_CMD_ACCEPT, nullptr, coop_accept_token)) coop_terms_changed = true;
+        if (!host->coop_command(HOS_COOP_CMD_ACCEPT, nullptr, coop_accept_token))
+            coop_accept_notice = coop_accept_unknown;
     }
     else if (k == kCoopRemove && coop_removable(coop_now, &chosen) && chosen) host->coop_command(HOS_COOP_CMD_REMOVE, chosen->key, 0);
     else if (k == kCoopReset) host->coop_command(HOS_COOP_CMD_RESET_POOLS, nullptr, 0);
@@ -2993,7 +3028,7 @@ void coop_refresh(bool* changed) {
     if (!memcmp(&now, &coop_now, sizeof now)) return;
     if (pending && coop_kind(*pending) == kCoopAccept &&
         (now.offer != coop_accept_token || now.rules_epoch != coop_accept_epoch)) {
-        pending = nullptr, coop_terms_changed = true;
+        pending = nullptr, coop_accept_notice = coop_accept_change(now);
     }
     coop_now = now;
     coop_preview_refresh();
@@ -3195,7 +3230,12 @@ float measure_help(ui::Ctx& c, float width) {
         if (&r == &rows[kBugReportRow])   // (the Bug report's line once saved, with the longest folder name it can have)
             hint = ui::para(c, c.f.body, 16 * c.s, ImVec2(), 0, bug_report_saved_text("bug-reports/2026-12-31_23-59-59-99").c_str(),
                             width - 18 * c.s, false);
-        if (r.help) most = std::max(most, ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, r.help, width, false) + (hint ? 14 * c.s + hint : 0));
+        if (r.help) {
+            float tall = ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, r.help, width, false);
+            if (coop_kind(r) == kCoopAccept)
+                tall = std::max(tall, ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, coop_pvp_accept_help, width, false));
+            most = std::max(most, tall + (hint ? 14 * c.s + hint : 0));
+        }
     }
     return most;
 }
@@ -3749,7 +3789,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     ui::text_mid(c, c.f.strong, 19 * s, left + 20 * s, top + 22 * s, coop_in_room(v) ? ui::kGoldHi : ui::kInk, head.c_str());
     if (v.ping_ms && v.state == HOS_COOP_STATE_JOINED)
         ui::text_mid_right(c, c.f.body, 16 * s, right - 20 * s, top + 22 * s, ui::kSoft, (std::to_string(v.ping_ms) + " ms").c_str());
-    if (const char* line = coop_terms_changed ? "The terms changed. Read the new Room rules before accepting." :
+    if (const char* line = coop_accept_notice ? coop_accept_notice :
                            v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 50 * s, ui::kSoft, fit(c, c.f.body, 16 * s, right - left - 40 * s, line, false).c_str());
     const int count = tab_row_count(TAB_COOP);
@@ -3887,7 +3927,7 @@ void draw_options(ui::Ctx& c) {
                                                     : k == kCoopReset ? "Reset" : "Leave"};
             if (k == kCoopRemove) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
         } else if (selr.value || (selr.cheat >= 0 && (selr.cheat <= 1 || selr.cheat == 7 || cheat_chooses(selr.cheat) || age_shown(selr.cheat)))) {
-            prompt_list[prompts_n++] = {ui::kLeftRight, "Change"};
+            if (!(cur_tab == TAB_RULES && coop_rules_readonly)) prompt_list[prompts_n++] = {ui::kLeftRight, "Change"};
             if (selr.cheat >= 0) if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
             prompt_list[prompts_n++] = {ui::kCompact, "Compact", compact_key_name};
         } else if (selr.cheat >= 0) {
@@ -3908,10 +3948,10 @@ void draw_options(ui::Ctx& c) {
         const float help_h = std::min(22 * s + 32 * s + help_tall + (after ? 30 * s : 0) + (pending_line.empty() ? 0 : 52 * s) + 22 * s,
                                       (bottom - hh) * 0.5f);
         bottom = std::min(bar_top, c.h - c.safe) - help_h - 16 * s;
-        help_box(c, hx0, hx1, bottom + 8 * s, selr.name, selr.help, hint, pending_line.empty() ? nullptr : pending_line.c_str(), help_tall,
+        help_box(c, hx0, hx1, bottom + 8 * s, selr.name, coop_row_help(selr), hint, pending_line.empty() ? nullptr : pending_line.c_str(), help_tall,
                  after, bottom + 8 * s, bar_top - 10 * s);
     } else {
-        help_box(c, hx0, hx1, std::max(hh + 26 * s, c.h * 0.30f), selr.name, selr.help, hint,
+        help_box(c, hx0, hx1, std::max(hh + 26 * s, c.h * 0.30f), selr.name, coop_row_help(selr), hint,
                  pending_line.empty() ? nullptr : pending_line.c_str(), help_tall, after, hh + 18 * s, bar_top - 12 * s);
     }
     const float rh = 40 * s, pitch = 48 * s, top = hh + 24 * s, rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, split = rx0 + (rx1 - rx0) * 0.55f;

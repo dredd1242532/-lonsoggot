@@ -201,6 +201,8 @@ typedef struct {
     int unidentified;   // members in the room that never identified themselves: the room cannot be accepted meanwhile
     int disagree;       // members carry rules signed by different keys (or by another than the one in force)
     char refusal[96];   // why this room cannot be accepted; host-authored, not remote text
+    uint32_t membership_revision;   // local revision of signed admit/removed sets; independent of rules/pool epochs
+    uint32_t pool_epoch;            // signed pool reset epoch, separate from membership changes
 } CoopOffer;
 // A signed, explicitly present rule; unlike coop_feature_rule, absence never substitutes a local default.
 int coop_feature_present(const CoopRules *rules, int id, int *value);

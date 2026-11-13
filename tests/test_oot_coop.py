@@ -24,8 +24,11 @@ flag database in a fake guest memory (a getter and setters stand in for the game
 - and the wiring: one call at the end of the present (host/nvn_native.c), the RomFS open hook and the save-writer
   bookkeeping in host/nn_fs.c, no direct write of the flag table (HOS_COOP_ACCEPT and HOS_COOP_TEST_SET refused from
   longshot_env.txt: tests/test_env_file.py).
+- acceptance logs run the real offer_update and signed progress engine: Co-op still reports copy/apply, while PvP
+  describes setup only both before and after a completed copy; the PvP progress gate stays closed.
 
-    python -I -B tests/test_oot_coop.py [--cc gcc]
+    python -I -B tests/test_oot_coop.py [--cc gcc] [--source-root OLD_CHECKOUT]
+    Add --case accept-log-coop or --case accept-log-pvp to isolate the actual acceptance log.
 """
 import argparse
 import os
@@ -58,6 +61,7 @@ PIECES = [
     "static uint32_t reg_of(", "static GFlag *flag_by_hash(", "static int int_pending(", "static int apply_value(",
     "static int game_get_bool(", "static int set_flag(", "static int check_table(", "static uint32_t limit_fn(",
     "static void publish_members(", "static void publish_none(", "static void sync_on(", "static void on_view(",
+    "static int accept_always(", "static int offer_of(", "static void publish(", "static void offer_update(",
     "static void unbind(", "static void say_counts(", "static void bind_tables(", "static int player_in_world(",
     "static volatile int title_starts;", "void hos_oot_coop_rom_open(", "static int gate(",
     "static int start(", "void hos_oot_coop_present(",
@@ -120,6 +124,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cc", default=os.environ.get("CC") or shutil.which("gcc") or shutil.which("clang") or "gcc")
     p.add_argument("--source-root", type=Path, default=ROOT, help="production sources for a failing-before check; this checkout's fixture is retained")
+    p.add_argument("--case", choices=("all", "accept-log-coop", "accept-log-pvp"), default="all",
+                   help="run only the selected acceptance-log regression")
     a = p.parse_args()
     host = a.source_root.resolve() / "host"
     coop = (host / "oot_coop.c").read_text(encoding="utf-8")
@@ -147,7 +153,7 @@ def main():
                 print(r.stdout + r.stderr)
                 print("FAIL: the fixture does not compile")
                 return 1
-        r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=300)
+        r = subprocess.run([str(exe)] + ([a.case] if a.case != "all" else []), capture_output=True, text=True, timeout=300)
         sys.stdout.write(r.stdout + r.stderr)
         if r.returncode:
             print("FAIL: tests/oot_coop_test.c exited %d" % r.returncode)
