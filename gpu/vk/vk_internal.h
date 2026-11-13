@@ -336,6 +336,9 @@ bool vram_usage(uint64_t* used, uint64_t* budget, uint64_t* block_free = nullptr
 /// vram_usage asked of the driver now (VMA asks again for a new frame index), for the status line; false when the driver
 /// gives no budget (VK_EXT_memory_budget): used is then the game's own allocations
 bool vram_usage_now(uint64_t* used, uint64_t* budget);
+/// The system-memory heaps the GPU reaches: what the process uses there and what the driver allows it (vk_vma.cpp); false
+/// when unknown
+bool system_heap_usage(uint64_t* used, uint64_t* budget);
 void vma_log_heaps();
 void vma_log_image_blocks();   // (the image pools' blocks: what they hold, and their free ranges)
 PFN_vkGetInstanceProcAddr instance_proc();   // vk_main.cpp

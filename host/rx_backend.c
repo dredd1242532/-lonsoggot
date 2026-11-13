@@ -3,6 +3,7 @@
    (longshot_vk.so) beside the executable. Decided at rx_start, before any other rx_* call; a DLL that is missing or finds no usable Vulkan
    device leaves the WebGPU renderer in place (logged). */
 #include "hos.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
@@ -193,6 +194,19 @@ static void host_slept_ns(int64_t out[2]) {
     out[1] = hos_slept_ns[1] + __atomic_load_n(&hos_acquire_slept_ns, __ATOMIC_RELAXED);
 }
 
+/* (longshot) HOS_COUNTERS: the runtime's part of a counters line (MkwVkHost.host_counters), JSON members without braces:
+   the guest heap and how much of it is used, the address regions handed out, and the process's memory */
+int hos_mem_regions(void);   /* hos_mem.c */
+void hos_process_memory(uint64_t *private_bytes, uint64_t *working_set);   /* mkw_glue.c */
+static int host_counters(char *out, int cap) {
+    uint64_t priv = 0, ws = 0;
+    hos_process_memory(&priv, &ws);
+    const int n = snprintf(out, (size_t)cap, "\"heap_mb\":%.1f,\"heap_used_mb\":%.1f,\"regions\":%d,\"private_mb\":%.1f,"
+                           "\"working_set_mb\":%.1f", hos_heap_size / 1048576.0, hos_heap_used / 1048576.0, hos_mem_regions(),
+                           priv / 1048576.0, ws / 1048576.0);
+    return n > 0 && n < cap ? n : 0;
+}
+
 static const MkwVkHost vk_host = {
     MKWVK_API_VERSION, host_log, hos_guest_base, hos_guest_size, hos_gpu_ptr, nvn_gpu_guest, nvn_gpu_read,
     nvn_gpu_write, host_collect, host_free_pages, host_mark_written, hos_ticks, hos_now_ns, nvn_tex_layout,
@@ -201,6 +215,7 @@ static const MkwVkHost vk_host = {
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
+    host_counters,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

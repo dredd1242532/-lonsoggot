@@ -46,6 +46,7 @@
 #include "vk_shader.h"
 #include "vk_state.h"
 #include "vk_texture.h"
+#include "vk_progcache.h"   // (st_cache_hits: HOS_COUNTERS)
 #include "vk_xfer.h"
 #include "vk_present_rect.h"
 #include "vk_present_trace.h"
@@ -3209,6 +3210,57 @@ void log_frame_stats() {
     }
 }
 
+/// (longshot) HOS_COUNTERS=<seconds>: every so many seconds a JSON line of the memory and cache counters kept in their
+/// different places and logged at their own rates, side by side: the runtime's (the guest heap, its regions, the process's
+/// memory: MkwVkHost.host_counters), the video memory and the system heap the driver allows, the texture cache, the
+/// mirrors and the bytes synced and written back so far, the draws, the pipelines and the program cache's hits so far. To
+/// HOS_COUNTERS_FILE, else longshot_counters.jsonl beside the game; its first line names the format and the build
+/// (scripts/counters.py reads it: a table, two points' difference, what only grew). Called at each present, on the replay
+/// thread, whose counters the texture cache's are; unset, nothing is read or written
+void counters_tick(int64_t now_ns) {
+    static const double every = [] {
+        const char* v = getenv("HOS_COUNTERS");
+        return v ? atof(v) : 0.0;
+    }();
+    if (every <= 0) return;
+    static FILE* out = [] {
+        std::string path;
+        if (const char* f = getenv("HOS_COUNTERS_FILE"); f && *f) {
+            path = f;
+        } else {
+            char exe[MAX_PATH];
+            const DWORD n = game_module_path(exe, MAX_PATH);
+            const std::string dir(exe, n);
+            path = dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_counters.jsonl";
+        }
+        FILE* f = fopen(path.c_str(), "w");
+        if (f) fprintf(f, "{\"counters\":1,\"version\":\"%s\",\"every_s\":%g}\n", build_version(), every);
+        logf("vk: HOS_COUNTERS: every %g s to %s%s", every, path.c_str(), f ? "" : " (could not be made)");
+        return f;
+    }();
+    static int64_t first_ns, next_ns;
+    if (!out || now_ns < next_ns) return;
+    if (!first_ns) first_ns = now_ns;
+    next_ns = now_ns + (int64_t)(every * 1e9);
+    char host_part[512] = "";
+    if (!host->host_counters || host->host_counters(host_part, (int)sizeof host_part) <= 0) host_part[0] = 0;
+    uint64_t vram = 0, vram_budget = 0, sys = 0, sys_budget = 0, mirror_mb = 0;
+    vram_usage(&vram, &vram_budget);
+    system_heap_usage(&sys, &sys_budget);
+    int64_t mirrors = 0, sync_bytes = 0, sync_copies = 0, wb_bytes = 0, draws = 0, skipped = 0, dispatches = 0, pipelines = 0;
+    memory_stats(&mirrors, &mirror_mb, &sync_bytes, &sync_copies, &wb_bytes);
+    draw_stats(&draws, &skipped, &dispatches, &pipelines);
+    constexpr double MB = 1048576.0;
+    fprintf(out, "{\"t\":%.1f,\"presents\":%lld,%s%s\"vram_mb\":%.1f,\"vram_budget_mb\":%.1f,\"system_mb\":%.1f,"
+                 "\"system_budget_mb\":%.1f,\"textures\":%zu,\"texture_mb\":%.1f,\"mirrors\":%lld,\"mirror_mb\":%llu,"
+                 "\"synced_mb\":%.1f,\"written_back_mb\":%.1f,\"draws\":%lld,\"pipelines\":%lld,\"program_cache_hits\":%lld}\n",
+            (now_ns - first_ns) / 1e9, (long long)presents, host_part, host_part[0] ? "," : "", vram / MB, vram_budget / MB,
+            sys / MB, sys_budget / MB, texture_count(), texture_bytes() / MB, (long long)mirrors,
+            (unsigned long long)mirror_mb, sync_bytes / MB, wb_bytes / MB, (long long)draws, (long long)pipelines,
+            (long long)st_cache_hits.load(std::memory_order_relaxed));
+    fflush(out);
+}
+
 /// (longshot) Once a game frame: every 600 a status line (the video memory, DLSS's details while it draws), and every 60
 /// a look at the driver's allowance, warned of once when the use passes it (again only after it was back under)
 void status_tick() {
@@ -3219,6 +3271,7 @@ void status_tick() {
     static int64_t last_ns = 0, slowest_ns = 0;
     const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     if (last_ns) slowest_ns = std::max(slowest_ns, now_ns - last_ns);
+    counters_tick(now_ns);   // (HOS_COUNTERS: nothing when unset)
     // (RX_VK_FRAME_TRACE=1: every frame a line of longshot_frames.csv beside the game, present to present and what the frame did,
     // so that each stutter can be matched to its cause: waits for shaders or pipelines, translation, uploads, the memory sync,
     // pipeline compiles, the GPU behind. RX_VK_FRAME_LOG has the frame times alone)

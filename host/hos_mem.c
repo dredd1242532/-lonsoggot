@@ -28,6 +28,8 @@ static uint64_t sys_next = HOS_SYSTEM_BASE;
 typedef struct { uint64_t addr, size; } Range;
 static Range *regions;
 static int nregions, capregions;
+/* (longshot) how many regions are handed out now, for HOS_COUNTERS (rx_backend.c host_counters): read as a sample */
+int hos_mem_regions(void) { return __atomic_load_n(&nregions, __ATOMIC_RELAXED); }
 static uint64_t region_floor = ~0ULL;   /* the lowest region (none yet: the window's end) */
 
 /* Free address space below the heap that regions may also use (web: the window is tight): above the null guard

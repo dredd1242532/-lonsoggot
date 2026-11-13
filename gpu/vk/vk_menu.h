@@ -109,6 +109,7 @@ constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_aut
 bool preset_caps_memory();
 
 void menu_init();             // (the options from the file, once)
+const char* build_version();  // (this build's version: nx2/version.py)
 void menu_auto_for_gpu(const VkPhysicalDeviceProperties& props, ::auto_settings::Hardware hw);   // (the card chosen: Auto's profile)
 void menu_auto_tune(double gpu_ms, double draws, double fps);   // (the replay's 120-present windows: Auto (this PC) measured in play)
 /// (longshot) The V-Sync row as this run applies it: RX_VK_FIFO=1 is On and RX_VK_IMMEDIATE=1 Off, whatever the row says

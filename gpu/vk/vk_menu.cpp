@@ -74,6 +74,8 @@ extern char** environ;
 #endif
 
 namespace mkwvk {
+/// (longshot) this build's version (nx2/version.py), for files written beside the game (HOS_COUNTERS' first line)
+const char* build_version() { return LONGSHOT_VERSION; }
 int display_refresh_mhz();   // (vk_main.cpp: the window's display, asked once a second at most: the FPS counter's V-Sync target)
 HWND app_window();
 
