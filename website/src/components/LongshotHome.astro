@@ -42,7 +42,7 @@ const guides = [
       <a class="studio-help-guide" href={`${base}guides/common-issues/`}><span><strong>Troubleshooting guide</strong><small>Start here for common issues and practical checks</small></span><span aria-hidden="true">↗</span></a>
       <form data-frontpage-search role="search" aria-label="Search reported issues" action={`${base}progress/#problem-search`}><label for="frontpage-query">Has someone reported your issue?</label><div class="studio-search-row"><input id="frontpage-query" type="search" placeholder="Black screen, controller, stutter…" maxlength="300" aria-describedby="studio-search-note" /><button type="submit">Search reported issues <span aria-hidden="true">→</span></button></div></form>
       <div class="studio-topics"><span>Try:</span>{['Black screen', 'Controller', 'Stutter'].map(q => <a href={`${base}progress/#problem-search?q=${encodeURIComponent(q)}`}>{q}</a>)}</div>
-      <p id="studio-search-note">Searches the Longshot report snapshot. Reports are not confirmed diagnoses.</p>
+      <p id="studio-search-note">Searches reported issues</p>
       <noscript><p>Enable JavaScript to carry your search to the report board, or use the guide above.</p></noscript>
     </div>
   </section>
