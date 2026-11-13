@@ -252,15 +252,15 @@ right thing:
 
 ## Download links
 
-Forgejo's `/releases/latest` covers stable only. magicbean.dev (MagicBeanDev/Site, `src/index.js`) has permanent links to
+Forgejo's `/releases/latest` covers stable only. longshot.magicbean.dev (the Longshot website, `website/worker/index.ts` in MagicBeanDev/Longshot) has permanent links to
 the newest launcher of each channel, read from LongshotLauncher's release list by the rules above (cached 60 seconds):
 
 | Link | Goes to |
 |---|---|
-| `https://magicbean.dev/download` | a page: the launcher for the visitor's system, from the best channel there is, and every channel |
-| `https://magicbean.dev/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
-| `https://magicbean.dev/download/launcher/<channel>` | the channel's newest release page |
-| `https://magicbean.dev/download/launcher/<channel>/<os>` | that file of the channel's newest release |
+| `https://longshot.magicbean.dev/download` | a page: the launcher for the visitor's system, from the best channel there is, and every channel |
+| `https://longshot.magicbean.dev/download/launcher/<os>` | that file of the best channel there is: stable, else rc, else nightly |
+| `https://longshot.magicbean.dev/download/launcher/<channel>` | the channel's newest release page |
+| `https://longshot.magicbean.dev/download/launcher/<channel>/<os>` | that file of the channel's newest release |
 
 `<channel>` is `stable`, `rc` or `nightly`; `<os>` is `windows` (the setup), `windows-portable` (the zip) or `linux` (the
 AppImage). A channel with no release yet answers with a page that says so and offers the newest there is. The READMEs'

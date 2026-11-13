@@ -231,7 +231,7 @@ class Bump(unittest.TestCase):
 
 class ReleasePage(unittest.TestCase):
     """The release page publish writes: the launcher's starts with big download links to its own files; Longshot's with "to
-    play, get the Longshot Launcher", linking magicbean.dev's newest launcher of the same channel, and "don't download the
+    play, get the Longshot Launcher", linking longshot.magicbean.dev's newest launcher of the same channel, and "don't download the
     files below" (above the builder files)"""
 
     LAUNCHER = ("LongshotLauncher-%s-windows-x64-setup.exe", "LongshotLauncher-%s-windows-x64-portable.zip",
@@ -268,7 +268,7 @@ class ReleasePage(unittest.TestCase):
             with self.subTest(tag):
                 page = self.page(tag, "longshot", self.LONGSHOT)
                 head, notes = page.split("\n---\n", 1)
-                link = "https://magicbean.dev/download/launcher/" + channel
+                link = "https://longshot.magicbean.dev/download/launcher/" + channel
                 self.assertEqual(head.strip().split("\n\n")[:5], [
                     "# 🎮 To play, get the Longshot Launcher",
                     "### [🪟 &nbsp;Download the launcher for Windows](%s/windows)" % link,
@@ -402,7 +402,7 @@ class Publish(unittest.TestCase):
         run("--product", "longshot", "publish", "nightly-34-545618fc", "--target", "abc", "--notes", notes, f)
         body = FakeForgejo.releases[0]["body"]
         self.assertTrue(body.startswith("# 🎮 To play, get the Longshot Launcher\n"))
-        self.assertIn("https://magicbean.dev/download/launcher/nightly/windows", body)
+        self.assertIn("https://longshot.magicbean.dev/download/launcher/nightly/windows", body)
         self.assertIn("### Fixes\n\n- a fix\n", body)
         # (the launcher's: its own files, on its repository)
         FakeForgejo.releases, FakeForgejo.uploads = [], []

@@ -98,7 +98,7 @@ Players on the nightly channel keep the last good nightly until then.
    - Download `SHA256SUMS`, `SHA256SUMS.sig` and the files, and run
      `python -I scripts/release.py verify SHA256SUMS --files <folder>`.
    - In a launcher set to the rc channel (Settings), Retry offers it.
-   - For the launcher: within a minute, `https://magicbean.dev/download/launcher/rc` goes to it (and, for a stable,
+   - For the launcher: within a minute, `https://longshot.magicbean.dev/download/launcher/rc` goes to it (and, for a stable,
      `/download/launcher/stable`).
 5. Ask testers on the rc channel to try it, and for Longshot one on Windows for what CI can't check
    ([Needs a Windows tester](#needs-a-windows-tester-longshot)). Fixes go in as pull requests; each round is a new rc tag

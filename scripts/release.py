@@ -37,7 +37,7 @@ this is; $FORGEJO_API, $FORGEJO_UPLOAD_API):
         a draft release (pre-release unless a stable), every file uploaded and checked, then published: until that last step
         no launcher sees it. A draft left by a failed run of the same tag is reused. The page is the notes under a header
         (release_page): the launcher's, big download links to its own files; Longshot's, "to play, get the Longshot
-        Launcher", with magicbean.dev's links to the newest launcher of the same channel
+        Launcher", with longshot.magicbean.dev's links to the newest launcher of the same channel
     python -I scripts/release.py prune [--keep 5]
         the nightly releases and their tags past the newest <keep>; nothing else is ever deleted
     python -I scripts/release.py released-as <commit> [--not <tag>]
@@ -262,9 +262,9 @@ def notes(tag, product, root=ROOT):
 
 # ---- the release page ----
 
-# (magicbean.dev's permanent download links, MagicBeanDev/Site: /download/launcher/<channel>[/<os>] goes to that channel's
+# (longshot.magicbean.dev's permanent download links, the Longshot website, website/ in MagicBeanDev/Longshot: /download/launcher/<channel>[/<os>] goes to that channel's
 # newest launcher, by the rules of newest() above)
-SITE = "https://magicbean.dev"
+SITE = "https://longshot.magicbean.dev"
 LAUNCHER_FILES = {"setup": "-windows-x64-setup.exe", "portable": "-windows-x64-portable.zip", "appimage": "-x86_64.AppImage"}
 CHANNEL_SAYS = {"stable": "This is a stable release: it builds Longshot's stable versions by default.",
                 "rc": "This is a release candidate: it builds Longshot's rc versions by default.",
@@ -273,7 +273,7 @@ CHANNEL_SAYS = {"stable": "This is a stable release: it builds Longshot's stable
 
 def page_header(tag, product, names, repo=None):
     """The top of a release's page, above git-cliff's notes: big heading links that look like buttons, no tables. The
-    launcher's: this release's own files. Longshot's: "to play, get the Longshot Launcher", with magicbean.dev's links to
+    launcher's: this release's own files. Longshot's: "to play, get the Longshot Launcher", with longshot.magicbean.dev's links to
     the newest launcher of the same channel (rc to rc, nightly to nightly, stable to stable), and "don't download the files
     below" (above the builder files)"""
     channel = channel_of(tag, PRODUCTS[product]["first_major"]) or "nightly"
