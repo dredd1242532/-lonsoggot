@@ -496,6 +496,11 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   what happened, and drag the folder's files into it (from File Explorer on Windows, a file manager on Linux; on a Steam
   Deck, in Desktop Mode). The row then shows the folder's name. A game that stops before its menu can be used leaves its
   log as `longshot_log.1.txt`: start it again, or attach that file yourself.
+- **After a crash** a window opens with everything a crash report would hold (version, system, graphics card, CPU,
+  map, settings, the crash and the log before it). **Send Help** posts it publicly to
+  [#81](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/81) and counts it in the crash statistics; **I am sorry**
+  sends nothing. The launcher's **Always send crash reports** tick sends without asking (the window still shows what
+  went). `crash_reports=0` in `longshot_options.ini` turns the window off ([crash-report-window.md](docs/crash-report-window.md)).
 - **The scaling rows**, in the picture's order: **Output resolution** is the size of the game's whole frame, HUD
   included. The **Upscaler** fills it from the 3D: the game's own network, NVIDIA DLSS or DLAA (the 3D at full size,
   edges smoothed), AMD FSR 3.1, or AMD FSR 4 or its Native AA (below). DLSS and DLAA look softer than the game's own: set
