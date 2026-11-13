@@ -1263,7 +1263,8 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
     {TAB_GAMEPLAY, "Skip cutscenes (Experimental)", &opts.allow_cutscene_skip, 0, 1, 1, tx_onoff,
-     "Experimental and unfinished. Can skip the opening movie. Use the normal dialogue-skip shortcut to show the skip prompt, then the displayed button "
+     "Experimental and unfinished. Can skip the opening movie. It can leave story progress incomplete or soft-lock a save; save first. "
+     "Use the normal dialogue-skip shortcut to show the skip prompt, then the displayed button "
      "to confirm. It may overlap dialogue; some conversations and chest sequences remain unsupported.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text size", &opts.text_size, 0, 4, 1, tx_text_size,
      "How large the text of dialogue, Navi and signs is drawn.", hn_text_size, false, true},
@@ -1752,9 +1753,9 @@ std::string ini_path() {
 const char* ini_key(const Row& r) {
     if (r.value == &opts.output_res) return "output_res";   // (host/nn_applet.c reads it at the start)
     if (r.value == &opts.vsync) return "vsync";
+    if (r.value == &opts.allow_cutscene_skip) return "skip_unskippable_cutscenes";
     // (rows renamed since their values were first saved keep their keys: an options file from before still loads)
     if (r.value == &opts.resolution) return "resolution";
-    if (r.value == &opts.allow_cutscene_skip) return "skip_unskippable_cutscenes";
     if (r.value == &opts.fps_cap) return "frame_rate_cap";   // (host/nn_vi.c reads it at the start, then HOS_OPT_FPS_CAP)
     if (r.value == &opts.upscale) return "upscaling";
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)

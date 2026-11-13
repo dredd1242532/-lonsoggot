@@ -592,8 +592,9 @@ number is not the obvious one:
 
 Gameplay's Skip cutscenes (Experimental) remains off by default. Use the normal dialogue-skip shortcut to reveal the
 native skip prompt, then its displayed confirmation button. It can skip the opening movie. This is unfinished: it may
-overlap other dialogue, and some conversations and chest sequences remain unsupported. The game retains its event
-completion path; the option does not force-stop the decoder or grant items.
+overlap other dialogue, and some conversations and chest sequences remain unsupported. Skipping can leave story
+progress incomplete or soft-lock a save; save first. The game retains its event completion path; the option does not
+force-stop the decoder or grant items.
 
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
