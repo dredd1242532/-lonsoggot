@@ -30,8 +30,10 @@ jobs:
         run: python3 -I scripts/check_third_party.py
       - name: The pull request's changes
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch -q origin "${{ github.base_ref }}"
+          git fetch -q origin "$BASE_REF"
           python3 -I scripts/check_third_party.py --base FETCH_HEAD
 
   upstream:

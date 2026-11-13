@@ -1,6 +1,6 @@
 """The CI workflows keep their hardening (.forgejo/workflows/*.yml), read as text (standard library only):
 
-- every action is pinned by its full commit (owner/repo@<40 hex>), or is a workflow of this repository (./);
+- every action is pinned by its full commit ([https://<host>/]owner/repo@<40 hex>), or is a workflow of this repository (./);
 - every workflow sets its token's permissions at the top;
 - every checkout leaves no token behind (persist-credentials: false), except the release record job's, which pushes;
 - no ${{ ... }} of event data, inputs or other untrusted text inside a run: script (it is pasted into the script before
@@ -17,28 +17,36 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOWS = ROOT / ".github" / "workflows"
+WORKFLOWS = ROOT / ".forgejo" / "workflows"
 
 # (what a run: script may expand with ${{ }}: runner paths and values the workflow itself sets)
-RUN_SAFE = re.compile(r"^(runner\.(temp|os|arch)|github\.(workspace|run_id|run_number|run_attempt|sha)|env\.[A-Za-z_][A-Za-z0-9_]*)$")
+RUN_SAFE = re.compile(r"^(runner\.(temp|os|arch)|github\.(workspace|run_id|run_number|run_attempt|sha|repository|server_url)|env\.[A-Za-z_][A-Za-z0-9_]*)$")
+# (Forgejo names an action by its full URL as often as by owner/repo)
+HOST = r"(?:https://[\w.-]+/)?"
+ACTION = HOST + r"[\w.-]+/[\w./-]+"
 # (checkouts that keep their token on purpose: file name -> how many)
 PERSISTED = {"release.yml": 1}
+# (reviewed: workflows without a top-level permissions:, which Forgejo 17 ignores; each job's token is Forgejo's own)
+NO_PERMISSIONS = {"release.yml", "website.yml"}
+# (reviewed: pull_request_target workflows that check out. pr-description.yml takes only main's script (its sparse checkout of
+# the base); website.yml a fork's commit only once a maintainer's preview label approves it, checked to be that commit)
+TARGET_CHECKOUT = {"pr-description.yml", "website.yml"}
 
 
 def problems(path):
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     found = []
-    if not re.search(r"^permissions:", text, re.M):
+    if not re.search(r"^permissions:", text, re.M) and path.name not in NO_PERMISSIONS:
         found.append("%s: no top-level permissions:" % path.name)
     for n, line in enumerate(lines, 1):
         m = re.match(r"^\s*(?:-\s+)?uses:\s*(\S+)", line)
-        if m and not m.group(1).startswith("./") and not re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", m.group(1)):
+        if m and not m.group(1).startswith("./") and not re.fullmatch(ACTION + r"@[0-9a-f]{40}", m.group(1)):
             found.append("%s:%d: %s is not pinned by its full commit" % (path.name, n, m.group(1)))
     # checkouts: the step's lines, up to the next step
     persisted = 0
     for n, line in enumerate(lines, 1):
-        if not re.match(r"^\s*(?:-\s+)?uses:\s*actions/checkout@", line):
+        if not re.match(r"^\s*(?:-\s+)?uses:\s*" + HOST + r"actions/checkout@", line):
             continue
         indent = len(line) - len(line.lstrip(" -"))
         step = []
@@ -73,7 +81,8 @@ def problems(path):
                     if not RUN_SAFE.match(expr.strip()):
                         found.append("%s:%d: ${{ %s }} inside a run: script (pass it through env:)" % (path.name, n, expr.strip()))
         i += 1
-    if re.search(r"^\s*pull_request_target:", text, re.M) and re.search(r"uses:\s*actions/checkout@", text):
+    if re.search(r"^\s*pull_request_target:", text, re.M) and re.search(r"uses:\s*" + HOST + r"actions/checkout@", text) and \
+            path.name not in TARGET_CHECKOUT:
         found.append("%s: pull_request_target with a checkout" % path.name)
     return found
 
