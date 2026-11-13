@@ -9,7 +9,8 @@ rebound B, Shift or the press, or whose V is taken, or who bound Sprint, keeps t
 rest: read_input reads Sprint's key and gamepad input, npad_states hands sprint_step the stick only with the row on, the
 menu has the rows, writes the pad_ line and runs the layout when the row changes or the Controls page resets.
 sprint_step is compiled alone: A only while steered, the key held, the gamepad input a toggle that ends when Link stops and
-wants a new press while he moves, hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), and with
+wants a new press while he moves, hos_sprint_press_mask A's bit while it is Sprint's A (not the player's own), the
+player's own A mid-sprint a gap and then a press of theirs (a tap shorter than the gap too), and with
 HOS_SPRINT_STILL_MS the stick let go as it starts. nx2/oot_patches.py patch_sprint_press runs on lifted text: the mask goes
 between the pair that makes "pressed" and its store, in the two controllers' updates only, once.
 python -I -B tests/test_sprint.py   (needs a C and a C++ compiler)
@@ -218,10 +219,22 @@ int main(int argc, char **argv) {
     step(SPRINT_KEY, 0, 0, 0);       CHECK(!RUNS && !MASK);   /* standing: nothing */
     step(SPRINT_KEY, 1, 0, 1000);    CHECK(RUNS && !STILL && MASK == 1);
     step(SPRINT_KEY, 1, 0, 1100);    CHECK(RUNS && !STILL && MASK == 1);
-    step_a(SPRINT_KEY, 1, 0, 1150, 1);   CHECK(RUNS && MASK == 0);   /* the player's own A too: theirs */
-    step(SPRINT_KEY, 1, 0, 1180);    CHECK(RUNS && MASK == 1);
-    step(0, 1, 0, 1200);             CHECK(!RUNS && !STILL && !MASK);   /* let go: walks */
-    step_a(0, 1, 0, 1250, 1);        CHECK(RUNS && !MASK);    /* (the player's own A: not Sprint's) */
+    /* the player's own A going down mid-sprint: A let go for the gap, then held as their press (the mask 0) */
+    step_a(SPRINT_KEY, 1, 0, 1150, 1);   CHECK(!RUNS && MASK == 0);   /* the gap: A up */
+    step_a(SPRINT_KEY, 1, 0, 1180, 1);   CHECK(!RUNS && MASK == 0);
+    step_a(SPRINT_KEY, 1, 0, 1201, 1);   CHECK(RUNS && MASK == 0);    /* A down again: a press, theirs */
+    step(SPRINT_KEY, 1, 0, 1230);        CHECK(RUNS && MASK == 0);    /* theirs up: still owed for the gap */
+    step(SPRINT_KEY, 1, 0, 1260);        CHECK(RUNS && MASK == 1);    /* Sprint's own A again: no press */
+    /* a tap shorter than the gap: the press still comes */
+    step_a(SPRINT_KEY, 1, 0, 1300, 1);   CHECK(!RUNS);
+    step(SPRINT_KEY, 1, 0, 1320);        CHECK(!RUNS);
+    step(SPRINT_KEY, 1, 0, 1360);        CHECK(RUNS && MASK == 0);
+    step(SPRINT_KEY, 1, 0, 1420);        CHECK(RUNS && MASK == 1);
+    step(0, 1, 0, 1450);             CHECK(!RUNS && !STILL && !MASK);   /* let go: walks */
+    /* their A down before Sprint starts: theirs, no gap */
+    step_a(0, 1, 0, 1460, 1);        CHECK(RUNS && !MASK);    /* (the player's own A: not Sprint's) */
+    step_a(SPRINT_KEY, 1, 0, 1470, 1);   CHECK(RUNS && MASK == 0);
+    step(0, 1, 0, 1480);
     step(SPRINT_KEY, 1, 1, 1500);    CHECK(!RUNS && !MASK);   /* not with the menu open */
     step(0, 1, 0, 1600);
     /* the gamepad input: a toggle while steered */
@@ -247,7 +260,9 @@ class SprintStepTests(unittest.TestCase):
         if not compiler:
             self.skipTest("no C compiler")
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
-        code = test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" + test_bound_keys.block(hid, "static void sprint_step(")
+        gap = re.search(r"^#define SPRINT_ROLL_GAP_MS [^\n]*", hid, re.M).group(0)
+        code = (test_bound_keys.block(hid, "enum { SPRINT_KEY") + ";\n" + gap + "\n" +
+                test_bound_keys.block(hid, "static void sprint_step("))
         head, body = STEP_MAIN.split("static int fails;", 1)
         with tempfile.TemporaryDirectory(prefix="hookshot-sprint-step-") as tmp:
             tmp = Path(tmp)

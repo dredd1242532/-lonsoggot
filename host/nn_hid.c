@@ -868,15 +868,18 @@ static int pad_sprint_down(void) {
    hos_sprint_press_mask is A's bit: nx2/oot_patches.py patch_sprint_press leaves that bit out of what the game's
    controllers count as pressed this frame. The game sees A held, its run, and never pressed: no roll, no action. Its key
    (Shift) runs while it is held; its gamepad input (the left stick's press) is a toggle, pressed once while Link moves, it
-   runs until the stick comes back to the middle, and then wants a new press. The player's own A while it runs is theirs
-   (the mask 0), but A is held already then, so it is no new press: no roll while sprinting.
+   runs until the stick comes back to the middle, and then wants a new press. The player's own A while it runs is theirs:
+   A is held already then, so as it goes down Sprint lets go of A for SPRINT_ROLL_GAP_MS (at least one game frame) and
+   holds it again with the mask 0: the game sees A pressed, the player's roll (or talk, open, pick up). The mask stays 0
+   while their A is down and for SPRINT_ROLL_GAP_MS after the gap, so a tap shorter than the gap still counts.
    HOS_SPRINT_STILL_MS=<ms> (a game without the patch): the stick let go for that long as Sprint starts, so A goes down
    with Link standing, the earlier way round the roll (0, the default, none).
    held: SPRINT_KEY | SPRINT_PAD as read now; steered: the left stick pushed; now: hos_now_ns. Only while the menu is shut. */
 volatile uint32_t hos_sprint_press_mask;
+#define SPRINT_ROLL_GAP_MS 50   /* (A let go as the player's own A goes down mid-sprint: a frame at 20 fps) */
 static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steered, int menu_open, int64_t now) {
-    static int was_pad, latched, running, still_ms = -1;
-    static int64_t started;
+    static int was_pad, latched, running, still_ms = -1, own_was;
+    static int64_t started, gap_until, owed_until;
     if (still_ms < 0) {
         const char *e = getenv("HOS_SPRINT_STILL_MS");
         still_ms = e && *e ? atoi(e) : 0;
@@ -887,14 +890,25 @@ static void sprint_step(uint64_t *buttons, int32_t stick[4], int held, int steer
     else if (pad && !was_pad) latched = 1;   /* (pressed while he moves) */
     was_pad = pad;
     const int want = steered && !menu_open && (latched || (held & SPRINT_KEY));
+    const int own = (int)(*buttons >> B_A & 1);   /* (the player's own A: the pads', the keys', a script's) */
+    const int own_down = own && !own_was;
+    own_was = own;
     if (!want) {
-        running = 0;
+        running = 0, gap_until = owed_until = 0;
         __atomic_store_n(&hos_sprint_press_mask, 0, __ATOMIC_RELAXED);
         return;
     }
     if (!running) running = 1, started = now;
-    /* (the player's own A down too: theirs, as a press of theirs is) */
-    __atomic_store_n(&hos_sprint_press_mask, (*buttons >> B_A & 1) ? 0u : 1u, __ATOMIC_RELAXED);
+    else if (own_down) {   /* (theirs going down while Sprint holds A: a gap, then A again as their press) */
+        gap_until = now + (int64_t)SPRINT_ROLL_GAP_MS * 1000000;
+        owed_until = gap_until + (int64_t)SPRINT_ROLL_GAP_MS * 1000000;
+    }
+    if (now < gap_until) {
+        *buttons &= ~(1ULL << B_A);
+        __atomic_store_n(&hos_sprint_press_mask, 0, __ATOMIC_RELAXED);
+        return;
+    }
+    __atomic_store_n(&hos_sprint_press_mask, own || now < owed_until ? 0u : 1u, __ATOMIC_RELAXED);
     *buttons |= 1ULL << B_A;
     if (now - started < (int64_t)still_ms * 1000000) stick[0] = stick[1] = 0;   /* (A goes down with Link standing: no roll) */
 }
