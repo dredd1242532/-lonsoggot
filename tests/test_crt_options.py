@@ -144,6 +144,7 @@ const char* restart_names[mr::kMax];
 
 // CRT rows must not invoke host/device actions belonging to other rows.
 void apply_pad_layout(int) { CHECK(false); }
+int detect_pad_layout() { return opts.pad_layout; }   // (set_row asks it after a Layout preset, as main's own fixtures stand in)
 bool can_mic() { return false; }
 void mic_chosen() { CHECK(false); }
 void samplers_changed() { CHECK(false); }
