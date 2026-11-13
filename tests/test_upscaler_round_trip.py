@@ -247,6 +247,35 @@ int main(int argc, char** argv) {
     CHECK(opts.resolution == 3);  // Left from the shown 50% is 67%, not the hidden 58%.
     bridge_to(ur::DLSS);
     CHECK(opts.resolution == 3 && active_scale() == 6667);
+    // Native changes the mode, not the saved scale: FSR 3.1 100% -> DLSS/FSR 4 92% -> Native -> FSR 3.1 100%.
+    for (int engine : {(int)ur::DLSS, (int)ur::FSR4}) {
+        fresh(ur::FSR3, 1);
+        CHECK(active_scale() == 10000 && std::strcmp(tx_resolution(opts.resolution), "100% (1920x1080)") == 0);
+        bridge_to(engine);
+        CHECK(opts.resolution == 1 && active_scale() == 9167);
+        CHECK(menu_setting(1, &shown) == 1 && shown.value == 1 && std::strcmp(shown.text, "92% (1760x990)") == 0);
+        set_row(rows[1], 0, -1);
+        CHECK(opts.dlss == ur::native_of(engine) && opts.resolution == 1 && active_scale() == 10000);
+        CHECK(menu_setting(1, &shown) == 1 && shown.value == 1 &&
+              std::strcmp(shown.text, engine == ur::DLSS ? "Native (DLAA, 1920x1080)" : "Native (FSR 4, 1920x1080)") == 0);
+        restart();   // set_row saved the Native mode and the untouched numeric choice.
+        CHECK(opts.dlss == ur::native_of(engine) && opts.resolution == 1 && active_scale() == 10000);
+        bridge_to(ur::FSR3);
+        CHECK(opts.resolution == 1 && active_scale() == 10000);
+        CHECK(menu_setting(1, &shown) == 1 && shown.value == 1 && std::strcmp(shown.text, "100% (1920x1080)") == 0);
+        std::printf("NATIVE_ROUNDTRIP engine=%d returned=%d stored=%d\n", engine, active_scale(), opts.resolution);
+        // Leaving Native for a numbered stop still deliberately replaces the saved choice.
+        bridge_to(engine);
+        set_row(rows[1], 0, -1);
+        set_row(rows[1], 0, 1);
+        CHECK(opts.dlss == engine && opts.resolution == 9 && active_scale() == 9167);
+        // Entering Native from Auto keeps its sentinel; Left returns to Auto, not a numbered stop.
+        fresh(engine, 0);
+        set_row(rows[1], 0, 1);
+        CHECK(opts.dlss == ur::native_of(engine) && opts.resolution == 0 && active_scale() == 10000);
+        set_row(rows[1], 0, -1);
+        CHECK(opts.dlss == engine && resolution_auto() && resolution_scale() == 0);
+    }
     // Selecting each named quality through the bridge still reaches its exact slider stop.
     for (int engine : {(int)ur::DLSS, (int)ur::FSR3, (int)ur::FSR4}) {
         for (int value : ur::kSlider) {

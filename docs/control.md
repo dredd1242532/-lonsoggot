@@ -237,6 +237,9 @@ were, and replies `failed`. A `fixed` row replies `failed` too. The reply has th
 For Render resolution, `value` is the saved scale choice; `text` describes the active engine's supported size.
 Changing the Upscaler does not overwrite that choice. For example, saved `resolution=5` (58%) shows 50% with the
 game's own upscaler, then Balanced 58% on returning to DLSS, even after saving and restarting with the game's own.
+Stepping into Native (DLAA or FSR 4's native AA) keeps that numeric choice too: FSR 3.1 at 100%, then DLSS at its
+supported 92%, then Left to Native, then back to FSR 3.1 returns to 100%. Leaving Native for a numbered scale or
+Auto deliberately selects that new value. This does not remember the last native-versus-scaled mode of each engine.
 
 ```
 > {"id":9,"cmd":"option_set","name":"FPS counter","value":true}

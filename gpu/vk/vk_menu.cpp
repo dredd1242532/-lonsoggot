@@ -2313,7 +2313,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         int up = upscaler(), res = *r.value;
         ur::step_render(upscaler(), ur::snap_render(upscaler(), *r.value), dir, &up, &res);
         if (up != upscaler()) opts.dlss = up;   // (Native in or out: DLAA / DLSS, FSR 4's native AA / FSR 4)
-        v = res;
+        v = ur::full_scale(up) ? *r.value : res;   // (Native changes the mode, not the saved numeric scale)
     }
     if (r.value == &opts.output_res) {   // (smallest to largest: step_output_choice)
         v = step_output_choice(*r.value, dir);

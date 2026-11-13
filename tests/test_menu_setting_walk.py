@@ -79,7 +79,7 @@ void set_row(Row& r, int v, int dir) {
         int up = upscaler(), res = resolution;
         ur::step_render(upscaler(), ur::snap_render(upscaler(), resolution), dir, &up, &res);
         if (up != upscaler()) dlss = up;
-        v = res;
+        v = ur::full_scale(up) ? *r.value : res;
     }
     if (r.value == &output) {
         v = step_output_choice(output, dir);
