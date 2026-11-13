@@ -341,7 +341,8 @@ gradients and alpha much better, so textures look cleaner where BC3 shows bands 
 ## In-game menu
 
 By default, press <kbd>Insert</kbd>, <kbd>F1</kbd> or <kbd>Esc</kbd> in game. On a controller, press Home or Select and
-Start together; on a DualShock 4 or DualSense, clicking the touchpad does the same as <kbd>F1</kbd>.
+Start together; on a DualShock 4 or DualSense, clicking the touchpad does the same as <kbd>F1</kbd>, unless a row of
+Controls takes the touchpad as its input.
 The same keys close it; with every Menu shortcut, <kbd>Esc</kbd> goes back a page or closes the open menu.
 <kbd>F1</kbd> always works. **Controls → Menu shortcut** can leave <kbd>Insert</kbd> free for another overlay (F1 only).
 With Insert or F1, or with F1 only, <kbd>Esc</kbd> does not open the menu: it only lets the mouse go. Options saved by
