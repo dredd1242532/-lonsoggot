@@ -839,15 +839,16 @@ def patch_sprint_press(s):
         at = out.find(head)
         if at < 0:
             continue
-        end = out.find("\nvoid f_", at + len(head))
-        body = out[at:end if end >= 0 else len(out)]
+        end = out.find("\n}\n", at + len(head))   # (the function's own closing brace: what follows it is never read)
+        end = end + 1 if end >= 0 else len(out)
+        body = out[at:end]
         if SPRINT_MASK in body:
             found += 1
             continue
         pairs = [SPRINT_PAIR % (r, r) for r in (28, 21) if body.count(SPRINT_PAIR % (r, r)) == 1]
         if len(pairs) != 1:
             continue
-        out = out[:at] + body.replace(pairs[0], pairs[0] + SPRINT_MASK, 1) + (out[end:] if end >= 0 else "")
+        out = out[:at] + body.replace(pairs[0], pairs[0] + SPRINT_MASK, 1) + out[end:]
         found += 1
     if found and SPRINT_DECL not in out:
         out = out.replace('#include "a64.h"\n', '#include "a64.h"\n' + SPRINT_DECL, 1)

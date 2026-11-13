@@ -331,6 +331,19 @@ class SprintPressPatchTests(unittest.TestCase):
                          self.p.SPRINT_MASK, out)
         self.assertEqual(self.p.patch_sprint_press("#include \"a64.h\"\n"), ("#include \"a64.h\"\n", 0))
 
+    def test_body_ends_at_its_brace(self):
+        """f_8038a220 without its pair, followed by a function that is not a `void f_` with one: that pair is not
+        counted as f_8038a220's (the body ends at its own closing brace), and is left alone"""
+        lines = LIFTED.split("\n")
+        start = lines.index("void f_8038a220(Ctx *__restrict A64_NOESC c) {")
+        pair, store = lines[start + 2:start + 4], lines[start + 4]
+        helper = ["static void helper(Ctx *__restrict A64_NOESC c) {"] + pair + [store, "}"]
+        text = "\n".join(lines[:start + 2] + [store, "}"] + helper + lines[start + 6:])
+        self.assertIn("static void helper", text)
+        out, n = self.p.patch_sprint_press(text)
+        self.assertEqual(n, 1, "the pair in the function after f_8038a220 was counted as its own")
+        self.assertNotIn(self.p.SPRINT_MASK, out[out.index("static void helper"):out.index("void f_834a3680")])
+
     def test_host_side(self):
         hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
         self.assertIn("volatile uint32_t hos_sprint_press_mask;", hid, "the host has no press mask for the patch")
