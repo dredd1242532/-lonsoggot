@@ -1883,7 +1883,14 @@ static void cmd_coop_save(int ci, const JDoc *d, int req, const char *id) {
     buf_str(&b, preview.maker_key);
     buf_printf(&b, ",\"unidentified\":%d,\"disagree\":%s,\"rules\":[", preview.unidentified, preview.disagree ? "true" : "false");
     for (int i = 0; i < COOP_CAT_N; i++) buf_printf(&b, "%s%u", i ? "," : "", (unsigned)preview.rules.mode[i]);
-    buf_puts(&b, "],\"members\":[");
+    buf_puts(&b, "],\"features\":[");
+    for (unsigned i = 0; i < preview.rules.features.count && i < COOP_FEATURE_MAX; i++) {
+        const uint8_t *value = preview.rules.features.bytes + 3 * i;
+        buf_printf(&b, "%s{\"id\":%u,\"value\":%d}", i ? "," : "", (unsigned)value[0],
+                   (int)(int16_t)((uint16_t)value[1] | (uint16_t)value[2] << 8));
+    }
+    buf_puts(&b, "],\"refusal\":"); buf_str(&b, preview.refusal);
+    buf_puts(&b, ",\"members\":[");
     for (int i = 0; i < preview.n; i++) {
         buf_printf(&b, "%s{\"member\":%d,\"name\":", i ? "," : "", preview.member[i].id);
         buf_str(&b, preview.member[i].name); buf_puts(&b, ",\"key\":"); buf_str(&b, preview.member[i].key); buf_puts(&b, "}");

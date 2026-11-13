@@ -46,6 +46,7 @@ static void refused(int mode, int absent, int format, const char *reason) {
     assert(!coop_sync_offer(b, &offer, 8000));
     assert(strstr(offer.refusal, reason));
     assert(!coop_sync_accept(b, offer.token) && !coop_sync_open(b));
+    assert(!coop_sync_download_accept(b, offer.token) && !coop_sync_download_members(b));
     coop_sync_free(a); coop_sync_free(b);
 }
 int main(void) {
@@ -63,6 +64,8 @@ int main(void) {
     assert(coop_sync_offer(b, &first, 8000));
     assert(first.rules.mode[COOP_CAT_PROGRESS] == COOP_MODE_SHARED && first.maker_key[0]);
     assert(!memcmp(&b->mine, &saved, sizeof saved));
+    assert(coop_sync_download_accept(b, first.token));
+    assert(coop_sync_download_members(b) == (1u << 1) && !coop_sync_open(b) && !b->accepted);
     assert(coop_sync_accept(b, first.token)); coop_sync_copied(b, 1);
     assert(coop_sync_open(b));
     CoopRules changed = a->mine;
@@ -70,6 +73,7 @@ int main(void) {
     coop_sync_settings(a, &changed, 1); originate(a); deliver(a, b, 5);
     assert(coop_sync_offer(b, &next, 8001) && !next.accepted && next.token != first.token);
     assert(!coop_sync_accept(b, first.token));
+    assert(!coop_sync_download_members(b) && !coop_sync_download_accept(b, first.token));
     int value = 0;
     assert(coop_feature_present(&next.rules, 249, &value) && value == 17);
     assert(!memcmp(&b->mine, &saved, sizeof saved));
@@ -78,6 +82,7 @@ int main(void) {
     assert(coop_sync_offer(b, &next, 8002) && coop_sync_accept(b, next.token));
     coop_sync_copied(b, 1);
     assert(!coop_sync_open(b));   // a PvP setup room never becomes ordinary shared-progress gameplay
+    assert(coop_sync_download_accept(b, next.token) && coop_sync_download_members(b) == (1u << 1));
     CoopApply apply;
     assert(!coop_sync_take(b, &apply, 1));
     coop_sync_free(a); coop_sync_free(b);

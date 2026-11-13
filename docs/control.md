@@ -688,6 +688,11 @@ not a whose-save picker and has no load, import or progress-return command.
   The preview also includes `maker_key`, `unidentified`, `disagree` and the received
   `rules` array, ordered progress, items, songs, quest, keys, rupees, ammo (0 own,
   1 shared, 2 pool). These are received terms, not local defaults.
+  `features` preserves every received numbered rule as `{"id":80,"value":0}`,
+  including unknown IDs; `refusal` gives the signed-room admission reason.
+  Missing/off/unknown modes and format-4 peers refuse download identity acceptance
+  just as they refuse ordinary acceptance. A changed rule revokes old download consent.
+  A supported PvP setup may exchange an approved copy, but this opens no gameplay writer.
 - After checking the preview, each side explicitly sends
   `{"cmd":"coop_save","action":"identity","token":77}` with its current offer
   number. This accepts identities for downloading only, never room progress.
