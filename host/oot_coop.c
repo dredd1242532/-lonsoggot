@@ -69,6 +69,7 @@
 #endif
 
 extern const char *hos_user_dir;                     /* (nn_fs.c) */
+#include "coop_profile.h"
 int hos_ini_option(const char *key, int otherwise);  /* (nn_applet.c: the options file) */
 
 #define GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr's holder (host/hos_main.c OOT_GAMEDATA_SLOT), dereferenced twice */
@@ -655,6 +656,7 @@ static void publish_members(void) {
 
 static void on_message(int from, const uint8_t *bytes, size_t n, void *user) {
     const uint8_t kind = (uint8_t)(uintptr_t)user;
+    if (coop_profile_active()) return;   /* no temporary progress enters the real-save merge domain */
     AcquireSRWLockExclusive(&G.lock);
     if (G.eng) coop_sync_receive(G.eng, from, kind, bytes, n, coop_now_ms());
     publish_members();   /* revocations take effect before the next event in this receive batch */
@@ -1129,6 +1131,7 @@ static void say_stats(uint64_t now) {
 
 static void on_tick(uint64_t now, void *user) {
     (void)user;
+    if (coop_profile_active()) { publish_none(); return; }
     sync_on();
     {   /* a room joined before these hooks were registered, or a view hook that came and went: the view as it is */
         CoopView v;
@@ -1525,6 +1528,7 @@ static int start(void) {
 }
 
 void hos_oot_coop_present(Ctx *c) {
+    if (coop_profile_active()) return;   /* S11 must explicitly authorize any borrowed progress return */
     int s = __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
     if (s == ST_OFF) return;
     if (s == ST_UNSEEN) {

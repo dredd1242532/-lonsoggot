@@ -331,6 +331,7 @@ def main():
 static __thread DWORD last_error;
 #define HOS_FS_PATH 1024   /* (host/nn_fs.c's path buffers) */
 static const char *hos_user_dir;
+static const char *fs_user_dir(void) { return hos_user_dir; }
 static int hos_vcore_away(void) { return 0; }
 static void hos_vcore_back(void) {}
 static int64_t hos_now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000000000LL + t.tv_nsec; }

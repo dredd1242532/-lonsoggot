@@ -81,6 +81,12 @@ int tab_selected[TAB_RULES + 1] = {};
 int cur_tab = TAB_COOP;
 static int saves = 0;
 void save() { saves++; }
+static bool open_now = true;
+static int restarts, pipeline_saves;
+static int app_window() { return 1; }
+enum { WM_APP = 100 };
+static void PostMessageA(int, int msg, int, int) { CHECK(msg == WM_APP + 9); restarts++; }
+static void pipeline_cache_save() { pipeline_saves++; }
 struct Asked { int cmd; char text[64]; uint32_t number; } asked[32];
 static int n_asked = 0, answer = 1;
 static MkwVkCoopView room;
@@ -363,9 +369,9 @@ int main(int argc, char** argv) {
     CHECK(kRows == 1 + kCoopRows);   // (every row of the tab is one coop_kind knows)
     for (const Row& r : rows) CHECK(r.tab != TAB_COOP || (coop_kind(r) >= 0 && !r.value && r.help && std::strlen(r.help) > 20));
     CHECK(coop_kind(rows[0]) == -1);
-    CHECK(shows({kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopRules}));   // (off)
+    CHECK(shows({kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopRules, kCoopTemp}));   // (off)
     set_room(HOS_COOP_STATE_LEFT, "", 0, 0);
-    CHECK(shows({kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopRules}));
+    CHECK(shows({kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopRules, kCoopTemp}));
     tab_selected[TAB_COOP] = 2;   // (on Make a room)
     set_room(HOS_COOP_STATE_CONNECTING, "K7XG2M-RTB9DH-W4PZ5N", 0, 0);
     CHECK(shows({kCoopName, kCoopRelay, kCoopSecret, kCoopLeave}) && selected_kind() == kCoopSecret);   // (its row gone: the first after the fields)
@@ -549,6 +555,15 @@ int main(int argc, char** argv) {
     text_set(coop_name_field, "Malon");
     CHECK(coop_name_apply() == nullptr && saves == 2 && asked[1].cmd == HOS_COOP_CMD_NAME && !std::strcmp(asked[1].text, "Malon") &&
           asked[1].number == 1);
+    n_asked = 0;
+    coop_press(row(kCoopTemp));
+    CHECK(pending == &row(kCoopTemp) && !restarts);
+    answer = 0;
+    coop_press(row(kCoopTemp));
+    CHECK(!restarts && open_now);   // failed copy never restarts
+    answer = 1;
+    coop_press(row(kCoopTemp)), coop_press(row(kCoopTemp));
+    CHECK(restarts == 1 && pipeline_saves == 1 && !open_now && asked[1].cmd == HOS_COOP_CMD_TEMP_SAVE);
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
     for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
 #ifdef COOP_MENU_REAL_ENGINE
@@ -594,6 +609,11 @@ int hos_ini_text(const char *key, char *out, size_t size) {
 /* (the session, stubbed: what the tab asks of it) */
 static CoopView session;
 static int configures, commands, last_cmd, last_on;
+static int temporary, profile_asks, profile_ok = 1;
+int coop_profile_active(void) { return temporary; }
+const char *coop_profile_note(void) { return temporary ? "Temporary copy" : ""; }
+int hos_save_profile_ask(int returning) { CHECK(returning == temporary); profile_asks++; return profile_ok; }
+void coop_shutdown(void) { session.state = COOP_OFF; }
 static char last_name[64], last_server[64], last_secret[64];
 void coop_view_get(CoopView *out) { *out = session; }
 int coop_configure(int on, const char *name, const char *server) {
@@ -772,6 +792,13 @@ static void real(void) {
     set_env("HOS_COOP_ROOM", "k7xg2m rtb9dh w4pz5n");
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_MAKE, NULL, 0) && last_cmd == COOP_CMD_CREATE && !strcmp(last_secret, "K7XG2MRTB9DHW4PZ5N"));
     set_env("HOS_COOP_ROOM", NULL);
+    session.state = COOP_JOINED;
+    CHECK(!hos_coop_menu_command(HOS_COOP_CMD_TEMP_SAVE, NULL, 0) && !profile_asks);
+    temporary = 1;
+    hos_coop_menu_view(&v);
+    CHECK(v.temporary_save && !strcmp(v.save_note, "Temporary copy"));
+    CHECK(hos_coop_menu_command(HOS_COOP_CMD_TEMP_SAVE, NULL, 0) && profile_asks == 1 && session.state == COOP_OFF);
+    temporary = 0;
     puts("PASS: the tab's commands reach the session and progress sync; its view of the room");
 }
 static void demo(void) {

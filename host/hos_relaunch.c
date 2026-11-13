@@ -16,6 +16,7 @@
 #include <string.h>
 #include <windows.h>
 #include "hos_relaunch.h"
+#include "coop_profile.h"
 
 static volatile LONG relaunch_asked;
 
@@ -34,17 +35,17 @@ void hos_relaunch_keep_env(void) {
     FreeEnvironmentStringsW(b);
 }
 
-static void relaunch(void) {
+static int relaunch(void) {
     wchar_t exe[MAX_PATH * 4];
     const DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH * 4);
     if (!n || n >= MAX_PATH * 4) {
         hos_log("restart: this executable's path was not found: the game only exits");
-        return;
+        return 0;
     }
     const wchar_t *line = GetCommandLineW();
     const size_t len = wcslen(line);
     wchar_t *cmd = (wchar_t *)malloc((len + 1) * sizeof *cmd);   /* (CreateProcessW may write into it) */
-    if (!cmd) return;
+    if (!cmd) return 0;
     memcpy(cmd, line, (len + 1) * sizeof *cmd);
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -57,7 +58,15 @@ static void relaunch(void) {
     swprintf(pid, 16, L"%lu", (unsigned long)GetCurrentProcessId());
     SetEnvironmentVariableW(L"HOS_RESTART_OF", pid);
     wchar_t *env = start_env ? hos_relaunch_env_block(start_env, L"HOS_RESTART_OF", pid) : NULL;   /* (NULL: this one's) */
-    if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, env ? CREATE_UNICODE_ENVIRONMENT : 0, env, NULL, &si, &pi)) {
+    const char *ticket = coop_profile_restart_token();
+    wchar_t value[33];
+    for (unsigned i = 0; i <= strlen(ticket); i++) value[i] = (unsigned char)ticket[i];
+    wchar_t *profile_env = env ? hos_relaunch_env_block(env, L"HOS_COOP_PROFILE_TICKET", value) : NULL;
+    if (!profile_env) { free(cmd); free(env); return 0; }
+    free(env);
+    env = profile_env;
+    const int started = CreateProcessW(exe, cmd, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT, env, NULL, &si, &pi) != 0;
+    if (started) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     } else {
@@ -66,6 +75,7 @@ static void relaunch(void) {
     }
     free(cmd);
     free(env);
+    return started;
 }
 #else
 #include <dirent.h>
@@ -74,13 +84,24 @@ static void relaunch(void) {
 
 extern char **environ;
 
-static void relaunch(void) {
+static int relaunch(void) {
     HosRelaunch r;
     if (!hos_relaunch_command("/proc/self/cmdline", "/proc/self/environ", &r)) {
         hos_log("restart: this process's command was not found: the game only exits");
         hos_log_flush();
-        return;
+        return 0;
     }
+    /* Replace rather than inherit an earlier one-use ticket from /proc/environ. */
+    const char *ticket = coop_profile_restart_token();
+    char ticket_env[64];
+    snprintf(ticket_env, sizeof ticket_env, "HOS_COOP_PROFILE_TICKET=%s", ticket);
+    char **env = calloc((size_t)r.envc + 2, sizeof *env);
+    if (!env) return 0;
+    int count = 0;
+    for (int i = 0; i < r.envc; i++)
+        if (strncmp(r.envp[i], "HOS_COOP_PROFILE_TICKET=", 23)) env[count++] = r.envp[i];
+    if (*ticket) env[count++] = ticket_env;
+    r.envp = env;
     /* (every file this process opened closes with it, as at an exit: the new one opens its own) */
     DIR *d = opendir("/proc/self/fd");
     if (d) {
@@ -97,6 +118,7 @@ static void relaunch(void) {
     execvp(r.argv[0], r.argv);
     hos_log("restart: the game could not be started again: it only exits");
     hos_log_flush();
+    return 0;
 }
 #endif
 
@@ -110,6 +132,6 @@ void hos_window_closed_exit(void) {
     hos_log_flush();
     void hos_crash_clean_end(void);
     hos_crash_clean_end();
-    if (again) relaunch();
+    if (!again || !relaunch()) coop_profile_restart_failed();
     ExitProcess(0);
 }

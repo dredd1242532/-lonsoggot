@@ -1908,6 +1908,18 @@ static int game_main(int argc, char **argv) {
     if (env_on("HOS_TRACE")) hos_trace = 1;
     if (!hos_user_dir) hos_user_dir = "user";
     CreateDirectoryA(hos_user_dir, NULL);
+    {
+        int coop_profile_init(const char *, const char *);
+        if (!coop_profile_init(hos_user_dir, getenv("HOS_COOP_PROFILE_TICKET"))) {
+            hos_log("coop: temporary profile ticket failed; no save was mounted. Start again normally to use your own saves.");
+            return 1;
+        }
+#ifdef _WIN32
+        _putenv("HOS_COOP_PROFILE_TICKET=");
+#else
+        unsetenv("HOS_COOP_PROFILE_TICKET");
+#endif
+    }
     if (!reserve_guest()) {
         fprintf(stderr, "cannot reserve the guest window\n");
         return 1;

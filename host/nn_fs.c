@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "coop_profile.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
@@ -83,6 +84,12 @@ static BOOL fs_FindNextFile(HANDLE h, WIN32_FIND_DATAA *fd) {
 #endif
 
 const char *hos_romfs_dir, *hos_user_dir;
+/* Selected once, before the first mount. Identity keys remain under hos_user_dir;
+   every native user mount and save backup uses the selected profile instead. */
+static const char *fs_user_dir(void) {
+    const char *p = coop_profile_root();
+    return p[0] ? p : hos_user_dir;
+}
 
 #define R_PATH_NOT_FOUND 0x202          /* fs::ResultPathNotFound */
 #define R_PATH_EXISTS 0x402             /* fs::ResultPathAlreadyExists */
@@ -178,6 +185,7 @@ static int host_path(const char *guest_mem, char *out, size_t cap, int *writable
             if (!guest_path_ok(rest)) break;
             if (mounts[i].writable || !hos_mods_romfs(rest, out, cap))
                 if ((size_t)snprintf(out, cap, "%s/%s", mounts[i].root, rest) >= cap) break;   /* (cut short: not this path) */
+            if (coop_profile_active() && !coop_profile_path_safe(out)) break;
             if (writable) *writable = mounts[i].writable;
             ok = 1;
             break;
@@ -364,7 +372,7 @@ int hos_save_copy(const char *folder, const char *prefix, int keep, char *out, s
         return 1;   /* (nothing saved yet) */
     }
     char parent[HOS_FS_PATH], name[96], part[HOS_FS_PATH], dst[HOS_FS_PATH];
-    snprintf(parent, sizeof parent, "%s\\%s", hos_user_dir, folder);
+    snprintf(parent, sizeof parent, "%s\\%s", fs_user_dir(), folder);
     CreateDirectoryA(parent, NULL);
     /* <prefix><UTC time>, and copies in one second numbered on from the last (-002, -003...): the names sort as the copies
        were made, also after the oldest of that second was pruned (a number used again would sort first and go next) */
@@ -405,6 +413,17 @@ int hos_save_copy(const char *folder, const char *prefix, int keep, char *out, s
     return ok;
 }
 
+/* Called only outside a room (copy) or after leaving it (return). No hot mount:
+   native handles and their paths keep this process's original choice until exit. */
+int hos_save_profile_ask(int returning) {
+    AcquireSRWLockExclusive(&save_lock);
+    const int64_t quiet = hos_now_ns() / 1000000 - InterlockedCompareExchange64(&save_changed_ms, 0, 0);
+    int ok = !InterlockedCompareExchange(&save_writers, 0, 0) && quiet >= SAVE_QUIET_MS;
+    if (ok) ok = returning ? coop_profile_return() : coop_profile_prepare();
+    ReleaseSRWLockExclusive(&save_lock);
+    return ok;
+}
+
 /* ---- mounts --------------------------------------------------------------------------------------------------- */
 HLE(_ZN2nn2fs22QueryMountRomCacheSizeEPm) { G64(ARG(0)) = 0x10000; RET(0); }
 HLE(_ZN2nn2fs8MountRomEPKcPvm) {
@@ -430,7 +449,8 @@ int hos_fs_save_root(char *out, size_t cap) {
 
 static int user_mount(const char *name, const char *sub) {
     char root[HOS_FS_PATH];
-    snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
+    if (snprintf(root, sizeof root, "%s\\%s", fs_user_dir(), sub) >= (int)sizeof root ||
+        (coop_profile_active() && !coop_profile_path_safe(root))) return 0;
     make_dirs(root);
     CreateDirectoryA(root, NULL);
     return mount(name, root, 1);
@@ -439,16 +459,16 @@ static int user_mount(const char *name, const char *sub) {
 /* nn::fs::IsSaveDataExisting(ApplicationId, account::Uid const&) -> bool */
 HLE(_ZN2nn2fs18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE) {
     char root[HOS_FS_PATH];
-    snprintf(root, sizeof root, "%s\\save\\%016llx%016llx", hos_user_dir, (unsigned long long)G64(ARG(1) + 8),
+    snprintf(root, sizeof root, "%s\\save\\%016llx%016llx", fs_user_dir(), (unsigned long long)G64(ARG(1) + 8),
              (unsigned long long)G64(ARG(1)));
-    RET(GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES);
+    RET((!coop_profile_active() || coop_profile_path_safe(root)) && GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES);
 }
 /* MountSaveData(char const*, account::Uid const&) */
 HLE(_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE) {
     char sub[64], root[HOS_FS_PATH];
     snprintf(sub, sizeof sub, "save\\%016llx%016llx", (unsigned long long)G64(ARG(1) + 8), (unsigned long long)G64(ARG(1)));
     const int ok = user_mount(gstr(ARG(0)), sub);
-    snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
+    snprintf(root, sizeof root, "%s\\%s", fs_user_dir(), sub);
     if (ok) save_mounted(root);
     RET(ok ? 0 : R_NOT_MOUNTED);
 }
@@ -457,7 +477,7 @@ HLE(_ZN2nn2fs21MountSaveDataReadOnlyEPKcNS_13ApplicationIdERKNS_7account3UidE) {
     char sub[64], root[HOS_FS_PATH];
     snprintf(sub, sizeof sub, "save\\%016llx%016llx", (unsigned long long)G64(ARG(2) + 8), (unsigned long long)G64(ARG(2)));
     const int ok = user_mount(gstr(ARG(0)), sub);
-    snprintf(root, sizeof root, "%s\\%s", hos_user_dir, sub);
+    snprintf(root, sizeof root, "%s\\%s", fs_user_dir(), sub);
     if (ok) save_mounted(root);
     RET(ok ? 0 : R_NOT_MOUNTED);
 }
@@ -471,7 +491,8 @@ HLE(_ZN2nn2fs17MountCacheStorageEPKci) {
 /* CreateCacheStorage(int index, long size, long journal) */
 HLE(_ZN2nn2fs18CreateCacheStorageEill) {
     char root[HOS_FS_PATH];
-    snprintf(root, sizeof root, "%s\\cache\\%d\\", hos_user_dir, (int)ARG(0));
+    snprintf(root, sizeof root, "%s\\cache\\%d\\", fs_user_dir(), (int)ARG(0));
+    if (coop_profile_active() && !coop_profile_path_safe(root)) { RET(R_PATH_NOT_FOUND); return; }
     make_dirs(root);
     RET(0);
 }
@@ -483,8 +504,8 @@ HLE(_ZN2nn2fs20ReadCacheStorageListEPiPNS0_16CacheStorageInfoENS0_22CacheStorage
     int n = 0, max = (int)ARG(3);
     for (; cache_list_pos < 16 && n < max; cache_list_pos++) {
         char root[HOS_FS_PATH];
-        snprintf(root, sizeof root, "%s\\cache\\%d", hos_user_dir, cache_list_pos);
-        if (GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES) {
+        snprintf(root, sizeof root, "%s\\cache\\%d", fs_user_dir(), cache_list_pos);
+        if ((!coop_profile_active() || coop_profile_path_safe(root)) && GetFileAttributesA(root) != INVALID_FILE_ATTRIBUTES) {
             memset(GP(ARG(1) + 0x20 * n), 0, 0x20);
             G32(ARG(1) + 0x20 * n) = (uint32_t)cache_list_pos;
             n++;

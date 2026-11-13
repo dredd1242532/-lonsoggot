@@ -776,3 +776,33 @@ separate required proof before readiness.
 Interpolation clamps its weight, normalizes received rotations and keeps finite animation frames finite even at
 the floating-point limits. A refused request-storage allocation is retained for this start, not retried every frame.
 
+## Temporary local saves
+
+Outside a room, **Temporary save** copies the saved checkpoints and restarts into
+that copy. Save in the game first, wait for saving to finish, then press twice.
+The same row in the copy leaves the room and restarts with the normal saves.
+It never replaces or renames the normal save folder and never copies progress back.
+The tab identifies the temporary domain. Normal progress synchronization is
+suspended there until a separately consented progress-return policy is available.
+
+Copies stay under the selected user folder's `coop-sessions`, using random local
+IDs, an immutable starting copy and a separate working `user/save`. Only local
+save data is copied: no room keys, tokens, mods or other user-folder contents.
+Save, temporary and cache mounts, existence checks and save backups all use the
+selected working root. The mount choice lasts until process exit, never changes
+under an open native save handle, and is made before the first game mount.
+
+A private one-use restart ticket binds the complete working copy's BLAKE2b-256
+digest. `HOS_COOP_PROFILE_TICKET` is internal restart state, not a user setting.
+An ordinary start, including after a crash, always selects the normal saves and
+keeps interrupted copies for recovery. A bad ticket stops before any save mounts;
+start again normally. Failed copying or restarting cannot replace normal saves.
+The original and working copy remain on disk; no automatic pruning or import.
+New copies refuse at 16 retained sessions, 64 MiB, 4096 entries or an unsupported
+path. Close the game before removing an unwanted temporary folder.
+
+Links, junctions, reparse points and multiply-linked files are refused. Windows
+uses UTF-8 to wide paths, exclusive file access and non-replacing renames; Linux
+uses no-follow file opens, a process lease and non-replacing rename. This is not
+a sandbox against another process running as the same operating-system user.
+Local file-locking, durability and junction behavior still need Windows execution.

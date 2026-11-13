@@ -19,6 +19,8 @@
 
 #include "coop.h"
 #include "coop_state.h"
+#include "coop_profile.h"
+int hos_save_profile_ask(int returning);
 #include "../gpu/vk/vk_api.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -192,6 +194,8 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
     copy_text(out->name, sizeof out->name, v.name);
     copy_text(out->status, sizeof out->status, v.status);
     out->ping_ms = v.ping_ms;
+    out->temporary_save = coop_profile_active();
+    copy_text(out->save_note, sizeof out->save_note, coop_profile_note());
     for (int i = 0; i < v.n && i < COOP_MAX_MEMBERS && out->n < HOS_COOP_MEMBERS; i++) {
         MkwVkCoopMember *m = &out->member[out->n++];
         m->id = v.member[i].id;
@@ -281,6 +285,14 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return hos_oot_coop_reset_pools();
     case HOS_COOP_CMD_RULES_CHANGED:
         return hos_oot_coop_rules_changed();
+    case HOS_COOP_CMD_TEMP_SAVE: {
+        CoopView v;
+        coop_view_get(&v);
+        const int returning = coop_profile_active();
+        if (!returning && v.state != COOP_OFF && v.state != COOP_LEFT) return 0;
+        if (returning) coop_shutdown();
+        return hos_save_profile_ask(returning);
+    }
     default:
         return 0;
     }

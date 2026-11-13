@@ -153,6 +153,8 @@ typedef struct MkwVkCoopView {
     uint8_t category[HOS_COOP_RULE_CATEGORIES], feature_count, feature_id[HOS_COOP_FEATURES];
     int16_t feature_value[HOS_COOP_FEATURES];
     char maker_key[24], room_title[40];
+    int32_t temporary_save;   /* native save mounts point to a local copy until exit */
+    char save_note[160];
     /* (version 27; 26 belongs to the temporary-profile view) cancellation explanations only, not consent tokens. */
     uint32_t membership_revision;   /* signed admission/removal sets changed, even with an unchanged visible roster */
     uint32_t pool_epoch;            /* signed pool reset, not a member or category/feature edit */
@@ -162,7 +164,7 @@ typedef struct MkwVkCoopView {
    Enter, applied at once to a session that runs, 0: the saved value at the start, kept for the next Make or Join); the
    maker's remedies: remove the player of that key (text: its fingerprint), reset the pools */
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
-       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED };
+       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED, HOS_COOP_CMD_TEMP_SAVE = 10 };
 
 /* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
    registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most

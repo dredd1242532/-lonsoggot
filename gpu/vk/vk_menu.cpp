@@ -1573,6 +1573,9 @@ Row rows[] = {
     {TAB_COOP, "Room rules", nullptr, 0, 0, 0, nullptr,
      "What a room you make shares: progress, items, songs and quest items shared or per player; small keys, rupees and "
      "ammunition in one pool or per player. The rules are the maker's: in a room another player made, theirs apply."},
+    {TAB_COOP, "Temporary save", nullptr, 0, 0, 0, nullptr,
+     "Outside a room: copy your saved checkpoints and restart into that copy. In a temporary copy: leave and restart with "
+     "your normal saves. Nothing is copied back. Save first; press twice. Temporary copies are kept separately."},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -1876,10 +1879,10 @@ const char* const coop_pvp_accept_help =
     "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
     "fingerprints aloud to each other before: a name can be anyone's. Press twice.";
 const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
-enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopRows };
+enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
-                                               "Leave the room",  "Room rules"};
+                                               "Leave the room",  "Room rules", "Temporary save"};
 int coop_remove_at = 0;   // (Remove a player: which of the others with a key, Left and Right choose)
 /// The other members with a key (those the maker can remove): their count, and the one coop_remove_at chooses (*chosen)
 int coop_removable(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
@@ -1946,6 +1949,7 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopReset: return makers;
     case kCoopLeave: return coop_in_room(v);
     case kCoopRules: return makers || v.rules_epoch || !coop_in_room(v);
+    case kCoopTemp: return v.temporary_save || !coop_in_room(v);
     default: return true;
     }
 }
@@ -2987,7 +2991,7 @@ void coop_press(const Row& r) {
         coop_secret_shown = !coop_secret_shown;
         return;
     }
-    if ((k == kCoopAccept || k == kCoopRemove || k == kCoopReset || k == kCoopLeave) && pending != &r) {
+    if ((k == kCoopAccept || k == kCoopRemove || k == kCoopReset || k == kCoopLeave || k == kCoopTemp) && pending != &r) {
         pending = &r;
         if (k == kCoopAccept) {
             coop_accept_token = coop_now.offer, coop_accept_epoch = coop_now.rules_epoch;
@@ -3016,6 +3020,12 @@ void coop_press(const Row& r) {
     else if (k == kCoopRemove && coop_removable(coop_now, &chosen) && chosen) host->coop_command(HOS_COOP_CMD_REMOVE, chosen->key, 0);
     else if (k == kCoopReset) host->coop_command(HOS_COOP_CMD_RESET_POOLS, nullptr, 0);
     else if (k == kCoopLeave) host->coop_command(HOS_COOP_CMD_LEAVE, nullptr, 0);
+    else if (k == kCoopTemp && app_window() && host->coop_command(HOS_COOP_CMD_TEMP_SAVE, nullptr, 0)) {
+        save();
+        pipeline_cache_save();
+        open_now = false;
+        PostMessageA(app_window(), WM_APP + 9, 0, 0);
+    }
 }
 /// (longshot) The room as it is now, at every frame of the open menu: a change shows (*changed). The Co-op tab's selection stays
 /// on its row while rows come and go; when its own row went (Make a room, once in the room), on the first after the two fields
@@ -3790,7 +3800,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     if (v.ping_ms && v.state == HOS_COOP_STATE_JOINED)
         ui::text_mid_right(c, c.f.body, 16 * s, right - 20 * s, top + 22 * s, ui::kSoft, (std::to_string(v.ping_ms) + " ms").c_str());
     if (const char* line = coop_accept_notice ? coop_accept_notice :
-                           v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
+                           v.save_note[0] ? v.save_note : v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 50 * s, ui::kSoft, fit(c, c.f.body, 16 * s, right - left - 40 * s, line, false).c_str());
     const int count = tab_row_count(TAB_COOP);
     float y = top + box_h + 16 * s;
@@ -3814,7 +3824,8 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, y + rh * 0.5f), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
         } else {
-            const char* says = k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
+            const char* says = k == kCoopTemp ? (v.temporary_save ? "Return to normal saves" : "Copy and restart") :
+                              k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : says, selected, false, false);
         }
         hits.add(left, y, right, std::min(y + rh, bottom + 8 * s), menu_hit::kRow, i, va.x, vb.x);
@@ -3924,7 +3935,7 @@ void draw_options(ui::Ctx& c) {
         } else if (const int k = coop_kind(selr); k >= 0 && k != kCoopRules) {
             prompt_list[prompts_n++] = {ui::kConfirm, k == kCoopMake ? "Make" : k == kCoopSecret ? (coop_secret_shown ? "Hide" : "Show")
                                                     : pending == &selr ? "Confirm" : k == kCoopAccept ? "Accept" : k == kCoopRemove ? "Remove"
-                                                    : k == kCoopReset ? "Reset" : "Leave"};
+                                                    : k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
             if (k == kCoopRemove) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
         } else if (selr.value || (selr.cheat >= 0 && (selr.cheat <= 1 || selr.cheat == 7 || cheat_chooses(selr.cheat) || age_shown(selr.cheat)))) {
             if (!(cur_tab == TAB_RULES && coop_rules_readonly)) prompt_list[prompts_n++] = {ui::kLeftRight, "Change"};
