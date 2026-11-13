@@ -12,11 +12,11 @@ const rosterSource = siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'w
     <img src={`${base}branding/magicbean-team-logo.webp`} alt="Team magicbean logo" width="512" height="512" />
   </section>
   <section aria-labelledby="roster-title" class="team-roster">
-    <div class="team-section-heading"><h2 id="roster-title">Meet the beans</h2><span>{members.length} {members.length === 1 ? 'profile' : 'profiles'} · A–Z</span></div>
-    <p class="team-note">Our roster grows as teammates add themselves.</p>
+    <div class="team-section-heading"><h2 id="roster-title">Meet the beans</h2><span>{members.length} {members.length === 1 ? 'profile' : 'profiles'}</span></div>
+    <p class="team-note">Faces from Git. Beans at heart.</p>
     <ul class="team-grid" role="list">
       {members.map(member => <li class="team-card">
-        <div class="team-card-top"><span class="team-initial" aria-hidden="true">{member.initial}</span><span class="team-host">{member.host}</span></div>
+        <div class="team-card-top"><span class="team-avatar" aria-hidden="true"><span class="team-initial">{member.initial}</span>{member.avatar && <img data-team-avatar src={member.avatar} alt="" width="72" height="72" loading="lazy" decoding="async" referrerpolicy="no-referrer" />}</span><span class="team-host">{member.host}</span></div>
         <h3>{member.name}</h3><p class="team-handle">@{member.handle}</p>
         {member.bio && <p class="team-bio">{member.bio}</p>}
         {member.focus.length > 0 && <ul class="team-focus" aria-label="Focus areas" role="list">{member.focus.map(label => <li>{label}</li>)}</ul>}
@@ -38,6 +38,10 @@ const rosterSource = siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'w
   </section>
   <p class="team-endnote">Here for the wider project history? <a href={`${base}about/#credits-and-licensing`}>Read the credits and acknowledgements.</a></p>
 </div>
+<script>
+  import { attachAvatarFallback } from '../lib/team-avatar.mjs';
+  document.querySelectorAll<HTMLImageElement>('[data-team-avatar]').forEach(attachAvatarFallback);
+</script>
 <style>
   .team-page { font-size: 1.0625rem; line-height: 1.65; }
   .team-page * { box-sizing: border-box; }
@@ -62,6 +66,10 @@ const rosterSource = siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'w
   .team-example { border-style: dashed; background: transparent; }
   .team-card-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
   .team-initial { display: grid; place-items: center; flex: 0 0 54px; height: 60px; border: 1px solid var(--sl-color-gray-4); border-radius: 50% 45% 50% 40%; font-size: 1.6rem; font-weight: 700; color: var(--sl-color-text-accent); background: var(--sl-color-accent-low); }
+  .team-avatar { position: relative; display: block; flex: 0 0 72px; width: 72px; height: 72px; overflow: hidden; border-radius: 50% 45% 50% 40%; }
+  .team-avatar .team-initial { width: 100%; height: 100%; }
+  .team-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--panel); }
+  .team-avatar img[hidden] { display: none; }
   .team-host { font-size: .8rem; color: var(--soft-text); }
   .team-card h3 { font: 700 1.45rem/1.25 var(--sl-font); overflow-wrap: anywhere; }
   .team-handle { font-size: .92rem; color: var(--soft-text); overflow-wrap: anywhere; }

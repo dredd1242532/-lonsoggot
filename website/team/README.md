@@ -2,7 +2,8 @@
 
 Each person has one JSON file here. The team page reads these files at build time;
 there is no second member list to maintain, no browser token and no account signup
-on the website. Profiles are opt-in; this is not an automatic contributor ranking.
+on the website. The initial roster was selected from the MagicBean Git repository directory.
+The display order is chosen by the site owner, not a contributor ranking.
 
 ## Add yourself
 
@@ -33,11 +34,21 @@ yours: URL validation checks format, not account ownership. A maintainer should
 confirm ownership through the submitting Git account or another established team
 channel. Profiles requiring sign-in are valid, but visitors may need to sign in.
 
+An optional `order` integer (0–10000) sets display order; lower comes first.
+Profiles without one use 1000; ties use alphabetical order.
+
 Name: 1–60 characters. Bio: optional, 1–240 characters. Focus: optional, up to three
 plain-text labels of 1–32 characters each. No markup. Do not add someone else without
 their consent. Never put access tokens, email addresses or other private contact
 details in a profile. Only the fields above are accepted; duplicate profiles fail
-the build. Cards use initials rather than fetching third-party profile images.
+the build. An optional `avatar` field contains the HTTPS image URL returned by the
+Git host's user API. Cards display that image and fall back to initials if it fails.
+Image requests go to the Git host without a referrer; no account token is sent.
+Run `npm run team:sync` to refresh avatar URLs before rebuilding. Public profiles
+work without authentication. For limited MagicBean profiles, the optional server-only
+`FORGEJO_TOKEN` must be supplied through the environment, never in a file or URL.
+Failed lookups keep the existing image URL; builds themselves remain offline.
+Profile names and bios are never overwritten by the image refresh.
 
 To update your card, edit your file. To leave the displayed roster, delete your file
 in a PR. Merged changes appear after the website is rebuilt and deployed; pushing a

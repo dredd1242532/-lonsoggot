@@ -80,7 +80,10 @@ for (const asset of ['longshot.png', 'teary-elf-bean.png', 'grappling-hook-bean.
 const commonIssues = await readFile(path.join(dist, 'guides/common-issues/index.html'), 'utf8');
 assert(commonIssues.includes(`href="${base}antivirus/"`), 'Download safety link must stay on the site');
 const team = await readFile(path.join(dist, 'team/index.html'), 'utf8');
-for (const member of await readTeam()) assert(team.includes(`href="${member.profile}"`), `Missing team profile: ${member.id}`);
+for (const member of await readTeam()) {
+  assert(team.includes(`href="${member.profile}"`), `Missing team profile: ${member.id}`);
+  if (member.avatar) assert(team.includes(`src="${member.avatar}"`), `Missing team avatar: ${member.id}`);
+}
 assert(team.includes('id="add-your-profile"'), 'Roster contribution section missing');
 assert(team.includes(siteConfig.editBase.replace('/_edit/', '/src/branch/') + 'website/team/README.md'), 'Roster instructions must target the website branch');
 const home = await readFile(path.join(dist, 'index.html'), 'utf8');
