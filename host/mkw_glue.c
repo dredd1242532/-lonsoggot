@@ -2,6 +2,7 @@
    commit (TOTK commits its whole 4 GB window up front; MKW's 512 GB window is only reserved), and stand-ins for the
    hooks of files not taken into host/ (the renderer and display, the profiler, mods, TOTK's own patches). */
 #include "hos.h"
+#include "hos_crash_window.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -188,6 +189,7 @@ static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {
         }
     }
     hos_log_flush();
+    hos_crash_window_open();   /* (the crash window, in a process of its own: docs/crash-report-window.md) */
     void hos_hostcall_stats(void);
     hos_hostcall_stats();   /* (HOS_HOSTCALL_STATS=1: the host calls made, and the last 256 of them) */
     return EXCEPTION_CONTINUE_SEARCH;

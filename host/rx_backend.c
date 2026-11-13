@@ -322,12 +322,14 @@ int rx_start(void *hwnd) {
         if (r && r->start(hwnd)) {
             vk = r;
             hos_log("rx: renderer: Vulkan (%s)", dll);
+            hos_log("report: renderer Vulkan");   /* (the crash report's renderer: nx2/crash_report.py) */
             flush_early();
             return 1;
         }
         if (r) hos_log("rx: the Vulkan back end could not start on the window: WebGPU");
     }
     const int ok = wgr_start(hwnd);
+    if (ok) hos_log("report: renderer WebGPU (no usable Vulkan device)");
     flush_early();
     return ok;
 }
