@@ -151,7 +151,11 @@ def file_jobs():
     n = max(1, min(16, n))
     gb = _available_gb()
     if gb is not None:
-        n = max(1, min(n, int(gb // 2)))
+        # a new process (spawn: Windows) holds only the emit's tables and its run's bodies: 395 MB at most, measured
+        # over a whole lift with 4 (Ryzen 5 5600, 16 GB). The 2 GB a process is a forked one's, which touches the lift's shared pages.
+        # At 2 GB, a 16 GB Windows PC with 4-8 GB free got 2-4 processes or one (its build's lift took 254 s; 178 s with 4 forced)
+        per = 0.75 if _no_fork() else 2
+        n = max(1, min(n, int(gb // per)))
     return n
 
 
@@ -559,8 +563,22 @@ def _side_run(fn, conn):
 def start_side(fn):
     """fn() started in a forked process, beside what the lift does next; None where there is no fork or one process is asked for
     (LONGSHOT_LIFT_JOBS=1). end_side(side, fn) waits for it and gives its result"""
-    if _no_fork() or emit_jobs() <= 1:
+    if emit_jobs() <= 1:
         return None
+    if _no_fork():
+        # where there is no fork (Windows): a thread of this process. While the edits run, this process only waits on
+        # their workers, so the tables (~11 s of Python here, after the edits before) are made beside them, as a forked process does
+        import threading
+        box = {}
+
+        def side():
+            try:
+                box["out"] = (True, fn())
+            except BaseException as e:   # (said, then made again in end_side, as a failed forked process)
+                box["out"] = (False, repr(e))
+        t = threading.Thread(target=side, name="lift-side", daemon=True)
+        t.start()
+        return t, box
     ctx = multiprocessing.get_context("fork")
     mine, theirs = ctx.Pipe(duplex=False)
     p = ctx.Process(target=_side_run, args=(fn, theirs))
@@ -572,6 +590,14 @@ def start_side(fn):
 def end_side(side, fn):
     """start_side's result; fn() here when it was not started, or its process failed or died (the files are written whole again)"""
     if side is None:
+        return fn()
+    if isinstance(side[1], dict):   # (a thread: start_side where there is no fork)
+        t, box = side
+        t.join()
+        ok, out = box.get("out", (False, "the thread stopped"))
+        if ok:
+            return out
+        print("side thread failed (%s): done here" % out, flush=True)
         return fn()
     p, conn = side
     try:
