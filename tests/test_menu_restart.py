@@ -124,6 +124,10 @@ def sources():
     if "need = note + text_h + (gold_line ? 52 * s : 0)" not in box or "float body = std::max(min_h, need);" not in box or \
             "y = y1 - 22 * s - 32 * s;" not in box:
         raise SystemExit("vk_menu.cpp: the help box grows by the restart note and the Restart needed line again")
+    # (the Restart needed line is for what else waits: not shown while the selected row's own change is all there is)
+    if "(restart_pending() & ~(slot >= 0 ? 1u << slot : 0u)) != 0" not in function(menu, "bool restart_line_shown(const Row& selected) {") or \
+            "&& restart_line_shown(selr) ? restart_line(" not in menu:
+        raise SystemExit("vk_menu.cpp: the Restart needed line shows again when only the selected row waits for a restart")
     if "restart_init();" not in function(menu, "void menu_init() {"):
         raise SystemExit("menu_init does not keep the start values")
     # (Auto (this PC) sets the Output resolution and the Profile once the device is known, after host/hos_main.c read them at

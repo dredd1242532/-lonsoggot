@@ -1635,6 +1635,12 @@ unsigned restart_pending() {
     restart_values(now);
     return restart_state.pending(now);
 }
+/// Whether the help shows the "Restart needed" line with this row selected: something other than the row itself waits for
+/// a restart. The row's own change is said by its note, in gold (restart_note): the line is for what else waits
+bool restart_line_shown(const Row& selected) {
+    const int slot = restart_slot_of(selected);
+    return (restart_pending() & ~(slot >= 0 ? 1u << slot : 0u)) != 0;
+}
 /// Whether closing the menu now asks to restart: something pending, not declined with Later, and a window to close
 bool restart_ask() {
     int now[mr::kMax];
@@ -3085,7 +3091,7 @@ void draw_options(ui::Ctx& c) {
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
-    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
+    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_line_shown(selr) ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
     if (help_tall_w != hx1 - hx0 || help_said != share_said)
