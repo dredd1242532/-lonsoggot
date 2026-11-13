@@ -46,6 +46,13 @@ static int CreateDirectoryA(const char *p, void *unused) {
     for (char *c = b; *c; c++) if (*c == '\\') *c = '/';
     return mkdir(b, 0700) == 0;
 }
+#define INVALID_FILE_ATTRIBUTES 0xffffffffUL
+static unsigned long GetFileAttributesA(const char *p) {
+    char b[1024]; snprintf(b, sizeof b, "%s", p);
+    for (char *c = b; *c; c++) if (*c == '\\') *c = '/';
+    struct stat s;
+    return stat(b, &s) ? INVALID_FILE_ATTRIBUTES : S_ISDIR(s.st_mode) ? 16 : 128;
+}
 #endif
 #define HOS_FS_PATH 1024
 #define FS_PATH_MAX 0x302
@@ -56,6 +63,17 @@ typedef struct { char name[32]; char root[HOS_FS_PATH]; int writable; } Mount;
 static Mount mounts[16];
 static int nmounts;
 static SRWLOCK mount_lock = SRWLOCK_INIT;
+static uint64_t args[8], result;
+#define HLE(name) static void name(void)
+#define ARG(n) args[n]
+#define GP(a) ((void *)(uintptr_t)(a))
+#define G64(a) (*(uint64_t *)GP(a))
+#define G32(a) (*(uint32_t *)GP(a))
+#define RET(v) (result = (uint64_t)(v))
+#define R_NOT_MOUNTED 1
+static const char *gstr(uint64_t a) { return (const char *)(uintptr_t)a; }
+static void save_mounted(const char *p) { if (!strstr(p, "coop-sessions")) exit(13); }
+static int cache_list_pos;
 /* ACTUAL */
 int main(int argc, char **argv) {
     if (argc < 3) return 2;
@@ -77,6 +95,21 @@ int main(int argc, char **argv) {
         if (!host_path("temp:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 7;
         if (!host_path("cache:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 8;
         if (host_path("save:/../outside", out, sizeof out, &writable)) return 9;
+        uint64_t uid[2] = {1, 0};
+        args[0] = (uintptr_t)"native"; args[1] = (uintptr_t)uid;
+        _ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE(); if (result) return 14;
+        _ZN2nn2fs18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE(); if (!result) return 15;
+        args[0] = (uintptr_t)"readonly"; args[2] = (uintptr_t)uid;
+        _ZN2nn2fs21MountSaveDataReadOnlyEPKcNS_13ApplicationIdERKNS_7account3UidE(); if (result) return 16;
+        args[0] = (uintptr_t)"scratch";
+        _ZN2nn2fs21MountTemporaryStorageEPKc(); if (result) return 17;
+        args[0] = (uintptr_t)"cached"; args[1] = 7;
+        _ZN2nn2fs17MountCacheStorageEPKci(); if (result) return 18;
+        args[0] = 7; _ZN2nn2fs18CreateCacheStorageEill(); if (result) return 19;
+        uint32_t listed[128] = {0}, count = 0;
+        args[0] = (uintptr_t)&count; args[1] = (uintptr_t)listed; args[3] = 16;
+        _ZN2nn2fs20ReadCacheStorageListEPiPNS0_16CacheStorageInfoENS0_22CacheStorageListHandleEi();
+        if (count != 2) return 20;
         if (!coop_profile_return() || strcmp(coop_profile_restart_token(), "normal")) return 10;
     } else if (!strcmp(argv[2], "normal")) {
         if (coop_profile_active() || strcmp(coop_profile_root(), argv[1])) return 11;
@@ -104,6 +137,14 @@ def main():
     fs = (root / "host/nn_fs.c").read_text()
     actual = "\n".join(block(fs, x) for x in ["static const char *fs_user_dir(", "static int mount(",
                          "static int guest_path_ok(", "static int host_path(", "static void make_dirs(", "static int user_mount("])
+    for name in ("_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE", "_ZN2nn2fs18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE",
+                 "_ZN2nn2fs21MountSaveDataReadOnlyEPKcNS_13ApplicationIdERKNS_7account3UidE", "_ZN2nn2fs21MountTemporaryStorageEPKc",
+                 "_ZN2nn2fs17MountCacheStorageEPKci", "_ZN2nn2fs18CreateCacheStorageEill",
+                 "_ZN2nn2fs20ReadCacheStorageListEPiPNS0_16CacheStorageInfoENS0_22CacheStorageListHandleEi"):
+        actual += "\n" + block(fs, "HLE(" + name + ")")
+    start = fs.index("static const wchar_t *fs_wide(")
+    end = fs.index("\n#endif\n\nconst char *hos_romfs_dir", start)
+    actual = "#ifdef _WIN32\n" + fs[start:end] + "\n#endif\n" + actual
     source = (root / "host/coop_profile.c").read_text()
     if a.mutation == "links":
         source = source.replace("if (lstat(p, &s))", "if (stat(p, &s))").replace("if (a & FILE_ATTRIBUTE_REPARSE_POINT) return -1;", "")
@@ -164,6 +205,7 @@ def main():
             run("safe", "", expect=1, extra=[str(slot / "escape/new")])
             (slot / "escape").unlink()
         assert hashes(user / "save") == before
+        assert not (user / "cache").exists() and not (user / "temp").exists()
         print("PASS: copy/restart/return, original byte hashes, private keys excluded, tampered/one-use/crash tickets, all user mounts, links and traversal")
 
 
