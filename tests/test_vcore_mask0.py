@@ -3,7 +3,9 @@
 The virtual-core block is compiled with a single-threaded harness; the wrapper and the TLS
 cache helpers are stubs. The checks are:
 - mask 0 is no affinity: it uses every host core and prefers the core the guest cached;
-- a mask change that excludes the held core is queued, and the next checkpoint moves it.
+- a mask change that excludes the held core is queued, and the next checkpoint moves it;
+- every take writes the guest's TLS core cell: core + 1 for a 0/single-bit mask, 0 for a
+  multi-bit one, and a same-core mask change updates it without moving the thread.
 
 python -I -B tests/test_vcore_mask0.py [--cxx clang++]
 """
@@ -115,6 +117,20 @@ int main(void) {
     check(t.vc_kick == 2, "a mask change outside the held core queues a move");
     vc_yield(&t, 0);
     check(t.vc_held == 2 && t.vc_remask == 0, "the next checkpoint moves to the allowed core");
+
+    /* the TLS cell follows the core on every take and on a same-core mask change */
+    wrapper_valid = 1, wrapper_mask = 2, alias_now = 0;
+    thread(&t, "cell", 16, 2);
+    t.tls_slots[0] = 9;
+    vc_take(&t, 1);
+    check(t.tls_slots[0] == 2, "a take writes core + 1");
+    t.core_mask = 3, t.tls_slots[0] = 9;
+    vc_take(&t, 0);
+    check(t.tls_slots[0] == 0, "a multi-bit mask clears the cell");
+    t.core_mask = 2;
+    t.vc_held = 2, t.tls_slots[0] = 9;
+    vc_note_mask_change(&t);
+    check(t.vc_kick == 0 && t.tls_slots[0] == 2, "a same-core mask change syncs the cell");
 
     if (!bad) puts("ok");
     return bad;
