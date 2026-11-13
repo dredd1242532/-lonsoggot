@@ -156,8 +156,9 @@ class CrashReportTest(unittest.TestCase):
         # (a user name anywhere as a word of its own, as in a temporary folder named after the home: not inside a word)
         self.assertEqual(cr.redact("/tmp/x-1000/-home-alice-Desktop/tools/longshot", home=HOME, user="alice"),
                          "/tmp/x-1000/-home-<user>-Desktop/tools/longshot")
-        self.assertEqual(cr.redact("alice's malice", home=HOME, user="alice"), "<user>'s malice")
-        # (in its own case only: the Steam Deck's user is deck, and its report must still say Steam Deck)
+        self.assertEqual(cr.redact("Alice's malice", home=HOME, user="alice"), "<user>'s malice")   # (in any case)
+        # (a name that is also a word of the report's lines, in its own case only: the Steam Deck's user is deck, and its
+        # report must still say Steam Deck)
         self.assertEqual(cr.redact("Steam Deck, deck's", home="/home/deck", user="deck"), "Steam Deck, <user>'s")
         self.assertEqual(cr.redact("bob ran", home="/home/bo", user="bo"), "bob ran")   # (too short to tell)
 
@@ -293,7 +294,7 @@ class CrashReportTest(unittest.TestCase):
         self.assertIsNotNone(cr.read_marker(f.path))
         self.assertIsNotNone(f.report())
 
-    def test_an_answer_that_cant_be_read_keeps_the_report(self):
+    def test_what_went_wrong_before_an_answer_keeps_the_report(self):
         import urllib.request
         real = urllib.request.urlopen
 
@@ -307,6 +308,48 @@ class CrashReportTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(keep)
         self.assertIn("kept", said)
+
+    def test_a_posted_report_with_an_answer_that_cant_be_read_is_sent(self):
+        """2xx: the relay posted it, so it is never offered (or sent by Always send) again, whatever the body"""
+        import io
+        import urllib.request
+        real = urllib.request.urlopen
+        for body in (b"<html>cut", b"[1, 2]", b'{"comment": "https://x/issues/81#issuecomment-5"}'):
+            class Answer(io.BytesIO):
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+            urllib.request.urlopen = lambda *a, b=body, **kw: Answer(b)
+            try:
+                ok, said, keep = cr.send({"version": "3.4.1"}, url="https://relay.invalid/crash")
+            finally:
+                urllib.request.urlopen = real
+            self.assertEqual((ok, keep), (True, False), body)
+
+    def test_a_microphone_picked_earlier_never_reaches_the_log(self):
+        for line in ("audio in: Bob's Blue Yeti open (48000 Hz, 1 channel)", "audio in: Bob's Blue Yeti is back",
+                     "audio in: Bob's Blue Yeti not found: no such device, tried again from time to time"):
+            self.assertNotIn("Yeti", cr.clean("[hos audio] " + line, cr.LINE_LIMIT), line)
+
+    def test_addresses_ini_with_a_bom_or_broken_never_stops_the_builders(self):
+        good = Path(cr.ADDRESSES).read_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            ini = Path(tmp, "addresses.ini")
+            ini.write_bytes(b"\xef\xbb\xbf" + good)
+            self.assertEqual(cr.address("crash_reports", str(ini)), cr.ENDPOINT)
+            ini.write_bytes(good + b"\ncrash_reports = again\n")   # (a key twice: configparser refuses the file)
+            self.assertEqual(cr.address("crash_reports", str(ini)), "")
+            ini.write_bytes(b"\xff\xfe not text")
+            self.assertEqual(cr.address("crash_reports", str(ini)), "")
+
+    def test_the_windows_say_where_from_crash_issue(self):
+        self.assertEqual(cr.issue_place(), "git.magicbean.dev, on issue #81")
+        self.assertEqual(cr.issue_number(), "81")
+
+    def test_the_cpu_row_has_the_ram_as_the_game_words_it(self):
+        self.assertRegex(cr.this_cpu(), r"\(\d+ threads\), \d+ GB$")
 
     def test_the_windows_rows_and_show_texts(self):
         f = self.make()

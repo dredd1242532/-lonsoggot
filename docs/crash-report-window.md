@@ -200,6 +200,8 @@ thread in the game cannot take it down.
   report is kept. 201 or 200 give the comment's URL; 400, 413 and 429 say why, and whether to keep the report.
 - `comment_link(url)`: the Sent page's *See it on #81*: the report's own comment when the relay's answer is one on
   #81, else #81 itself (`crash_issue` in `nx2/addresses.ini`).
+- `issue_place()`, `issue_number()`: where the windows say reports are posted ("git.magicbean.dev, on issue #81") and
+  the Sent page's "See it on #81", both from `crash_issue`; without one the windows say no place and show no link.
 - `card(report, settings)`, `settings_text(settings)`, `log_text(report)`: the window's rows and its two Show texts, the
   same in both builders.
 - `clear(folder, when=None)`: removes the marker, only that crash's with `when` (after Send Help, I am sorry, or a

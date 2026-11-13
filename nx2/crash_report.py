@@ -31,11 +31,17 @@ import urllib.request
 
 
 
-def address(key):
+ADDRESSES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "addresses.ini")
+
+
+def address(key, path=ADDRESSES):
     """A service's address from nx2/addresses.ini (kept out of the code, to edit in one place); "" when it isn't there"""
     ini = configparser.ConfigParser(interpolation=None)
-    ini.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), "addresses.ini"), encoding="utf-8")
-    return ini.get("addresses", key, fallback="").strip()
+    try:   # (utf-8-sig: an editor's BOM; a file that doesn't parse turns the uses off, it never stops the builders)
+        ini.read(path, encoding="utf-8-sig")
+        return ini.get("addresses", key, fallback="").strip()
+    except (configparser.Error, UnicodeDecodeError):
+        return ""
 
 
 ENDPOINT = address("crash_reports")
@@ -78,6 +84,12 @@ HOMES = [(re.compile(r"/home/[^/\s]+"), "~"), (re.compile(r"/var/home/[^/\s]+"),
 CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
+# Words of the report's own lines (the system, the CPU, the GPU, the renderer) that are also user names
+COMMON_WORDS = {"deck", "steam", "arch", "linux", "ubuntu", "fedora", "debian", "mint", "manjaro", "bazzite", "nobara",
+                "cachyos", "windows", "wine", "vulkan", "intel", "amd", "nvidia", "radeon", "game", "games", "gamer",
+                "user", "admin", "player"}
+
+
 def redact(text, home=None, user=None):
     """The user's home and name out of a line, as the game's bug report does (gpu/vk/vk_bug_report.cpp redact), then any
     home folder by its shape"""
@@ -88,10 +100,12 @@ def redact(text, home=None, user=None):
         text = re.sub(r"(?<![\w/\\])" + re.escape(home) + r"(?![\w])", "~", text)
     if user:
         text = re.sub(r"(?<=[/\\])" + re.escape(user) + r"(?![\w])", "<user>", text)
-    if user and len(user) >= 3:   # (and as a word of its own anywhere, as in a folder named -home-alice-: not inside a
-        # longer word, not a name so short it is a common one, and in its own case: a user named deck or arch keeps the
-        # "Steam Deck" and the "Arch Linux" of the system line)
-        text = re.sub(r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>", text)
+    if user and len(user) >= 3:   # (and as a word of its own anywhere, in any case, as in a folder named -home-alice- or
+        # "Alice's PC": not inside a longer word, and not a name so short it is a common one. A user name that is also a
+        # word the report's own lines use (a Steam Deck's user is deck) is matched in its own case only, so the system
+        # line keeps its "Steam Deck" and "Arch Linux")
+        flags = 0 if user.lower() in COMMON_WORDS else re.I
+        text = re.sub(r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>", text, flags=flags)
     for pattern, replacement in HOMES:
         text = pattern.sub(replacement, text)
     return text
@@ -99,7 +113,12 @@ def redact(text, home=None, user=None):
 
 # The names of the player's devices in the log (host/nn_audio.c: "audio: output on Jane's AirPods (3 devices), stereo"): a
 # name the player gave them, so never sent. The microphone's is the options file's microphone_device (devices())
-DEVICE_LINES = [(re.compile(r"(audio: output on ).*?( \(\d+ devices?\))"), r"\1<device>\2")]
+DEVICE_LINES = [(re.compile(r"(audio: output on ).*?( \(\d+ devices?\))"), r"\1<device>\2"),
+                # (host/nn_audio_in.c: the microphone by name, "audio in: <name> open (48000 Hz, ...)", "... is back", "...
+                # <why>: ..., tried again": a microphone picked earlier in the session is not the options file's now)
+                (re.compile(r"(audio in: ).+?( open \(\d+ Hz)"), r"\1<device>\2"),
+                (re.compile(r"(audio in: ).+?( is back)$"), r"\1<device>\2"),
+                (re.compile(r"(audio in: ).+?(: .*, tried again from time to time)$"), r"\1<device>\2")]
 
 
 def clean(text, limit, home=None, user=None, devices=()):
@@ -232,7 +251,15 @@ def this_os():
     if sys.platform == "win32":
         v = sys.getwindowsversion()
         name = ("Windows 11" if v.build >= 22000 else "Windows 10") if v.major == 10 else "Windows %d.%d" % (v.major, v.minor)
-        return "%s (build %d)" % (name, v.build)
+        text = "%s (build %d)" % (name, v.build)
+        try:   # (", Wine x", as os_text says it)
+            import ctypes
+            wine = ctypes.WinDLL("ntdll").wine_get_version
+            wine.restype = ctypes.c_char_p
+            text += ", Wine " + wine().decode()
+        except (AttributeError, OSError, ImportError):
+            pass
+        return text
     name = "Linux"
     for path in ("/etc/os-release", "/usr/lib/os-release"):
         for line in read_lines(path) or []:
@@ -240,11 +267,17 @@ def this_os():
                 name = line[12:].strip().strip("\"'") or name
         if name != "Linux":
             break
-    return "%s (Linux %s)" % (name, platform.release())
+    text = "%s (Linux %s)" % (name, platform.release())
+    desktop, session = os.environ.get("XDG_CURRENT_DESKTOP"), os.environ.get("XDG_SESSION_TYPE")
+    if desktop:   # (the desktop and its display protocol, then the AppImage, as os_text)
+        text += ", %s%s" % (desktop, " (%s)" % session if session else "")
+    if os.environ.get("APPIMAGE"):
+        text += ", the AppImage"
+    return text
 
 
 def this_cpu():
-    """The processor's name and threads, as the report: line words it (cpu_text), for a run whose log has none"""
+    """The processor's name, threads and RAM, as the report: line words it (cpu_text), for a run whose log has none"""
     name = ""
     if sys.platform == "win32":
         try:
@@ -259,7 +292,30 @@ def this_cpu():
                 name = line.split(":", 1)[1]
                 break
     name = " ".join(name.split()) or "an unknown CPU"
-    return "%s (%d threads)" % (name, os.cpu_count() or 1)
+    ram = ram_bytes()
+    return "%s (%d threads)%s" % (name, os.cpu_count() or 1, ", %d GB" % ((ram + (1 << 29)) >> 30) if ram else "")
+
+
+def ram_bytes():
+    """The PC's RAM, 0 when it can't be read"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class Status(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong),
+                            ("avail", ctypes.c_ulonglong), ("page_total", ctypes.c_ulonglong),
+                            ("page_avail", ctypes.c_ulonglong), ("virtual_total", ctypes.c_ulonglong),
+                            ("virtual_avail", ctypes.c_ulonglong), ("extended", ctypes.c_ulonglong)]
+            s = Status()
+            s.length = ctypes.sizeof(s)
+            return s.total if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s)) else 0
+        except (AttributeError, OSError):
+            return 0
+    try:
+        return os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        return 0
 
 
 def release_source(folder):
@@ -352,6 +408,19 @@ def log_text(report):
                      report["log_tail"])
 
 
+def issue_place():
+    """Where the reports are posted, for the windows' text: "git.magicbean.dev, on issue #81" from crash_issue, "" without
+    one"""
+    m = re.match(r"https?://([^/]+)/.*/issues/(\d+)$", ISSUE_URL)
+    return "%s, on issue #%s" % m.groups() if m else ""
+
+
+def issue_number():
+    """crash_issue's number, as the Sent page's link says it ("See it on #81"); "" without one"""
+    m = re.search(r"/issues/(\d+)$", ISSUE_URL)
+    return m.group(1) if m else ""
+
+
 def comment_link(link):
     """Where the Sent page's link goes: the report's own comment on #81 (the relay's answer, the comment it posted or added
     this crash to), else #81 itself; never anywhere else, whatever the answer says"""
@@ -370,7 +439,11 @@ def send(report, url=ENDPOINT, timeout=10):
                                  headers={"Content-Type": "application/json", "User-Agent": "longshot-crash-report"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return True, json.loads(resp.read() or "{}").get("comment", ""), False
+            try:   # (2xx: the relay posted it. An answer cut short or not its JSON still means sent: no link, never again)
+                answer = json.loads(resp.read() or "{}")
+                return True, answer.get("comment", "") if isinstance(answer, dict) else "", False
+            except Exception:
+                return True, "", False
     except urllib.error.HTTPError as e:
         try:
             why = json.loads(e.read() or "{}").get("error", "")
@@ -382,9 +455,9 @@ def send(report, url=ENDPOINT, timeout=10):
     except (urllib.error.URLError, OSError) as e:
         return False, "Couldn't reach the crash server (%s). Your report is kept, and offered again next time." % (
             getattr(e, "reason", e)), True
-    except Exception as e:   # (an answer that isn't the relay's: a captive portal's page, a body cut short. The windows wait
-        # for an answer: whatever went wrong is one, never a thread that ends without saying)
-        return False, "The crash server's answer could not be read (%s). Your report is kept, and offered again next time." % (
+    except Exception as e:   # (before any answer, anything else that went wrong: the windows wait for an answer, never a
+        # thread that ends without saying)
+        return False, "The report could not be sent (%s). Your report is kept, and offered again next time." % (
             type(e).__name__), True
 
 
