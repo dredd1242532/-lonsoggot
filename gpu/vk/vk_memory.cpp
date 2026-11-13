@@ -3481,6 +3481,7 @@ void retire_pool(std::map<uint64_t, Pool>::iterator it) {
         logf("vk: pool %#llx remade larger (%zu retired)", (unsigned long long)old->lo, retired_pools.size());
 }
 int64_t st_sync_bytes, st_sync_copies, st_wb_bytes, st_mirrors;
+int64_t st_mirrors_freed = 0;   // (with st_mirrors: equal while no pool has a mirror)
 int64_t st_sync_live_pages, st_sync_cap_pages, st_sync_old_pages;   // (mirror syncs' dirty pages: live / this submit's capture / an earlier one's)
 std::unordered_map<uint64_t, int64_t> live_by_pool;
 std::unordered_map<uint64_t, std::pair<int64_t, int>> direct_by_pool;   // (bindings the GPU reads in guest memory: count, state)
@@ -3779,6 +3780,10 @@ bool memory_rb_refresh(VkCommandBuffer up) {
         if (k < 64) rb_segs.made |= 1ull << k;
     }
     if (rb_pages.empty() || !up) return false;
+    // (no pool has a mirror, as on an integrated GPU: no page has one to be copied into, and each was still looked up among the
+    // pools at every recording. The pages not read for a while still go, every 64th time)
+    static uint32_t unmirrored = 0;
+    if (st_mirrors == st_mirrors_freed && (++unmirrored & 63)) return false;   // (made and freed: a sparse mirror may hold no byte yet)
     auto written_ahead = [&](uint64_t lo, uint64_t hi) {   // (may be, by a recording ahead of this one in its submission)
         if (rb_hazards_epoch != mirror_epoch) return false;
         for (const RbHazard& h : rb_hazards)
@@ -4124,7 +4129,6 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
 // with the submissions that bound it; a mirror not bound for kIdleEpochs submissions goes when a wanted one does not
 // fit, or after kLongIdle; and a pool refused for the budget is tried again when it is next bound.
 constexpr uint64_t kIdleEpochs = 600, kLongIdle = 6000;
-int64_t st_mirrors_freed = 0;
 uint64_t st_mirror_bytes_freed = 0;
 // (longshot) A freed mirror's buffer is destroyed only once the GPU is past everything recorded until then. Its pool's
 // last_value counts the draws and dispatches that bound it, not the shaders that reach it through the guest page table:
@@ -4208,11 +4212,14 @@ void retired_imports_give_back() {   // (pools_mu held)
             want = retired_give_back::want(retired_give_back::settled(used, dead_import_bytes), budget, high, low);
     }
     const int64_t now = mode == Mode::GRACE ? import_now_ms() : 0;
-    uint64_t live_bytes = 0, retired_bytes = 0;
+    uint64_t retired_bytes = 0;
     size_t retired_alive = 0;
-    for (auto& [lo, p] : imported) live_bytes += p.hi - p.lo;
-    for (auto& nh : retired_pools) {   // (in the order they were retired: the oldest first)
-        Pool& p = nh.mapped();
+    // (this runs at every part of a submission. The oldest retired pools, their imports gone, are passed once: the list only
+    // grows and a retired pool is never imported again)
+    static size_t gone = 0;
+    while (gone < retired_pools.size() && !retired_pools[gone].mapped().memory) gone++;
+    for (size_t i = gone; i < retired_pools.size(); i++) {   // (in the order they were retired: the oldest first)
+        Pool& p = retired_pools[i].mapped();
         if (!p.memory) continue;
         const uint64_t idle = (uint64_t)std::max<int64_t>(0, now - p.retired_ms);
         // (longshot) a pool whose mirror was refused (over 1 GB, or no room in VRAM when it was asked for) has no mirror either:
@@ -4235,6 +4242,8 @@ void retired_imports_give_back() {   // (pools_mu held)
     static uint64_t logged_epoch;
     if (mirror_epoch - logged_epoch >= 1200) {
         logged_epoch = mirror_epoch;
+        uint64_t live_bytes = 0;   // (only this line reads it: every live pool walked for it at every part, before)
+        for (auto& [lo, p] : imported) live_bytes += p.hi - p.lo;
         logf("vk: imports: %zu live (%llu MB), %zu retired still imported (%llu MB), %llu retired given back (%llu MB)",
              imported.size(), (unsigned long long)(live_bytes >> 20), retired_alive, (unsigned long long)(retired_bytes >> 20),
              (unsigned long long)st_retired_imports_freed, (unsigned long long)(st_retired_import_bytes_freed >> 20));
