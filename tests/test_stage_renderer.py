@@ -6,8 +6,9 @@ loader (weak ones too, not the runtime's versioned ones), the names an executabl
 module and its exports. A renderer that needs a name the executable does not give is not staged, and the name is said;
 one that pairs is copied whole to <name>.new beside the executable (bin/ when the game has one). On Linux a real pair is
 built (an executable exporting some host functions, a shared object wanting them, weak and strong): the one missing is
-named. dev_dll_swap is cut out of host/rx_backend.c and run (Windows): with the switch, a staged renderer takes the old
-one's place; without it, or with none staged, nothing changes.
+named. dev_dll_swap is cut out of host/rx_backend.c and run (Windows, and Linux over host/posix/win32_posix.c, where it
+swaps the .so): with the switch, a staged renderer takes the old one's place; without it, or with none staged, nothing
+changes.
 
     python -I -B tests/test_stage_renderer.py [--cc gcc]
 """
@@ -128,17 +129,25 @@ int main(int argc, char **argv) { (void)argc; dev_dll_swap(argv[1]); return 0; }
 
 
 def check_swap(cc, tmp):
-    """dev_dll_swap itself (Windows: the Win32 calls it makes are the real ones)"""
+    """dev_dll_swap itself. Windows: the Win32 calls it makes are the real ones. Linux: over host/posix/win32_posix.c,
+    as the game builds it; given the .dll's name, as load_vulkan is, it swaps the .so"""
     src = (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8")
     start = src.index("static void dev_dll_swap(const char *path) {")
     fn = src[start:src.index("\n}\n", start) + 3]
     c, exe = Path(tmp) / "swap.c", Path(tmp) / "swap.exe"
     c.write_text(SWAP.replace("%SWAP%", fn), encoding="utf-8")
-    subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I",
-                    str(ROOT / "gpu" / "vk" / "compat"), str(c), "-o", str(exe)], check=True)
+    compat = str(ROOT / "gpu" / "vk" / "compat")
+    if os.name == "nt":
+        cmd = [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I", compat, str(c)]
+    else:   # (the shim is built with the game's own warnings, not these: -w, as the other checks over it do)
+        cmd = [cc, "-std=gnu11", "-D_GNU_SOURCE", "-w", "-I", str(ROOT / "host" / "posix"), "-I", compat, str(c),
+               str(ROOT / "host" / "posix" / "win32_posix.c"), "-lpthread", "-ldl"]
+    subprocess.run(cmd + ["-o", str(exe)], check=True)
     game = Path(tmp) / "swapgame"
     game.mkdir()
-    dll, new = game / "longshot_vk.dll", game / "longshot_vk.dll.new"
+    given = game / "longshot_vk.dll"
+    dll = given if os.name == "nt" else game / "longshot_vk.so"
+    new = dll.with_name(dll.name + ".new")
     env = {k: v for k, v in os.environ.items() if k != "HOS_DEV_DLL_SWAP"}
     for switch, staged, want in ((None, True, "old"), ("0", True, "old"), ("1", False, "old"), ("1", True, "new")):
         dll.write_bytes(b"old")
@@ -147,7 +156,7 @@ def check_swap(cc, tmp):
         elif new.exists():
             new.unlink()
         e = dict(env, **({"HOS_DEV_DLL_SWAP": switch} if switch is not None else {}))
-        subprocess.run([str(exe), str(dll)], env=e, check=True)
+        subprocess.run([str(exe), str(given)], env=e, check=True)
         assert dll.read_bytes().decode() == want, (switch, staged, dll.read_bytes())
         assert new.exists() == (staged and want == "old"), (switch, staged)
 
@@ -171,9 +180,9 @@ def main():
         if sr.LINUX and shutil.which("nm"):
             check_linux_pair(a.cc, tmp)
             print("linux: a real executable and shared object paired")
-        if os.name == "nt":
+        if os.name == "nt" or sr.LINUX:
             check_swap(a.cc, tmp)
-            print("windows: dev_dll_swap run")
+            print("%s: dev_dll_swap run" % ("windows" if os.name == "nt" else "linux, over the POSIX shim"))
     print("stage_renderer: readers, staging, the swap under its switch only")
 
 
