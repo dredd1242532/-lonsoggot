@@ -822,7 +822,8 @@ built, so a new patch, a changed one or a mod with patches switched on or off ta
 the same folder again in Longshot Builder, or `nx2/make_game.py --update <folder>`). The Mods tab says when a mod's
 patches wait for a build. A patch file is for this game when its name (IPS) or its `@nsobid` line (pchtxt) is the code's
 build id, `E0F3CCFAF50065AE4EA01EB5AEB13B1A45DA3348`; others are left out. `exefs_patches.txt` in the game folder lists
-what the build applied.
+what the build applied. Bytes a patch writes into a word that the game's loader relocates (a pointer in its data) are
+left out, and the file's line there says how many.
 
 **Cheats** of the mods that are on are listed under them on the Mods tab and switched there, at once. Cheats that change
 memory run as Atmosphere runs them, every frame (opcodes 0 to A and C0 to C3); a cheat that writes the game's code is

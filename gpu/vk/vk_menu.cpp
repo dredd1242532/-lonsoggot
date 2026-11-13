@@ -3697,7 +3697,9 @@ void draw_options(ui::Ctx& c) {
 /// The tuning bar: a compact TV-style picture settings bar docked at the bottom of the screen,
 /// leaving 90% of the game scene visible so visual settings can be judged live.
 void draw_tune_bar(ui::Ctx& c) {
-    if (cur_tab == TAB_MODS) {   // (the Mods tab has no rows of the bar's kind, its lines are the host's: its full page)
+    if (cur_tab == TAB_MODS) {   // (the Mods tab has no rows of the bar's kind, its lines are the host's: its full page, the
+                                 // game behind dimmed as under the full menu, which draw_menu leaves out for the bar)
+        c.d->AddRectFilled(ImVec2(0, 0), ImVec2(c.w, c.h), ui::rgba(8, 5, 2, ui::kDimAlpha));
         draw_options(c);
         return;
     }
@@ -5744,8 +5746,10 @@ void menu_tick() {
         }
         if (!tab_shown(cur_tab)) cur_tab = TAB_GRAPHICS;   // (the Mods tab, its mods gone: never, as the list is the start's)
         if (cur_tab != TAB_MODS) mods_grab = -1;
-        if (cur_tab == TAB_MODS) mods_tick(press, changed);   // (the Mods tab: its own lines, draw_mods)
-        else {
+        if (cur_tab == TAB_MODS) {   // (the Mods tab: its own lines, draw_mods)
+            if (pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: not on this tab)
+            mods_tick(press, changed);
+        } else {
             const int tab_count = tab_row_count(cur_tab);
             int& selected = tab_selected[cur_tab];
             if (selected >= tab_count) selected = tab_count - 1;   // (a row gone since: the debug tools turned off, HDR turned off: row_shown)

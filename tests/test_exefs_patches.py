@@ -69,7 +69,8 @@ def main():
     m = ep.Main(FakeNso())
     need(m.classify({0x100: 0x1f}) == ("empty", "", {}), "a byte equal to main's is kept")
     need(m.classify({0x100: 0x00})[0] == "code" and m.classify({0x2f00: 1})[0] == "data", "code and data are not told apart")
-    need(m.classify({0x2c00: 5, 0x2f00: 1}) == ("data", "", {0x2f00: 1}), "a relocated word's bytes are kept (rtld writes over them)")
+    need(m.classify({0x2c00: 5, 0x2f00: 1}) == ("data", "1 byte in words the dynamic linker relocates left out", {0x2f00: 1}),
+         "a relocated word's bytes are kept (rtld writes over them), or the file's note does not say they were left out")
     need(m.classify({0x2c09: 1})[0] == "unsupported", "a lazily bound pointer can be written")
     need(m.classify({0x2814: 1})[0] == "unsupported", "the dynamic section can be written")
     need(m.classify({0x2905: 1})[0] == "unsupported", "a relocation table can be written")
