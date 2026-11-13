@@ -453,7 +453,7 @@ def cmd_pr_status(args):
     for f in found:
         print("  - " + f)
     for w in warnings:   # (the Flags and settings note is never a gate: what it leaves out is a note)
-        print("  %s: %s" % ("note" if "Flags and settings" in w else "warning", w))
+        print("  %s: %s" % ("note" if "Flags and settings" in w else "hint" if "the diff suggests" in w else "warning", w))
     parts = desc.testing_parts(desc.sections(desc.without_comments(body)).get("Testing", ""))
     needs = parts.get("Needs other testers", "").strip()
     if not parts:
@@ -465,9 +465,10 @@ def cmd_pr_status(args):
             "none" if not items else "%d (%d with a test request, %d to open)" % (
                 len(items), sum(bool(desc.TEST_REQUEST.search(i)) for i in items), len(desc.requests_to_open(body)))))
     lists = desc.sections(desc.sections(desc.without_comments(body)).get("Checklist", ""), "###")
-    for name in ("For everyone", "If applicable"):
-        items = desc.boxes(lists.get(name, ""))
-        print("Checklist, %s: %d of %d ticked" % (name, sum(t for t, _ in items), len(items)))
+    items = desc.boxes(lists.get("For everyone", ""))
+    print("Checklist, For everyone: %d of %d ticked" % (sum(t for t, _ in items), len(items)))
+    items = desc.boxes(lists.get("If applicable", ""))
+    print("Checklist, If applicable: %d kept, %d ticked" % (len(items), sum(t for t, _ in items)))
     if pr["state"] == "open":
         print("Mergeable: %s" % ("yes" if pr.get("mergeable") else "no (rebase onto main)"))
     labels = [l["name"] for l in pr.get("labels") or []]
@@ -512,6 +513,9 @@ def cmd_pr(args):
             "base": "main", "head": "%s:%s" % (login, args.branch),
             "title": title if args.ready else WIP + title, "body": body})
         filled = fill_commits(body, args.branch, pr)
+        if not body_given(args):   # (the template's If applicable list, down to the boxes the diff suggests)
+            keep = [item for item, _ in desc.suggested_boxes(pr_diff(pr["number"]))]
+            filled = desc.keep_applicable(filled, keep)
         if filled != body:
             edit_pr(pr["number"], body=filled)
         print(pr["html_url"])

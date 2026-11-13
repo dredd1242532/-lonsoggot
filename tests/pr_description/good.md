@@ -69,8 +69,6 @@ Fixes #42
 
 ## Checklist
 
-<!-- n/a: the boxes left unticked below. -->
-
 ### For everyone
 
 - [x] One topic.
@@ -86,13 +84,9 @@ Fixes #42
 
 ### If applicable
 
-- [ ] AI assistance recorded with `Assisted-by:` / `Co-Authored-By:` trailers.
 - [x] Flags noted, and the switch reference updated (docs/development.md, the README).
 - [x] Screenshots for a change that shows on screen.
-- [ ] A row in `docs/tested-configurations.md` for each measured run.
-- [ ] `MKWVK_API_VERSION` bumped (`gpu/vk/vk_api.h`'s `MkwVkHost` or `MkwVkRenderer` changed).
-- [ ] The SPIR-V headers regenerated with glslang (a shader changed).
 - [x] A game-free test added for the fix, failing on `main` and passing here.
-- [ ] A check under `tests/` that reads changed source updated in this PR, not weakened.
-- [ ] Host code builds on both Windows (llvm-mingw) and Linux, with UTF-8 paths.
+- [x] A check under `tests/` that reads changed source updated in this PR, not weakened.
+- [x] Host code builds on both Windows (llvm-mingw) and Linux, with UTF-8 paths.
 - [x] Docs updated.

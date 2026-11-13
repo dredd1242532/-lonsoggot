@@ -149,11 +149,25 @@ class PR(unittest.TestCase):
         self.assertEqual(pr["title"], "WIP: fix(menu): text cut off at 4K")
         self.assertTrue(pr["draft"])
         # (no --body-file: the description starts from the template, with the commits filled in)
-        self.assertEqual(pr["body"], TEMPLATE.replace("main: <commit> (<date>)", "main: 7afe6ae1 (2026-11-10)")
-                         .replace("this PR: <branch> @ <commit>", "this PR: fix @ 992a2420")
-                         .replace("| | main @ <commit> | this PR @ <commit> |", "| | main @ 7afe6ae1 | this PR @ 992a2420 |"))
+        # (and If applicable down to the boxes the diff suggests: none for this one)
+        self.assertEqual(pr["body"], forge.desc.keep_applicable(
+            TEMPLATE.replace("main: <commit> (<date>)", "main: 7afe6ae1 (2026-11-10)")
+            .replace("this PR: <branch> @ <commit>", "this PR: fix @ 992a2420")
+            .replace("| | main @ <commit> | this PR @ <commit> |", "| | main @ 7afe6ae1 | this PR @ 992a2420 |"), []))
         self.assertIn("<what was measured>", pr["body"])
         self.assertIn("pr ready 1", out)
+
+    def test_create_keeps_the_boxes_the_diff_suggests(self):
+        self.forgejo.diffs[1] = "--- a/gpu/vk/vk_api.h\n+++ b/gpu/vk/vk_api.h\n@@ -1 +1 @@\n+x\n"
+        self.assertEqual(self.run_forge("pr", "create", "fix", "--title", "fix: x")[0], 0)
+        lists = forge.desc.sections(forge.desc.sections(self.forgejo.prs[1]["body"])["Checklist"], "###")
+        self.assertEqual([item.split(" ")[0] for _, item in forge.desc.boxes(lists["If applicable"])],
+                         ["`MKWVK_API_VERSION`", "A", "Host"])
+        self.forgejo.diffs[5] = self.forgejo.diffs[1]
+        self.forgejo.add(5, "WIP: fix: x", FILLED.replace("- [x] Docs updated.\n", ""))
+        out = self.run_forge("pr", "status", "5")[1]
+        self.assertIn("Checklist, If applicable: 5 kept, 5 ticked", out)
+        self.assertIn("  hint: If applicable: the diff suggests '`MKWVK_API_VERSION` bumped", out)
 
     def test_create_draft_is_the_default_and_wip_is_not_doubled(self):
         self.assertEqual(self.run_forge("pr", "create", "fix", "--title", "fix: x", "--draft", "--body", "b")[0], 0)

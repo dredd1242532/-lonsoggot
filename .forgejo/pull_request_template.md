@@ -92,8 +92,8 @@ Fixes #
 
 ## Checklist
 
-<!-- Keep the whole checklist, both lists, in every PR: tick what is done; in If applicable, leave unticked (or write
-     "n/a" beside) what doesn't apply. -->
+<!-- Keep the whole For everyone list, ticked. From If applicable, keep only the boxes that apply to this PR, and
+     tick them; delete the rest. -->
 
 ### For everyone
 
@@ -109,6 +109,8 @@ Fixes #
 - [ ] The license is OK: GPL-3.0-or-later, nothing incompatible and nothing decompiled.
 
 ### If applicable
+
+<!-- Keep only the boxes that apply to this PR, and tick them; delete the rest. Keep the whole For everyone list. -->
 
 - [ ] AI assistance recorded with `Assisted-by:` / `Co-Authored-By:` trailers.
 - [ ] Flags noted, and the switch reference updated (docs/development.md, the README).

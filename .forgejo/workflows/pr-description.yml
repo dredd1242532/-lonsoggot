@@ -29,6 +29,7 @@ jobs:
           sparse-checkout: |
             scripts/check_pr_description.py
             .forgejo/pull_request_template.md
+            tests
           sparse-checkout-cone-mode: false
       - name: Check the description
         env:

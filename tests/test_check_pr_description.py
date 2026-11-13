@@ -1,13 +1,14 @@
 """scripts/check_pr_description.py on sample descriptions, game-free: the template as it comes fails on every section,
 the sample good description (tests/pr_description/good.md) passes, and so does CONTRIBUTING.md's example
-measurements; the checklist is kept whole: an unticked or deleted For everyone box, a deleted If applicable list or no
-checklist at all fails, while If applicable boxes (the AI trailers among them) may stay unticked; Testing has its
+measurements; For everyone is kept whole (an unticked or deleted box, or no checklist at all, fails) while If
+applicable keeps only the boxes that apply (trimmed or left out passes, a box kept but unticked fails, "n/a" and a box
+the diff suggests but that isn't there are warnings); Testing has its
 three parts (Tested, Not tested, Needs other testers), filled in, each tester line with its test request or "request to
 open" (a warning, and pr ready's refusal), and naming something the Measurements say was measured as untested is a
 warning; Measurements' columns must name main and this PR with their commits, never a bare Before and After; the
 Flags and settings note is never a gate: missing, empty, a row missing a cell, a switch the diff adds that it doesn't
-list and a menu change with no flags are warnings, like a rebase since the measurements; a work-in-progress PR (WIP: or [WIP], as Forgejo reads them) passes
-with a notice; and the workflow runs the script on Forgejo's events.
+list and a menu change with no flags are warnings, like a rebase since the measurements; a work-in-progress PR (WIP:
+or [WIP], as Forgejo reads them) passes with a notice; and the workflow runs the script on Forgejo's events.
 
 python -I -B tests/test_check_pr_description.py
 """
@@ -72,7 +73,7 @@ def filled():
                        ("Risk and rollback", "Text could overflow on small screens; revert the commit.")):
         body = section(body, name, text)
     head, tail = body.split("### If applicable")
-    return head.replace("- [ ]", "- [x]") + "### If applicable" + tail
+    return check.keep_applicable(head.replace("- [ ]", "- [x]") + "### If applicable" + tail, [])   # (none applies)
 
 
 class Check(unittest.TestCase):
@@ -86,7 +87,7 @@ class Check(unittest.TestCase):
     def test_the_good_sample_passes(self):
         self.assertEqual(check.review(GOOD, diff=DIFF.replace("RX_VK_NEW_THING", "RX_VK_MENU_FONT_SCALE")), ([], []))
         self.assertEqual(check.problems(GOOD.replace("\n", "\r\n")), [])
-        self.assertIn("- [ ] AI assistance", GOOD, "the If applicable boxes may stay empty")
+        self.assertNotIn("AI assistance", GOOD, "If applicable keeps only the boxes that apply")
 
     def test_the_plain_fill_and_contributings_example_pass(self):
         self.assertEqual(check.problems(filled()), [])
@@ -313,15 +314,59 @@ class Testing(unittest.TestCase):
 
 
 class Checklist(unittest.TestCase):
+    def test_if_applicable_keeps_only_what_applies(self):
+        self.assertEqual(check.problems(GOOD[:GOOD.index("### If applicable")]), [], "left out when nothing applies")
+        trimmed = GOOD.replace("- [x] Screenshots for a change that shows on screen.\n", "")
+        self.assertEqual(check.review(trimmed), ([], []), "a trimmed list passes")
+        unticked = GOOD.replace("- [x] Docs updated.", "- [ ] Docs updated.")
+        self.assertEqual(check.problems(unticked), [
+            "If applicable, not ticked: Docs updated. (a box kept here applies, so it must be done: tick it, or delete "
+            "it if it doesn't apply)"])
+        na = GOOD.replace("- [x] Docs updated.", "- [ ] Docs updated. n/a")
+        self.assertEqual(check.review(na), ([], ["If applicable: 'Docs updated. n/a' says n/a: delete a box that "
+                                                 "doesn't apply"]))
+
+    def test_the_diff_hints_at_boxes(self):
+        def hinted(diff):
+            return [item.split(" ")[0] + " ... (" + why + ")" for item, why in check.suggested_boxes(diff)]
+        def diff(*paths, added=""):
+            return "".join("--- a/%s\n+++ b/%s\n@@ -1 +1,2 @@\n+%s\n" % (p, p, added) for p in paths)
+        self.assertEqual(hinted(diff("gpu/vk/vk_api.h")), [
+            "`MKWVK_API_VERSION` ... (it changes gpu/vk/vk_api.h)",
+            "A ... (tests read gpu/vk/vk_api.h)",
+            "Host ... (it changes host code (gpu/vk/vk_api.h))"])
+        self.assertIn("The ... (it changes the shader gpu/vk/shaders/fsr.comp)", hinted(diff("gpu/vk/shaders/fsr.comp")))
+        self.assertIn("Flags ... (it adds RX_VK_NEW)", hinted(diff("scripts/x.py", added='os.environ.get("RX_VK_NEW")')))
+        self.assertIn("A ... (tests read gpu/vk/vk_menu.cpp)", hinted(diff("gpu/vk/vk_menu.cpp")),
+                      "tests/ cut functions out of vk_menu.cpp")
+        self.assertEqual(hinted(diff("docs/forge.md")), ["Docs ... (it changes docs/forge.md)"])
+        self.assertEqual(hinted(None), [])
+        # (a hint is a warning, never a failure; a box that is there already gives none)
+        bare = GOOD[:GOOD.index("### If applicable")]
+        found, warnings = check.review(bare, diff=diff("gpu/vk/vk_api.h"))
+        self.assertEqual(found, [])
+        self.assertEqual(warnings, [
+            "If applicable: the diff suggests '`MKWVK_API_VERSION` bumped (`gpu/vk/vk_api.h`'s `MkwVkHost` or "
+            "`MkwVkRenderer` changed).' (it changes gpu/vk/vk_api.h): add it, ticked once done, if it applies",
+            "If applicable: the diff suggests 'A check under `tests/` that reads changed source updated in this PR, not "
+            "weakened.' (tests read gpu/vk/vk_api.h): add it, ticked once done, if it applies",
+            "If applicable: the diff suggests 'Host code builds on both Windows (llvm-mingw) and Linux, with UTF-8 "
+            "paths.' (it changes host code (gpu/vk/vk_api.h)): add it, ticked once done, if it applies"])
+        self.assertEqual(check.review(GOOD, diff=diff("gpu/vk/vk_menu.cpp")), ([], []))
+
+    def test_keep_applicable(self):
+        keep = [item for item, _ in check.suggested_boxes("+++ b/docs/forge.md\n+x\n")]
+        body = check.keep_applicable(TEMPLATE, keep)
+        lists = check.sections(check.sections(body)["Checklist"], "###")
+        self.assertEqual(check.boxes(lists["If applicable"]), [(False, "Docs updated.")])
+        self.assertEqual(lists["For everyone"], check.sections(check.sections(TEMPLATE)["Checklist"], "###")["For everyone"])
+        none = check.sections(check.sections(check.keep_applicable(TEMPLATE, []))["Checklist"], "###")["If applicable"]
+        self.assertEqual(check.boxes(none), [])
+        self.assertIn("Add the boxes that apply from the template", none)
+
     def test_the_whole_checklist_is_kept(self):
         self.assertEqual(check.problems(GOOD[:GOOD.index("## Checklist")]),
-                         ["no ## Checklist: keep the template's whole checklist, For everyone and If applicable"])
-        no_applicable = GOOD[:GOOD.index("### If applicable")]
-        self.assertEqual(check.problems(no_applicable), [
-            "the ### If applicable list was deleted: keep it, and leave unticked (or write n/a beside) what doesn't apply"])
-        unticked = re.sub(r"- \[x\] (?=Flags table)", "- [ ] ", GOOD)
-        self.assertEqual(check.problems(unticked.replace("- [ ] Docs updated.", "- [ ] Docs updated. n/a")), [],
-                         "If applicable boxes may stay unticked or say n/a")
+                         ["no ## Checklist: keep the For everyone list whole, and the If applicable boxes that apply"])
         box = "- [x] Testing filled in: what was tested, what wasn't, and what needs other testers (with test requests).\n"
         self.assertIn(box, GOOD)
         self.assertEqual(check.problems(GOOD.replace(box, "")), [

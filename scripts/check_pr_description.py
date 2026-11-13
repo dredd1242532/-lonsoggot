@@ -10,13 +10,13 @@
     named build). main against this PR needs nothing more; anything else says which column is the baseline in a
     "Baseline: <its column>" line. A main or this PR column comes with its "main: <hash> (<date>)" or "this PR:
     <branch> @ <hash>" line, on the same commit; and a row of values;
-  - the whole checklist kept: every box of "For everyone" there and ticked, and the "If applicable" list there (its
-    boxes may stay unticked, or say n/a).
+  - the checklist: every box of "For everyone" there and ticked. "If applicable" keeps only the boxes that apply
+    (or is left out when none does), and every box kept is ticked: a box there means it applies, so it is done.
 
 Warnings, which do not fail it: Flags and settings, a note on what the PR adds and the author's recommendation, never
 a gate (missing, empty or with the template's stand-ins; a row missing a cell; an RX_*, HOS_* or LONGSHOT_* name the
 diff adds that isn't listed; a change to the menu's code while it says None), a PR rebased onto a newer main than the
-one measured, Not tested or Needs other testers naming something the Measurements say was
+one measured, an If applicable box marked n/a (delete it instead), a box the diff suggests that isn't there, Not tested or Needs other testers naming something the Measurements say was
 measured, and a test request still to open (forge.py pr ready refuses that one: the PR goes ready once they are open).
 
 A pull request still in work in progress (a title starting with WIP: or [WIP], Forgejo's draft mark, or the API's
@@ -210,6 +210,75 @@ def flags_notes(text, switches):
     return out
 
 
+# The If applicable boxes a diff suggests: (the box's first words, as key() reads them, why, a test on the files and
+# switches the diff changes). A hint is a warning, never a failure; pr create keeps these boxes when it fills in the
+# template.
+HOST_CODE = re.compile(r"^(?!tests/|third_party/).*\.(c|cc|cpp|h|hpp)$")
+SHADER = re.compile(r"\.(comp|glsl|vert|frag|mesh|task|geom|tesc|tese)$")
+DOCS = re.compile(r"^(docs/.*|README\.md|CONTRIBUTING\.md|AGENTS\.md)$")
+HINTS = (
+    ("flags noted and the", "it adds %s", lambda files, switches, read: ", ".join(switches)),
+    ("mkwvk api version bumped", "it changes gpu/vk/vk_api.h", lambda files, switches, read: "gpu/vk/vk_api.h" in files),
+    ("the spir v headers", "it changes the shader %s",
+     lambda files, switches, read: ", ".join(sorted(f for f in files if SHADER.search(f)))),
+    ("a check under tests", "tests read %s", lambda files, switches, read: ", ".join(sorted(read))),
+    ("host code builds on", "it changes host code (%s)",
+     lambda files, switches, read: ", ".join(sorted(f for f in files if HOST_CODE.match(f))[:3])),
+    ("docs updated", "it changes %s", lambda files, switches, read: ", ".join(sorted(f for f in files if DOCS.match(f))[:3])),
+)
+NA = re.compile(r"\bn/a\b", re.I)
+
+
+def read_by_tests(files, root=None):
+    """The changed source files a check under tests/ reads by name (the tests cut functions out of the source)"""
+    folder = Path(root) if root else TEMPLATE.parents[1] / "tests"
+    try:
+        texts = [p.read_text(encoding="utf-8", errors="replace") for p in folder.glob("test_*.py")]
+    except OSError:
+        return set()
+    out = set()
+    for f in files:
+        if f.startswith(("tests/", "docs/")) or f.endswith(".md"):
+            continue
+        name = f.rsplit("/", 1)[-1]
+        if any(f in t or '"%s"' % name in t or "'%s'" % name in t for t in texts):
+            out.add(f)
+    return out
+
+
+def suggested_boxes(diff, template=None):
+    """[(the If applicable item, why)] for the boxes the diff suggests"""
+    switches, files = diff_changes(diff)
+    if not files:
+        return []
+    template = template if template is not None else TEMPLATE.read_text(encoding="utf-8")
+    items = [item for _, item in boxes(sections(sections(without_comments(template)).get("Checklist", ""), "###")
+                                       .get("If applicable", ""))]
+    read = read_by_tests(files)
+    out = []
+    for start, why, test in HINTS:
+        found = test(files, switches, read)
+        item = next((i for i in items if key(i).startswith(start)), None)
+        if found and item:
+            out.append((item, why % found if "%s" in why else why))
+    return out
+
+
+def keep_applicable(body, keep):
+    """body with its If applicable list down to the items in keep (none: the heading and a comment)"""
+    m = re.search(r"^### If applicable\n(.*?)(?=^#{1,3} |\Z)", body, re.S | re.M)
+    if not m:
+        return body
+    wanted = {key(i) for i in keep}
+    lines = [ln for ln in m.group(1).splitlines() if not re.match(r"^\s*[-*] \[[ xX]\] ", ln)
+             or key(re.sub(r"^\s*[-*] \[[ xX]\] ", "", ln)) in wanted]
+    text = "\n".join(lines).strip("\n")
+    if not wanted:
+        text = ("<!-- Nothing in the diff suggested one when this PR was opened. Add the boxes that apply from the template\n"
+                "     (.forgejo/pull_request_template.md), ticked once done. -->")
+    return body[:m.start(1)] + "\n" + text + "\n\n" + body[m.end(1):].lstrip("\n")
+
+
 def diff_changes(diff):
     """(the switch names the diff adds, the files it changes) for a unified diff; a name only moved is not added"""
     added, removed, files, path = set(), set(), set(), None
@@ -327,12 +396,19 @@ def review(body, diff=None, merge_base=None, template=None):
     lists = sections(top.get("Checklist", ""), "###")
     everyone = lists.get("For everyone")
     if "Checklist" not in top:
-        out.append("no ## Checklist: keep the template's whole checklist, For everyone and If applicable")
+        out.append("no ## Checklist: keep the For everyone list whole, and the If applicable boxes that apply")
     elif everyone is None:
         out.append("no ### For everyone checklist under ## Checklist")
-    if "Checklist" in top and not boxes(lists.get("If applicable", "")):
-        out.append("the ### If applicable list was deleted: keep it, and leave unticked (or write n/a beside) what "
-                   "doesn't apply")
+    kept = boxes(lists.get("If applicable", ""))
+    for ticked, item in kept:
+        if NA.search(item):
+            warn.append("If applicable: '%s' says n/a: delete a box that doesn't apply" % item)
+        elif not ticked:
+            out.append("If applicable, not ticked: %s (a box kept here applies, so it must be done: tick it, or "
+                       "delete it if it doesn't apply)" % item)
+    have = {key(item) for _, item in kept}
+    warn += ["If applicable: the diff suggests '%s' (%s): add it, ticked once done, if it applies" % (item, why)
+             for item, why in suggested_boxes(diff, template) if key(item) not in have]
     if everyone is not None:
         have = {key(item) for _, item in boxes(everyone)}
         out += ["not ticked: " + item for ticked, item in boxes(everyone) if not ticked]

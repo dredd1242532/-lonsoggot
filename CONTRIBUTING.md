@@ -303,8 +303,9 @@ python -I scripts/forge.py pr create fix/arc-walls --title "fix(vk): walls missi
      about game files);
    - **Risk and rollback**: what could break, and how to turn it off or revert it; **Reviewer notes** if any;
    - `Fixes #123` (one line per issue) closes the issue when the PR merges; `See #123` keeps it open;
-   - the **checklist**, kept whole in every PR: every box of *For everyone* ticked; in *If applicable*, the ones that
-     apply ticked and the rest left unticked or marked n/a, never deleted.
+   - the **checklist**: the whole *For everyone* list, every box ticked; from *If applicable*, only the boxes that
+     apply to this PR, ticked (delete the rest: a box kept means it applies, so it must be done). `pr create` keeps
+     the ones the diff suggests, and the check warns when the diff suggests one that isn't there.
 4. **A pull request is work in progress until it is measured and ready for review.** On Forgejo that is a title
    starting with `WIP:` (or `[WIP]`). `pr create` opens it so (`--ready` when the description is complete already);
    `pr ready <n>` marks it ready once the Measurements have real numbers and every *For everyone* box is ticked, and
