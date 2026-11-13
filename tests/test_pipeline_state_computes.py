@@ -520,7 +520,7 @@ int main(int argc, char** argv) {
 
 def check_game(tool, draw, cxx):
     readers = "\n".join((
-        block(draw, "bool targets_ok("), block(draw, "bool formats_ok("),
+        block(draw, "bool targets_ok("), block(draw, "bool formats_ok("), block(draw, "bool streams_ok("),
         block(draw, "constexpr char kComputesMagic[8]", True), block(draw, "std::unordered_set<uint64_t> computes_read()"),
         block(draw, "constexpr char kStateMagic[8]", True), block(draw, "constexpr char kStateMagic2[8]", True),
         block(draw, "struct StateRec {", True), block(draw, "struct StateRec2 {", True),
