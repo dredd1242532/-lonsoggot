@@ -446,8 +446,10 @@ std::optional<ConstBufferAddr> Track(const IR::Value& value, Environment& env, c
         // (Lichii bd0171f7) Nor into a texture instruction or floating-point math: no handle is
         // made from them, while a register the program reuses for the handle and for a sample
         // result (a Phi of both: OoT's clustered lights) would lead the search through the
-        // sample's coordinates to an unrelated word (c6[0x430], a float).
-        if (IsTextureInstruction(*inst) || IsFloatValue(*inst)) {
+        // sample's coordinates to an unrelated word (c6[0x430], a float). With handle tables only
+        // (support_handle_table_arrays): RX_VK_HANDLE_TABLES=0 translates as before them.
+        if (host_info.support_handle_table_arrays &&
+            (IsTextureInstruction(*inst) || IsFloatValue(*inst))) {
             continue;
         }
         for (size_t arg = inst->NumArgs(); arg--;) {
@@ -522,6 +524,9 @@ thread_local int g_handle_depth{};
 // (g_handle_load_depth counts the reads whose address is being built), which is scaled to a byte
 // offset (g_handle_scaled) to give the address of another read, qualifies, and one word per program.
 thread_local bool g_handle_index_allowed{};
+// HostTranslateInfo::support_handle_table_arrays of the pass running on this thread (TexturePass):
+// without it the handle builder reads no word of a 12- or 16-byte load, as before handle tables.
+thread_local bool g_handle_tables{};
 thread_local IR::Value g_handle_index{};
 thread_local int g_handle_load_depth{};
 thread_local int g_handle_scaled{};
@@ -693,8 +698,10 @@ bool BuildHandleNode(const IR::Value& value, std::vector<u32>& code, int& budget
     case IR::Opcode::CompositeExtractU32x4: {
         // A word of a wider load (a handle in a table entry read 16 bytes at a time: OoT's light
         // table, 96 bytes a light, the shadow map's handle the first word of a 16-byte load).
+        // With handle tables only (g_handle_tables).
         const IR::Value element{inst->Arg(1)};
-        if (!element.IsImmediate() || inst->Arg(0).IsImmediate()) {
+        if (!element.IsImmediate() || inst->Arg(0).IsImmediate() ||
+            (!g_handle_tables && inst->GetOpcode() != IR::Opcode::CompositeExtractU32x2)) {
             g_handle_failure = inst->GetOpcode();
             return false;
         }
@@ -1197,6 +1204,24 @@ TextureInst MakeInst(Environment& env, IR::Block* block, IR::Inst& inst, const H
                 g_handle_index_allowed = false;
                 index = built ? g_handle_index : IR::Value{};
                 g_handle_index = IR::Value{};
+                // The shader indexes the array with the index word, which must be defined wherever
+                // the texture instruction runs. Where it isn't, the program would evaluate its
+                // Index as element 0 and bind table entry 0's texture to every invocation: the
+                // earlier search below instead, as without handle tables.
+                if (built && !index.IsEmpty()) {
+                    if (g_program != nullptr && !g_dominance) {
+                        g_dominance.emplace(*g_program);
+                    }
+                    if (g_program == nullptr || !g_dominance->Dominates(index.InstRecursive(), &inst)) {
+                        static std::atomic<int> told{};
+                        if (told.fetch_add(1, std::memory_order_relaxed) < 8) {
+                            LOG_WARNING(Shader, "Bindless {} handle: its table index does not dominate the sample: "
+                                                "no handle table, the earlier search instead", inst.GetOpcode());
+                        }
+                        built = false;
+                        index = IR::Value{};
+                    }
+                }
             }
             if (!built) {
                 // Not computable for a whole draw (a handle that changes in a loop): keep the
@@ -1214,7 +1239,9 @@ TextureInst MakeInst(Environment& env, IR::Block* block, IR::Inst& inst, const H
                 }
                 // (Lichii 282a585a) The word the search found may be the pointer a load reads the
                 // handle through (a light table's address): that binds no texture (vk_draw.cpp).
-                const bool pointer_word{!ReachesOutsideLoads(inst.Arg(0), legacy_inst, block)};
+                // With handle tables only: RX_VK_HANDLE_TABLES=0 binds that word's texture, as before.
+                const bool pointer_word{host_info.support_handle_table_arrays &&
+                                        !ReachesOutsideLoads(inst.Arg(0), legacy_inst, block)};
                 static std::atomic<int> warnings{};
                 if (warnings.fetch_add(1, std::memory_order_relaxed) < 32) {
                     LOG_WARNING(Shader, "Bindless {} handle not computable per draw (stopped at {}): taking cbuf{}+{:#x}{}",
@@ -1223,25 +1250,18 @@ TextureInst MakeInst(Environment& env, IR::Block* block, IR::Inst& inst, const H
                 }
                 return TextureInst{.cbuf = *legacy, .inst = &inst, .block = block, .pointer_word = pointer_word};
             }
-            TrimTrailingTees(code);
+            if (host_info.support_handle_table_arrays) {   // (as before handle tables without them)
+                TrimTrailingTees(code);
+            }
             auto& programs{*g_handle_programs};
             auto it{std::ranges::find(programs, code)};
             if (it == programs.end()) {
                 programs.push_back(std::move(code));
                 it = programs.end() - 1;
             }
-            // The shader indexes the array with the index word, which must be defined wherever
-            // the texture instruction runs; where it isn't, every invocation takes the first
-            // element.
-            u32 count{1};
-            if (!index.IsEmpty() && g_program != nullptr) {
-                if (!g_dominance) {
-                    g_dominance.emplace(*g_program);
-                }
-                if (g_dominance->Dominates(index.InstRecursive(), &inst)) {
-                    count = HANDLE_TABLE_SIZE;
-                }
-            }
+            // An index word left here dominates the sample (checked above): an array of the
+            // table's first entries.
+            const u32 count{index.IsEmpty() ? 1U : HANDLE_TABLE_SIZE};
             addr = ConstBufferAddr{
                 .index = 0,
                 .offset = 0,
@@ -1481,9 +1501,11 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
     g_handle_programs = &program.info.handle_programs;
     g_program = &program;   // (the dominator tree a handle table's index word is checked against, made when first asked)
     g_dominance.reset();
+    g_handle_tables = host_info.support_handle_table_arrays;
     SCOPE_EXIT {
         g_program = nullptr;
         g_dominance.reset();
+        g_handle_tables = false;
     };
     for (IR::Block* const block : program.post_order_blocks) {
         env.track_cache.clear();

@@ -3676,6 +3676,15 @@ void build_descriptors(const NvnState& s, const Program& p) {
                     }
                     if (is_table) prev_handle = handle, prev_view = view, prev_tex = tex, have_prev = true;
                 }
+                // (the shader clamps its index to the last element: a table that names a texture there may run past the
+                // array, and its lights from that index on all take this one's texture. Said once)
+                if (is_table && k + 1 == d.count && view) {
+                    static std::atomic<bool> told{false};
+                    if (!told.exchange(true))
+                        logf("vk: handle table: last element %u of program %016llx names texture #%u: the table may have more "
+                             "entries than the array, and those take this texture (said once)", k, (unsigned long long)p.key,
+                             tex ? tex->id : 0);
+                }
                 if (dump_on()) dump_input('t', (uint32_t)(out.imgs.size() - 0), handle, view ? tex : nullptr);
                 if (view && tex && trace_tex_wanted(tex)) trace_tex_hit = tex;
                 if (log_img_wanted(p.key)) {

@@ -563,19 +563,32 @@ private:
 /// own (OoT's clustered lights: each light's shadow map, read per pixel from the light table) becomes an array of the
 /// table's first entries, which the shader indexes per pixel. Without them those samples took a constant word on their
 /// path for the handle (the light table's address), bound no texture, and the lights' shadow tests read nothing: dark
-/// and green blocks on Zora's Domain's ice and snow (Longshot #52, Hookshot #2509). Needs nonuniform sampled image array
-/// indexing (Vulkan 1.2's descriptor indexing). RX_VK_HANDLE_TABLES=0: off (a test; in the cache's stamp)
+/// and green blocks on Zora's Domain's ice and snow (https://git.magicbean.dev/MagicBeanDev/Longshot/issues/52,
+/// https://github.com/NotRexed/Hookshot/issues/2509). Needs nonuniform sampled image array indexing (Vulkan 1.2's descriptor
+/// indexing) and room for the arrays in the descriptor limits. RX_VK_HANDLE_TABLES=0: off, the translation as without them
+/// (a test; in the cache's stamp). The log line names the check that turned them off
 bool handle_tables_on() {
     static const bool on = [] {
         const VkPhysicalDeviceLimits& l = dev.props.limits;
-        const bool can = dev.vk12.shaderSampledImageArrayNonUniformIndexing && l.maxPerStageDescriptorSampledImages >= 256 &&
-                         l.maxPerStageDescriptorSamplers >= 256 && l.maxPerStageResources >= 256 &&
-                         l.maxDescriptorSetSampledImages >= 512 && l.maxDescriptorSetSamplers >= 512;
+        // (the first check that fails, with the device's value, so a tester's log says which; empty when all pass)
+        char why[160] = "";
+        const auto need = [&why](const char* what, uint64_t have, uint64_t least) {
+            if (!why[0] && have < least)
+                snprintf(why, sizeof why, "%s is %llu, under %llu", what, (unsigned long long)have, (unsigned long long)least);
+        };
+        if (!dev.vk12.shaderSampledImageArrayNonUniformIndexing)
+            snprintf(why, sizeof why, "no shaderSampledImageArrayNonUniformIndexing");
+        need("maxPerStageDescriptorSampledImages", l.maxPerStageDescriptorSampledImages, 256);
+        need("maxPerStageDescriptorSamplers", l.maxPerStageDescriptorSamplers, 256);
+        need("maxPerStageResources", l.maxPerStageResources, 256);
+        need("maxDescriptorSetSampledImages", l.maxDescriptorSetSampledImages, 512);
+        need("maxDescriptorSetSamplers", l.maxDescriptorSetSamplers, 512);
+        const bool can = !why[0];
         const char* e = getenv("RX_VK_HANDLE_TABLES");
         const bool want = !e || atoi(e) != 0;
-        logf("vk: handle tables as descriptor arrays: %s", !want ? "off (RX_VK_HANDLE_TABLES=0)"
-                                                         : can ? "on"
-                                                               : "off (no nonuniform sampled image array indexing)");
+        if (!want) logf("vk: handle tables as descriptor arrays: off (RX_VK_HANDLE_TABLES=0)");
+        else if (can) logf("vk: handle tables as descriptor arrays: on");
+        else logf("vk: handle tables as descriptor arrays: off (%s)", why);
         return want && can;
     }();
     return on;

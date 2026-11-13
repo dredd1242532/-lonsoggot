@@ -5,7 +5,8 @@ OoT's clustered lights sample each light's shadow map with a handle read per pix
 the pixel's list, then the light's 96-byte entry). The translation now makes that a descriptor array of the table's first
 entries, whose handle program computes entry k's handle (HandleOp::Index), and the shader indexes the array per pixel.
 Before, the samples took the light table's address word for the handle and bound no texture: the lights' shadow tests read
-nothing (dark and green blocks on Zora's Domain's ice and snow, Longshot #52, Hookshot #2509).
+nothing (dark and green blocks on Zora's Domain's ice and snow, https://git.magicbean.dev/MagicBeanDev/Longshot/issues/52,
+https://github.com/NotRexed/Hookshot/issues/2509).
 
 Built from the sources' own text: shader_info.h's HandleOp and EvaluateHandleProgram, texture_pass.cpp's TrimTrailingTees,
 vk_shader.cpp's stage_handle / stage_handles, with stubs for the banks and memory; then checks of the code that has no
@@ -167,15 +168,25 @@ int main() {
                                 'const HostTranslateInfo& host_info, const IR::Block* block) {')
     require(track, 'IsTextureInstruction(*inst) || IsFloatValue(*inst)',
             'Track must not search through texture results or float math (c6[0x430], a float, became the handle)')
+    require(track, 'if (host_info.support_handle_table_arrays &&', 'RX_VK_HANDLE_TABLES=0 translates as before handle tables')
     node = block(texture_pass, 'bool BuildHandleNode(const IR::Value& value, std::vector<u32>& code, int& budget,\n                     const IR::Block* block) {')
     for op in ('CompositeExtractU32x3', 'CompositeExtractU32x4'):
         require(node, f'case IR::Opcode::{op}:', 'the handle builder must read a word of a 12- or 16-byte load (the light table)')
     require(node, 'if (!address(source->Arg(1))) return index_word();', 'a storage read at a per-invocation address is the index word')
     require(node, 'emit(Op::Index);', 'the index word becomes HandleOp::Index')
+    require(node, '(!g_handle_tables && inst->GetOpcode() != IR::Opcode::CompositeExtractU32x2)',
+            'RX_VK_HANDLE_TABLES=0 reads no word of a 12- or 16-byte load, as before handle tables')
     make = block(texture_pass, 'TextureInst MakeInst(')
     require(make, 'host_info.support_handle_table_arrays', 'handle tables only where the host has them')
     require(make, 'g_dominance->Dominates(index.InstRecursive(), &inst)', 'the index word must dominate the sample to index the array')
-    require(make, 'count = HANDLE_TABLE_SIZE;', 'a handle table is an array of HANDLE_TABLE_SIZE elements')
+    require(make, 'const u32 count{index.IsEmpty() ? 1U : HANDLE_TABLE_SIZE};',
+            'a handle table is an array of HANDLE_TABLE_SIZE elements')
+    dom = make.index('g_dominance->Dominates(index.InstRecursive(), &inst)')
+    require(make[dom:make.index('if (!built) {', dom)], 'built = false;',
+            'an index word that does not dominate the sample takes the earlier search, not table entry 0 for every pixel')
+    for gated in ('if (host_info.support_handle_table_arrays) {   // (as before handle tables without them)\n                TrimTrailingTees(code);',
+                  'const bool pointer_word{host_info.support_handle_table_arrays &&'):
+        require(make, gated, 'RX_VK_HANDLE_TABLES=0 translates as before handle tables')
     require(make, 'TrimTrailingTees(code);', 'the samples of one table share one handle program and one array')
     require(make, '.pointer_word = pointer_word', 'a legacy word reached only through a load\'s address is a pointer (Lichii 282a585a)')
     m = re.search(r'constexpr u32 HANDLE_TABLE_SIZE = (\d+);', texture_pass)
@@ -183,6 +194,7 @@ int main() {
     tp = block(texture_pass, 'void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo& host_info) {')
     require(tp, 'if (cbuf.handle_program == ~0U) {', 'the stage cap (1 with Hookshot\'s host_info) must not cut a handle table')
     require(tp, '.handle_is_pointer_word = texture_inst.pointer_word,', 'the descriptor carries the pointer word')
+    require(tp, 'g_handle_tables = host_info.support_handle_table_arrays;', 'the handle builder sees the host\'s switch')
 
     # The host's switch and the draw's binding
     host = block(shader, 'Shader::HostTranslateInfo host_info() {')
@@ -190,13 +202,27 @@ int main() {
     tables = block(shader, 'bool handle_tables_on() {')
     require(tables, 'shaderSampledImageArrayNonUniformIndexing', 'handle tables need nonuniform sampled image array indexing')
     require(tables, 'RX_VK_HANDLE_TABLES', 'RX_VK_HANDLE_TABLES=0 turns them off')
+    for limit in ('maxPerStageDescriptorSampledImages', 'maxPerStageDescriptorSamplers', 'maxPerStageResources',
+                  'maxDescriptorSetSampledImages', 'maxDescriptorSetSamplers'):
+        require(tables, f'need("{limit}", l.{limit}, ', 'the log line names the limit that turned handle tables off')
     stamp = block(shader, 'uint64_t translator_stamp() {')
     require(stamp, 'if (!handle_tables_on()) {', 'programs translated without handle tables must not share the cache')
+    # The offline copies of host_info: a bank baked offline must be translated as a live run with the same stamp is
+    bake = (root / 'nx2/bake_ds/bake_ds.cpp').read_text(encoding='utf-8')
+    require(block(bake, 'Shader::HostTranslateInfo host_info() {'), 'h.support_handle_table_arrays = g_handle_tables;',
+            'bake_ds translates with handle tables as live does')
+    require(block(bake, 'uint64_t disk_stamp(uint64_t translator_stamp, uint32_t depth) {'), 'if (!g_handle_tables) {',
+            'a bank baked without handle tables carries live\'s "nhtb" word')
+    batch = (root / 'gpu/shaderbatch.cpp').read_text(encoding='utf-8')
+    require(block(batch, 'Shader::HostTranslateInfo make_host() {'), 'h.support_handle_table_arrays = true;',
+            'shaderbatch translates with handle tables as live does')
     pointer = block(draw, 'bool handle_is_storage_pointer(')
     require(pointer, 'if (d.handle_is_pointer_word) return true;', 'a pointer word binds no texture')
     require(draw, 'stage_handles(s, st, d.handle_program, d.count, table.data());', 'the draw binds every entry of a handle table')
     require(draw, 'is_table && view && tex && d.is_depth && !is_depth_format(tex->format)',
             'a table entry naming a colour texture for a depth comparison binds nothing')
+    require(draw, 'if (is_table && k + 1 == d.count && view) {',
+            'a table whose last element names a texture (indices past it are clamped to it) is logged')
     print('handle table source checks passed')
 
 
