@@ -678,3 +678,21 @@ the title screen came back: progress is shared once a save is loaded`.
 `coop: sync: playing a save: N progress flags, ...` when a save is bound; `the flag table reads as the game's getter
 does (N flags checked)` before anything is shared; `room accepted (...)`, `the save as it was before this room is in
 <folder>`, `took N values from the room (...)` every 5 s while values arrive; `N values from the room were refused`.
+
+### Gameplay ownership
+
+Route A keeps native effects in reviewed host adapters, not an outside gameplay module. `coop_gameplay.h` is the
+single in-process ownership boundary: one registered writer for progress, bodies, world effects or clock state.
+Its writer, context and ticket structures have exact version/size checks. A duplicate writer, unsupported capability,
+wrong payload size or incompatible structure is refused before its callback.
+
+Tickets capture the current room session, signed offer and rules epoch, save/area generation and accepted member
+sessions. Revocation closes the capability and advances its generation; reaccepting identical terms cannot revive
+queued work from before the revocation. Presentation, temporary effects and durable progression are separate
+capabilities, not permission to use one another's writers. This is trusted native code, not a sandbox or a plugin SDK.
+
+The existing progress adapter is the sole durable writer. It checks the current accepted room and completed backup,
+then dispatches a bounded batch through that writer under the existing engine lock. No receive-only check can race
+revocation against a setter. A failed setter is not recorded as an applied value. Co-op off, including switching it
+off after use, returns before guest reads/calls (the separately requested read-only debug probe remains separate).
+PvP setup grants no gameplay capability. The native game still owns ordinary single-player state.

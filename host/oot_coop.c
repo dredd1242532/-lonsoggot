@@ -62,6 +62,7 @@
 #include "hos.h"
 #include "coop.h"
 #include "coop_state.h"
+#include "coop_gameplay.h"
 #include "oot_coop.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -174,6 +175,8 @@ static struct {
     SRWLOCK lock;           /* around eng (the game thread only tries it) */
     CoopSync *eng;
     uint64_t self_id;
+    CoopGameplay gameplay;  /* one writer per native state domain; serialized by lock */
+    uint64_t save_generation, area_generation;
 
     /* the game thread's */
     uint64_t mgr, bool_entries, int_entries;
@@ -621,6 +624,18 @@ static int send_fn(int member, uint8_t kind, const uint8_t *bytes, size_t n, voi
 
 /* The engine owns consent; the session gets only current member/session bindings (G.lock held).
    Read the live view, not G.view: a roster and a removal can arrive in the same receive batch before on_view. */
+static void gameplay_revoke_locked(const CoopView *v) {
+    const CoopGameplayContext *c = &G.gameplay.context;
+    if (!c->capabilities) return;
+    CoopOffer o;
+    int valid = G.eng && v->state == COOP_JOINED && v->session == c->room_session &&
+                coop_sync_offer(G.eng, &o, coop_now_ms()) && o.accepted && coop_sync_open(G.eng) &&
+                o.token == c->offer && o.rules.epoch == c->rules_epoch;
+    for (int id = 1; valid && id <= COOP_GAMEPLAY_MEMBERS; id++)
+        if (c->accepted_session[id] && !coop_sync_member_accepted(G.eng, id, c->accepted_session[id])) valid = 0;
+    if (!valid) coop_gameplay_publish(&G.gameplay, NULL);
+}
+
 static void publish_members(void) {
     CoopView v;
     coop_view_get(&v);
@@ -629,6 +644,7 @@ static void publish_members(void) {
         if (coop_sync_member_accepted(G.eng, v.member[i].id, v.member[i].session))
             members |= 1u << v.member[i].id;
     coop_accept_members(&v, members);
+    gameplay_revoke_locked(&v);
 }
 
 static void on_message(int from, const uint8_t *bytes, size_t n, void *user) {
@@ -742,6 +758,12 @@ static void sync_on(void) {
 
 static void on_view(const CoopView *v, void *user) {
     (void)user;
+    if (v->state == COOP_OFF) {
+        view_changed(v);
+        __atomic_store_n(&G.on, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&G.state, G.probe ? ST_ON : ST_OFF, __ATOMIC_RELEASE);
+        return;
+    }
     sync_on();
     G.view_seen = v->version, G.view_any = 1;
     view_changed(v);
@@ -779,6 +801,9 @@ static void publish(const CoopOffer *o, int has, uint64_t now) {
 /* No engine (co-op off, or no save played yet): nothing to read. */
 static void publish_none(void) {
     coop_accept_members(NULL, 0);
+    AcquireSRWLockExclusive(&G.lock);
+    coop_gameplay_publish(&G.gameplay, NULL);
+    ReleaseSRWLockExclusive(&G.lock);
     AcquireSRWLockExclusive(&G.pub_lock);
     if (G.pub_has || G.pub.n || G.pub_ncontrib || G.pub_maker)
         memset(&G.pub, 0, sizeof G.pub), G.pub_has = G.pub_maker = G.pub_ncontrib = 0, G.pub_contrib_at = 0;
@@ -1126,6 +1151,7 @@ static void bind_tables(Ctx *c, uint64_t mgr) {
     }
     const uint64_t now = coop_now_ms();
     if (G.eng) coop_sync_schema(G.eng, G.schema), coop_sync_rebind(G.eng);
+    G.save_generation++;
     publish_members();   /* another save must be accepted before its members count again */
     for (int i = 0; i < G.nflags; i++) {
         GFlag *f = &G.flags[i];
@@ -1203,6 +1229,7 @@ static int gate(Ctx *c, uint64_t mgr) {
     const int open = G.loaded && player && !loading && !moving && G.clock_at && now - G.clock_at < CLOCK_MS;
     if (open != G.gate && (TRACE_ON || G.probe))
         hos_log("coop: sync: game %s (play clock %u, loading %d, scene change %#x)", open ? "running" : "paused", clock, loading, moving);
+    if (open != G.gate) G.area_generation++;
     G.gate = open;
     return open;
 }
@@ -1233,34 +1260,74 @@ static void run_test_aid(Ctx *c, uint64_t mgr) {
     }
 }
 
+typedef struct { Ctx *ctx; uint64_t mgr; } ProgressWrite;
+
+/* Called only by the registered progress owner, with G.lock held. Native setters do not re-enter this engine. */
+static int progress_write(void *game, const void *payload) {
+    const ProgressWrite *w = game;
+    const CoopApply *a = payload;
+    const GFlag *f = flag_by_hash(a->hash);
+    int32_t value = 0;
+    if (f && a->pool && int_pending(w->ctx, w->mgr, f->hash)) {
+        coop_sync_untake(G.eng, a);
+        return 0;
+    }
+    if (!apply_value(f, a, f ? raw_of(w->ctx, f) : 0, &value)) return 0;
+    if (!set_flag(w->ctx, w->mgr, f->is_int, f->hash, value)) {
+        coop_sync_untake(G.eng, a);
+        return 0;
+    }
+    if (a->pool) coop_sync_pool_wrote(G.eng, f->hash, value);
+    G.applied[f->cat]++, G.applied_total++;
+    if (TRACE_ON) hos_log("coop: sync: applied %s %08x = %d", coop_cat_name(f->cat), f->hash, value);
+    return 1;
+}
+
+/* The game thread alone publishes native context. The session thread may only close it on revocation. */
+static void gameplay_context_locked(void) {
+    CoopGameplayContext context = {0};
+    CoopOffer offer;
+    CoopView view;
+    coop_view_get(&view);
+    if (G.eng && G.bound && G.gate && G.loaded && view.state == COOP_JOINED &&
+        coop_sync_offer(G.eng, &offer, coop_now_ms()) && offer.accepted && coop_sync_open(G.eng)) {
+        context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
+        context.capabilities = COOP_GAMEPLAY_DURABLE;
+        context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
+        context.room_session = view.session;
+        context.save_generation = G.save_generation, context.area_generation = G.area_generation;
+        for (int i = 0; i < view.n && i < COOP_MAX_MEMBERS; i++) {
+            const int id = view.member[i].id;
+            if (id > 0 && id <= COOP_GAMEPLAY_MEMBERS && coop_sync_member_accepted(G.eng, id, view.member[i].session))
+                context.accepted_session[id] = view.member[i].session;
+        }
+    }
+    coop_gameplay_publish(&G.gameplay, &context);
+}
+
 static void apply(Ctx *c, uint64_t mgr) {
     CoopApply a[APPLY_PER_FRAME];
     if (!G.eng || !__atomic_load_n(&G.open, __ATOMIC_ACQUIRE)) return;   /* not accepted, or no copy of the save yet: values wait */
     if (!TryAcquireSRWLockExclusive(&G.lock)) return;   /* the co-op thread has the engine: nothing is applied this frame */
-    const int n = coop_sync_take(G.eng, a, APPLY_PER_FRAME);
-    ReleaseSRWLockExclusive(&G.lock);
-    for (int i = 0; i < n; i++) {
-        const GFlag *f = flag_by_hash(a[i].hash);
-        int32_t v = 0;
-        if (f && a[i].pool && int_pending(c, mgr, f->hash)) {   /* the game changed it this frame: the next one */
-            AcquireSRWLockExclusive(&G.lock);
-            coop_sync_untake(G.eng, &a[i]);
+    if (!G.gameplay.writer[COOP_GAMEPLAY_PROGRESS].write) {
+        const CoopGameplayWriter writer = {COOP_GAMEPLAY_VERSION, sizeof writer, COOP_GAMEPLAY_PROGRESS,
+                                          COOP_GAMEPLAY_DURABLE, sizeof(CoopApply), progress_write};
+        if (!coop_gameplay_register(&G.gameplay, &writer)) {
             ReleaseSRWLockExclusive(&G.lock);
-            continue;
+            return;
         }
-        if (!apply_value(f, &a[i], f ? raw_of(c, f) : 0, &v)) {
-            if (TRACE_ON) hos_log("coop: sync: not applied %s %08x = %d", coop_cat_name(a[i].cat), a[i].hash, a[i].value);
-            continue;
-        }
-        set_flag(c, mgr, f->is_int, f->hash, v);
-        if (a[i].pool) {
-            AcquireSRWLockExclusive(&G.lock);
-            coop_sync_pool_wrote(G.eng, f->hash, v);
-            ReleaseSRWLockExclusive(&G.lock);
-        }
-        G.applied[f->cat]++, G.applied_total++;
-        if (TRACE_ON) hos_log("coop: sync: applied %s %08x = %d", coop_cat_name(f->cat), f->hash, v);
     }
+    gameplay_context_locked();
+    CoopGameplayTicket ticket;
+    const int allowed = coop_gameplay_ticket(&G.gameplay, COOP_GAMEPLAY_PROGRESS, 0,
+                                            G.gameplay.context.room_session, &ticket);
+    const int n = allowed ? coop_sync_take(G.eng, a, APPLY_PER_FRAME) : 0;
+    ProgressWrite game = {c, mgr};
+    // Keep the existing engine lock across this bounded batch, not a second lock with inverse lock order.
+    // Revocation cannot race a native write after a receive-time-only check.
+    for (int i = 0; i < n; i++)
+        coop_gameplay_dispatch(&G.gameplay, &ticket, &a[i], sizeof a[i], &game);
+    ReleaseSRWLockExclusive(&G.lock);
     const uint64_t now = coop_now_ms();
     if (G.applied_total && now - G.applied_log_at >= 5000) {
         char text[200];

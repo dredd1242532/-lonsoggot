@@ -13,6 +13,7 @@
 
 #include "coop.h"
 #include "coop_state.h"
+#include "coop_gameplay.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* (env_on, env_value_off: the switches' rule, as host/oot_coop.c has it) */
 
 static int failures;
@@ -30,6 +31,7 @@ static void ReleaseSRWLockExclusive(SRWLOCK *l) { (void)l; }
 
 static struct { uint64_t base, size; uint8_t *mem; } regions[2] = {{0x84c00000ull, 0x400000, NULL}, {0x10000000ull, 16u << 20, NULL}};
 static unsigned stray;   /* reads outside both regions (none expected but the null pointer's page) */
+static unsigned guest_reads;
 static uint8_t *host_ptr(uint64_t a, uint64_t n) {
     for (int i = 0; i < 2; i++)
         if (a >= regions[i].base && n <= regions[i].size && a - regions[i].base <= regions[i].size - n) return regions[i].mem + (a - regions[i].base);
@@ -38,6 +40,7 @@ static uint8_t *host_ptr(uint64_t a, uint64_t n) {
 static void *hos_guest_range(uint64_t a, uint64_t n) { return host_ptr(a, n); }
 #define GP(a) ((void *)host_ptr((a), 1))
 static uint64_t ld(uint64_t a, unsigned n) {
+    guest_reads++;
     uint64_t v = 0;
     const uint8_t *p = host_ptr(a, n);
     if (p) memcpy(&v, p, n);
@@ -691,11 +694,15 @@ int main(int argc, char **argv) {
 
         /* off at the start: the present reads nothing, and the hooks are registered all the same */
         FRESH(1);
+        const unsigned off_reads = guest_reads;
+        const int off_sets = nsets;
         TICK(), hos_oot_coop_present(&c);
         TICK(), hos_oot_coop_present(&c);
         CHECK(G.state == ST_OFF && !G.on && !G.bound && !G.looked && !rules_said && !scans);
         CHECK(hooks.msg == 2 && hooks.view == 1 && hooks.tick == 1 && hooks.remove == 1);   /* once, not per present */
+        CHECK(guest_reads == off_reads && nsets == off_sets);
         /* the session's thread runs (co-op switched on in the tab) and calls back: sync is on, the settings said once */
+        view.state = COOP_LEFT;
         if (hooks.view_fn) hooks.view_fn(&view, NULL), hooks.view_fn(&view, NULL);
         CHECK(G.state == ST_ON && G.on == 1 && rules_said == 1 && views == 2);
         TICK(), hos_oot_coop_present(&c);                        /* the first look: the save's clock appears */
@@ -703,6 +710,12 @@ int main(int argc, char **argv) {
         TICK(), hos_oot_coop_present(&c);
         CHECK(G.bound && scans == 1 && applies == 1);            /* the save in play is read and shared */
         CHECK(hooks.view == 1);
+        view.state = COOP_OFF;
+        if (hooks.view_fn) hooks.view_fn(&view, NULL);
+        const unsigned disabled_reads = guest_reads;
+        hos_oot_coop_present(&c);
+        CHECK(G.state == ST_OFF && !G.on && guest_reads == disabled_reads);
+        view.state = COOP_LEFT;
 
         /* the options file's coop=1 alone, as the session reads it (host/coop.c coop_init) */
         FRESH(1);
