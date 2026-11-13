@@ -146,3 +146,52 @@ page that says so and names the newest launcher there is. The channels follow th
 (`Core/ReleaseManifest.cs`, `scripts/release.py newest`), and the release list is kept 60 seconds.
 `npx wrangler dev` (after `npm run build`) serves the site with the Worker; `tests/download.test.ts` checks the channel
 rules.
+
+## The report inbox
+
+`worker/report.ts` answers `POST /report`: the [Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher)'s
+**Send report** (after a build stops or the game crashes) files the report here as an issue on
+[Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot/issues), so players need no Forgejo account. What the
+launcher sends, and what it shows the player first, is in the launcher's `docs/launcher-reports.md`.
+
+- **One issue per problem.** The report's kind and signature (a crash's code and the module it was in, the same on every
+  PC) make a 10-digit key, written in the title: `[report 4fd0273e9e] GameCrashed: 0xc0000005 nvoglv64.dll+0x1234`.
+  A report whose key has an **open** issue is a comment there; otherwise it opens a new issue. So: keep an issue open
+  while its reports are useful, and close it when the problem is fixed. A crash that comes back then opens a new issue.
+- **The answer** is `200 {"id": "#123", "url": "<the issue or the comment>"}`, which the launcher shows the player. Any
+  other status is "not sent", and the launcher offers the report to copy instead: `400` a report it can't read, `413` too
+  large, `429` too many, `502` Forgejo failed, `503` the inbox is off.
+- **Limits.** The body is at most 6 MB (256 KB of text and a 4 MB PNG). Each address may send 3 reports a minute, and
+  everyone together 20 a minute (`ratelimits` in `wrangler.jsonc`). The address is only the rate limiter's key: nothing
+  logs or keeps it.
+- **Nothing in a report is trusted.** The kind must be one the launcher knows, the signature and version are cut to
+  one short line, `@mentions` are broken so a report can't ping anyone, control characters go, and a picture must be
+  a PNG. Forgejo renders the Markdown as it does any comment (no scripts).
+- **Only the site files reports.** A PR preview (`pr-<n>-longshot-website...workers.dev`) checks the report and answers
+  `{"id": "dry-run"}` without filing it, so the launcher can be tried against a preview with
+  `LONGSHOT_REPORT_URL=https://pr-<n>-longshot-website.<subdomain>.workers.dev/report`. `npx wrangler dev` counts as
+  the site (it serves the route's host), so locally, with a token in `.dev.vars`, set `REPORT_REPO` to a repository of
+  your own there.
+
+### Setting it up
+
+1. **A bot account** on git.magicbean.dev (such as `longshot-reports`), so reports aren't filed in a person's name.
+   Give it the **Triage** role (or a team with Issues: Write) on Longshot: without it, Forgejo files the issue
+   but drops its labels.
+2. **Its token:** the bot's Settings → Applications → Generate token, with the scope **write:issue** and nothing else.
+3. **The secret,** from `website/` with the Cloudflare account signed in (`npx wrangler login`):
+   `npx wrangler secret put REPORT_FORGEJO_TOKEN`. A secret stays with the Worker across deploys; it is never in the
+   repository or the workflow.
+4. **The labels** in `REPORT_LABELS` (`wrangler.jsonc`, comma-separated, now `kind/bug,source/report`): create
+   `source/report` on Longshot. A label the repository doesn't have is left out.
+
+Until step 3, the inbox answers `503` and the launcher keeps offering the report to copy.
+
+**Turning it off**, at once and without a deploy: `npx wrangler secret put REPORTS_OFF` with the value `1` (back on:
+`npx wrangler secret delete REPORTS_OFF`). Deleting `REPORT_FORGEJO_TOKEN` does the same. A **leaked token** is
+revoked in the bot's settings and replaced with step 2 and 3; it can only write issues and comments.
+
+A PR preview is a version of the same Worker and has the same secrets: the review that lets a PR preview at all (see
+`.forgejo/workflows/website.yml`) is what keeps the token from code that would send it elsewhere.
+
+`tests/report.test.ts` checks what the inbox accepts and what it files, against a stand-in Forgejo.

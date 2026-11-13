@@ -11,8 +11,10 @@
 #   label approves the commit the PR is at: the run checks it is still that commit, then takes the label off, so a
 #   later push needs the label again. pull_request_target runs this file from main, not from the PR, and checkout
 #   needs allow-unsafe-pr-checkout for it: the label and the commit check are what make it safe.
-# The Worker is website/wrangler.jsonc (the site, and worker/index.ts for the download links). Only a deploy applies its
-# domain, and only main deploys, so a PR's configuration can't change where the site goes.
+# The Worker is website/wrangler.jsonc (the site, worker/index.ts for the download links and worker/report.ts for the
+# launcher's report inbox). Only a deploy applies its domain, and only main deploys, so a PR's configuration can't change
+# where the site goes. A preview is a version of the same Worker, with its secrets (REPORT_FORGEJO_TOKEN, set with
+# `wrangler secret put`, not here; website/README.md, "The report inbox"): one more reason only reviewed code previews.
 #
 # No game data is involved.
 #

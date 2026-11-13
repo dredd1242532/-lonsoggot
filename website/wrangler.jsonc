@@ -1,6 +1,7 @@
 // The Worker serving longshot.magicbean.dev: the built site (dist/), with worker/index.ts answering /download (the
-// Longshot Launcher's permanent download links). Deployed from main by .forgejo/workflows/website.yml; a pull request's
-// preview uploads a version without deploying it.
+// Longshot Launcher's permanent download links) and /report (its report inbox, worker/report.ts: needs the secret
+// REPORT_FORGEJO_TOKEN, see website/README.md, "The report inbox"). Deployed from main by .forgejo/workflows/website.yml;
+// a pull request's preview uploads a version without deploying it.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "longshot-website",
@@ -10,8 +11,14 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/download", "/download/*"]
+    "run_worker_first": ["/download", "/download/*", "/report"]
   },
+  // The report inbox's limits: per address, and for everyone (a burst of new crashes is still a few a minute)
+  "ratelimits": [
+    { "name": "REPORT_LIMIT", "namespace_id": "4201", "simple": { "limit": 3, "period": 60 } },
+    { "name": "REPORT_LIMIT_ALL", "namespace_id": "4202", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "vars": { "REPORT_REPO": "MagicBeanDev/Longshot", "REPORT_LABELS": "kind/bug,source/report" },
   "workers_dev": false,
   "preview_urls": true,
   "routes": [{ "pattern": "longshot.magicbean.dev", "custom_domain": true }]

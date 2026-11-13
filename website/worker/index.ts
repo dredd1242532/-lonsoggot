@@ -1,4 +1,5 @@
-// longshot.magicbean.dev's Worker: the built site (dist/), and permanent download links for the Longshot Launcher.
+// longshot.magicbean.dev's Worker: the built site (dist/), permanent download links for the Longshot Launcher, and the
+// launcher's report inbox (POST /report, worker/report.ts).
 //
 //   /download                                   a page: the launcher for this computer, from the best channel there is
 //   /download/launcher/<os>                     302 to that file of the best channel (stable, else rc, else nightly)
@@ -9,6 +10,8 @@
 // The channels follow the launcher's rules (Core/ReleaseManifest.cs, Newest; scripts/release.py, newest): drafts never;
 // stable the newest vX.Y.Z that is not a pre-release; rc the newest vX.Y.Z-rc.N or vX.Y.Z; nightly the newest
 // nightly-<count>-<8 hex> by its count. The release list is read from git.magicbean.dev and kept 60 seconds.
+
+import { handleReport } from "./report.ts";
 
 const FORGE = "https://git.magicbean.dev";
 const REPO = "MagicBeanDev/LongshotLauncher";
@@ -283,6 +286,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, "");
+    if (path === "/report") return handleReport(request, env);
     if (path === "/download" || path.startsWith("/download/")) {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
       const parts = path.split("/").slice(2).filter(Boolean).map((p) => p.toLowerCase());
