@@ -112,6 +112,8 @@ VkPipeline last_pipeline{};
 struct { bool on = false; } vertex_set, last_ib;
 void descriptors_disturbed() {}
 std::unordered_map<int, int>& handle_hits() { static thread_local std::unordered_map<int, int> h; return h; }
+struct ViewFast { unsigned long long key = ~0ull; };   // (the texture views' front cache: cleared with handle_hits)
+std::array<ViewFast, 4>& view_fast() { static std::array<ViewFast, 4> v; return v; }
 struct Program {};
 constexpr int kNvnStages = 8;
 int desc_reuse_level() { return 2; }   // (vk_draw.cpp: RX_VK_DESC_REUSE and the Descriptor reuse row; the banks are kept)

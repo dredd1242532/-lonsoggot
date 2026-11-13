@@ -68,6 +68,8 @@ VkPipeline last_pipeline{};
 struct { bool on=false; } vertex_set,last_ib;
 void descriptors_disturbed() {}
 std::unordered_map<int,int>& handle_hits() { static std::unordered_map<int,int> h;return h; }
+struct ViewFast { unsigned long long key = ~0ull; };   // (the texture views' front cache: cleared with handle_hits)
+std::array<ViewFast, 4>& view_fast() { static std::array<ViewFast, 4> v; return v; }
 struct BankCache { uint64_t at=0; };
 std::array<std::array<BankCache,2>,2>& bank_cache() { static std::array<std::array<BankCache,2>,2> b;return b; }
 void make_dummies() {}
