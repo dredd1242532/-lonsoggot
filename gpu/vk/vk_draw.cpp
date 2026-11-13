@@ -744,7 +744,7 @@ PipelineCacheFile pcache_file_read(const std::string& path) {
 std::string pcache_dir;
 
 // (longshot) Intel's Windows driver faults in vkGetPipelineCacheData (igvk64.dll+0x79ddf3, an access violation) when it fetches
-// a cache's data while other threads build pipelines with that cache: the game closes with no message (issue 999: the Arc 140V,
+// a cache's data while other threads build pipelines with that cache: the game closes with no message (NotRexed/Hookshot#999: the Arc 140V,
 // and 4 runs of 6 on a Core Ultra 7 155H, driver 101.9175). Vulkan allows it; on Intel the fetches and the builds take turns:
 // a build holds this shared, a fetch alone. The background save does not wait for the builds: it tries a while, then leaves the
 // save to the next one. RX_VK_PCACHE_FETCH_LOCK=0: off, =1: on any GPU
