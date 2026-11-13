@@ -2517,9 +2517,13 @@ bool fps_vram_over = false;                    // (the VRAM line in red: past wh
 /// The FPS counter's target frame time, ms: the Game frame rate cap row's (HOS_FPS_MAX over it, as host/nn_vi.c, which follows
 /// the row in play), or the display's refresh with V-Sync On and no frame generation when that is slower; 0 for none (Uncapped
 /// without V-Sync)
-double fps_target_ms() {
+/// The frame rate cap in effect: HOS_FPS_MAX's over the Game frame rate cap row's
+int fps_cap_now() {
     static const int env_max = getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0;
-    const int cap = fps_stats::cap_rate(opts.fps_cap, env_max);
+    return fps_stats::cap_rate(opts.fps_cap, env_max);
+}
+double fps_target_ms() {
+    const int cap = fps_cap_now();
     const bool fifo = menu_vsync() == 1 && opts.framegen == 0;
     return fps_stats::target_ms_for(cap, fifo, fifo ? (display_refresh_mhz() + 500) / 1000 : 0);
 }
@@ -4232,6 +4236,7 @@ void menu_set_gpu_count(int count) {
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
 double menu_target_ms() { return fps_target_ms(); }   // (the performance summary's: perf_report.cpp)
+int menu_fps_cap() { return fps_cap_now(); }          // (likewise: its fps_cap label)
 bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }
 // (the tools off on the Debug tab: flight, the free camera and heart protection put away; -1, heart protection never set, is the
 // host's own HOS_OOT_PROTECT_HEARTS)

@@ -3,9 +3,9 @@ tests/test_perf_report.cpp: buckets, hitches, pacing, the JSON, a frame's cost),
 frame added at each present, the events where they happen), and the launcher's side (nx2/perf_report.py):
 
   - the tick: send=1 in longshot_perf.ini, off by default; off deletes what is waiting;
-  - with the tick on, the waiting summaries are sent oldest first, with the version and the release flag filled in, and
-    each one the relay took or refused is deleted; one it couldn't take now (not reached, 429, 5xx) stops the sending and
-    stays; with the tick off nothing is sent;
+  - with the tick on, the waiting summaries are sent oldest first, the game's own version kept (filled in when missing)
+    and a release only for the folder's build; each one the relay took or refused is deleted; one it couldn't take now
+    (not reached, 429, 5xx) stops the sending and stays; with the tick off nothing is sent;
   - at most 48 wait: the oldest past that go unsent;
   - the relay's address is perf_reports in nx2/addresses.ini (none in the code);
   - the summary's map before the first one: "Preparing shaders", then "Title and intro".
@@ -64,11 +64,11 @@ class Relay:
         self.server.server_close()
 
 
-def game_folder(tmp, name, summaries=3, tick=True, version="v3.1.0", source="abcd1234", log_source="abcd1234"):
+def game_folder(tmp, name, summaries=3, tick=True, version="v3.1.0", source="abcd1234", log_source="abcd1234", wrote=""):
     f = Path(tmp, name)
     (f / pr.PENDING).mkdir(parents=True)
     for i in range(summaries):
-        (f / pr.PENDING / ("17000000%02d-%d.json" % (i, i))).write_text(json.dumps({"v": 1, "version": "x", "n": i}))
+        (f / pr.PENDING / ("17000000%02d-%d.json" % (i, i))).write_text(json.dumps({"v": 1, "version": wrote, "n": i}))
     (f / pr.VERSION_FILE).write_text("version=%s\nsource=%s\n" % (version, source))
     (f / "longshot_log.txt").write_text("[hos host] longshot %s (source %s)\n" % (version, log_source))
     if tick:
@@ -96,6 +96,17 @@ def launcher_side(tmp):
         pr.send_waiting(str(f2), url=relay.url)
         check(relay.bodies and all(b["release"] is False for b in relay.bodies), "built from other sources: not a release")
 
+        f7 = game_folder(tmp, "updated since", summaries=2, wrote="v3.0.0")
+        relay.bodies.clear()
+        pr.send_waiting(str(f7), url=relay.url)
+        check(relay.bodies and all(b["version"] == "v3.0.0" and b["release"] is False for b in relay.bodies),
+              "a summary of the build before an update keeps its version, and is not this release's")
+
+        f9 = game_folder(tmp, "same build", summaries=1, wrote="v3.1.0")
+        relay.bodies.clear()
+        pr.send_waiting(str(f9), url=relay.url)
+        check(relay.bodies and relay.bodies[0]["release"] is True, "the folder's own build: the release flag")
+
         f3 = game_folder(tmp, "busy", summaries=4)
         relay.codes[:] = [201, 400, 429]
         relay.bodies.clear()
@@ -109,8 +120,9 @@ def launcher_side(tmp):
         check(not relay.bodies and got["sent"] == 0, "the tick off: nothing sent")
 
         f5 = game_folder(tmp, "turned off")
+        (f5 / pr.PENDING / "1700000099-9.tmp").write_text("{")
         pr.set_sending(str(f5), False)
-        check(not (f5 / pr.CHOICE).exists() and not list((f5 / pr.PENDING).glob("*.json")),
+        check(not (f5 / pr.CHOICE).exists() and not list((f5 / pr.PENDING).iterdir()),
               "turning the tick off deletes the setting and what is waiting")
 
         f6 = game_folder(tmp, "many", summaries=pr.MAX_PENDING + 5)

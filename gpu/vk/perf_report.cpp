@@ -6,12 +6,14 @@
 // written on a thread of its own every kPeriod seconds and at exit. Off, the only cost is fps_presented's look at perf_measure.
 #include "perf_report.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <thread>
 
@@ -26,10 +28,8 @@
 #include "upscaler_rows.h"
 
 #ifdef _WIN32
-#include <direct.h>
 #include <psapi.h>
 #else
-#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -37,6 +37,7 @@ namespace mkwvk {
 
 std::atomic<bool> perf_measure{false};
 double menu_target_ms();   // (vk_menu.cpp fps_target_ms: the frame time the game aims for, 0 uncapped)
+int menu_fps_cap();        // (vk_menu.cpp fps_cap_now: the cap in effect, the same rule)
 bool shaders_preparing();  // (vk_main.cpp: the start-up screen's shader preparation)
 
 namespace {
@@ -55,7 +56,7 @@ std::map<std::string, bool> seen_maps;   // (maps this session has sent: the rel
 pr::MapTotals* current = nullptr;
 std::string current_map;
 pr::Machine machine;
-std::string folder;
+std::filesystem::path folder;   // (the game folder: vk_paths.h, wide on Windows)
 std::atomic<int64_t> events[pr::kEvents];
 int64_t started_ns = 0, last_movie[5] = {};
 double since_map = 0, since_summary = 0, avg_ms = 0, last_ms = 0;
@@ -64,21 +65,11 @@ int seq = 0;
 int64_t l_failed = 0;   // (the renderer's counts at the summary before: at the start, perf_report_init)
 uint64_t l_swap = 0;
 
-std::string game_folder() {
-    char exe[MAX_PATH];
-    const DWORD n = game_module_path(exe, MAX_PATH);
-    std::string dir(exe, n);
-    return dir.substr(0, dir.find_last_of("\\/") + 1);
-}
-
-bool ticked(const std::string& dir) {
-    FILE* f = fopen((dir + "longshot_perf.ini").c_str(), "r");
-    if (!f) return false;
-    char line[64];
+bool ticked(const std::filesystem::path& dir) {
+    std::ifstream f(dir / "longshot_perf.ini");
     bool on = false;
-    while (fgets(line, sizeof line, f))
-        if (!strncmp(line, "send=", 5)) on = atoi(line + 5) == 1;
-    fclose(f);
+    for (std::string line; std::getline(f, line);)
+        if (!line.compare(0, 5, "send=")) on = atoi(line.c_str() + 5) == 1;
     return on;
 }
 
@@ -144,8 +135,7 @@ void read_machine(const char* version) {
 void read_settings() {
     machine.upscaler = upscaler_name(opts.dlss);
     machine.preset = preset_name(opts.preset);
-    static const int env_max = getenv("HOS_FPS_MAX") ? atoi(getenv("HOS_FPS_MAX")) : 0;   // (over the row, as fps_target_ms)
-    machine.fps_cap = fs::cap_rate(opts.fps_cap, env_max);
+    machine.fps_cap = menu_fps_cap();
 }
 
 /// The map from the host, and the movies' totals since the last ask, onto the map they played on
@@ -169,26 +159,25 @@ void where_now() {
     memcpy(last_movie, movie, sizeof last_movie);
 }
 
-void write_summary(const std::string& dir, const std::string& name, const std::string& json) {
-    const std::string pending = dir + "perf_pending";
+void write_summary(const std::filesystem::path& dir, const std::string& name, const std::string& json) {
+    namespace fsys = std::filesystem;
+    const fsys::path pending = dir / "perf_pending";
+    std::error_code ec;
     {
-        std::error_code ec;
         int waiting = 0;
-        for (std::filesystem::directory_iterator it(pending, ec), end; !ec && it != end; it.increment(ec))
+        for (fsys::directory_iterator it(pending, ec), end; !ec && it != end; it.increment(ec))
             waiting += it->path().extension() == ".json";
         if (waiting >= kMaxPending) return;
     }
-#ifdef _WIN32
-    _mkdir(pending.c_str());
-#else
-    mkdir(pending.c_str(), 0755);
-#endif
-    const std::string tmp = pending + "/" + name + ".tmp", path = pending + "/" + name + ".json";
-    FILE* f = fopen(tmp.c_str(), "wb");
-    if (!f) return;
-    const bool ok = fwrite(json.data(), 1, json.size(), f) == json.size();
-    fclose(f);
-    if (!ok || rename(tmp.c_str(), path.c_str())) remove(tmp.c_str());   // (whole or nothing: the launcher never reads half)
+    fsys::create_directory(pending, ec);
+    const fsys::path tmp = pending / (name + ".tmp"), path = pending / (name + ".json");
+    bool ok;
+    {
+        std::ofstream f(tmp, std::ios::binary);
+        ok = f && f.write(json.data(), (std::streamsize)json.size()) && f.flush();
+    }
+    if (ok) fsys::rename(tmp, path, ec);
+    if (!ok || ec) fsys::remove(tmp, ec);   // (whole or nothing: the launcher never reads half)
 }
 
 /// The summary of what came in since the one before (under mu), written on a thread of its own unless `now` (the exit, a
@@ -227,24 +216,29 @@ void summarize(bool now) {
         if (t.any()) seen_maps[n] = true;
     maps.clear();
     current = &maps[current_map];
-    current->fresh = false;
+    current->fresh = !seen_maps.count(current_map);   // (a map entered just before this summary, with nothing yet: still new)
     first = false;
     if (now) return write_summary(folder, name, json);
     std::thread([dir = folder, n = std::string(name), j = std::move(json)] { write_summary(dir, n, j); }).detach();
 }
 
 // (an exit that runs atexit: Windows' ExitProcess, exit(). The window's close writes it first, mkwvk_close_asked; then
-// this finds nothing new)
+// this finds nothing new. Only tried: ExitProcess has already ended the other threads, and one may have held mu)
 void at_exit() {
-    std::lock_guard lk(mu);
-    summarize(true);
+    std::unique_lock lk(mu, std::try_to_lock);
+    if (lk) summarize(true);
 }
 
 }   // namespace
 
 bool perf_report_init() {
-    folder = game_folder();
+    folder = game_dir_path();
     if (!ticked(folder)) return false;
+    {   // (a summary cut short by an exit before: its .tmp, never sent and never counted)
+        std::error_code ec;
+        for (std::filesystem::directory_iterator it(folder / "perf_pending", ec), end; !ec && it != end; it.increment(ec))
+            if (it->path().extension() == ".tmp") std::filesystem::remove(it->path(), ec);
+    }
     started_ns = fps_clock();
     int64_t translated = 0;
     shader_stats(&translated, &l_failed);   // (the renderer's counts so far: only what comes after is counted)
@@ -260,21 +254,21 @@ void perf_event(int e) {
     if (e >= 0 && e < pr::kEvents && perf_measure.load(std::memory_order_relaxed)) events[e].fetch_add(1, std::memory_order_relaxed);
 }
 
-void perf_frame(const fs::Frame& f) {
-    // (the renderer's counters since the frame before: what the slow frames waited on)
-    if (!perf_measure.load(std::memory_order_relaxed)) return;   // (unticked while the game ran: summarize)
+void perf_frame(const fs::Frame& f, double wait_ms) {
+    // (the renderer's counters since the frame before: what the slow frames waited on. wait_ms: draw_stats3's, read by
+    // fps_presented, which calls this only while perf_measure holds)
     static int64_t l_prof[PROF_COUNT], l_readback;
     static double l_wait_ms, l_translate;
     static bool primed = false;   // (the first frame only takes the counters: they hold everything since the game started)
-    int64_t skips = 0, waits = 0;
-    double wait_ms = 0;
-    draw_stats3(&skips, &waits, &wait_ms);
-    const double translate = shader_translate_ms();
+    const double translate = shader_translate_wait_ms();   // (only what a draw waited for: the jobs' run behind the game)
     const int64_t readback = texture_readback_wait_ns();
     const auto dp = [](int i) { return (prof_ns[i] - l_prof[i]) / 1e6; };
     pr::Waits w;
-    w.pipeline = wait_ms - l_wait_ms + dp(PROF_PIPE) + dp(PROF_PROGRAM);
-    w.translate = translate - l_translate;
+    // (draw_stats3's waits are draws waiting for a program's translation; program_pick's own translation, in place, is
+    // timed inside PROF_PROGRAM too: each counted once, as a translation)
+    const double in_place = translate - l_translate;
+    w.translate = wait_ms - l_wait_ms + in_place;
+    w.pipeline = std::max(0.0, dp(PROF_PIPE) + dp(PROF_PROGRAM) - in_place);
     w.upload = dp(PROF_UPLOAD);
     w.memsync = dp(PROF_MEMSYNC);
     w.readback = (readback - l_readback) / 1e6;

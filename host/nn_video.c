@@ -554,9 +554,6 @@ static void decode_next(Dec *d) {
         free(n);
     }
 }
-/* (longshot, issue 2316) one line when a movie stops: its decoder, the time it took for each submission against the time
-   between the movie's pictures, and the pictures the catch-up skipped. A decoder slower than the movie leaves the picture
-   behind the sound, whatever the catch-up does: the line says which it was in a report's longshot_log.txt */
 /* (longshot) every movie's totals this session, for the performance summary (hos_perf_info, gpu/vk/perf_report.cpp): pictures
    shown (taken by the game), skipped to keep up with the sound (and dropped for want of memory), shown late (50 ms or more
    after the one before), decoding time in ns, decoders that did not start. Added as each happens, so a movie still playing
@@ -565,6 +562,9 @@ void hos_movie_stats(int64_t out[5]) {
     for (int i = 0; i < 5; i++) out[i] = __atomic_load_n(&movie_totals[i], __ATOMIC_RELAXED);
 }
 void hos_movie_fallback(void) { __atomic_add_fetch(&movie_totals[4], 1, __ATOMIC_RELAXED); }
+/* (longshot, issue 2316) one line when a movie stops: its decoder, the time it took for each submission against the time
+   between the movie's pictures, and the pictures the catch-up skipped. A decoder slower than the movie leaves the picture
+   behind the sound, whatever the catch-up does: the line says which it was in a report's longshot_log.txt */
 static void movie_report(Dec *d) {
     if (d->decoded > 1) {
         const double each = (double)d->decode_ns / d->decoded / 1e6,

@@ -51,7 +51,7 @@ const char *hos_version(void) { return LONGSHOT_VERSION; }   /* (discord_rpc.c's
 #endif
 
 /* (longshot) the map Link is in and his age, as the last map: line, for the performance summary (gpu/vk/perf_report.cpp
-   through MkwVkHost perf_info): "" before a save is loaded */
+   through MkwVkHost perf_info): "" while no save is loaded (before one, and back at the title) */
 static SRWLOCK map_lock = SRWLOCK_INIT;
 static char map_now[100];
 void hos_movie_stats(int64_t out[5]);   /* nn_video.c */
@@ -679,9 +679,15 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
         int child = 1;
         rx_option_set(OOT_CHEAT_AGE_ID, loaded && oot_gamedata_bool(c, 0xcea220d3u, &child) ? (child ? 0 : 1) : -1);
     }
+    static char logged[100];
+    if (!loaded && logged[0]) {   /* back to the title or the file select: the summary's time there is not the last map's */
+        logged[0] = 0;
+        AcquireSRWLockExclusive(&map_lock);
+        map_now[0] = 0;
+        ReleaseSRWLockExclusive(&map_lock);
+    }
     if (loaded) {   /* the map Link is in and his age, logged when either changes: where a log's problem happened, the "Where in
                        the game" of the Insert menu's Bug report (gpu/vk/vk_bug_report.cpp reads the last of these lines) */
-        static char logged[100];
         char map[80], line[100];
         int child = 1;
         if (oot_gamedata_string(c, 0x1d6189dau, map, sizeof map) && map[0]) {   /* Sequence_CurrentBanc */

@@ -55,8 +55,8 @@ inline const char* event_name(int e) {
 
 /// A frame's times beyond the FPS counter's parts, ms: from the renderer's counters, since the frame before
 struct Waits {
-    double pipeline = 0;    // (waits for shaders or pipelines, and building them on this thread)
-    double translate = 0;   // (shader translation)
+    double pipeline = 0;    // (building pipelines and picking programs on the drawing threads)
+    double translate = 0;   // (draws waiting for a shader translation, or translating one in place)
     double upload = 0;      // (texture uploads and their CPU unswizzle)
     double memsync = 0;     // (the guest memory's sync to the GPU)
     double readback = 0;    // (read-backs' waits for the GPU)

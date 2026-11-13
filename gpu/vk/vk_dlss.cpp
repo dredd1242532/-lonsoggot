@@ -122,18 +122,8 @@ void NVSDK_CONV ngx_log(const char* message, NVSDK_NGX_Logging_Level, NVSDK_NGX_
 
 namespace fs = std::filesystem;
 #ifdef _WIN32
-/// The game folder (game_module_path's rule: bin\longshot.exe beside image.bin is the folder above bin), from
-/// GetModuleFileNameW: a folder with characters outside the ANSI code page is still the right one
-fs::path game_dir() {
-    std::wstring exe(32768, L'\0');
-    const DWORD n = GetModuleFileNameW(nullptr, exe.data(), (DWORD)exe.size());
-    if (!n || n >= exe.size()) return {};
-    exe.resize(n);
-    fs::path dir = fs::path(exe).parent_path();
-    if (!_wcsicmp(dir.filename().c_str(), L"bin") && GetFileAttributesW((dir.parent_path() / L"image.bin").c_str()) != INVALID_FILE_ATTRIBUTES)
-        dir = dir.parent_path();
-    return dir;
-}
+/// The game folder (vk_paths.h: from GetModuleFileNameW, so any folder name works)
+fs::path game_dir() { return game_dir_path(); }
 /// An environment variable as a path (_wgetenv: not through the ANSI code page); empty when unset
 fs::path env_path(const wchar_t* name) {
     const wchar_t* e = _wgetenv(name);
@@ -150,11 +140,7 @@ std::string shown(const fs::path& p) {
 /// A path for NGX, which takes wide strings: Windows' own
 std::wstring wide(const fs::path& p) { return p.native(); }
 #else
-fs::path game_dir() {
-    char exe[MAX_PATH];
-    const DWORD n = game_module_path(exe, MAX_PATH);
-    return fs::path(std::string(exe, n)).parent_path();
-}
+fs::path game_dir() { return game_dir_path(); }
 fs::path env_path(const char* name) {
     const char* e = getenv(name);
     return e && *e ? fs::path(e) : fs::path();

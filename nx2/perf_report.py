@@ -57,7 +57,11 @@ def set_sending(folder, on):
         os.remove(path)
     except OSError:
         pass
-    for name in waiting(folder):
+    try:
+        names = [n for n in os.listdir(os.path.join(folder, PENDING)) if n.endswith((".json", ".tmp"))]
+    except OSError:
+        names = []
+    for name in names:   # (and a summary the game was writing when it was cut short: its .tmp)
         try:
             os.remove(os.path.join(folder, PENDING, name))
         except OSError:
@@ -145,8 +149,11 @@ def send_waiting(folder, url=None, timeout=10):
         except (OSError, ValueError):
             result = "refused"   # (unreadable: dropped)
         else:
-            summary["version"] = version or summary.get("version", "")
-            summary["release"] = release
+            # (the game's own version, of the build that wrote it: the folder may have been updated since. A release only
+            # when that is the folder's build, whose fingerprint was checked)
+            own = summary.get("version") if isinstance(summary.get("version"), str) else ""
+            summary["version"] = own or version
+            summary["release"] = release and summary["version"] == version
             body = json.dumps(summary, separators=(",", ":")).encode()
             result = "refused" if len(body) > MAX_BODY else post(body, url, timeout)
         if result == "later":

@@ -13,6 +13,8 @@
 #undef min
 #undef max
 #include <cstring>
+#include <filesystem>
+#include <string>
 
 namespace mkwvk {
 inline DWORD game_module_path(char* buf, DWORD size) {
@@ -33,5 +35,24 @@ inline DWORD game_module_path(char* buf, DWORD size) {
     if (GetFileAttributesA(probe) == INVALID_FILE_ATTRIBUTES) return n;
     std::memmove(buf + root, name, std::strlen(name) + 1);
     return (DWORD)std::strlen(buf);
+}
+/// The game folder as a path, game_module_path's rule. On Windows from GetModuleFileNameW: a folder with characters outside
+/// the ANSI code page, or longer than MAX_PATH, is still the right one (open it with std::filesystem or the streams)
+inline std::filesystem::path game_dir_path() {
+#ifdef _WIN32
+    std::wstring exe(32768, L'\0');
+    const DWORD n = GetModuleFileNameW(nullptr, exe.data(), (DWORD)exe.size());
+    if (!n || n >= exe.size()) return {};
+    exe.resize(n);
+    std::filesystem::path dir = std::filesystem::path(exe).parent_path();
+    if (!_wcsicmp(dir.filename().c_str(), L"bin") &&
+        GetFileAttributesW((dir.parent_path() / L"image.bin").c_str()) != INVALID_FILE_ATTRIBUTES)
+        dir = dir.parent_path();
+    return dir;
+#else
+    char exe[MAX_PATH];
+    const DWORD n = game_module_path(exe, MAX_PATH);
+    return std::filesystem::path(std::string(exe, n)).parent_path();
+#endif
 }
 }  // namespace mkwvk
