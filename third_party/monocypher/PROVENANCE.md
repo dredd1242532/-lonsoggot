@@ -6,3 +6,5 @@ with the GPL.
 Compiled into the runtime by nx2/build.py. Used by host/coop_proto.c alone, for co-op's wire format (docs/coop.md):
 keyed BLAKE2b (RFC 7693) for a room's keys and the datagram tags, XChaCha20-Poly1305 for the players' sealed messages,
 and EdDSA over Curve25519 with BLAKE2b for what one player signs.
+
+tree-sha256: 4f457756684359418f66890020667143bd0743faa6434d8002dafb48662c3b26
