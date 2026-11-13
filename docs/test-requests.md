@@ -114,7 +114,7 @@ Between `claim` and `done`:
 
 ### Which commit?
 
-`request` pins the PR's head at that moment. For example, on November 12, Hookshot's PR #2731 moved from `bce3d17e` to
+`request` pins the PR's head at that moment. For example, on November 12, https://github.com/NotRexed/Hookshot/pull/2731 moved from `bce3d17e` to
 `309e6c35` while its card was being tested; a later result for the first commit was not a test of the second.
 `claim` tells you what to build and checks the current head. If it moved, both commits are shown and no claim is sent.
 Ask the requester which is wanted; only after confirmation use `claim T-7KQ2 --commit <confirmed-pin>`, or wait for
