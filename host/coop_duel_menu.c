@@ -36,7 +36,8 @@ void hos_coop_duel_menu_view(MkwVkCoopView *out, const CoopView *v, const CoopOf
         snprintf(out->duel_note, sizeof out->duel_note, "Use a temporary save copy. This build cannot start a fight."); return;
     }
     if (v->n != 2 || v->member[0].away || v->member[1].away ||
-        !(members & (1u << v->member[0].id)) || !(members & (1u << v->member[1].id))) {
+        (v->member[0].id != v->self && !(members & (1u << v->member[0].id))) ||
+        (v->member[1].id != v->self && !(members & (1u << v->member[1].id)))) {
         snprintf(out->duel_note, sizeof out->duel_note, "Exactly two present accepted players are required. This build cannot start a fight."); return;
     }
     /* File IO is explicit, local and diagnostic, on an attempted Ready only (never menu drawing).

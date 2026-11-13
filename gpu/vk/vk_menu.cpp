@@ -70,6 +70,7 @@
 #include <unistd.h>
 extern char** environ;
 #endif
+#include "../../host/coop_chat_text.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 #ifndef LONGSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
 #define LONGSHOT_VERSION "unknown"
@@ -1205,7 +1206,6 @@ MENU_HINTS(hn_prompts, 0,
 // back are Enter and Esc, its D-pad moves the caret and cycles characters, its shoulders add and remove a character,
 // its paste button (menu_keys::paste) pastes; a click elsewhere is Enter, a right click Esc; closing the menu is Esc too ----
 // Chat alone opts into bounded UTF-8 and code-point editing.
-#include "../../host/coop_chat_text.h"
 struct TextField {
     char text[193];                   // UTF-8 bytes including the terminator
     int len = 0, caret = 0;
@@ -1237,6 +1237,7 @@ int text_edit(TextField& f, uint32_t in) {
             memmove(f.text + f.caret, f.text + end, (size_t)(f.len - end + 1));
             f.len -= end - f.caret;
             break;
+        }
         case VK_UP:
         case VK_DOWN:
         case VK_INSERT: {
@@ -1254,7 +1255,6 @@ int text_edit(TextField& f, uint32_t in) {
                 f.caret = caret;   // (the new character is the one to cycle)
             } else if (!f.allow || f.allow(chars[next])) f.text[f.caret] = chars[next];
             break;
-        }
         }
         case VK_DELETE: {
             int end = f.caret;
@@ -1611,7 +1611,8 @@ Row rows[] = {
      nullptr, false, true},
     {TAB_COOP, "Chat", nullptr, 0, 0, 0, nullptr, "Enter sends. Esc cancels."},
     {TAB_COOP, "Mute chat", nullptr, 0, 0, 0, nullptr, "Left and Right choose a player. Enter mutes or unmutes."},
-    {TAB_COOP, "Notices", &opts.coop_notices, 0, 2, 1, tx_notices, "Off, joins only, or everything. Only on your screen."},
+    {TAB_COOP, "Notices", &opts.coop_notices, 0, 2, 1, tx_notices, "Off, joins only, or everything. Only on your screen.",
+     nullptr, false, true},
     {TAB_COOP, "Ready for duel", nullptr, 0, 0, 0, nullptr,
      "Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight."},
     {TAB_COOP, "Sword-practice kit", nullptr, 0, 0, 0, nullptr,
@@ -3045,7 +3046,7 @@ const FieldRow* field_row(const Row& r) {
     return nullptr;
 }
 MkwVkCoopFeed chat_feed{};
-TextField chat_field{{}, 0, 0, HOS_COOP_CHAT_BYTES, nullptr, true};
+TextField chat_field{{}, 0, 0, HOS_COOP_CHAT_BYTES, nullptr, nullptr, true};
 std::atomic<bool> chat_capture{false};
 int64_t chat_release_at = 0;
 uint32_t chat_generation = 0;

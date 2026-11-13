@@ -45,7 +45,7 @@ int main(void) {
     memset(pos.area,'A',COOP_POS_TEXT);
     for (int i=0;i<COOP_POS_SLOTS;i++) memset(pos.slot[i].node,'B',COOP_POS_TEXT);
     uint8_t packed[COOP_MAX_MESSAGE]; size_t len=coop_pos_pack(packed,sizeof packed,&pos), bytes;
-    assert(len);
+    assert(len == 290);   // one integrated version: three gear bytes followed by four health bytes
     assert(!coop_sess_send(s,0,COOP_K_POS,packed,len));
     coop_sess_accept_members(s,&v,1u<<2);
     assert(coop_sess_send(s,0,COOP_K_POS,packed,len)); flush_outbox(s); drain(relay,s,1u<<2,&bytes);
@@ -59,12 +59,22 @@ int main(void) {
     coop_sess_accept_members(s,&v,0x1fc);
     assert(coop_sess_send(s,0,COOP_K_POS,packed,len)); flush_outbox(s); drain(relay,s,0x1fc,&bytes);
     const double rate=1000.0/COOP_PLAYERS_SEND_MS;
-    // Reserve three bytes for the parallel equipment slice when counting the maximum packet.
-    const size_t integrated_bytes=bytes+7*3;
+    const size_t integrated_bytes=bytes;
+    assert(integrated_bytes == 7 * (len + 54));
     assert(7*rate < COOP_RELAY_PACKET_RATE/2.0);
     assert(integrated_bytes*rate < COOP_RELAY_BYTE_RATE/2.0);
-    printf("PASS POS privacy: 7 unicasts/update, %.6f updates/s, %.3f datagrams/s, %zu bytes/update, %.3f bytes/s (including 3 equipment bytes/packet); limits %d/%d\n",
+    printf("PASS POS privacy: 7 unicasts/update, %.6f updates/s, %.3f datagrams/s, %zu bytes/update, %.3f bytes/s (combined gear/health payload); limits %d/%d\n",
            rate,7*rate,integrated_bytes,integrated_bytes*rate,COOP_RELAY_PACKET_RATE,COOP_RELAY_BYTE_RATE);
+    // Download is not presentation; explicit copy presence has the same queued revocation fence.
+    coop_sess_accept_members(s,&v,0);
+    coop_sess_download_members(s,&v,0x1fc);
+    assert(!coop_sess_send(s,0,COOP_K_POS,packed,len));
+    coop_sess_presence_members(s,&v,1u<<2);
+    assert(coop_sess_send(s,0,COOP_K_POS,packed,len)); flush_outbox(s); drain(relay,s,1u<<2,&bytes);
+    assert(coop_sess_send(s,0,COOP_K_POS,packed,len));
+    coop_sess_presence_members(s,&v,0); coop_sess_presence_members(s,&v,1u<<2);
+    flush_outbox(s); drain(relay,s,0,&bytes);
+    assert(coop_sess_send(s,0,COOP_K_POS,packed,len)); flush_outbox(s); drain(relay,s,1u<<2,&bytes);
     // Same member number, new session: neither a queued nor a new pose inherits acceptance.
     assert(coop_sess_send(s,0,COOP_K_POS,packed,len));
     CoopRoster changed=s->roster; for(int i=1;i<8;i++) changed.m[i].session+=100;
@@ -82,7 +92,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='longshot-pos-privacy-') as tmp:
         d=Path(tmp); text=(ROOT/'host/coop.c').read_text()
         if a.mutation=='enqueue':
-            text=text.replace('&& accepted_locked(s, id))','&& id != s->view.self)')
+            text=text.replace('&& (accepted_locked(s, id) || presence_locked(s, id)))','&& id != s->view.self)')
         if a.mutation=='revoke':
             text=text.replace('slot->pos_epoch == s->accepted_epoch[slot->dst]','1')
         (d/'coop.c').write_text(text); (d/'check.c').write_text(C)

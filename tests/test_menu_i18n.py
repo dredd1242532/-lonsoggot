@@ -121,6 +121,9 @@ class MenuI18nTests(unittest.TestCase):
             "You are playing a temporary copy. Accepts the named players below to see and talk, under the room rules. "
             "No progress, items, pools or saves are shared. Read your key fingerprints aloud to each other before: "
             "a name can be anyone's. Press twice.",
+            "Sword-practice kit",
+            "Press twice to change only this copy's sword and shield inventory, never your normal save.",
+            "Different build; body not shown.",
         )
         for text in texts:
             with self.subTest(menu_text=text):

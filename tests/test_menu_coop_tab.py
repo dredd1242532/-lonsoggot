@@ -69,6 +69,9 @@ enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME =
 extern "C" void coop_test_charter_views(MkwVkCoopView* before, MkwVkCoopView* after, const char* kind);
 #endif
 static_assert(HOS_COOP_CMD_RULES_CHANGED == 9 && HOS_COOP_CMD_TEMP_SAVE == 10);
+static_assert(HOS_COOP_CMD_GO_FRIEND == 11 && HOS_COOP_CMD_DUEL_READY == 12 &&
+              HOS_COOP_CMD_PRESENCE_ACCEPT == 13 && HOS_COOP_CMD_KIT_ACCEPT == 14);
+static_assert(HOS_OPT_CHAT_FOCUS == 61 && HOS_KEY_CHAT == 29);
 @@TABS@@
 @@ROW@@
 @@TEXT@@
@@ -673,6 +676,21 @@ int main(int argc, char** argv) {
     CHECK(!std::strcmp(asked[0].text, room.duel_digest));
     room.duel_diagnostic = 0;
     CHECK(!coop_row_shown(row(kCoopDuel), room));
+    room.duel_diagnostic = 0, room.temporary_save = 0;
+    std::snprintf(room.kit_token, sizeof room.kit_token, "0000002c:00000063:0000000000000065:0000000000000001");
+    CHECK(!coop_row_shown(row(kCoopKit), room));
+    room.temporary_save = 1, room.accepted = 0;
+    CHECK(!coop_row_shown(row(kCoopKit), room));   // presence is required before a separate kit action
+    room.accepted = 1; coop_refresh(&changed); n_asked = 0;
+    CHECK(coop_row_shown(row(kCoopKit), room));
+    CHECK(std::strstr(row(kCoopKit).help, "only this copy") && std::strstr(row(kCoopKit).help, "never your normal save"));
+    coop_press(row(kCoopKit)); CHECK(pending && !n_asked);
+    room.kit_token[50] = '2'; coop_press(row(kCoopKit)); CHECK(!pending && !n_asked);
+    coop_refresh(&changed); coop_press(row(kCoopKit)); tick_pending(row(kCoopKit)); CHECK(pending);
+    coop_press(row(kCoopKit)); CHECK(!pending && n_asked == 1 && asked[0].cmd == HOS_COOP_CMD_KIT_ACCEPT &&
+                                    asked[0].number == room.offer && !std::strcmp(asked[0].text, room.kit_token));
+    coop_press(row(kCoopKit)); room.kit_token[50] = '3'; coop_refresh(&changed); CHECK(!pending);
+    room.temporary_save = 0; CHECK(!coop_row_shown(row(kCoopKit), room));
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
     for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer", "presence"}) check_menu_case(name);
 #ifdef COOP_MENU_REAL_ENGINE
@@ -706,6 +724,8 @@ static CoopSync *view_engine;
 #endif
 int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age) { (void)id; (void)out; (void)age; return 0; }
 int hos_oot_destination(int index, const char **child, const char **adult) { (void)index; (void)child; (void)adult; return 0; }
+static int incompatible_member;
+int hos_oot_coop_players_mismatch(int member, uint64_t session_id) { (void)session_id; return member == incompatible_member; }
 static int64_t clock_ms;
 int64_t hos_now_ns(void) { return clock_ms * 1000000; }
 void hos_log(const char *fmt, ...) { (void)fmt; }
@@ -754,7 +774,29 @@ int hos_oot_coop_offer(CoopOffer *out) {
     *out = sync_offer;
     return sync_has;
 }
-int hos_oot_coop_accept(uint32_t token) { accepted_token = token; return sync_has && token == sync_offer.token; }
+int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members) {
+    CoopOffer offer;
+    const int has = hos_oot_coop_offer(&offer);
+    const int ok = has && (temporary ? offer.presence_accepted : offer.accepted);
+    if (rules) *rules = ok ? offer.rules : (CoopRules){0};
+    if (members) {
+        *members = 0;
+        for (int i = 0; ok && i < session.n; i++) *members |= 1u << session.member[i].id;
+    }
+    return ok;
+}
+int hos_oot_coop_kit_token(char *out, size_t cap) {
+    const int ok = temporary && sync_has && sync_offer.presence_accepted;
+    snprintf(out, cap, "%s", ok ? "fixture-kit" : "");
+    return ok;
+}
+int hos_oot_coop_kit_accept(const char *stamp, uint32_t token) {
+    return temporary && sync_has && sync_offer.presence_accepted && stamp &&
+           !strcmp(stamp, "fixture-kit") && token == sync_offer.token;
+}
+int hos_oot_coop_kit_ready(uint32_t token, uint32_t epoch) { (void)token; (void)epoch; return 0; }
+int rx_option(int id, int otherwise) { (void)id; return otherwise; }
+int hos_oot_coop_accept(uint32_t token) { accepted_token = token; return !temporary && sync_has && token == sync_offer.token; }
 int hos_oot_coop_presence_accept(uint32_t token) {
     accepted_token = token; return temporary && sync_has && token == sync_offer.token;
 }
@@ -903,6 +945,8 @@ static void real(void) {
     sync_offer.accepted = 1, sync_maker = 1;
     hos_coop_menu_view(&v);
     CHECK(v.accepted && v.member[0].accepted && !v.member[1].accepted && v.remedies);
+    incompatible_member = 1; hos_coop_menu_view(&v); CHECK(v.member[0].pos_incompatible && !v.member[1].pos_incompatible);
+    incompatible_member = 0;
     temporary = 1;
     hos_coop_menu_view(&v);
     CHECK(v.temporary_save && !v.accepted && !v.member[0].accepted);
@@ -910,6 +954,9 @@ static void real(void) {
     hos_coop_menu_view(&v);
     CHECK(v.accepted && v.member[0].accepted);
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_PRESENCE_ACCEPT, NULL, 77) && accepted_token == 77);
+    CHECK(!hos_coop_menu_command(HOS_COOP_CMD_ACCEPT, NULL, 77));
+    CHECK(!strcmp(v.kit_token, "fixture-kit") && hos_coop_menu_command(HOS_COOP_CMD_KIT_ACCEPT, v.kit_token, 77));
+    CHECK(!hos_coop_menu_command(HOS_COOP_CMD_KIT_ACCEPT, "stale-copy", 77));
     temporary = 0; sync_offer.presence_accepted = 0;
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_REMOVE, "a9e0-31c7-6d58-f2b4", 0) && !strcmp(removed_key, "a9e0-31c7-6d58-f2b4"));
     CHECK(!hos_coop_menu_command(HOS_COOP_CMD_REMOVE, "", 0) && hos_coop_menu_command(HOS_COOP_CMD_RESET_POOLS, NULL, 0) && resets == 1);
@@ -1038,6 +1085,8 @@ def main():
     if "HOS_COOP_STATE_OFF" not in api:
         raise SystemExit("FAIL: vk_api.h: no Co-op tab's view (MkwVkCoopView)")
     api_cut = between(api, "enum { HOS_TEXT_KEY", "\n") + "\n" + between(api, "enum { HOS_COOP_STATE_OFF", "/* what the executable gives")
+    api_cut += "\n" + "\n".join(re.search(r"enum \{\s*" + first + r".*?\};", api, re.S).group(0)
+                                for first in ("HOS_SW_A", "HOS_KEY_MOVE_UP", "HOS_OPT_CHAT_FOCUS"))
     draw = block(menu, "void draw_options(ui::Ctx& c) {")
     coop_draw = block(menu, "void draw_coop_rows(")
     status = re.search(r"if \(const char\* line = (.*?)\)\n", coop_draw, re.S).group(1)
@@ -1086,7 +1135,8 @@ def main():
             cflags = [a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
                       "-I" + str(root / "host"), "-I" + str(mono)]
             sources = [(tmp / "host" / "fixture.c", ["-DCOOP_MENU_REAL_ENGINE=1", "-Dmain=coop_host_fixture_main"])]
-            sources += [(root / "host" / name, []) for name in ("coop_menu.c", "coop_state.c", "coop_proto.c")]
+            sources += [(root / "host" / name, []) for name in
+                        ("coop_menu.c", "coop_state.c", "coop_proto.c", "coop_arena.c", "coop_duel.c", "coop_duel_menu.c")]
             for index, (path, defines) in enumerate(sources):
                 obj = tmp / ("charter-%d.o" % index)
                 run(cflags + defines + ["-c", str(path), "-o", str(obj)])
@@ -1094,15 +1144,17 @@ def main():
             objects.append(str(tmp / "monocypher.o"))
         run([a.cxx, "-std=c++20", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
              "-Wno-missing-field-initializers", "-I" + str(ROOT)] + (["-DCOOP_MENU_REAL_ENGINE=1"] if real_engine else []) +
-            [str(tmp / "menu.cpp")] + objects + ["-o", str(tmp / "menu")])
+            [str(tmp / "menu.cpp")] + objects + ["-o", str(tmp / "menu")] + ([] if os.name == "nt" else ["-lm"]))
         env = {k: v for k, v in os.environ.items() if not k.startswith("HOS_COOP")}
         run([str(tmp / "menu")] + ([a.menu_case] if a.menu_case != "all" else []), env=env)
         if a.menu_case != "all":
             return
         run([a.cc, "-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
              "-I" + str(root / "host"), "-I" + str(mono), str(tmp / "host" / "fixture.c"),
-             str(root / "host" / "coop_menu.c"), str(root / "host" / "coop_proto.c"), str(tmp / "monocypher.o"),
-             "-o", str(tmp / "host_test")])
+             str(root / "host" / "coop_menu.c"), str(root / "host" / "coop_proto.c"),
+             str(root / "host" / "coop_state.c"), str(root / "host" / "coop_arena.c"),
+             str(root / "host" / "coop_duel.c"), str(root / "host" / "coop_duel_menu.c"),
+             str(tmp / "monocypher.o"), "-o", str(tmp / "host_test")] + ([] if os.name == "nt" else ["-lm"]))
         run([str(tmp / "host_test")], env=env)
         run([str(tmp / "host_test"), "demo"], env=dict(env, HOS_COOP_DEMO="1"))
         # ---- the Room rules page against the engine: the rows as the source has them ----
