@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://longshot.magicbean.dev/"><b>Website</b></a> |
   <a href="https://longshot.magicbean.dev/download"><b>Download</b></a> |
-  <a href="https://discord.gg/KX99srmQTe"><b>Discord</b></a> |
+  <a href="https://discord.gg/magicbean"><b>Discord</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#build-from-source">Build from source</a> |
@@ -30,7 +30,7 @@ Longshot is a static recompilation of a supported console game. The game's code 
 
 Longshot is a continuation of [Hookshot](https://github.com/NotRexed/Hookshot). The top maintainers have moved to this project.
 
-**[Join us on Discord](https://discord.gg/KX99srmQTe)!**
+**[Join us on Discord](https://discord.gg/magicbean)!**
 <br>
 
 > [!IMPORTANT]
@@ -106,8 +106,13 @@ frame rate: the game runs on more than this, and performance depends on the reso
 | **Graphics card** | **Vulkan 1.3.** NVIDIA GeForce GTX 1060 6 GB or GTX 1650, AMD Radeon RX 5500 XT, or Intel Arc A380. | **Vulkan 1.3 with mesh shaders.** NVIDIA GeForce RTX 3060 or RTX 4060, AMD Radeon RX 6600 XT or RX 6700 XT, or Intel Arc A750. Check the [project status](#project-status) for each maker's known issues. |
 | **Mesh shaders** | Not required: without them, Longshot draws through a slower compute fallback. | **Strongly recommended:** NVIDIA RTX 20 series and newer, AMD RX 6000 series and newer, Intel Arc. |
 | **Video memory (VRAM)** | **4 GB**, with the in-game Minimum (4GB) or Low (6GB) quality preset. | **8 GB or more.** |
-| **System memory (RAM)** | **16 GB.** A run uses about 10 GB. | **16 GB or more.** |
+| **System memory (RAM)** | **16 GB.** See the memory guidance below. | **16 GB or more.** |
 | **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
+
+Memory use depends on the build, driver and scene: recent Linux/NVIDIA runs used roughly
+13–19 GiB for the game alone (see [tested configurations](docs/tested-configurations.md)), so even a 16 GB PC can need
+swap. Leave room for the desktop and other programs.
+Swap can prevent an out-of-memory exit, but it is not extra RAM; heavy swapping can make the whole desktop unresponsive.
 
 **Drivers:** use an up-to-date graphics driver with Vulkan 1.3. On Linux, use Mesa or NVIDIA's driver. Linux examples
 include Ubuntu 22.04, Debian 12, Fedora, Arch and SteamOS.
@@ -293,6 +298,7 @@ line with the video memory in use against what the driver allows, and DLSS's det
 | **Starting** | |
 | The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
 | Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
+| Linux: low-memory warning, or the whole desktop becomes unresponsive while loading | Close other programs and check `free -h`: the `Mem` and `Swap` rows are separate. Below 10 GiB of physical RAM the game warns even with plenty of swap; absence of that warning does not mean a run will fit. Do not keep retrying a load that locks up the PC. After restarting, keep the failed session's log before launching again, and check `journalctl -k -b -1` for an out-of-memory kill or a GPU reset (if the previous boot's journal was saved). |
 | **Graphics** | |
 | Parts of the picture are missing, or a message says your card has no mesh shader support | The card or its driver has no mesh shaders, so Longshot draws through its compute fallback, which leaves some draws out. Update the driver; a card with mesh shaders draws everything ([#640](https://github.com/NotRexed/Hookshot/issues/640)). |
 | A place has a wrong texture, or a floor or wall is missing | Look for `longshot_damaged_files.txt` in the game folder. The build writes it when your dump is incomplete (about 23.3 GB instead of 23.8 GB), listing each damaged file and what was put in its place. Dump the game again and build from the new dump; the file is then removed. |
@@ -398,7 +404,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
 | | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
 | | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
-| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's: DLSS, FSR and TAAU do not take its scene yet, so the game's own upscale runs) (shown only with HDR set to Native) | Vanilla |
+| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS/DLAA with their NVIDIA frame-generation inputs, and AMD FSR 4, can be tried with `RX_VK_PSYCHOV35_DLSS=1`; FSR 3.1, TAAU and Upscaler Off still fall back to the game's network) | Vanilla |
 | | Colour filter | Off, Protanopia, Deuteranopia, Tritanopia (live colour correction, not simulation; SDR and Expanded HDR only) | Off |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
@@ -436,6 +442,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
 | Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed) | Off |
+| | Player: Damage taken | Half, Normal, Double, Quadruple (live, while Debug tools is on; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
 | | Developer: Descriptor reuse | Off, On (changes at once) | On |
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
@@ -472,6 +479,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   can reach 120 FPS. Choose **Auto** in Frame generation to target the display's refresh rate instead of a fixed multiplier.
   A cap **past 60 is experimental**: the game keeps real time, but some cutscenes and bosses still count frames and can
   misbehave (Gohma running into the wall, the intro's narration running ahead: #1742). 60 is the safe choice.
+  Scarecrow's Song keeps the timing of its eight-note recording and playback above 60. Saved songs are not retimed;
+  re-record a song after updating if its recorded rhythm was lost.
   **Uncapped** renders as fast as the PC can (the game still keeps real time). A display that waits for its refresh still
   holds the frames to its refresh rate: V-Sync on, or the driver's FIFO mode. `HOS_FPS_MAX=<61-1000>` sets a cap for one
   run.
@@ -498,6 +507,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   and **Sharpness** sharpens it, by the picture's pixels: when the window is much larger than the picture (the Handheld
   Profile's 1536x864 on a 4K screen), a Sharpness kept from an older version is stronger than it was, so a lower one may
   suit.
+  Changing the Upscaler keeps your chosen render scale, including across a restart. An engine without that scale
+  temporarily uses and shows its nearest supported size: DLSS Balanced (58%) shows 50% with the game's own, then 58%
+  again on returning to DLSS. Changing Render resolution or choosing a Quality preset replaces that saved scale.
 - **Aspect ratio** and **Output resolution:** the menu lists the resolutions your screen offers (its display modes, as
   Windows lists them, DSR's included), with the common sizes of each of those shapes your screen does not list (1440p, 4K
   and 5K at 16:9, 1920x1200 and 2560x1600 at 16:10, 3440x1440 at 21:9, ...), grouped by shape. **Aspect ratio** lists
@@ -962,8 +974,11 @@ switch that stands in for a menu row (`RX_VK_PACE`, `RX_VK_UPSCALE`, `RX_VK_FRAM
 `HOS_DYNRES`, `HOS_OUTPUT_RES`) applies to that run only: `longshot_options.ini` keeps the value chosen in the menu.
 
 To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or add `HOS_OOT_CHEATS=1` to
-`longshot_env.txt` in the game folder). The tools then show below it on the same tab. The tab's Developer section,
-always shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows.
+`longshot_env.txt` in the game folder). The tools then show below it on the same tab. **Damage taken** is in the
+**Player** group beside **Heart protection**: Half, Normal (the default), Double or Quadruple. It applies only while
+Debug tools is on: off, Link takes Normal damage, and the saved choice returns when the tools do. Heart protection takes
+priority while enabled. The tab's Developer section, always shown, has the Descriptor reuse, Sampler cache, Robust
+buffers and ASTC as RGBA8 rows.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then

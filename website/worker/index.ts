@@ -113,6 +113,11 @@ async function fetchReleases(ctx) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const mb = (n) => (n ? `${Math.round(n / 1048576)} MB` : "");
 
+// The site's own pages (src/content-pages.ts, src/content/docs/), linked from the download pages.
+const NAV = [["Get started", "/install/"], ["Requirements", "/requirements/"], ["Help", "/help/"], ["About", "/about/"]];
+
+// The same look as the rest of the site (src/styles/theme.css): its colours, its light and dark themes (and the
+// theme the visitor picked there, which Starlight keeps in localStorage), its header and its logo.
 function page(title, body, status = 200) {
   return new Response(`<!doctype html>
 <html lang="en">
@@ -120,53 +125,90 @@ function page(title, body, status = 200) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${esc(title)}</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
-  <meta name="theme-color" content="#1a0601">
+  <meta name="description" content="Download the Longshot Launcher for Windows or Linux: it builds the game from your own copy.">
+  <link rel="icon" type="image/png" href="/branding/longshot.png">
+  <meta name="theme-color" content="#0e100f">
+  <script>try { const t = localStorage.getItem("starlight-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
   <style>
     :root {
-      --bg: #1a0601; --fg: #fbe9c8; --muted: #e6c9a0; --line: rgba(251, 233, 200, .16); --pill: rgba(251, 233, 200, .06);
-      --green: #7cc243; --green-ink: #142705; --gold: #f6c453;
+      --bg: #0e100f; --fg: #f5f7f3; --muted: #c0c6c1; --faint: #949b96; --border: #2f3431; --panel: #161917;
+      --panel-hover: #1f2320; --accent: #c2ed83; --button: #c2ed83; --button-hover: #daf5b2; --button-text: #13210d;
+      --warn-bg: #2a2412; --warn-line: #a88a3a;
       color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: #f6f7f4; --fg: #121712; --muted: #434a41; --faint: #5f665c; --border: #cfd3cb; --panel: #eef0ea;
+        --panel-hover: #e5e8e1; --accent: #365e1b; --button: #3c651e; --button-hover: #254415; --button-text: #f6f7f4;
+        --warn-bg: #f6efd8; --warn-line: #b8953a;
+        color-scheme: light;
+      }
+    }
+    :root[data-theme="light"] {
+      --bg: #f6f7f4; --fg: #121712; --muted: #434a41; --faint: #5f665c; --border: #cfd3cb; --panel: #eef0ea;
+      --panel-hover: #e5e8e1; --accent: #365e1b; --button: #3c651e; --button-hover: #254415; --button-text: #f6f7f4;
+      --warn-bg: #f6efd8; --warn-line: #b8953a;
+      color-scheme: light;
     }
     * { box-sizing: border-box; }
     body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px 16px;
-      background: var(--bg); color: var(--fg); line-height: 1.5;
-      font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      margin: 0; background: var(--bg); color: var(--fg); line-height: 1.6; font-size: 1.0625rem;
+      font-family: "Atkinson Hyperlegible Next", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
     }
-    main { width: 100%; max-width: 640px; text-align: center; }
-    .logo { width: 120px; height: auto; }
-    h1 { font-size: clamp(1.8rem, 7vw, 2.6rem); font-weight: 800; line-height: 1.1; margin: .25rem 0 .5rem; }
+    a { color: var(--accent); text-underline-offset: .15em; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    header {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem 1.5rem;
+      max-width: 60rem; margin: 0 auto; padding: 1rem 16px; border-bottom: 1px solid var(--border);
+    }
+    .home { display: inline-flex; align-items: center; gap: .6rem; color: var(--fg); text-decoration: none; font-weight: 700; font-size: 1.2rem; }
+    .home img { width: 36px; height: 36px; }
+    nav { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; }
+    nav a { color: var(--muted); text-decoration: none; font-weight: 600; }
+    nav a:hover { color: var(--fg); }
+    main { max-width: 44rem; margin: 0 auto; padding: 2.5rem 16px 3rem; }
+    h1 {
+      font-family: "Libertinus Serif", Georgia, "Times New Roman", serif; font-weight: 600;
+      font-size: clamp(2rem, 1.5rem + 2vw, 2.75rem); line-height: 1.1; margin: 0 0 .75rem;
+    }
+    h2 { font-size: 1.25rem; margin: 2.5rem 0 .75rem; }
     p { color: var(--muted); margin: .5rem 0; }
-    a { color: var(--gold); }
+    strong { color: var(--fg); }
+    .lead { font-size: 1.15rem; }
+    .warn { background: var(--warn-bg); border-left: 4px solid var(--warn-line); border-radius: 8px; padding: .75rem 1rem; margin: 1.25rem 0; color: var(--fg); }
+    .bigs { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.5rem 0 .75rem; }
     .big {
-      display: inline-flex; flex-direction: column; align-items: center; margin: 1rem 0 .25rem; padding: 1rem 2rem;
-      border-radius: 18px; background: var(--green); color: var(--green-ink); text-decoration: none; font-weight: 800;
-      font-size: 1.25rem; box-shadow: 0 3px 0 rgba(0, 0, 0, .35);
+      display: inline-flex; flex-direction: column; padding: .85rem 1.5rem; border-radius: 12px; background: var(--button);
+      color: var(--button-text); text-decoration: none; font-weight: 700; font-size: 1.15rem;
     }
-    .big small { font-weight: 600; font-size: .85rem; opacity: .8; }
-    .big:hover { filter: brightness(1.08); }
-    .big:focus-visible, .pill:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
-    .others { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; margin: .5rem 0 1.5rem; }
+    .big small { font-weight: 500; font-size: .85rem; opacity: .85; }
+    .big:hover { background: var(--button-hover); }
+    .others { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
     .pill {
-      display: inline-block; padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--line); background: var(--pill);
-      color: var(--muted); font-weight: 600; text-decoration: none;
+      display: inline-block; padding: .35rem .9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel);
+      color: var(--fg); font-weight: 600; font-size: .95rem; text-decoration: none;
     }
-    .pill:hover { background: var(--green); border-color: var(--green); color: var(--green-ink); }
-    .channels { margin-top: 1.25rem; }
-    .channel { border-top: 1px solid var(--line); padding: .75rem 0 .25rem; }
-    .channel h3 { margin: 0 0 .25rem; font-size: 1.15rem; }
-    .channel h3 small { font-weight: 600; color: var(--muted); font-size: .85rem; }
-    .channel .others { margin: .5rem 0; }
-    .warn { border: 1px solid var(--gold); border-radius: 12px; padding: .75rem 1rem; margin: 1rem 0; color: var(--fg); }
-    code { font-size: .9em; }
+    .pill:hover { background: var(--panel-hover); border-color: var(--faint); }
+    .steps { margin: 0; padding-left: 1.25rem; color: var(--muted); }
+    .steps li { margin: .35rem 0; }
+    .channels { display: grid; gap: .75rem; }
+    .channel { border: 1px solid var(--border); background: var(--panel); border-radius: 12px; padding: .9rem 1rem; }
+    .channel h3 { margin: 0; font-size: 1.05rem; }
+    .channel h3 small { font-weight: 500; color: var(--faint); font-size: .9rem; margin-left: .35rem; }
+    .channel p { font-size: .95rem; }
+    footer { max-width: 44rem; margin: 0 auto; padding: 1.5rem 16px 2.5rem; border-top: 1px solid var(--border); font-size: .9rem; }
   </style>
 </head>
 <body>
+  <header>
+    <a class="home" href="/"><img src="/branding/longshot.png" alt="" width="512" height="512">Longshot</a>
+    <nav aria-label="Main navigation">${NAV.map(([label, href]) => `<a href="${href}">${label}</a>`).join("")}</nav>
+  </header>
   <main>
-    <img class="logo" src="/logo.webp" alt="" width="512" height="512">
 ${body}
   </main>
+  <footer><p>Bring your own copy of the game: Longshot never includes the game, its keys or an executable.
+    All launcher releases: <a href="${FORGE}/${REPO}/releases">git.magicbean.dev</a>.</p></footer>
 </body>
 </html>
 `, {
@@ -196,13 +238,21 @@ function channelTable(releases) {
   return `<div class="channels">${rows.join("")}</div>`;
 }
 
-const NOT_THE_BUILDER = `<p>Download the <strong>launcher</strong>: it installs the builder and builds the game from your own copy.
-    The <em>LongshotBuilder</em> files on Longshot's releases are for the launcher, not for you to run.</p>`;
+const NOT_THE_BUILDER = `<p class="lead">The launcher installs the builder and builds the game on your PC, from your own copy.</p>
+    <p>The <em>LongshotBuilder</em> files on Longshot's releases are for the launcher, not for you to run.</p>`;
+
+const NEXT_STEPS = `<h2>Then</h2>
+    <ol class="steps">
+      <li>Check your PC can build and run it: <a href="/requirements/">Requirements</a>.</li>
+      <li>Install, point it at your copy of the game, and play: <a href="/install/">Get started</a>.</li>
+      <li>Windows or your browser warns about the download? <a href="/help/antivirus/">Antivirus and SmartScreen</a>.</li>
+      <li>Something else goes wrong: <a href="/help/">Help</a>.</li>
+    </ol>`;
 
 function downloadPage(request, releases) {
   const [channel, r] = best(releases);
   if (!r) {
-    return page("Download the Longshot Launcher", `    <h1>Longshot Launcher</h1>
+    return page("Download the Longshot Launcher", `    <h1>Download the Longshot Launcher</h1>
     <p>There is no release yet. Watch <a href="${FORGE}/${REPO}/releases">the release page</a>.</p>`, 404);
   }
   const os = osOf(request);
@@ -216,15 +266,14 @@ function downloadPage(request, releases) {
     .map((k) => `<a class="pill" href="/download/launcher/${k}">${esc(FILES[k].label)} (${esc(FILES[k].note)})</a>`).join("");
   const warn = channel === "stable" ? "" :
     `<div class="warn">There is no stable launcher yet: this is the newest <strong>${channel}</strong> (${esc(CHANNEL_NOTE[channel])}).</div>`;
-  return page("Download the Longshot Launcher", `    <h1>Longshot Launcher</h1>
+  return page("Download the Longshot Launcher", `    <h1>Download the Longshot Launcher</h1>
     ${NOT_THE_BUILDER}
     ${warn}
-    ${bigs}
+    <div class="bigs">${bigs}</div>
     <div class="others">${others}</div>
+    ${NEXT_STEPS}
     <h2>Every channel</h2>
-    ${channelTable(releases)}
-    <p>How to install and play: <a href="${FORGE}/MagicBeanDev/Longshot#install-and-play">Longshot's README</a>.
-    All releases: <a href="${FORGE}/${REPO}/releases">git.magicbean.dev</a>.</p>`);
+    ${channelTable(releases)}`);
 }
 
 function notFound(releases, what, kind) {

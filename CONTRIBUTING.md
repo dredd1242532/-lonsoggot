@@ -91,8 +91,9 @@ break.
 ## Development setup
 
 You need your own supported dump: program `0400486024DEC000`, update v131072, build `e0f3ccfa`. Other versions don't
-work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free and a run about
-10 GB of RAM. Build on an SSD if you can: a hard drive works but takes much longer.
+work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free. For runtime
+memory, see the README's [requirements](README.md#what-you-need): the game alone can exceed 16 GiB, depending on the
+build, driver and scene. Build on an SSD if you can: a hard drive works but takes much longer.
 
 Where a step below needs files from the Builder, use the Windows builder of the newest
 [Longshot release](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
@@ -446,7 +447,7 @@ SDK is not one of them: it is never in the repository ([NVIDIA DLSS](#nvidia-dls
 
 ## Where to talk
 
-- **Discord:** https://discord.gg/KX99srmQTe. Claim work and discuss pull requests in `#dev-work`; `#prs` shows every
+- **Discord:** https://discord.gg/magicbean. Claim work and discuss pull requests in `#dev-work`; `#prs` shows every
   open pull request, kept up to date.
 - **Issues:** [the forms on git.magicbean.dev](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new/choose).
 - **Agents:** [AGENTS.md](AGENTS.md); they post progress to the team chat (`scripts/team_chat.py`).
