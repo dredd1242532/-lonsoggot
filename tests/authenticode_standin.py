@@ -1,11 +1,12 @@
 """Explicit Linux mechanics stand-in through the production Authenticode command path.
 
-    python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode
+    python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode [--out <empty folder>]
 
-Requires openssl, clang, lld-link and the pinned osslsigncode. Downloads nothing. Uses
-throwaway software keys/certificates and a loopback RFC 3161 TSA, not a real token/service
-or public timestamp authority. No trust store is changed and no Windows program is run.
-This proves mechanics, not publisher trust, PKCS#11 credentials or Windows acceptance.
+Requires Python 3.12+, OpenSSL 3, clang, lld-link and osslsigncode 2.15 for this PC's OS.
+Downloads nothing. Uses throwaway software keys/certificates and a loopback RFC 3161 TSA,
+not a real token/service or public timestamp authority. No trust store is changed and no
+Windows program is run. --out retains only tiny authored stand-ins, public certificates
+and hashes, never keys. They are not Builder binaries or publisher-trust evidence.
 """
 import argparse
 import contextlib
@@ -47,6 +48,44 @@ def certificate(folder, name, usage):
          "-keyout", key, "-out", cert])
     return key, cert
 
+def config_path(path):
+    """Quoted OpenSSL-config path, including Windows drive paths and spaces."""
+    return '"' + path.as_posix().replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def check_output(out):
+    out = Path(out)
+    if out.is_symlink() or (out.exists() and (not out.is_dir() or any(out.iterdir()))):
+        raise ValueError("--out must name an empty directory (or a new one)")
+
+
+def export_bundle(folder, out):
+    """A strict public-file allowlist: never copy the temporary directory or its keys."""
+    out = Path(out)
+    check_output(out)
+    names = (("unsigned-standin.exe", "unsigned.exe"),
+             ("signed-setup-standin.exe", "LongshotBuilder-Setup.exe"),
+             ("signed-apphost-standin.exe", "LongshotBuilder.exe"),
+             ("standin-package.zip", "builder.zip"),
+             ("signer.pem", "code.pem"), ("timestamp.pem", "TSA.pem"))
+    files = {dest: (folder / source).read_bytes() for dest, source in names}
+    for name in ("signer.pem", "timestamp.pem"):
+        data = files[name]
+        if (not data.startswith(b"-----BEGIN CERTIFICATE-----") or b"-----END CERTIFICATE-----" not in data
+                or b"PRIVATE KEY" in data.upper()):
+            raise ValueError("only public certificate PEM files may be exported")
+    out.mkdir(parents=True, exist_ok=True)
+    check_output(out)
+    for name, data in files.items():
+        with (out / name).open("xb") as f:
+            f.write(data)
+    sums = "".join("%s  %s\n" % (hashlib.sha256(data).hexdigest(), name) for name, data in sorted(files.items()))
+    with (out / "SHA256SUMS").open("x", encoding="ascii", newline="\n") as f:
+        f.write(sums)
+    print("Exported tiny authored stand-ins, not Builder binaries: %s" % out)
+    print("No private key was exported; the self-signed certificates do not establish public trust.")
+
+
 
 @contextlib.contextmanager
 def timestamp_server(folder, key, cert):
@@ -56,7 +95,7 @@ def timestamp_server(folder, key, cert):
     config.write_text("[tsa]\ndefault_tsa=server\n[server]\nserial=%s\ncrypto_device=builtin\n"
                       "signer_cert=%s\ncerts=%s\nsigner_key=%s\nsigner_digest=sha256\n"
                       "default_policy=1.2.3.4.1\ndigests=sha256\naccuracy=secs:1\nordering=yes\ntsa_name=yes\n"
-                      "ess_cert_id_chain=no\ness_cert_id_alg=sha256\n" % (serial, cert, cert, key))
+                      "ess_cert_id_chain=no\ness_cert_id_alg=sha256\n" % tuple(config_path(p) for p in (serial, cert, cert, key)))
     errors = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -102,7 +141,13 @@ def rejected(fn, error):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--osslsigncode", required=True)
+    parser.add_argument("--out", type=Path, help="retain public fixtures in a new or empty folder, never private keys")
     a = parser.parse_args()
+    if a.out is not None:
+        try:
+            check_output(a.out)
+        except (ValueError, OSError) as e:
+            parser.error(str(e))
     tool = str(Path(a.osslsigncode).resolve())
     auth, bp, release = (load(n) for n in ("authenticode", "builder_package", "release"))
     with tempfile.TemporaryDirectory(prefix="authenticode-standin-") as tmp:
@@ -152,11 +197,14 @@ def main():
         no_timestamp = folder / "no-timestamp.exe"
         run([tool, "sign", "-certs", cert, "-key", key, "-h", "sha256", "-in", unsigned, "-out", no_timestamp])
         rejected(lambda: auth.verify_file(tool, no_timestamp, leaf, trust), auth.SigningError)
-        with zipfile.ZipFile(archive, "w") as z:
+        tampered_archive = folder / "tampered-package.zip"
+        with zipfile.ZipFile(tampered_archive, "w") as z:
             for name in auth.ARCHIVE_FILES:
                 z.writestr(name, tampered.read_bytes() if name == auth.ARCHIVE_FILES[2] else setup.read_bytes())
-        rejected(lambda: auth.verify_archive(archive, tool, leaf, trust), auth.SigningError)
+        rejected(lambda: auth.verify_archive(tampered_archive, tool, leaf, trust), auth.SigningError)
         print("stand-in: altered code, wrong leaf, missing timestamp and tampered package are rejected")
+        if a.out is not None:
+            export_bundle(folder, a.out)
     print("PASS: real command-path mechanics with temporary software keys/TSA; not PKCS11, public trust, Windows or live CI proof")
 
 

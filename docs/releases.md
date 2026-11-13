@@ -196,12 +196,30 @@ accepted on the other. Check the chosen certificate and timestamp on a clean Win
 releases. Removing a configured certificate secret intentionally restores unsigned output; do not use that as an
 unannounced workaround once players have been promised signed releases.
 
-The game-free decision/command checks are `python -I -B tests/test_authenticode.py`. The explicit Linux
-`python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode` test also needs openssl, clang and
-lld-link. It downloads nothing and exercises the **production sign/verify/archive-check command path** with temporary
+The game-free decision/command checks are `python -I -B tests/test_authenticode.py`. The explicit
+`python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode` test needs Python 3.12+,
+OpenSSL 3, clang, lld-link and osslsigncode 2.15 for the host OS (Linux/WSL is one route). It downloads nothing and
+exercises the **production sign/verify/archive-check command path** with temporary
 software keys, explicitly trusted self-signed certificates and a loopback RFC 3161 timestamp server. It rejects altered
 code, a wrong leaf, an absent timestamp and a tampered zip. It is a **stand-in**, not proof of PKCS#11 credentials,
 hardware/cloud custody, public publisher trust, Windows acceptance or the live timestamp service.
+
+To keep fixtures for Windows' own signature tools, add `--out signing-standin` (a new or empty directory):
+
+```sh
+python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode --out signing-standin
+```
+
+It exports `unsigned-standin.exe`, `signed-setup-standin.exe`, `signed-apphost-standin.exe`,
+`standin-package.zip` (the same three EXE paths as the release), `signer.pem`, `timestamp.pem` and `SHA256SUMS`.
+The zip is the verified positive fixture, not the corrupted copy used by the negative test. No key is exported.
+These are **tiny authored stand-ins, not working Builder binaries**. The public certificates are self-signed,
+test-only and short-lived; Windows should not trust their roots. Do not install them as trusted roots or turn off
+Defender. They serve a Windows signature/structure check, not the real release's browser-download reputation
+test. The latter needs actual release files and is separate from an on-demand scan.
+
+`python -I -B tests/test_authenticode_standin.py` checks the export allowlist, hashes and overwrite refusal without
+running a compiler, signer, timestamp server or executable.
 
 #### Certificate and ownership decisions
 
