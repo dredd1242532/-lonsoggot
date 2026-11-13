@@ -53,6 +53,7 @@
 .studio-signal { width: 7px; height: 7px; border-radius: 50%; background: var(--sl-color-text-accent); }
 .studio-hero h1#_top { color: var(--sl-color-white); font-size: clamp(2.8rem, 4.9vw, 4.75rem); line-height: 1.04; letter-spacing: -.045em; margin: 1.5rem 0; }
 .studio-hero h1#_top em { color: var(--sl-color-text-accent); font-style: normal; }
+.studio-hero .studio-bean-line { display: inline-block; min-block-size: 2.08em; max-width: 100%; text-wrap: balance; }
 .studio-intro { font-size: 1.15rem; line-height: 1.65; max-width: 28rem; color: var(--sl-color-gray-2); margin: 0; }
 .studio-intro strong { font-weight: 700; color: var(--sl-color-white); }
 .studio-hero-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.8rem; }

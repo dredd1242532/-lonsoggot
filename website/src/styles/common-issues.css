@@ -1,0 +1,25 @@
+.sl-markdown-content .issue-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 1rem; margin-block: 2rem; }
+.sl-markdown-content .issues-guide .issue-card { margin: 0; padding: 0; border-radius: 12px; overflow-wrap: anywhere; min-width: 0; }
+.sl-markdown-content .issues-guide .issue-card > summary { padding: 1.25rem; min-height: 44px; }
+.sl-markdown-content .issues-guide .issue-card > summary:hover { background: var(--panel-hover); border-radius: 12px; }
+.sl-markdown-content .issue-card > summary h2 { display: inline-block; vertical-align: top; width: calc(100% - 1.5rem); margin: 0; padding: 0; border: 0; font-family: var(--sl-font); scroll-margin-top: calc(var(--sl-nav-height) + 1rem); }
+.sl-markdown-content .issue-card > summary h2 > span { display: block; }
+.sl-markdown-content .issue-category { color: var(--sl-color-text-accent); font-size: .7rem; font-weight: 700; letter-spacing: .08em; line-height: 1.5; }
+.sl-markdown-content .issue-title { margin-top: .5rem; color: var(--sl-color-white); font-size: 1.3rem; font-weight: 700; line-height: 1.35; }
+.sl-markdown-content .issue-hint { margin-top: .6rem; color: var(--soft-text); font-size: .95rem; font-weight: 400; line-height: 1.5; }
+.sl-markdown-content .issues-guide .issue-card[open] { grid-column: 1/-1; border-color: var(--sl-color-text-accent); }
+.sl-markdown-content .issue-content { max-width: 72ch; padding: 0 1.5rem 1.5rem; }
+.sl-markdown-content .issue-step-label { font-weight: 700; color: var(--sl-color-white); margin-block: .5rem 1rem; }
+.sl-markdown-content .issue-content ol { padding-left: 1.5rem; }
+.sl-markdown-content .issue-content li { margin-block: 1rem; padding-left: .3rem; }
+.sl-markdown-content .issue-content li::marker { color: var(--sl-color-text-accent); font-weight: 700; }
+.sl-markdown-content .issues-guide .issue-help { margin: 1.5rem 0 0; padding-inline: 1rem; background: var(--sl-color-bg); }
+.sl-markdown-content .issues-guide :is(summary,a):focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 4px; }
+@media (max-width: 42rem) {
+  .sl-markdown-content .issue-grid { grid-template-columns: 1fr; }
+  .sl-markdown-content .issue-content { padding-inline: 1.25rem; }
+}
+@media print {
+  .sl-markdown-content .issue-grid { display: block; }
+  .sl-markdown-content .issues-guide .issue-card { margin-block: 1rem; }
+}

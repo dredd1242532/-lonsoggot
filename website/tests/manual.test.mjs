@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { sectionsAt, formatManual, formatInstallHub, formatSaveGuide } from '../scripts/format-manual.mjs';
+import { formatCommonIssues } from '../scripts/format-common-issues.mjs';
+import { revealManualTarget } from '../src/lib/manual-navigation.mjs';
 
 test('manual sections do not split headings inside backtick or tilde code fences', () => {
   const source = 'Introduction\n## First\n```sh\n## A shell comment\n```\n~~~text\n## Another example\n~~~\n## Second\nDone\n';
@@ -45,4 +47,28 @@ test('save guide presentation retains commands, backup guidance and heading anch
     assert(formatted.includes('href="#advanced-beans"'));
     assert(formatted.includes('data-manual-expand'));
   }
+});
+
+test('symptom cards preserve all canonical steps, help links and existing topic anchors', async () => {
+  const source = await readFile(new URL('../../docs/common-issues.md', import.meta.url), 'utf8');
+  const formatted = formatCommonIssues(source);
+  const topics = sectionsAt(source, 2).filter(section => section.title && section.title !== 'What’s going wrong?');
+  assert.equal((formatted.match(/class="issue-card"/g) || []).length, 7);
+  assert.equal((formatted.match(/class="issue-help"/g) || []).length, 7);
+  for (const topic of topics) {
+    assert(formatted.includes(`id="${topic.title.toLowerCase().replaceAll(' ', '-')}"`));
+    for (const part of sectionsAt(topic.body, 3)) {
+      for (const line of part.body.split('\n').filter(line => line.trim())) assert(formatted.includes(line), `Lost content: ${line}`);
+    }
+  }
+  assert.throws(() => formatCommonIssues(source.replace('## A download is flagged', '## Unknown topic')), /structure changed/);
+  assert.throws(() => formatCommonIssues(source.replace('### Still stuck?', '### Extra section')), /structure changed/);
+});
+
+test('a legacy symptom link opens its native card, including nested help targets', () => {
+  const outer = { tagName: 'DETAILS', open: false, parentElement: null };
+  const inner = { tagName: 'DETAILS', open: false, parentElement: outer };
+  revealManualTarget({ parentElement: inner, closest: () => null });
+  assert.equal(outer.open, true);
+  assert.equal(inner.open, true);
 });

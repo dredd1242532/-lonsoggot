@@ -7,6 +7,7 @@ import { contentSources } from '../content-sources.mjs';
 import { verifyCompatibilitySources } from './verify-compatibility-sources.mjs';
 import { createMarkdownProcessor } from '@astrojs/markdown-remark';
 import { formatGraphicsSettings } from './graphics-settings.mjs';
+import { formatCommonIssues } from './format-common-issues.mjs';
 
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.resolve(site, '..');
@@ -55,6 +56,7 @@ for (const [source, slug] of pages) {
   }).join('');
   if (source === 'README.md') text = formatManual(text);
   if (source === 'docs/getting-started.md') text = formatInstallHub(text);
+  if (source === 'docs/common-issues.md') text = formatCommonIssues(text);
   if (['docs/saves.md', 'docs/updates-and-saves.md'].includes(source)) text = formatSaveGuide(text);
   if (source === 'docs/graphics-and-controls.md') text = await formatGraphicsSettings(text,
     await readFile(path.join(root, 'README.md'), 'utf8'),
@@ -62,6 +64,7 @@ for (const [source, slug] of pages) {
   const front = [
     '---', `title: ${JSON.stringify(title)}`, `slug: ${JSON.stringify(slug)}`,
     `editUrl: ${JSON.stringify(siteConfig.editBase + source)}`,
+    ...(source === 'docs/common-issues.md' ? ['tableOfContents: false'] : []),
     '---', '',
   ].join('\n');
   await writeFile(path.join(out, slug.replaceAll('/', '--') + '.md'), front + text);

@@ -31,6 +31,11 @@ controls, and team credits. The main Grappling Hook Bean becomes the Glowing Fai
 Bean after three clicks, taps or keyboard button activations. Reload resets it.
 A failed image load keeps the original artwork and allows a retry.
 
+The homepage's bean punchline changes once per page load from ten short lines.
+Session storage prevents an immediate repeat across reloads in the same tab when
+available. Blocked storage still allows a random line; no JavaScript keeps the
+original “Slightly emotional beans.” There is no timed rotation or animation.
+
 At narrower widths the main links use an Explore Longshot disclosure, including a
 no-JavaScript fallback. With JavaScript, Escape, an outside click or choosing a link
 closes it. Shared-memory GPUs have a separate checker choice; their memory remains
@@ -99,6 +104,12 @@ Edit those original sources, not the generated cards. Restart badges reflect exp
 README annotations; absence of a badge is not a promise about every build or mode.
 Search and section filters enhance native disclosures; without JavaScript every card
 remains available. Setting links clear filters and printing includes the whole catalogue.
+
+Common issues uses seven symptom cards with short checklists and a nested “Still stuck?”
+disclosure for reporting details, issue search and Discord. The steps and links remain
+in `docs/common-issues.md`; `format-common-issues.mjs` supplies presentation labels only.
+Existing topic anchors open their cards through the shared manual navigation. Native
+disclosures work without JavaScript, and the shared print handling expands every card.
 
 ## Validation and limits
 
