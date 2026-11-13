@@ -2270,9 +2270,11 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
         // destroyed: nothing here knows when the recordings that read the handle are done on the GPU, so a replaced quick
         // pipeline stays for the session, one more per entry that got one, counted in quick_pipeline's log line)
         use_counters.made_how = 0;
-        slow_full_build = true;   // (RX_VK_TEST_SLOW_MS: held inside the driver-fault gate, build_graphics)
-        const VkPipeline full = build_graphics(*job->p, job->s, job->at, job->topo);
-        slow_full_build = false;
+        VkPipeline full;
+        {   // (RX_VK_TEST_SLOW_MS: held inside the driver-fault gate, build_graphics)
+            const quick_pipe::Raise slow(slow_full_build);
+            full = build_graphics(*job->p, job->s, job->at, job->topo);
+        }
         if (full) {
             job->e->pipeline = full;
         } else if (job->e->pipeline.load(std::memory_order_acquire)) {
@@ -2623,17 +2625,19 @@ bool quick_pipeline(PipeEntry& e, const Program& p, const NvnState& s, const Tar
     const auto ask = [&](bool& busy) -> VkPipeline {   // (needs pipelineCreationCacheControl, as pipeline_from_caches)
         if (!dev.vk13.pipelineCreationCacheControl) return VK_NULL_HANDLE;
         bool cold = false;
-        ask_start_first = true, gate_busy = false;
+        gate_busy = false;
+        const quick_pipe::Raise asking(ask_start_first);
         const VkPipeline pl = build_graphics(p, s, at, topo, -1, &cold);
-        ask_start_first = false, busy = gate_busy;
+        busy = gate_busy;
         return pl;
     };
     double quick_took = 0;
     const auto build = [&](bool& busy) -> VkPipeline {
         const double t0 = now_ms();
-        quick_build = true, gate_busy = false;
+        gate_busy = false;
+        const quick_pipe::Raise quick(quick_build);
         const VkPipeline pl = build_graphics(p, s, at, topo);
-        quick_build = false, busy = gate_busy;
+        busy = gate_busy;
         quick_took = now_ms() - t0;
         return pl;
     };

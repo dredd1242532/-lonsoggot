@@ -13,10 +13,13 @@ namespace quick_pipe {
 
 /// RX_VK_QUICK_MS's suggested value (off unless set, on every driver, until a run on AMD measures it): half a frame at 60 fps,
 /// the same bound as RX_VK_TRANSLATE_WAIT_MS's tested 8. A skippable draw's quick build only stands in for leaving it out, so
-/// its cost has to stay under a frame's: Mako's 1000 traded a missing draw for a hitch of up to a second
+/// its cost has to stay under a frame's: Mako's 1000 traded a missing draw for a hitch of up to a second. Where a quick build
+/// takes longer than 8 ms (tens of ms on AMD's proprietary driver), it means one quick build a frame on each recording thread,
+/// each a hitch of that build's length: the frame's first always runs (FrameBudget::fits) and nothing after it fits
 constexpr double kQuickSuggestedMs = 8;
-/// How long a draw that cannot be left out waits for a quick one another thread is making (a few ms as a rule)
-constexpr int kOtherQuickPolls = 5000;   // (1 ms each)
+/// How long a draw that cannot be left out waits for a quick one another thread is making (a few ms as a rule), by the clock:
+/// a poll sleeps 1 ms, which is about 15 ms on Windows unless the timer resolution was raised, so a count of polls is no time
+constexpr double kOtherQuickWaitMs = 5000;
 
 /// A switch's milliseconds: its value when it reads as a number (0 or less: off), def when unset; a value that is not a
 /// number ("8ms", "off", "") is def too, with *bad set so that the caller says so in the log
@@ -47,7 +50,7 @@ struct FrameBudget {
     uint64_t frame = ~0ull;
     double used = 0;
     double build_ms = 0;   // (take's: the thread's last quick build, what the next one is expected to take; 0: none yet)
-    int builds = 0;        // (quick builds started this frame on this thread: not a cache answer or a busy gate's retry)
+    int builds = 0;        // (quick builds started this frame on this thread: not a cache answer, nor a busy gate's retry)
     double left(uint64_t now, double total) {
         if (now != frame) frame = now, used = 0, builds = 0;
         return total - used;
@@ -66,6 +69,16 @@ struct FrameBudget {
         builds++;
     }
     void spend(double ms) { used += ms; }
+};
+
+/// A thread_local flag set for a scope and cleared on leaving it, by a throw too (run_guarded keeps a worker running after its
+/// job throws, and the flag would stay set for its next jobs)
+struct Raise {
+    bool& flag;
+    explicit Raise(bool& f) : flag(f) { flag = true; }
+    ~Raise() { flag = false; }
+    Raise(const Raise&) = delete;
+    Raise& operator=(const Raise&) = delete;
 };
 
 /// The quick state of an entry: none tried (or tried while the driver-fault gate was busy: tried again), one being made, one
@@ -91,18 +104,30 @@ Got take(Entry& e, bool must, double budget_ms, FrameBudget& budget, uint64_t fr
     if (!must && !budget.fits(frame, budget_ms)) return there() ? Got::kOther : Got::kNothing;
     uint8_t none = kNone;
     if (!e.quick.compare_exchange_strong(none, kMaking, std::memory_order_acq_rel)) {
-        for (int i = 0; must && i < kOtherQuickPolls && e.quick.load(std::memory_order_acquire) == kMaking && !there() &&
-                        !e.ready.load(std::memory_order_acquire);
-             i++)
+        const double from = must ? now_ms() : 0;
+        while (must && e.quick.load(std::memory_order_acquire) == kMaking && !there() &&
+               !e.ready.load(std::memory_order_acquire) && now_ms() - from < kOtherQuickWaitMs)
             poll();
         return there() ? Got::kOther : Got::kNothing;
     }
+    // (the entry's state when this is over: kTried unless set below, so that a throw out of ask or build cannot leave it
+    // kMaking, with every draw of it that must wait polling for the whole kOtherQuickWaitMs)
+    struct Making {
+        decltype(e.quick)& quick;
+        uint8_t then = kTried;
+        ~Making() { quick.store(then, std::memory_order_release); }
+    } making{e.quick};
     const double t0 = now_ms();
     Got got = Got::kCached;
     bool busy = false;
     P pl = ask(busy);
     double t1 = 0;
-    if (pl == P{} && !busy) got = Got::kQuick, t1 = now_ms(), budget.started(frame, budget_ms), pl = build(busy);
+    if (pl == P{} && !busy) {
+        got = Got::kQuick, t1 = now_ms(), pl = build(busy);
+        // (a build the gate let in, or one that will never be made: one that met the gate busy built nothing, and counted, it
+        // would keep the frame's one build from the draws after it for as long as its program is in the driver)
+        if (!busy) budget.started(frame, budget_ms);
+    }
     const double t2 = now_ms();
     if (got == Got::kQuick && pl != P{}) budget.build_ms = t2 - t1;   // (one made: a busy gate or a NOOPT one took no time)
     budget.left(frame, budget_ms);
@@ -113,7 +138,7 @@ Got take(Entry& e, bool must, double budget_ms, FrameBudget& budget, uint64_t fr
     } else {
         got = there() ? Got::kOther : Got::kNothing;
     }
-    e.quick.store(pl == P{} && busy ? kNone : kTried, std::memory_order_release);
+    making.then = pl == P{} && busy ? kNone : kTried;
     return got;
 }
 

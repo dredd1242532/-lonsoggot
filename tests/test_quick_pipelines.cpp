@@ -53,11 +53,12 @@ thread_local bool gate_busy = false;
 // gate busy, another build of the program in the driver, as build_graphics answers it then)
 struct Call { bool asked, quick, start_first; };
 std::vector<Call> calls;
-bool cache_has = false, gate_held = false;
+bool cache_has = false, gate_held = false, throws = false;
 VkPipeline next_handle = 100;
 VkPipeline build_graphics(const Program&, const NvnState&, const Targets&, VkPrimitiveTopology, int part = -1, bool* cold = nullptr) {
     calls.push_back({cold != nullptr, quick_build, ask_start_first});
     check(part == -1, "a whole pipeline is asked for");
+    if (throws) throw 996;
     if (gate_held) return gate_busy = true, cold ? (*cold = true, VK_NULL_HANDLE) : VK_NULL_HANDLE;
     if (cold) return cache_has ? next_handle++ : (*cold = true, VK_NULL_HANDLE);
     return next_handle++;
@@ -140,6 +141,32 @@ void header_rules() {
         check(quick_pipe::take(r[1], false, 8, small, 3, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick &&
                   built == 3,
               "a frame's first build still comes after a busy retry took some of its time");
+        // (the same where the gate is met at the quick build itself: no pipelineCreationCacheControl, so no ask, or the gate
+        // taken between the ask and the build. small's last build took 400 ms, more than the whole budget of 8)
+        FakeEntry q[2];
+        const auto build_busy_slow = [&](bool& busy) { clock += 1; busy = true; return 0; };
+        check(quick_pipe::take(q[0], false, 8, small, 4, ask_none, build_busy_slow, destroy, now, poll) ==
+                      quick_pipe::Got::kNothing &&
+                  q[0].quick.load() == quick_pipe::kNone && small.used > 0 && small.build_ms > 8,
+              "a build that met the gate busy builds nothing and leaves the entry to try again");
+        check(quick_pipe::take(q[1], false, 8, small, 4, ask_none, build_slow, destroy, now, poll) == quick_pipe::Got::kQuick &&
+                  built == 4,
+              "a frame's first build still comes after a build that met the gate busy took some of its time");
+    }
+    {   // (a throw out of the ask or the build, which run_guarded survives on a worker: the entry is not left kMaking)
+        quick_pipe::FrameBudget tb;
+        FakeEntry x[2];
+        const auto ask_throws = [&](bool&) -> int { throw 1; };
+        const auto build_throws = [&](bool&) -> int { throw 2; };
+        bool thrown = false;
+        try { quick_pipe::take(x[0], false, 8, tb, 1, ask_throws, build_slow, destroy, now, poll); } catch (int) { thrown = true; }
+        check(thrown && x[0].quick.load() == quick_pipe::kTried, "a throw at the cache ask leaves the entry tried, not kMaking");
+        thrown = false;
+        try { quick_pipe::take(x[1], true, 8, tb, 1, ask_none, build_throws, destroy, now, poll) ; } catch (int) { thrown = true; }
+        check(thrown && x[1].quick.load() == quick_pipe::kTried, "a throw at the quick build leaves the entry tried, not kMaking");
+        bool flag = false;
+        try { const quick_pipe::Raise r(flag); check(flag, "Raise sets its flag"); throw 3; } catch (int) {}
+        check(!flag, "Raise clears its flag on a throw");
     }
     // (cache first: a full one the caches have is taken, and nothing is built)
     FakeEntry c;
@@ -182,6 +209,20 @@ void header_rules() {
     check(quick_pipe::take(t, true, 1000, budget, 13, none, none, destroy, now, [&] { polls++; }) == quick_pipe::Got::kNothing &&
               polls == 0,
           "an attempt that is over without one is not waited for");
+    {   // (another thread's attempt that never ends: a draw that must wait gives up after kOtherQuickWaitMs by the clock, however
+        // long a poll sleeps: about 15 ms on Windows, where 5000 polls of "1 ms" would be some 78 s)
+        FakeEntry h;
+        h.quick.store(quick_pipe::kMaking);
+        for (const double step : {1.0, 15.6}) {
+            polls = 0;
+            const double from = clock;
+            check(quick_pipe::take(h, true, 1000, budget, 14, none, none, destroy, now, [&] { polls++, clock += step; }) ==
+                          quick_pipe::Got::kNothing &&
+                      clock - from >= quick_pipe::kOtherQuickWaitMs && clock - from < quick_pipe::kOtherQuickWaitMs + step + 1 &&
+                      polls == (int)((quick_pipe::kOtherQuickWaitMs + step - 1) / step),
+                  "a draw that must wait polls another thread's attempt for kOtherQuickWaitMs, by the clock");
+        }
+    }
 
     // (the driver-fault gate busy (AMD: the entry's own full build in the driver): nothing, and the entry left to be tried
     // again; neither a quick build after a busy cache ask, nor a wait. Once the gate is free a later draw gets one)
@@ -267,6 +308,19 @@ void cut_code(double want_ms) {
     gate_held = false, calls.clear();
     check(quick_pipeline(b, p, s, at, 0, true) && b.pipeline.load() != 0 && b.quick.load() == quick_pipe::kTried,
           "the gate free again: the entry gets one");
+    // (a throw out of build_graphics: run_guarded keeps the thread, and its flags must not stay set for its next builds)
+    PipeEntry t;
+    throws = true, calls.clear();
+    bool thrown = false;
+    try { quick_pipeline(t, p, s, at, 0, true); } catch (int) { thrown = true; }
+    check(thrown && !ask_start_first && !quick_build && t.quick.load() == quick_pipe::kTried,
+          "a throw at the cache ask: ask_start_first cleared, the entry not left kMaking");
+    PipeEntry u;
+    dev.vk13.pipelineCreationCacheControl = false, thrown = false;
+    try { quick_pipeline(u, p, s, at, 0, true); } catch (int) { thrown = true; }
+    check(thrown && !quick_build && u.quick.load() == quick_pipe::kTried,
+          "a throw at the quick build: quick_build cleared, the entry not left kMaking");
+    dev.vk13.pipelineCreationCacheControl = true, throws = false;
     check(pipe_wait_budget_ms() == quick_pipe::wait_ms(std::getenv("RX_VK_PIPE_WAIT_MS"), nullptr), "RX_VK_PIPE_WAIT_MS as read");
 }
 

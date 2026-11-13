@@ -59,9 +59,10 @@ def check_source(draw):
     job = between(draw, "    jobs_push([job] {\n        // (over a linked one", "}, false, &e->ready,")
     if "if (full) {\n            job->e->pipeline = full;" not in job:
         raise SystemExit("the worker's full build no longer replaces the quick one")
-    if "slow_full_build = true;" not in job or job.index("slow_full_build = true;") > job.index("build_graphics(") or \
-            job.index("slow_full_build = false;") < job.index("build_graphics("):
-        raise SystemExit("RX_VK_TEST_SLOW_MS does not hold the worker's full build")
+    raised = "const quick_pipe::Raise slow(slow_full_build);"
+    if raised not in job or job.index(raised) > job.index("build_graphics(") or "slow_full_build = " in job:
+        raise SystemExit("RX_VK_TEST_SLOW_MS does not hold the worker's full build, or a throw out of it would leave "
+                         "slow_full_build set on that worker (quick_pipe::Raise)")
     slow = between(draw, "int test_slow_ms() {", "\n}\n")
     if 'getenv("RX_VK_TEST_SLOW_MS")' not in slow or "quick_pipe::slow_ms(" not in slow:
         raise SystemExit("RX_VK_TEST_SLOW_MS is not read strictly")
