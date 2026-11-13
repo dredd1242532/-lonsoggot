@@ -1,7 +1,7 @@
-# Hookshot VR (Meta Quest, PCVR)
+# Longshot VR (Meta Quest, PCVR)
 
-Plays Hookshot in a Meta Quest over Quest Link, Air Link or Virtual Desktop. The game still runs on the PC's GPU; only the
-renderer DLL (`hookshot_vk.dll`) changes, so the game does not need to be rebuilt. The game appears on a large screen
+Plays Longshot in a Meta Quest over Quest Link, Air Link or Virtual Desktop. The game still runs on the PC's GPU; only the
+renderer DLL (`longshot_vk.dll`) changes, so the game does not need to be rebuilt. The game appears on a large screen
 fixed in place in front of you. The Touch controllers act as a gamepad, and the right controller's motion is the
 gamepad's gyroscope (for the game's Motion controls).
 
@@ -11,7 +11,7 @@ Insert menu over it, is also copied into an OpenXR swapchain, and a separate thr
 
 ## Install
 
-Needs an existing Hookshot v2.1.0 install made by the Hookshot Builder. This script uses the toolchain the builder
+Needs an existing Longshot v2.1.0 install made by the Longshot Builder. This script uses the toolchain the builder
 installed.
 
 ```
@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File quest\build_vk.ps1 -Uninstall   # put t
 The settings are on the Insert menu's **VR** tab (F1 or Insert): VR on or off and the flat screen or stereo 3D (both
 after a restart), first person, the world's scale, the eyes' separation, the HUD panel and the aiming reticle, the
 desktop window, and the Touch controllers. All but the two that take a restart apply while you play. They are kept in
-`hookshot_vr.ini` in the game folder, which can still be edited by hand and is read again when it changes; a few
+`longshot_vr.ini` in the game folder, which can still be edited by hand and is read again when it changes; a few
 developer lines (`sync_step_us`, `stereo_lead`, `sync_flip`) are only there. The environment variable
 `RX_VR=0` or `1` overrides the `vr=` line.
 
@@ -30,8 +30,8 @@ developer lines (`sync_step_us`, `stereo_lead`, `sync_flip`) are only there. The
 
 1. Connect the Quest with Link or Air Link. The Meta Horizon Link app must be the active OpenXR runtime (its settings,
    General, OpenXR Runtime).
-2. Start Hookshot as usual. The game shows in the headset once you put it on. Without a headset it plays on the desktop
-   as before; the log says why (`xr:` lines in `hookshot_log.txt`).
+2. Start Longshot as usual. The game shows in the headset once you put it on. Without a headset it plays on the desktop
+   as before; the log says why (`xr:` lines in `longshot_log.txt`).
 3. Don't minimise the game's window, because the headset gets what the window shows. A larger window, or fullscreen,
    gives a sharper screen in the headset. HDR must be off.
 
@@ -45,7 +45,7 @@ developer lines (`sync_step_us`, `stereo_lead`, `sync_flip`) are only there. The
 | Right stick held in, then pushed | D-pad |
 | Left stick held in, then pushed | Minus (-) |
 | Menu (tap) | Plus (+) |
-| Menu (hold half a second) | Hookshot's Insert menu |
+| Menu (hold half a second) | Longshot's Insert menu |
 | Both sticks held in for one second | Re-centre the screen (holding the Oculus button to recentre works too) |
 
 Controls can be rebound on the Insert menu's Controls page, as for any pad. If aiming feels inverted, use the Motion
@@ -64,7 +64,7 @@ culls with that camera, nothing is missing when you look around within its field
 camera back from the scene's uniform buffer to tell which eye the frame belongs to and its field of view, then submits
 both eyes' latest pictures as a projection layer.
 
-This needs the rebuilt game (`hookshot.exe`), not only the DLL. The game is rebuilt from a copy of the builder's tools
+This needs the rebuilt game (`longshot.exe`), not only the DLL. The game is rebuilt from a copy of the builder's tools
 with this tree's files on top, then `make_game.py --update` runs on the game folder.
 
 Limits:
@@ -73,7 +73,7 @@ Limits:
 - The Insert menu, the start-up screen and anything that isn't the gameplay camera show on the flat screen instead.
 - Temporal upscalers (DLSS, FSR) see the camera jump between the eyes every frame. The game's own upscaler may look
   cleaner in stereo.
-- `hookshot_log.txt` logs how well each frame's camera matched (`xr: stereo: ... matched view N (eye E) to ERR`). If the
+- `longshot_log.txt` logs how well each frame's camera matched (`xr: stereo: ... matched view N (eye E) to ERR`). If the
   error is large, the game moved the camera after the hook, and the eyes fall back to the flat screen.
 
 ## Notes

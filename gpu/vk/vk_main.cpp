@@ -255,7 +255,7 @@ bool pick_device() {
         return false;
     }
     dev.physical = all[best];
-    if (const VkPhysicalDevice headset = xr_physical_device()) {   // (hookshot-quest) the GPU the headset is on
+    if (const VkPhysicalDevice headset = xr_physical_device()) {   // (longshot-vr) the GPU the headset is on
         if (headset != dev.physical) logf("vk: the headset's GPU instead of device %d", best);
         dev.physical = headset;
     }
@@ -687,7 +687,7 @@ bool create_device() {
     coopmat_init();
     reflex_device_created();
     antilag_device_created();
-    xr_device_ready();   // (hookshot-quest) the headset's session, when VR is on
+    xr_device_ready();   // (longshot-vr) the headset's session, when VR is on
     if (dev.push_descriptor) {
         VkPhysicalDevicePushDescriptorPropertiesKHR pp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR};
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -912,7 +912,7 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // The renderer copies into swapchain images. Readback is optional and only available on surfaces that allow it.
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
         ci.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    dev.swap_transfer_src = (ci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;   // (hookshot-quest: the headset's copy)
+    dev.swap_transfer_src = (ci.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;   // (longshot-vr: the headset's copy)
     // (longshot) the overlays Dear ImGui draws (vk_imgui.cpp) render into it. Every surface allows it (the Vulkan spec)
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
         ci.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -1574,7 +1574,7 @@ void mkwvk_close_asked(void) {
     module_ids_flush();
     fsr4_close();             // (AMD FSR 4's tuned layers: their background builds stopped first, what they made then saved below)
     pipeline_cache_close();   // (in play: the pipelines made since the last save, kept for the next start)
-    xr_shutdown();            // (hookshot-quest: the headset's session ended properly before the process goes)
+    xr_shutdown();            // (longshot-vr: the headset's session ended properly before the process goes)
     if (prep_running.load() && !prepare_stopped()) {
         logf("vk: the window was closed while the shaders were prepared: stopping, what is done is kept");
         prepare_stop();

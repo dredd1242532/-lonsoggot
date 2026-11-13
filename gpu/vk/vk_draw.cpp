@@ -7093,17 +7093,17 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     const Targets at = bare_targets(s, targets(s));
     if (!at.width || !at.height) SKIP_HERE();
-    // (hookshot-quest) a HUD draw of a stereo frame: into the HUD's own picture, pinned to the view, not the eyes' (vk_xr.cpp)
+    // (longshot-vr) a HUD draw of a stereo frame: into the HUD's own picture, pinned to the view, not the eyes' (vk_xr.cpp)
     if (at.n && at.color[0] && xr_hud_draw(cmd, s, d, at.color[0])) return;
     // (longshot) the scene's camera and depth for the temporal upscalers: NVIDIA DLSS and AMD FSR 4 (vk_temporal.cpp) and AMD
     // FSR 3.1 (vk_fsr3_inputs.cpp). The vertex stage's uniform buffer 3 (NVN's binding 0)
     if (at.n && at.color[0] && at.depth) {
-        // (hookshot-quest: stereo. First: the frame's eye, which the temporal chain below is chosen by)
+        // (longshot-vr: stereo. First: the frame's eye, which the temporal chain below is chosen by)
         xr_note_scene_draw(at.color[0], at.width, at.height, s.ubo[0][0].addr, s.ubo[0][0].size);
         temporal_note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
         fsr3_inputs::note_scene_draw(at.color[0], at.width, at.height, at.depth, s.ubo[0][0].addr, s.ubo[0][0].size);
     }
-    if (at.n && at.color[0] && at.color[0]->presented) {   // (hookshot-quest: the window's draw, which samples the HUD's picture)
+    if (at.n && at.color[0] && at.color[0]->presented) {   // (longshot-vr: the window's draw, which samples the HUD's picture)
         xr_note_window(s);
         xr_note_window_draw(at.color[0], at.width, at.height, s.prog.serial, d.count, d.instances, d.mesh, s.color.blend_en,
                             s.viewport[0], at.depth != nullptr, &s);

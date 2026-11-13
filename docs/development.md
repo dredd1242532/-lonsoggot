@@ -190,8 +190,8 @@ See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-a
 | `HOS_INPUT_FRAME_CLOCK=1` | The script's time runs at 60 game frames a second instead of the wall clock |
 | `HOS_INPUT_EXCLUSIVE`, `HOS_INPUT_BACKGROUND`, `HOS_INPUT_SCRIPT_BACKGROUND` (set) | As above; the last lets every device count while the window is behind another one |
 | `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR` |
-| `RX_VR=0` / `1` | The headset (OpenXR, `gpu/vk/vk_xr.cpp`) off or on for this run, over `hookshot_vr.ini`'s `vr=`; `RX_VR_STEREO=0` / `1` the same for its `stereo=` |
-| `RX_VR_TEST=1` | Stereo's cameras without a headset (with `RX_VR=0`): a pretended head, turned by `test_yaw` and `test_pitch` in `hookshot_vr.ini`, for looking at what the game draws for each eye with `RX_VK_SHOTS` |
+| `RX_VR=0` / `1` | The headset (OpenXR, `gpu/vk/vk_xr.cpp`) off or on for this run, over `longshot_vr.ini`'s `vr=`; `RX_VR_STEREO=0` / `1` the same for its `stereo=` |
+| `RX_VR_TEST=1` | Stereo's cameras without a headset (with `RX_VR=0`): a pretended head, turned by `test_yaw` and `test_pitch` in `longshot_vr.ini`, for looking at what the game draws for each eye with `RX_VK_SHOTS` |
 | `RX_VR_TRACE=1` | Logs the draws into the window's picture for one frame every 10 s while a headset runs (the HUD's draws) |
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a controller or the keys, whatever was used last (screenshots) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |

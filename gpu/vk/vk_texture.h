@@ -76,7 +76,7 @@ struct Texture {
     uint64_t upload_value = 0;   // (the submission its last upload was recorded in, and the parallel replay's segment
     uint64_t upload_seg = 0;     // that recorded it: one before it in the stream uploads it again)
     uint64_t last_frame = 0;  // the present it was last used in (the cache's age)
-    bool presented = false;   // (hookshot-quest: one of the game's window textures, shown at a present: vk_xr.cpp's HUD layer)
+    bool presented = false;   // (longshot-vr: one of the game's window textures, shown at a present: vk_xr.cpp's HUD layer)
     uint64_t first_render_frame = 0;   // the present it was first rendered into in (0: never)
     uint64_t last_value = 0;  // the timeline value of the last submission that used it
     uint64_t bytes = 0;       // device memory it holds (the texels', or a sparse image's chunks)

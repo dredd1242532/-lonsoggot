@@ -36,7 +36,7 @@ def _ratio(vreg, base=None):
 
 
 def _vr_ratio(vreg):
-    """(hookshot-quest) The camera's ratio just loaded into s<vreg>, on its way to the projection: the headset's while stereo runs
+    """(longshot-vr) The camera's ratio just loaded into s<vreg>, on its way to the projection: the headset's while stereo runs
     (host/hos_main.c hos_vr_ratio, 0 otherwise), for the 16:9 cameras as the window's ratio above."""
     return ("{ extern volatile float hos_vr_ratio; const float _a = hos_vr_ratio; if (_a > 0.0f) { float _r; "
             "memcpy(&_r, c->vreg[%d], 4); const float _d = _r - (16.0f / 9.0f); if (_d <= 0.01f && _d >= -0.01f) { "
@@ -45,7 +45,7 @@ def _vr_ratio(vreg):
 
 
 def _vr_fov(vreg, base):
-    """(hookshot-quest) sead's perspective projection's matrix update, which has just loaded the tangent of half the field of
+    """(longshot-vr) sead's perspective projection's matrix update, which has just loaded the tangent of half the field of
     view into s0 (+0xac) and the ratio into s<vreg> (+0xb0): while stereo runs, the headset's in their place, in the registers
     and in the projection (its angle, sine, cosine and tangent at +0xa0 to +0xac, the ratio at +0xb0: culling reads them), for a
     projection whose ratio is the game's 16:9, the window's, or the headset's already."""

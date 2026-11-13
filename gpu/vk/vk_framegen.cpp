@@ -557,7 +557,7 @@ bool framegen_wanted(int menu_value, int allow) {
     return allow && menu_value >= 1;   // (1: Auto)
 }
 
-// (hookshot-quest) not with a headset: the window's presents go no faster than Link's virtual monitor (60 Hz), so made frames
+// (longshot-vr) not with a headset: the window's presents go no faster than Link's virtual monitor (60 Hz), so made frames
 // took the game's own (4 made a frame at a 240 Hz display: 15 fps), and a picture held back for them reached the headset
 // with another frame's eye
 bool framegen_on() {

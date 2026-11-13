@@ -3890,7 +3890,7 @@ void frame_info(int64_t* replayed, int64_t* draws, int* width, int* height) {
     if (height) *height = (int)dev.swap_extent.height;
 }
 
-std::atomic<int> present_src_format{0};       // (hookshot-quest, do_present: the game's picture's format, for the eyes' copy of it)
+std::atomic<int> present_src_format{0};       // (longshot-vr, do_present: the game's picture's format, for the eyes' copy of it)
 uint64_t present_value = 0;   // (the present job's value, handed out as it came; 0: the next one)
 struct PendingShot {
     bool on = false;
@@ -3944,7 +3944,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
             logf("vk: present texture %#llx %ux%u format %#x: %s", (unsigned long long)(t ? t->gpu : 0),
                  t ? t->d.width : 0, t ? t->d.height : 0, t ? t->d.format : 0,
                  tex ? (tex->gpu_written ? "rendered" : "never rendered") : "no image");
-        if (tex) src = tex->image, sw = tex->width, sh = tex->height, tex->presented = true;   // (hookshot-quest: a window texture)
+        if (tex) src = tex->image, sw = tex->width, sh = tex->height, tex->presented = true;   // (longshot-vr: a window texture)
         // (the Insert menu's HDR set to Native: the game, told its display is HDR10, presents PQ codes in RGB10A2 (vk
         // A2B10G10R10); that picture goes to the HDR10 swapchain as PQ, not through the SDR-to-HDR expansion. Told by the format
         // the game presents, the one its view is made in (direct_view below), not by the cached image's: images are shared by
@@ -3952,7 +3952,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         // was a view of an RGBA8 image and took the SDR expansion, a flat, grey picture. The image's format is not asked as well:
         // an image first made as RGB10A2 under an RGBA8 picture would take an SDR picture for PQ)
         const VkFormat shown_format = t ? vk_format(t->d.format).format : VK_FORMAT_UNDEFINED;
-        present_src_format.store(tex ? (int)tex->format : 0, std::memory_order_relaxed);   // (hookshot-quest)
+        present_src_format.store(tex ? (int)tex->format : 0, std::memory_order_relaxed);   // (longshot-vr)
         present_native_pq.store(tex && dev.hdr && opts.hdr == 2 && shown_format == VK_FORMAT_A2B10G10R10_UNORM_PACK32,
                                 std::memory_order_relaxed);
         {   // (the presented picture's format, the game's and its image's, and the HDR path it takes, said when any of them
@@ -3987,7 +3987,7 @@ void do_present(const nvn_tex* t, const int crop[4]) {
         texture_frame(completed());
         full_barrier(r.cmd);
         presents++;
-        if (presents <= 3 && env_on("RX_VR_TEST"))   // (hookshot-quest: which frame number a shot's present shows)
+        if (presents <= 3 && env_on("RX_VR_TEST"))   // (longshot-vr: which frame number a shot's present shows)
             logf("xr: test: present %lld shows frame %llu", (long long)presents, (unsigned long long)(texture_frame_no() - 1));
         presents_now = presents;
         wide_sides_tick();
@@ -4632,7 +4632,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         trace_route = 1;
         blit_crop_to_rect(f.cmd, scaled, rect.w, rect.h, nullptr, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, rect);
     } else if (src && !native_pq) {
-        // (hookshot-quest) a stereo frame: the window shows both eyes side by side, not the one eye this frame is
+        // (longshot-vr) a stereo frame: the window shows both eyes side by side, not the one eye this frame is
         const PresentSourceRect game = present_source_rect(sw, sh, crop);
         if (present_kind.load(std::memory_order_relaxed) != 0 ||
             !xr_mirror(f.cmd, src, game.x, game.y, game.w, game.h, dst, dev.swap_extent.width, dev.swap_extent.height))
@@ -4693,7 +4693,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
         }
     }
     menu_record(f.cmd, index, dev.swap_extent.width, dev.swap_extent.height);   // (longshot) Dear ImGui's overlays, over all of it
-    // (hookshot-quest) the picture as the window shows it, overlays and all, into the headset's screen: the content rectangle only
+    // (longshot-vr) the picture as the window shows it, overlays and all, into the headset's screen: the content rectangle only
     // (no black bars), the whole window on the start-up screen and when the menu has no picture under it
     XrCopy xr_copy;
     if (dev.swap_transfer_src && !dev.hdr && xr_running()) {
@@ -4711,7 +4711,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
             xr_copy_record(f.cmd, xr_copy, dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, whole ? 0 : rect.x, whole ? 0 : rect.y);
         }
     }
-    XrCopy xr_hud = xr_copy.eye >= 0 ? xr_hud_acquire() : XrCopy{};   // (hookshot-quest: the stereo frame's HUD, pinned to the view)
+    XrCopy xr_hud = xr_copy.eye >= 0 ? xr_hud_acquire() : XrCopy{};   // (longshot-vr: the stereo frame's HUD, pinned to the view)
     if (xr_hud.image) xr_hud_record(f.cmd, xr_hud);
     image_barrier(f.cmd, dst, xr_copy.image && !xr_copy.from_game ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -4753,7 +4753,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     si.pNext = reflex_submit_id(nullptr, reflex_present_frame);
     res = vkQueueSubmit2(dev.queue, 1, &si, f.done);
     if (res == VK_ERROR_DEVICE_LOST) device_lost();
-    xr_copy_release(xr_copy);   // (hookshot-quest: after the submit that copies into it, dev.present_mu held)
+    xr_copy_release(xr_copy);   // (longshot-vr: after the submit that copies into it, dev.present_mu held)
     xr_copy_release(xr_hud);
     if (present_defer_into) {   // (present ahead: the copy is queued; present_commit shows it at its time)
         present_defer_into->used = true;

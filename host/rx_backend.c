@@ -355,7 +355,7 @@ void rx_close_asked(void) {
     void (*close_asked)(void) = (void (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_close_asked");
     if (close_asked) close_asked();
 }
-/* (hookshot-quest) the gameplay camera seen from the headset's eye for this frame (gpu/vk/vk_xr.cpp mkwvk_xr_view): the game's
+/* (longshot-vr) the gameplay camera seen from the headset's eye for this frame (gpu/vk/vk_xr.cpp mkwvk_xr_view): the game's
    eye and target in, the view's 3x4 rows (world to camera) out; 0 when no headset shows the game in stereo, or the back end
    is one without the export */
 /* (phase: 1 the first frame of a pair of one moment, 2 the second, 0 no pairs: host/nn_vi.c realtime_step) */
@@ -380,7 +380,7 @@ int rx_xr_sync(void) {
     }
     return fn ? fn() : 0;
 }
-/* (hookshot-quest) the field of view the cameras take while stereo runs: out[0] the tangent of half its height, out[1] its width
+/* (longshot-vr) the field of view the cameras take while stereo runs: out[0] the tangent of half its height, out[1] its width
    over its height; 0 when the game's own is to stay (gpu/vk/vk_xr.cpp mkwvk_xr_projection) */
 int rx_xr_projection(float out[2]) {
     static int (*fn)(float *);

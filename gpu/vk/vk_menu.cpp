@@ -86,7 +86,7 @@ enum MenuTab {
     TAB_AUDIO = 1,
     TAB_GAMEPLAY = 2,
     TAB_CONTROLS = 3,
-    TAB_VR = 4,      // (hookshot-quest: the headset's settings, hookshot_vr.ini's: vk_xr.h XrOpt)
+    TAB_VR = 4,      // (longshot-vr: the headset's settings, longshot_vr.ini's: vk_xr.h XrOpt)
     TAB_DEBUG = 5,   // (the OoT debug tools of #785, a tab of their own)
     TAB_COUNT = 6,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
@@ -110,7 +110,7 @@ struct Row {
                                   // tests/test_preset_exempt.py)
     signed char cheat = -1;   // (a debug tool, on the Debug tab with the tools on: its index in the cheat_ tables, -1 none)
     bool heading = false;     // (a section's title on its tab, not a row: the selection steps over it)
-    // (a row kept elsewhere than the options file, the VR tab's in hookshot_vr.ini: called when its value changes, and the
+    // (a row kept elsewhere than the options file, the VR tab's in longshot_vr.ini: called when its value changes, and the
     // options file neither writes nor reads it)
     void (*apply)(const Row& r) = nullptr;
 };
@@ -1173,7 +1173,7 @@ MENU_HINTS(hn_prompts, 0,
            "The Switch's buttons.", "An Xbox controller's.", "A PlayStation 4 controller's.", "A PlayStation 5 controller's.",
            "A Steam Deck's.", "The keys and mouse buttons your controls put each action on.")
 
-// (hookshot-quest) the VR tab: its rows are vk_xr.cpp's settings (xr_opt[]), kept in hookshot_vr.ini, not in the options file
+// (longshot-vr) the VR tab: its rows are vk_xr.cpp's settings (xr_opt[]), kept in longshot_vr.ini, not in the options file
 const char* tx_cm(int v) {
     static char b[16];
     snprintf(b, sizeof b, "%.2f m", v / 100.0);
@@ -1210,7 +1210,7 @@ MENU_HINTS(hn_vr_upscaler, 0, "Sharper edges, more shimmer on fine detail such a
 MENU_HINTS(hn_vr_window, 0, "Each frame as the game drew it: the eyes in turn.", "Both eyes side by side.",
            "The left eye alone, filling the window: a steady picture to record or stream.")
 bool is_vr_recenter(const struct Row& r);
-void vr_apply(const Row& r) { xr_opt_changed((int)(r.value - xr_opt)); }   // (applied at once and kept in hookshot_vr.ini)
+void vr_apply(const Row& r) { xr_opt_changed((int)(r.value - xr_opt)); }   // (applied at once and kept in longshot_vr.ini)
 
 Row rows[] = {
     // Graphics, in sections: a heading row is a section's title (draw_options draws it, the selection steps over it). The
@@ -1403,7 +1403,7 @@ Row rows[] = {
      "Which key switches between the full menu and the compact bar (or opens directly to the compact bar when held "
      "with the menu shortcut).",
      nullptr, false, true},
-    // VR (hookshot-quest): the headset. The 3D view's, the HUD's and Advanced's rows with the Stereo 3D view, the screen's with
+    // VR (longshot-vr): the headset. The 3D view's, the HUD's and Advanced's rows with the Stereo 3D view, the screen's with
     // the Flat screen: row_shown
     {TAB_VR, "VR headset", &xr_opt[XO_VR], 0, 1, 1, tx_onoff,
      "Shows the game in a headset over Quest Link, Air Link or Virtual Desktop. Off plays on the desktop only. Applies "
@@ -2063,7 +2063,7 @@ void save() {
                 // ultrawide= is kept, unless the row was changed in the menu)
                 const int v = saved_value(r.value);
                 fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
-            } else if (r.value && !r.apply && r.value != &opts.game_lang) {   // (game_lang: language.txt's; the VR tab's: hookshot_vr.ini's, Row::apply)
+            } else if (r.value && !r.apply && r.value != &opts.game_lang) {   // (game_lang: language.txt's; the VR tab's: longshot_vr.ini's, Row::apply)
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
@@ -4932,7 +4932,7 @@ void menu_tick() {
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
     if (fg) GetWindowThreadProcessId(fg, &pid);
-    const bool mine = pid == GetCurrentProcessId() || xr_running();   // (hookshot-quest: the headset shows it)
+    const bool mine = pid == GetCurrentProcessId() || xr_running();   // (longshot-vr: the headset shows it)
     bool press[K_N] = {};
     for (int i = 0; i < K_N; i++) {
         const bool down = mine && (GetAsyncKeyState(keys[i]) & 0x8000) != 0;

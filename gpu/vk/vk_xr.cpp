@@ -1,7 +1,7 @@
-// (hookshot-quest) OpenXR output and Touch controllers: vk_xr.h says what and why.
+// (longshot-vr) OpenXR output and Touch controllers: vk_xr.h says what and why.
 //
 // Two ways to show the game. The screen: every presented picture copied into one swapchain, shown as a quad in front of the
-// player. Stereo (stereo=1 in hookshot_vr.ini): the game's own camera moved to the headset's eyes, one eye a frame (alternate
+// player. Stereo (stereo=1 in longshot_vr.ini): the game's own camera moved to the headset's eyes, one eye a frame (alternate
 // eye rendering), through host/hos_main.c hos_oot_free_view, which asks mkwvk_xr_view below for the view each frame. That is
 // the camera the game culls and draws with, so the picture is the world as seen from that eye. Each frame's scene camera is read
 // back where the draws read it (xr_note_scene_draw: the uniform buffer the temporal upscalers read, vk_temporal.cpp) and matched
@@ -106,7 +106,7 @@ void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkIma
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// settings: hookshot_vr.ini in the game folder (quest/build_vk.ps1 -Install puts one there), RX_VR over its vr= line
+// settings: longshot_vr.ini in the game folder (quest/build_vk.ps1 -Install puts one there), RX_VR over its vr= line
 struct Settings {
     int vr = 0;
     float distance = 2.6f;   // (the screen: metres from the head)
@@ -196,7 +196,7 @@ std::string vr_ini_path() {
     char exe[MAX_PATH];
     const DWORD len = game_module_path(exe, MAX_PATH);
     std::string ini(exe, len);
-    return ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_vr.ini";
+    return ini.substr(0, ini.find_last_of("\\/") + 1) + "longshot_vr.ini";
 }
 std::atomic<uint64_t> ini_seen{0};   // (the file's time as last read or written here: reload_settings reads it again when it differs)
 uint64_t ini_time() {
@@ -204,7 +204,7 @@ uint64_t ini_time() {
     if (!GetFileAttributesExA(vr_ini_path().c_str(), GetFileExInfoStandard, &a)) return 0;
     return ((uint64_t)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime;
 }
-/// One setting's line in hookshot_vr.ini set (added at the end when the file has none): the other lines as they are
+/// One setting's line in longshot_vr.ini set (added at the end when the file has none): the other lines as they are
 void ini_write(const char* key, const char* value) {
     const std::string path = vr_ini_path();
     std::vector<std::string> lines;
@@ -227,13 +227,13 @@ void ini_write(const char* key, const char* value) {
     const std::string tmp = path + ".tmp";
     FILE* f = fopen(tmp.c_str(), "w");
     if (!f) {
-        logf("xr: hookshot_vr.ini could not be written (%s)", tmp.c_str());
+        logf("xr: longshot_vr.ini could not be written (%s)", tmp.c_str());
         return;
     }
     for (const std::string& l : lines) fprintf(f, "%s\n", l.c_str());
     fclose(f);
     if (!MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-        logf("xr: hookshot_vr.ini could not be replaced (error %lu)", GetLastError());
+        logf("xr: longshot_vr.ini could not be replaced (error %lu)", GetLastError());
         DeleteFileA(tmp.c_str());
         return;
     }
@@ -244,7 +244,7 @@ Settings load_settings() {
     char exe[MAX_PATH];
     const DWORD len = game_module_path(exe, MAX_PATH);
     std::string ini(exe, len);
-    ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "hookshot_vr.ini";
+    ini = ini.substr(0, ini.find_last_of("\\/") + 1) + "longshot_vr.ini";
     if (FILE* f = fopen(ini.c_str(), "r")) {
         char line[160];
         while (fgets(line, sizeof line, f)) {
@@ -441,7 +441,7 @@ struct Xr {
     std::mutex mu;
     Chain screen_chain, eyes[2], hud_chain;
     float game_tan_x = 0.83f, game_tan_y = 0.47f;   // (the game's picture: the tangents of half its field of view, as last drawn)
-    std::atomic<int> first_person{-1};   // (1 on, 0 off; -1: as hookshot_vr.ini says, until it is toggled)
+    std::atomic<int> first_person{-1};   // (1 on, 0 off; -1: as longshot_vr.ini says, until it is toggled)
     std::atomic<float> game_pitch{0};               // (the game camera's tilt left out of the eyes' views by horizon_lock, radians up)
     std::atomic<int64_t> hud_ns{0};   // (when the HUD's picture came last: the panel shows while it is fresh)
     VkFormat format = VK_FORMAT_UNDEFINED;
@@ -676,7 +676,7 @@ bool pad_attach() {
     d.nsensors = xr().set.gyro ? 2 : 0;
     d.button_mask = (1u << B_COUNT) - 1;
     d.axis_mask = (1u << AX_COUNT) - 1;
-    d.name = "Meta Quest Touch (Hookshot VR)";
+    d.name = "Meta Quest Touch (Longshot VR)";
     d.sensors = sensors;
     d.Update = pad_update;
     d.Rumble = pad_rumble;
@@ -975,7 +975,7 @@ void combos() {
     f8_was = f8;
 }
 
-// hookshot_vr.ini read again when it changes (once a second): the screen, the HUD, the separation, the scale and the rest take
+// longshot_vr.ini read again when it changes (once a second): the screen, the HUD, the separation, the scale and the rest take
 // effect while the game runs; vr= and stereo= decide how it started and stay
 void reload_settings() {
     static int64_t next = 0;
@@ -1003,7 +1003,7 @@ void reload_settings() {
     x.set = s;
     if (env_on("RX_VR_TEST")) logf("xr: test: separation %.2f, yaw %.1f, pitch %.1f", s.separation, s.test_yaw, s.test_pitch);
     x.recenter = true;   // (the screen and the HUD where the new numbers put them)
-    logf("xr: hookshot_vr.ini read again: separation %.2f, world scale %.2f, horizon lock %d, head motion %d, HUD %d", s.separation,
+    logf("xr: longshot_vr.ini read again: separation %.2f, world scale %.2f, horizon lock %d, head motion %d, HUD %d", s.separation,
          s.world_scale, s.horizon_lock, s.head_motion, s.hud);
 }
 
@@ -1415,7 +1415,7 @@ bool xr_wanted() {
         if (!x.set.vr) return false;
         HMODULE m = load_loader();
         if (!m) {
-            logf("xr: VR is on (hookshot_vr.ini), but there is no openxr_loader.dll: the desktop only");
+            logf("xr: VR is on (longshot_vr.ini), but there is no openxr_loader.dll: the desktop only");
             return false;
         }
         xrGetInstanceProcAddr_ = (PFN_xrGetInstanceProcAddr)(void*)GetProcAddress(m, "xrGetInstanceProcAddr");
@@ -1425,9 +1425,9 @@ bool xr_wanted() {
             return false;
         const char* exts[] = {XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME};
         XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
-        strcpy(ci.applicationInfo.applicationName, "Hookshot");
+        strcpy(ci.applicationInfo.applicationName, "Longshot");
         ci.applicationInfo.applicationVersion = 1;
-        strcpy(ci.applicationInfo.engineName, "Hookshot VR");
+        strcpy(ci.applicationInfo.engineName, "Longshot VR");
         ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);   // (1.0: every runtime takes it)
         ci.enabledExtensionCount = 1;
         ci.enabledExtensionNames = exts;
@@ -1560,7 +1560,7 @@ void xr_shutdown() {
     logf("xr: the session and the instance closed (the frame loop %s)", x.thread_done.load() ? "ended first" : "did not end in time");
 }
 // RX_VR_TEST=1: stereo's camera without a headset, for looking at what the game draws with it (RX_VK_SHOTS): a pretended
-// head at the anchor, turned by test_yaw and test_pitch (hookshot_vr.ini, read live), the eyes 64 mm apart
+// head at the anchor, turned by test_yaw and test_pitch (longshot_vr.ini, read live), the eyes 64 mm apart
 static bool xr_test() {
     static const bool on = [] {
         if (!env_on("RX_VR_TEST")) return false;
@@ -2274,7 +2274,7 @@ void xr_copy_release(const XrCopy& c) {   // (dev.present_mu held: after the sub
 
 } // namespace mkwvk
 
-// (hookshot-quest) the field of view for the game's cameras while stereo runs (host/hos_main.c hos_oot_free_view, each frame after a
+// (longshot-vr) the field of view for the game's cameras while stereo runs (host/hos_main.c hos_oot_free_view, each frame after a
 // view was handed out): one frustum both eyes' views fit in, upright and centred, as sead's projection is: the tangent of half its
 // height, and its width over its height. The eyes' images take the part of the picture each eye sees (eye_layout)
 extern "C" __declspec(dllexport) int mkwvk_xr_projection(float out[2]) {
@@ -2292,7 +2292,7 @@ extern "C" __declspec(dllexport) int mkwvk_xr_projection(float out[2]) {
     return 1;
 }
 
-// (hookshot-quest) the export host/rx_backend.c rx_xr_view looks for: an older game does not ask, an older back end has none
+// (longshot-vr) the export host/rx_backend.c rx_xr_view looks for: an older game does not ask, an older back end has none
 extern "C" __declspec(dllexport) int mkwvk_xr_view(const double eye[3], const double target[3], float out[12]) {
     return mkwvk::xr_view(eye, target, out, 0);
 }

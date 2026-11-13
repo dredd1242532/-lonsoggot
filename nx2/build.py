@@ -1197,7 +1197,7 @@ def main():
             "-I" + os.path.join(vk_headers, "include"), "-I" + os.path.join(vma_headers, "include"),
             "-I" + vk, "-I" + gen_dir,
             "-I" + os.path.join(kit.ROOT, "third_party", "zbic"),
-            "-I" + os.path.join(kit.ROOT, "third_party", "openxr", "include")]   # (hookshot-quest: vk_xr.cpp)
+            "-I" + os.path.join(kit.ROOT, "third_party", "openxr", "include")]   # (longshot-vr: vk_xr.cpp)
         # (NVIDIA DLSS, a local build's option: scripts/ngx_sdk.py. Only vk_dlss.cpp sees NVIDIA's headers; without them
         # it is the stubs that say DLSS is not there)
         ngx_flags = ["-DLONGSHOT_NGX", "-I" + os.path.join(NGX_SDK, "include")] if NGX_SDK else []

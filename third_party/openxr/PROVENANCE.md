@@ -14,7 +14,9 @@ What is here and why:
 | `LICENSE` | The Apache-2.0 text |
 
 The loader, `openxr_loader.dll`, is not here and is never committed: it comes from the same release's package
-(`x64/bin/openxr_loader.dll`) and sits beside `hookshot_vk.dll` in the game folder's `bin`. Without it VR stays off and
+(`x64/bin/openxr_loader.dll`) and sits beside `longshot_vk.dll` in the game folder's `bin`. Without it VR stays off and
 the game plays on the desktop as before (`quest/README.md`).
 
 Nothing in this folder is edited. A change belongs in a new folder with its own note, per `CONTRIBUTING.md`.
+
+tree-sha256: 261bab7efcfc0e971fc80771576e8523e47b7b650ddba78de5b86afafcd4a59c

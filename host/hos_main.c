@@ -1636,7 +1636,7 @@ void hos_oot_free_view(Ctx *c, uint64_t view) {
     AcquireSRWLockExclusive(&lock);
     const int enabled = rx_option(HOS_OPT_CHEAT_CAMERA, 0);
     oot_build_free_view(c, enabled ? view : 0, view + 8);
-    if (!enabled) {   /* (hookshot-quest) the headset's eye in place of the camera: stereo VR, gpu/vk/vk_xr.cpp */
+    if (!enabled) {   /* (longshot-vr) the headset's eye in place of the camera: stereo VR, gpu/vk/vk_xr.cpp */
         int rx_xr_view(const double eye[3], const double target[3], float out[12], int phase);
         extern volatile uint32_t hos_step_read_bits, hos_vr_tiny_bits;   /* (nn_vi.c: the frames' time in pairs) */
         const uint32_t tiny_bits = hos_vr_tiny_bits;
@@ -1676,7 +1676,7 @@ float hos_aspect_ratio = 0;   /* (the window's default shape: host/display.c) */
 /* (nx2/oot_wide.py) read by the widescreen patches in the game's code; 0: the game's own 16:9 */
 volatile uint64_t hos_wide_out, hos_wide_scene;
 volatile float hos_wide_ratio, hos_wide_squeeze, hos_wide_margin;
-/* (hookshot-quest, nx2/oot_wide.py _vr_fov) the headset's field of view for the game's cameras while stereo runs: the tangent of
+/* (longshot-vr, nx2/oot_wide.py _vr_fov) the headset's field of view for the game's cameras while stereo runs: the tangent of
    half its height, its width over its height, and that half angle's double, sine and cosine; 0: the game's own. Kept by
    hos_oot_free_view each frame from the renderer (gpu/vk/vk_xr.cpp mkwvk_xr_projection) */
 volatile float hos_vr_tan, hos_vr_ratio, hos_vr_fovy, hos_vr_sin, hos_vr_cos;

@@ -1,40 +1,44 @@
-# Builds hookshot_vk.dll (the Vulkan back end, with the Quest/OpenXR output) from this tree, using the toolchain the
-# Hookshot Builder already installed (llvm-mingw, Python, the Vulkan/SPIR-V/VMA headers, NVIDIA's DLSS SDK).
+# Builds longshot_vk.dll (the Vulkan back end, with the Quest/OpenXR output) from this tree, using the toolchain the
+# Longshot Builder already installed (llvm-mingw, Python, the Vulkan/SPIR-V/VMA headers, NVIDIA's DLSS SDK).
 # The game itself is not rebuilt: the DLL is the only file that changes.
 #   powershell -File quest\build_vk.ps1                 # build into ..\work\sa\build
 #   powershell -File quest\build_vk.ps1 -Install        # and copy it into the game folder (the original kept as .orig)
-#   powershell -File quest\build_vk.ps1 -Uninstall      # the original renderer back (hookshot_vr.ini and the loader stay, unused)
+#   powershell -File quest\build_vk.ps1 -Uninstall      # the original renderer back (longshot_vr.ini and the loader stay, unused)
 param(
-    [string]$BuilderVersion = "v2.1.0",
-    [string]$Game = "$env:USERPROFILE\Games\Hookshot",
-    [string]$Work = "$env:LOCALAPPDATA\HookshotVR\work",   # (outside OneDrive and the like: the build objects made it sync and swell)
+    [string]$Tools = "",   # (the Builder's tools folder, ...\LongshotBuilder\tools. Not given: the newest installed version's)
+    [string]$Game = "$env:USERPROFILE\Games\Longshot",
+    [string]$Work = "$env:LOCALAPPDATA\LongshotVR\work",   # (outside OneDrive and the like: the build objects made it sync and swell)
     [switch]$Install,
     [switch]$Uninstall,
     [int]$Jobs = [Environment]::ProcessorCount
 )
 $ErrorActionPreference = "Stop"
 $bin = Join-Path $Game "bin"
-if (Get-Process hookshot -ErrorAction SilentlyContinue) { if ($Install -or $Uninstall) { throw "Hookshot is running: close it first" } }
+if (Get-Process longshot -ErrorAction SilentlyContinue) { if ($Install -or $Uninstall) { throw "Longshot is running: close it first" } }
 if ($Uninstall) {
-    $orig = Join-Path $bin "hookshot_vk.dll.orig"
+    $orig = Join-Path $bin "longshot_vk.dll.orig"
     if (-not (Test-Path $orig)) { throw "no $orig to restore" }
-    Copy-Item $orig (Join-Path $bin "hookshot_vk.dll") -Force
+    Copy-Item $orig (Join-Path $bin "longshot_vk.dll") -Force
     Write-Host "the original renderer is back in $bin"
     return
 }
 $repo = Split-Path -Parent $PSScriptRoot
-$builder = Join-Path $env:LOCALAPPDATA "HookshotBuilder"
-$tools = Join-Path $builder "versions\$BuilderVersion\HookshotBuilder\tools"
-if (-not (Test-Path $tools)) { throw "no Hookshot Builder $BuilderVersion at $tools" }
+$builder = Join-Path $env:LOCALAPPDATA "LongshotBuilder"
+$tools = $Tools
+if (-not $tools) {
+    $tools = Get-ChildItem (Join-Path $builder "versions") -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending |
+        ForEach-Object { Join-Path $_.FullName "LongshotBuilder\tools" } | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $tools -or -not (Test-Path $tools)) { throw "no Longshot Builder tools found (-Tools <folder>, or python -I scripts/tools.py install <folder>)" }
 
 $env:OOT_WORK = $Work
-$env:HOOKSHOT_MINGW = Join-Path $tools "llvm-mingw"
+$env:LONGSHOT_MINGW = Join-Path $tools "llvm-mingw"
 $env:RX_CPM = Join-Path $tools "cpm"
 $ngx = Join-Path $builder "ngx-sdk"
-if (Test-Path (Join-Path $ngx "lib")) { $env:HOOKSHOT_NGX_SDK = $ngx }
+if (Test-Path (Join-Path $ngx "lib")) { $env:LONGSHOT_NGX_SDK = $ngx }
 $env:RX_RELEASE = "1"
 $env:RX_VK_ONLY = "1"
-$env:HOOKSHOT_MEM_GATE = "0"
+$env:LONGSHOT_MEM_GATE = "0"
 
 $py = Get-ChildItem (Join-Path $tools "python") -Filter python.exe -Recurse | Select-Object -First 1
 if (-not $py) { throw "no python.exe under $tools\python" }
@@ -44,10 +48,10 @@ try {
     if ($LASTEXITCODE) { throw "build failed ($LASTEXITCODE)" }
 } finally { Pop-Location }
 
-$dll = Join-Path $env:OOT_WORK "sa\build\hookshot_vk.dll"
+$dll = Join-Path $env:OOT_WORK "sa\build\longshot_vk.dll"
 Write-Host "built $dll"
 if ($Install) {
-    $dst = Join-Path $bin "hookshot_vk.dll"
+    $dst = Join-Path $bin "longshot_vk.dll"
     $orig = "$dst.orig"
     if (-not (Test-Path $orig)) { Copy-Item $dst $orig }
     Copy-Item $dll $dst -Force
@@ -63,8 +67,8 @@ if ($Install) {
         Copy-Item (Join-Path $out "x64in\openxr_loader.dll") $loader
     }
     Copy-Item $loader (Join-Path $bin "openxr_loader.dll") -Force
-    $ini = Join-Path $Game "hookshot_vr.ini"
-    if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot "hookshot_vr.ini") $ini }
+    $ini = Join-Path $Game "longshot_vr.ini"
+    if (-not (Test-Path $ini)) { Copy-Item (Join-Path $PSScriptRoot "longshot_vr.ini") $ini }
     Write-Host "installed into $bin (the original renderer is $orig); settings in $ini"
 }
 

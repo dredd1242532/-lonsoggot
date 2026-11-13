@@ -1,4 +1,4 @@
-// (hookshot-quest) The game on a Meta Quest (or any OpenXR headset) over Quest Link / Air Link / Virtual Desktop: vk_xr.cpp.
+// (longshot-vr) The game on a Meta Quest (or any OpenXR headset) over Quest Link / Air Link / Virtual Desktop: vk_xr.cpp.
 //
 // The renderer's Vulkan instance and device are made through OpenXR (XR_KHR_vulkan_enable2) when VR is on, every presented
 // picture (the game's, the start-up screen, the Insert menu over them) is copied into an OpenXR swapchain, and a thread of its
@@ -6,7 +6,7 @@
 // while the head moves, at the headset's rate whatever the game's). The Touch controllers are a virtual SDL3 gamepad, with
 // the right controller's motion as its gyroscope (the game's Motion controls), so host/pad_sdl.c plays them as any pad.
 //
-// On when hookshot_vr.ini beside the game says vr=1 (RX_VR=0 / 1 over it). Anything missing (no openxr_loader.dll,
+// On when longshot_vr.ini beside the game says vr=1 (RX_VR=0 / 1 over it). Anything missing (no openxr_loader.dll,
 // no runtime, the headset not connected) leaves the game on the desktop as it was, said in the log ("xr: ...").
 #pragma once
 
@@ -75,9 +75,9 @@ void xr_copy_release(const XrCopy& c);
 bool xr_mirror(VkCommandBuffer cmd, VkImage src, uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh, VkImage dst, uint32_t w,
                uint32_t h);
 
-// The Insert menu's VR tab (vk_menu.cpp): hookshot_vr.ini's settings as the menu's whole numbers (a length in centimetres, a
+// The Insert menu's VR tab (vk_menu.cpp): longshot_vr.ini's settings as the menu's whole numbers (a length in centimetres, a
 // scale in percent, a switch 0 or 1). A row changes xr_opt[] and tells xr_opt_changed: the setting applies at once (those read
-// at the start after a restart: XO_VR, XO_STEREO, XO_GYRO) and its line in hookshot_vr.ini is written, the file's other lines
+// at the start after a restart: XO_VR, XO_STEREO, XO_GYRO) and its line in longshot_vr.ini is written, the file's other lines
 // and comments kept
 enum XrOpt {
     XO_VR, XO_STEREO,
@@ -93,7 +93,7 @@ enum XrOpt {
     XO_SCREEN_LAST = XO_SCREEN_HEIGHT
 };
 extern int xr_opt[XO_N];
-/// hookshot_vr.ini read into xr_opt[] (once; the menu's start, before it notes what the game started with)
+/// longshot_vr.ini read into xr_opt[] (once; the menu's start, before it notes what the game started with)
 void xr_opts_load();
 void xr_opt_changed(int id);
 /// The screen, the HUD and the game's camera put in front of the head as it is now (as F8, or both sticks held in)

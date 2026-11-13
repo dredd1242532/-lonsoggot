@@ -261,7 +261,7 @@ volatile int hos_scene_rgba16f = 0;   /* (the scene buffer RGBA16F, not R11G11B1
 volatile uint64_t hos_step_probe = 0;   /* (f_80706be0's object, set by the lifted code when the frame-time hook is in this build; its
                                             +0xd58 is the game clock in 1/60 s: nx2/oot_patches.py) */
 volatile uint32_t hos_frame_seconds_bits = 0;   /* (the frame's seconds as a float's bits for that hook, 0: the game's own step) */
-/* (hookshot-quest) stereo draws one eye a frame: so that the two eyes of a pair show one moment, the frames' time comes in
+/* (longshot-vr) stereo draws one eye a frame: so that the two eyes of a pair show one moment, the frames' time comes in
    pairs, a step of two frames' time and then one of next to none (hos_vr_tiny_bits, 0 while not). hos_step_read_bits: the step
    the game's frame read last (the lifted hook writes it), by which hos_oot_free_view knows the second frame of a pair */
 volatile uint32_t hos_step_read_bits = 0, hos_vr_tiny_bits = 0;

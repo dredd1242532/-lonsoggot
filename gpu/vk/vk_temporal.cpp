@@ -97,7 +97,7 @@ bool temporal_env_chosen() {
 }
 
 int temporal_mode() {
-    if (xr_no_temporal()) return ur::GAME;   // (hookshot-quest: the frame before is the other eye's; history from it was a double image)
+    if (xr_no_temporal()) return ur::GAME;   // (longshot-vr: the frame before is the other eye's; history from it was a double image)
     const int dlss = env_dlss(), fsr4 = env_fsr4();
     int v = opts.dlss;
     if (dlss > 0) v = dlss >= 2 ? ur::DLAA : ur::DLSS;   // (2 and up: DLAA, as RX_VK_DLSS was clamped before)
@@ -230,7 +230,7 @@ struct State {
 State& st() {
     // (never destroyed: Longshot leaves through ExitProcess / exit() with the device alive, and `dead` may still hold an
     // engine's state then (an FSR context), whose destructor would call into a library already gone)
-    // (hookshot-quest) stereo draws one eye a frame: each eye has a chain of its own (its camera, its history, its engine's
+    // (longshot-vr) stereo draws one eye a frame: each eye has a chain of its own (its camera, its history, its engine's
     // feature), so a frame's history is its own eye's frame before, not the other eye's (which ghosted on quick moves)
     static State* const s[2] = {new State, new State};
     return *s[xr_temporal_slot()];
