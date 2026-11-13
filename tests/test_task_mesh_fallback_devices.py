@@ -1,10 +1,12 @@
-"""The GPUs whose task + mesh draws take the compute fallback by default (gpu/vk/mesh_mode.h, gpu/vk/vk_main.cpp, issue 996).
+"""The GPUs whose task + mesh draws take the compute fallback by default (gpu/vk/mesh_mode.h, gpu/vk/vk_main.cpp,
+https://github.com/NotRexed/Hookshot/issues/996).
 
-On AMD's Windows driver the native task + mesh path timed out the driver on Navi 22 (#1747) and on Navi 21: an RX 6800 XT lost
-the device within minutes at Hyrule Castle's entrance, and played 25 minutes there with none through the fallback. An RX 6600
-(Navi 23) lost the device on the session's first task + mesh draws (reported in Mako by sharkiix), and Navi 24 has the same
-RDNA 2 mesh path. This compiles mesh_rule::task_mesh_fallback_default and checks that it names those chips' device IDs, only
-for AMD, and no other; and reads vk_main.cpp to check that it is the default only on Windows and that
+On AMD's Windows driver the native task + mesh path timed out the driver on Navi 22
+(https://github.com/NotRexed/Hookshot/pull/1747) and on Navi 21: an RX 6800 XT lost the device within minutes at Hyrule
+Castle's entrance, and played 25 minutes there with none through the fallback. An RX 6600 (Navi 23) lost the device on the
+session's first task + mesh draws (reported in Mako by sharkiix). Navi 24 is held out: no report, and 4 GB cards where the
+fallback's buffers cost the most. This compiles mesh_rule::task_mesh_fallback_default and checks that it names those chips'
+device IDs, only for AMD, and no other; and reads vk_main.cpp to check that it is the default only on Windows and that
 RX_VK_TASK_MESH_FALLBACK still decides over it.
 
 python -I -B tests/test_task_mesh_fallback_devices.py
@@ -29,10 +31,11 @@ DEVICES = {
     0x73E3: "Navi 23 (Radeon Pro W6600)",
     0x73EF: "Navi 23 (RX 6650 XT)",
     0x73FF: "Navi 23 (RX 6600, 6600 XT, 6600 LE)",
-    0x743F: "Navi 24 (RX 6400, 6500 XT)",
 }
-# (not in the default: RDNA 1, other RDNA 2 functions and boards nobody reported on, RDNA 3)
-OTHERS = [0x731F, 0x7340, 0x73C3, 0x73C4, 0x73CE, 0x73DA, 0x73E4, 0x7421, 0x7422, 0x7423, 0x7424, 0x73F0, 0x744C, 0x7480]
+# (not in the default: RDNA 1; Navi 22's and 23's IDs that are no named card (USB, SR-IOV, unnamed); all of Navi 24 (0x743F
+# RX 6400 and 6500 XT, 0x7421 to 0x7424 RX 6300 and Pro W6300 to W6500M), held until a Windows run; RDNA 3)
+OTHERS = [0x731F, 0x7340, 0x73C3, 0x73C4, 0x73CE, 0x73DA, 0x73E4, 0x743F, 0x7421, 0x7422, 0x7423, 0x7424, 0x73F0, 0x744C,
+          0x7480]
 
 RULE = r'''#include "mesh_mode.h"
 #include <cstdio>

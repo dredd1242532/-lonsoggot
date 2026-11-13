@@ -622,7 +622,8 @@ bool create_device() {
     if (dev.mesh_fallback) logf("vk: no mesh shaders: task and mesh programs run as compute shaders (issue 640 fallback)");
     bool task_mesh_fallback = false;
 #ifdef _WIN32
-    // (issue 996) AMD's RDNA 2 cards, Navi 21 to 24, can time out on task + mesh draws in the Windows driver: mesh_mode.h
+    // (https://github.com/NotRexed/Hookshot/issues/996) AMD's RDNA 2 cards, Navi 21 to 23, can time out on task + mesh draws
+    // in the Windows driver: mesh_mode.h
     task_mesh_fallback = mesh_rule::task_mesh_fallback_default(dev.props.vendorID, dev.props.deviceID);
 #endif
     if (mesh_mode == 1) task_mesh_fallback = false;   // (Native: the card's own mesh shaders for every draw)

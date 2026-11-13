@@ -42,11 +42,15 @@ inline bool old_ini_choice(const char* line, int* value) {
     return *value == 1 || *value == 2;   // (what the row read: 0 to 2, anything else Automatic)
 }
 
-/// (longshot, issue 996) The GPUs whose task + mesh draws take the compute fallback by default; vk_main.cpp asks only on
-/// Windows, where AMD's driver timed out on the native task + mesh path of RDNA 2. Navi 22 first, then Navi 21: on an RX
-/// 6800 XT (driver 0x800161) the native path lost the device within minutes at Hyrule Castle's entrance, while the
-/// fallback played 25 minutes there with none. Navi 23: an RX 6600 (driver 0x800161) lost the device on the session's
-/// first task + mesh draws (reported in Mako by sharkiix). Navi 24 has the same RDNA 2 mesh path, not tested on its own
+/// (longshot, https://github.com/NotRexed/Hookshot/issues/996) The GPUs whose task + mesh draws take the compute fallback by
+/// default; vk_main.cpp asks only on Windows, where AMD's driver timed out on the native task + mesh path of RDNA 2. Navi 22
+/// first (an RX 6700 XT), then Navi 21: on an RX 6800 XT (driver 0x800161) the native path lost the device within minutes at
+/// Hyrule Castle's entrance, while the fallback played 25 minutes there with none. Navi 23: an RX 6600 (driver 0x800161)
+/// lost the device on the session's first task + mesh draws (reported in Mako by sharkiix, no log published); another RX 6600
+/// on the same driver played 15-20 minutes on the native path and lost the device only at the driver's VRAM limit
+/// (https://git.magicbean.dev/MagicBeanDev/Longshot/issues/130); the fallback costs VRAM of its own (fallback_buffers_of,
+/// vk_draw.cpp). Navi 24 (0x743f: RX 6400, 6500 XT; 0x7421 to 0x7424: RX 6300, Pro
+/// W6300 to W6500M) is not on by default: no report, 4 GB cards. RX_VK_TASK_MESH_FALLBACK=1 to try
 inline bool task_mesh_fallback_default(uint32_t vendor, uint32_t device) {
     if (vendor != 0x1002) return false;
     switch (device) {
@@ -59,7 +63,6 @@ inline bool task_mesh_fallback_default(uint32_t vendor, uint32_t device) {
     case 0x73e3:   // Navi 23: Radeon Pro W6600
     case 0x73ef:   // Navi 23: RX 6650 XT
     case 0x73ff:   // Navi 23: RX 6600, 6600 XT, 6600 LE
-    case 0x743f:   // Navi 24: RX 6400, 6500 XT
         return true;
     default:
         return false;
