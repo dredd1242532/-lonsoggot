@@ -184,6 +184,8 @@ static struct {
     uint64_t save_generation, area_generation;
     OotCoopKitRun kit;       /* game-thread setup, retained after cancellation; lock */
     OotCoopKitWork kit_work;
+    uint32_t kit_offer, kit_epoch;
+    uint64_t kit_session, kit_generation;
 
     /* the game thread's */
     uint64_t mgr, bool_entries, int_entries;
@@ -652,6 +654,49 @@ static int presentation_locked(const CoopView *v, CoopOffer *o, uint32_t *member
             *members |= 1u << v->member[i].id;
     return 1;
 }
+/* Kit consent is local and separate from see/talk, bound to this exact copy load. G.lock held. */
+static int kit_consent_locked(const CoopView *view, const CoopOffer *offer) {
+    return coop_profile_active() && offer->presence_accepted && G.kit_offer &&
+           G.kit_offer == offer->token && G.kit_epoch == offer->rules.epoch &&
+           G.kit_session == view->session && G.kit_generation == G.save_generation;
+}
+static int kit_stamp_locked(const CoopView *view, const CoopOffer *offer, char *out, size_t cap) {
+    OotCoopKit kit;
+    if (!coop_profile_active() || !offer->presence_accepted || !G.loaded || !G.gate || !G.save_generation ||
+        oot_coop_kit_parse(&offer->rules, &kit) != OOT_KIT_VALID) return 0;
+    return snprintf(out, cap, "%08x:%08x:%016llx:%016llx", offer->token, offer->rules.epoch,
+                    (unsigned long long)view->session, (unsigned long long)G.save_generation) == 51;
+}
+int hos_oot_coop_kit_token(char *out, size_t cap) {
+    if (!out || cap < 52) return 0;
+    out[0] = 0;
+    if (!coop_profile_active() || !TryAcquireSRWLockExclusive(&G.lock)) return 0;
+    CoopView view;
+    CoopOffer offer;
+    uint32_t members = 0;
+    coop_view_get(&view);
+    const int ok = presentation_locked(&view, &offer, &members) && kit_stamp_locked(&view, &offer, out, cap);
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+int hos_oot_coop_kit_accept(const char *stamp, uint32_t token) {
+    if (!stamp || !coop_profile_active() || !TryAcquireSRWLockExclusive(&G.lock)) return 0;
+    CoopView view;
+    CoopOffer offer;
+    uint32_t members = 0;
+    char expected[64] = {0};
+    coop_view_get(&view);
+    const int ok = presentation_locked(&view, &offer, &members) && token == offer.token &&
+                   kit_stamp_locked(&view, &offer, expected, sizeof expected) && !strcmp(stamp, expected);
+    if (ok) {
+        G.kit_offer = offer.token, G.kit_epoch = offer.rules.epoch;
+        G.kit_session = view.session, G.kit_generation = G.save_generation;
+        hos_log("coop: kit: explicitly accepted this copy's sword-practice kit; normal saves are unchanged");
+    }
+    ReleaseSRWLockExclusive(&G.lock);
+    return ok;
+}
+
 /* The engine owns consent; the session gets only current member/session bindings (G.lock held).
    Read the live view, not G.view: a roster and a removal can arrive in the same receive batch before on_view. */
 static void gameplay_revoke_locked(const CoopView *v) {
@@ -661,10 +706,12 @@ static void gameplay_revoke_locked(const CoopView *v) {
     uint32_t members = 0;
     int valid = presentation_locked(v, &o, &members) && v->session == c->room_session &&
                 o.token == c->offer && o.rules.epoch == c->rules_epoch;
-    if (coop_profile_active() && (c->capabilities & ~COOP_GAMEPLAY_PRESENTATION)) valid = 0;
+    if (valid && coop_profile_active() && ((c->capabilities & COOP_GAMEPLAY_DURABLE) ||
+        ((c->capabilities & COOP_GAMEPLAY_TEMPORARY) && !kit_consent_locked(v, &o)))) valid = 0;
     for (int id = 1; valid && id <= COOP_GAMEPLAY_MEMBERS; id++)
         if (c->accepted_session[id] && !(members & (1u << id))) valid = 0;
     if (!valid) {
+        G.kit_offer = 0;
         coop_gameplay_publish(&G.gameplay, NULL);
         __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
         if (G.kit.state == OOT_KIT_APPLYING || G.kit.state == OOT_KIT_READY) G.kit.state = OOT_KIT_CANCELLED;
@@ -689,9 +736,8 @@ static void publish_members(void) {
     hos_oot_hits_room(presentation ? &offer.rules : NULL, presentation);
     gameplay_revoke_locked(&v);
     coop_download_members(&v, G.eng ? coop_sync_download_members(G.eng) : 0);
-    CoopOffer offer;
-    const int has = G.eng && coop_sync_offer(G.eng, &offer, coop_now_ms());
-    hos_coop_chat_room(&v, has ? &offer : NULL, members);
+    offer.accepted = presentation;
+    hos_coop_chat_room(&v, presentation ? &offer : NULL, presentation ? presented : 0);
 }
 
 static void on_message(int from, const uint8_t *bytes, size_t n, void *user) {
@@ -835,11 +881,9 @@ static int offer_of(CoopOffer *o, uint64_t now) {
     const int has = coop_sync_offer(G.eng, o, now);
     OotCoopKit kit;
     const int status = oot_coop_kit_parse(&o->rules, &kit);
-    if (has && (status < 0 || (status == OOT_KIT_VALID && !coop_profile_active()) ||
-                (status == OOT_KIT_OFF && coop_profile_active()))) {
+    if (has && !coop_profile_active() && status != OOT_KIT_OFF) {
         snprintf(o->refusal, sizeof o->refusal, "%s", status < 0 ? "Unsupported or incompatible temporary kit." :
-                 status == OOT_KIT_VALID ? "This kit needs Temporary save. Leave, make a copy, then join again." :
-                 "This copy has no supported kit to accept. Download consent remains separate.");
+                 "This kit needs Temporary save. Leave, make a copy, then join again.");
         o->accepted = 0;
         return 0;
     }
@@ -935,6 +979,7 @@ static void publish_none(void) {
     coop_presence_members(NULL, 0);
     AcquireSRWLockExclusive(&G.lock);
     coop_gameplay_publish(&G.gameplay, NULL);
+    G.kit_offer = 0;
     __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
     if (G.eng && coop_profile_active()) coop_sync_presence_revoke(G.eng);
     __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
@@ -1053,6 +1098,7 @@ int hos_oot_coop_presence_accept(uint32_t token) {
 }
 
 int hos_oot_coop_accept(uint32_t token) {
+    if (coop_profile_active()) return 0;   /* see/talk and kit consent have separate explicit actions */
     AcquireSRWLockShared(&G.pub_lock);
     const int same = token && G.pub_has && token == G.pub.token, done = same && G.pub.accepted;
     const int ok = same && !G.pub.accepted && !G.pub.unidentified && !G.pub.refusal[0];
@@ -1487,7 +1533,8 @@ static void gameplay_context_locked(void) {
             (presence & (COOP_PRESENCE_BODIES | COOP_PRESENCE_HEALTH | COOP_PRESENCE_ARROWS | COOP_PRESENCE_PLACE)))
             context.capabilities |= COOP_GAMEPLAY_PRESENTATION;
         int warp = 0;
-        if (coop_feature_present(&offer.rules, COOP_RULE_WARP, &warp) && warp == 1)
+        if ((!temporary && coop_feature_present(&offer.rules, COOP_RULE_WARP, &warp) && warp == 1) ||
+            (temporary && kit_consent_locked(&view, &offer)))
             context.capabilities |= COOP_GAMEPLAY_TEMPORARY;
         context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
         context.room_session = view.session;
@@ -1646,41 +1693,23 @@ static int kit_write(void *game, const void *payload) {
 }
 
 static void temporary_kit_present(Ctx *c, uint64_t mgr, int open) {
+    (void)mgr;
+    (void)c;
     if (!TryAcquireSRWLockExclusive(&G.lock)) return;
-    const uint64_t eh = recomp_load64(c, 0x84c9e090ULL);
-    const uint64_t events = rd_ok(eh, 8) ? recomp_load64(c, eh) : 0;
-    open = open && rd_ok(events, 112) && !recomp_load64(c, events + 104);
-    if (open && !G.bound) {
-        G.mgr = mgr, G.bound = 1;
-        G.save_generation++;
-        G.bool_entries = recomp_load64(c, mgr + C_BOOL + CN_ENTRIES);
-        G.int_entries = recomp_load64(c, mgr + C_INT + CN_ENTRIES);
-        if (G.eng) coop_sync_rebind(G.eng);
-        publish_members();
-    }
-    CoopGameplayContext context = {0};
-    CoopOffer offer;
     CoopView view;
+    CoopOffer offer;
+    uint32_t members = 0;
     OotCoopKit kit;
     coop_view_get(&view);
-    if (open && G.eng && view.state == COOP_JOINED && coop_sync_offer(G.eng, &offer, coop_now_ms()) &&
-        offer.accepted && oot_coop_kit_parse(&offer.rules, &kit) == OOT_KIT_VALID) {
-        context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
-        context.capabilities = COOP_GAMEPLAY_TEMPORARY;
-        context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
-        context.room_session = view.session;
-        context.save_generation = G.save_generation, context.area_generation = G.area_generation;
-        for (int i = 0; i < view.n; i++) {
-            const int id = view.member[i].id;
-            if (id > 0 && id <= COOP_GAMEPLAY_MEMBERS && coop_sync_member_accepted(G.eng, id, view.member[i].session))
-                context.accepted_session[id] = view.member[i].session;
-        }
-    }
-    coop_gameplay_publish(&G.gameplay, &context);
-    __atomic_store_n(&hos_oot_coop_kit_active, context.capabilities &&
+    const int allowed = open && presentation_locked(&view, &offer, &members) &&
+                        kit_consent_locked(&view, &offer) &&
+                        oot_coop_kit_parse(&offer.rules, &kit) == OOT_KIT_VALID &&
+                        (G.gameplay.context.capabilities & COOP_GAMEPLAY_TEMPORARY);
+    __atomic_store_n(&hos_oot_coop_kit_active, allowed &&
                      (G.kit.state == OOT_KIT_IDLE || G.kit.state == OOT_KIT_APPLYING), __ATOMIC_RELEASE);
-    if (!context.capabilities) {
+    if (!allowed) {
         if (G.kit.state == OOT_KIT_APPLYING) G.kit.state = OOT_KIT_CANCELLED;
+        if (!open) G.kit_offer = 0;
         ReleaseSRWLockExclusive(&G.lock);
         return;
     }
@@ -1712,8 +1741,11 @@ void hos_oot_coop_kit_update(Ctx *c) {
 
 int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch) {
     if (!TryAcquireSRWLockExclusive(&G.lock)) return 0;
+    CoopView view;
+    coop_view_get(&view);
+    gameplay_revoke_locked(&view);
     const CoopGameplayContext *context = &G.gameplay.context;
-    const int ready = G.kit.state == OOT_KIT_READY && context->capabilities == COOP_GAMEPLAY_TEMPORARY &&
+    const int ready = G.kit.state == OOT_KIT_READY && (context->capabilities & COOP_GAMEPLAY_TEMPORARY) &&
                       offer && offer == G.kit.offer && offer == context->offer &&
                       epoch == G.kit.epoch && epoch == context->rules_epoch &&
                       G.kit.generation == context->save_generation;
@@ -1767,6 +1799,11 @@ static void copy_present(Ctx *c) {
         ReleaseSRWLockExclusive(&G.lock);
     }
     __atomic_store_n(&G.playing, open && __atomic_load_n(&G.on, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
+    const uint64_t eh = recomp_load64(c, 0x84c9e090ULL);
+    const uint64_t events = rd_ok(eh, 8) ? recomp_load64(c, eh) : 0;
+    const int safe = open && rd_ok(events, 112) && !recomp_load64(c, events + 104);
+    hos_coop_chat_scene(safe);
+    temporary_kit_present(c, mgr, safe);
     hos_oot_coop_players_tick(G.loaded, open);
     if (__atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED)) {
         char area[COOP_POS_TEXT + 1] = {0};
@@ -1808,11 +1845,6 @@ void hos_oot_coop_present(Ctx *c) {
         const uint64_t holder = recomp_load64(c, 0x84c9e090ULL);
         const uint64_t events = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
         hos_coop_chat_scene(open && rd_ok(events, 112) && !recomp_load64(c, events + 104));
-    }
-    if (coop_profile_active()) {
-        temporary_kit_present(c, mgr, open);
-        hos_oot_hits_frame(NULL, 0);
-        return; /* no bind_tables, scan, test-set aid, pool or durable writer in a temporary profile */
     }
     hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
     hos_oot_coop_warp_present(c);   /* pending travel only; no native effect from the present */

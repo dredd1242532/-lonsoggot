@@ -168,6 +168,7 @@ static struct {
     SRWLOCK lock;           /* around store, last_me and me_ms (the co-op thread takes positions; the game's threads only try it) */
     CoopPlayers store;
     CoopGameplayTicket ticket[COOP_MAX_MEMBERS + 1];   /* admission at receive; checked again before native effects */
+    uint64_t mismatch[COOP_MAX_MEMBERS + 1], mismatch_warned[COOP_MAX_MEMBERS + 1];
     CoopPos last_me;        /* Link's last place in play, as Link's update last read it: the present's tick sends from it */
     uint64_t me_ms;         /* when */
 
@@ -792,14 +793,32 @@ static void on_pos(int from, const uint8_t *bytes, size_t n, void *user) {
     CoopGameplayTicket ticket;
     if (!hos_oot_coop_gameplay_ticket(COOP_GAMEPLAY_BODIES, (unsigned)from, &ticket)) return;
     AcquireSRWLockExclusive(&P.lock);
-    const int taken = receive_pose(from, bytes, n, coop_now_ms(), &ticket);
+    int mismatch_notice = 0;
+    const int incompatible = n && bytes[0] != COOP_POS_VERSION;
+    int taken = 0;
+    if (incompatible) {
+        P.store.r[from].n = 0;
+        __atomic_store_n(&P.mismatch[from], ticket.session, __ATOMIC_RELEASE);
+        mismatch_notice = P.mismatch_warned[from] != ticket.session;
+        P.mismatch_warned[from] = ticket.session;
+    } else {
+        taken = receive_pose(from, bytes, n, coop_now_ms(), &ticket);
+        if (taken) __atomic_store_n(&P.mismatch[from], 0, __ATOMIC_RELEASE);
+    }
     if (taken && P.trace && coop_players_last(&P.store, from, 0, &last, NULL)) {
         say = !P.heard[from].any || last.flags != P.heard[from].flags || strcmp(last.area, P.heard[from].area);
         P.heard[from].any = 1, P.heard[from].flags = last.flags;
         memcpy(P.heard[from].area, last.area, sizeof last.area);
     }
     ReleaseSRWLockExclusive(&P.lock);
+    if (mismatch_notice)
+        hos_log("coop: players: member %d uses a different build; their body is not shown. Use the same build.", from);
     if (say) say_heard(from, &last);
+}
+
+int hos_oot_coop_players_mismatch(int member, uint64_t session) {
+    return member >= 1 && member <= COOP_MAX_MEMBERS && session &&
+           __atomic_load_n(&P.mismatch[member], __ATOMIC_ACQUIRE) == session;
 }
 
 static void on_view(const CoopView *v, void *user) {
@@ -875,7 +894,7 @@ static void update(Ctx *c, uint64_t actor) {
     in_room = P.store.others > 0;
     memcpy(tickets, P.ticket, sizeof tickets);
     ReleaseSRWLockExclusive(&P.lock);
-    if (n && age_permitted(me.flags)) coop_send(COOP_K_POS, buf, n);
+    if (n) coop_send(COOP_K_POS, buf, n);   /* place_hidden applies each independent disclosure bit */
     if (!P.show) return;   /* (nobody is shown: nothing is made in the game) */
 
     int shown = 0;
@@ -952,16 +971,19 @@ int hos_coop_overlay_snapshot(MkwVkCoopOverlay *out, int labels) {
     out->nmarks = 0;
     if (labels < 1 || labels > 2 || !hos_oot_coop_playing() || !hos_oot_coop_presence()) return 0;
     CoopOffer offer;
-    if (!hos_oot_coop_offer(&offer) || !offer.accepted) return 0;
+    CoopRules rules;
+    uint32_t members = 0;
+    if (!hos_oot_coop_presentation(&rules, &members) || !hos_oot_coop_offer(&offer)) return 0;
     int names = 0, permissions = 0;
-    coop_feature_present(&offer.rules, COOP_RULE_NAMES, &names);
-    coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &permissions);
+    coop_feature_present(&rules, COOP_RULE_NAMES, &names);
+    coop_feature_present(&rules, COOP_RULE_PRESENCE, &permissions);
     const int arrows = labels == 2 && (permissions & COOP_PRESENCE_ARROWS);
     if (!names && !arrows) return 0;
     if (!TryAcquireSRWLockExclusive(&P.game_lock)) return 0;
     const uint64_t now = coop_now_ms();
     for (int i = 0; i < offer.n && out->nmarks < HOS_COOP_MEMBERS; i++) {
         const int id = offer.member[i].id;
+        if (id < 1 || id > COOP_MAX_MEMBERS || !(members & (1u << id))) continue;
         CoopPos pose;
         uint64_t age = 0;
         if (!hos_oot_coop_players_snapshot(id, &pose, &age) || age >= COOP_PLAYERS_SILENT_MS ||

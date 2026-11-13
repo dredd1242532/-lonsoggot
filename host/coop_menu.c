@@ -34,6 +34,10 @@ int hos_ini_text(const char *key, char *out, size_t size);   /* host/nn_applet.c
 int hos_oot_coop_offer(CoopOffer *out);
 int hos_oot_coop_accept(uint32_t token);
 int hos_oot_coop_presence_accept(uint32_t token);
+int hos_oot_coop_kit_token(char *out, size_t cap);
+int hos_oot_coop_kit_accept(const char *stamp, uint32_t token);
+int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members);
+int hos_oot_coop_players_mismatch(int member, uint64_t session);
 int hos_oot_coop_is_maker(void);
 int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
@@ -232,6 +236,7 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
         MkwVkCoopMember *m = &out->member[out->n++];
         m->id = v.member[i].id;
         m->self = v.member[i].id == v.self;
+        m->pos_incompatible = (uint8_t)hos_oot_coop_players_mismatch(m->id, v.member[i].session);
         m->maker = v.member[i].maker || (v.maker && v.member[i].id == v.maker);
         m->away = v.member[i].away != 0;
         copy_text(m->name, sizeof m->name, v.member[i].name);
@@ -275,7 +280,12 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
                                                        !offer.member[j].removed && !offer.member[j].accepted_as[0]);
                 }
     }
-    for (int k = 0; k < out->n; k++) friend_information(&out->member[k], &offer.rules);
+    CoopRules presented_rules;
+    uint32_t presented_members = 0;
+    if (hos_oot_coop_presentation(&presented_rules, &presented_members))
+        for (int k = 0; k < out->n; k++)
+            if (presented_members & (1u << out->member[k].id)) friend_information(&out->member[k], &presented_rules);
+    hos_oot_coop_kit_token(out->kit_token, sizeof out->kit_token);
     CoopContributor who[COOP_MAX_MEMBERS * 2];
     const int n = hos_oot_coop_contributors(who, COOP_MAX_MEMBERS * 2);
     for (int j = 0; j < n; j++)
@@ -319,6 +329,8 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return hos_oot_coop_accept(number);
     case HOS_COOP_CMD_PRESENCE_ACCEPT:
         return hos_oot_coop_presence_accept(number);
+    case HOS_COOP_CMD_KIT_ACCEPT:
+        return hos_oot_coop_kit_accept(text, number);
     case HOS_COOP_CMD_REMOVE:
         return text && *text && hos_oot_coop_remove_key(text);
     case HOS_COOP_CMD_RESET_POOLS:

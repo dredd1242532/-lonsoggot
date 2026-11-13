@@ -11,7 +11,7 @@ int hos_ini_option(const char *key, int otherwise);
 
 static void receive(int from, uint64_t session, uint64_t event_id, const uint8_t *bytes, size_t n, void *user) {
     (void)event_id; (void)user;
-    if (!__atomic_load_n(&active, __ATOMIC_ACQUIRE) || !coop_member_accepted(from)) return;
+    if (!__atomic_load_n(&active, __ATOMIC_ACQUIRE) || !coop_member_present(from)) return;
     coop_lock(&lock);
     coop_chat_receive(&chat, from, session, bytes, n, coop_now_ms());
     coop_unlock(&lock);

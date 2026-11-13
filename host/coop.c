@@ -1292,8 +1292,9 @@ static void flush_outbox(CoopSess *s) {
         if (slot->kind == COOP_K_POS) {
             const int exhausted = s->out_counter == UINT32_MAX;
             // Serialize the final check and UDP send with revocation. Reacceptance cannot revive an old pose.
-            if (!exhausted && accepted_locked(s, slot->dst) && slot->pos_self == s->accepted_self &&
-                slot->pos_session == s->accepted[slot->dst] && slot->pos_epoch == s->accepted_epoch[slot->dst])
+            if (!exhausted && (accepted_locked(s, slot->dst) || presence_locked(s, slot->dst)) &&
+                slot->pos_self == s->view.session && slot->pos_epoch == s->accepted_epoch[slot->dst] &&
+                slot->pos_session == (presence_locked(s, slot->dst) ? s->presence[slot->dst] : s->accepted[slot->dst]))
                 send_sealed(s, slot->dst, slot->kind, slot->data, slot->len);
             s->out_tail = (s->out_tail + 1) % OUT_SLOTS;
             coop_unlock(&s->lock);
@@ -1317,7 +1318,7 @@ int coop_sess_send(CoopSess *s, int member, uint8_t kind, const void *bytes, siz
     if (kind == COOP_K_POS) {
         unsigned recipients = 0, count = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
-            if ((!member || member == COOP_DST_ALL || member == id) && accepted_locked(s, id))
+            if ((!member || member == COOP_DST_ALL || member == id) && (accepted_locked(s, id) || presence_locked(s, id)))
                 recipients |= 1u << id, count++;
         const unsigned free_slots = (s->out_tail + OUT_SLOTS - s->out_head - 1) % OUT_SLOTS;
         if (!count || count > free_slots) {
@@ -1329,7 +1330,9 @@ int coop_sess_send(CoopSess *s, int member, uint8_t kind, const void *bytes, siz
             if (!(recipients & (1u << id))) continue;
             OutMsg *slot = &s->out[s->out_head];
             slot->dst = (uint8_t)id, slot->kind = kind, slot->len = (uint16_t)n;
-            slot->pos_self = s->accepted_self, slot->pos_session = s->accepted[id], slot->pos_epoch = s->accepted_epoch[id];
+            slot->pos_self = s->view.session;
+            slot->pos_session = presence_locked(s, id) ? s->presence[id] : s->accepted[id];
+            slot->pos_epoch = s->accepted_epoch[id];
             if (n) memcpy(slot->data, bytes, n);
             s->out_head = (s->out_head + 1) % OUT_SLOTS;
         }

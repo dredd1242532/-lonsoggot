@@ -1121,9 +1121,10 @@ never zero. A freshly reported zero really is zero; a zero maximum means unknown
 wheel when it does not fit. The original membership names and key fingerprints remain available for deciding whom
 to accept; unaccepted members get none of this new gameplay information.
 
-POS payload version3 appends two little-endian u16 values, health and maximum, in quarter-heart units, bounded to
-160. Unknown is the canonical pair0/0. Older version2 payloads are refused, not guessed; a version2 client likewise
-refuses version3 and shows no remote body from it. Matching updated builds are required for presence.
+POS payload version3 has one definition in `host/coop_proto.h`: after animation slots come three gear bytes,
+then two little-endian u16 values, health and maximum, in quarter hearts, bounded to160. Unknown is0/0.
+Version2 and version3 refuse each other, never reinterpret a payload. Matching builds are required; the member's
+Co-op line says **Different build; body not shown.**, and the log explains it once per accepted peer session.
 The relay still forwards encrypted bytes without parsing them. POS now snapshots only locally accepted recipient
 sessions as unicasts and rechecks each before sending; revoke/reaccept cancels already queued poses.
 The receiver independently checks its own current acceptance and presentation generation as before.
@@ -1140,6 +1141,7 @@ Current-build two-game pictures, physical controls, Windows and multi-player rea
 In the Co-op tab, choose **Go to friend**, select an accepted friend with Left/Right, and press Enter/A twice.
 The maker must enable **Go to friend** (`coop_warp=1`, signed rule64, default0) in Room rules and everybody must
 accept the changed terms. This does not pull another player or change anybody's age, equipment or inventory.
+This action is only available on normal saves. See-and-talk consent on a copy never authorizes travel.
 It uses the precise position already shared by the accepted presence feature and the friend's local body-display
 choice; it does not enable extra position disclosure. Both builds must support the same pose format.
 
@@ -1217,7 +1219,7 @@ The room secret is shared: a malicious invited holder can still impersonate ephe
 chat or disrupt another sender's sequence. Chat is always labelled as a member's text,
 never interpreted as a command, path, link action or system notice.
 
-Renderer API27 adds bounded `coop_feed` and `coop_chat` callbacks. Input option61
+Renderer API29 combines the names overlay, feed and chat callbacks with the travel, kit and duel views. Input option61
 (`HOS_OPT_CHAT_FOCUS`) is the field/release fence; duel Ready/start admission must include it.
 `tests/test_coop_chat.py` exercises the production core, runtime callbacks, signed progress
 observer and menu/input entry without a game; `--mutations` requires broken copies to fail.
@@ -1231,8 +1233,10 @@ This is kit setup, not a playable duel, an exclusive inventory filter, or a comp
 
 First use **Temporary save** outside a room, restart into the copy, and load a checkpoint of the intended age. The
 adapter never changes age or touches a normal save. Make or join the room in that copy, read its signed rules, then
-confirm **Accept the room**. Acceptance there permits only this supported kit, not borrowed-progress return.
-Normal saves refuse an active kit offer; copies without a supported kit remain download-only.
+confirm **Accept to see and talk**, then separately press **Sword-practice kit** twice.
+That action changes only this copy's sword and shield inventory, never the normal save; presence alone grants no kit.
+The confirmation binds the displayed offer, epoch, member sessions and this loaded copy's save generation.
+Normal saves refuse an active kit offer; copies without a supported kit can still separately accept see/talk or downloads.
 
 The maker's draft is read from `longshot_options.ini` when making a room. There is no new environment switch,
 menu callback or item-palette UI. These keys stay intact when the menu saves other settings:

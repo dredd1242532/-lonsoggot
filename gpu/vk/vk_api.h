@@ -139,6 +139,7 @@ typedef struct MkwVkCoopMember {
     char name[32], key[24];
     int32_t place; /* 0 unknown/stale/private, -1 other area, positive: existing destination index + 1 */
     uint16_t health_q, max_health_q; /* max=0 unknown/stale/private, never interpreted as zero health */
+    uint8_t pos_incompatible; /* authenticated peer positions use another payload version */
 } MkwVkCoopMember;
 typedef struct MkwVkCoopView {
     uint32_t version;
@@ -166,6 +167,7 @@ typedef struct MkwVkCoopView {
     /* (version 27) diagnostic-only duel preview. No native fight can start in this build. */
     int32_t duel_diagnostic;
     char duel_terms[192], duel_note[160], duel_digest[65], duel_score[160];
+    char kit_token[64];   /* API29: exact offer/epoch/session/copy-generation confirmation, empty when unavailable */
 } MkwVkCoopView;
 /* what the tab asks (coop_command's cmd): make a room, join one (text: its secret as typed), leave it, accept the offer
    (number: its offer), the player's name and the relay ("host[:port]") as the fields set them (text; number 1: the field's
@@ -173,7 +175,8 @@ typedef struct MkwVkCoopView {
    maker's remedies: remove the player of that key (text: its fingerprint), reset the pools */
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
        HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED, HOS_COOP_CMD_TEMP_SAVE = 10,
-       HOS_COOP_CMD_GO_FRIEND = 11, HOS_COOP_CMD_DUEL_READY = 12, HOS_COOP_CMD_PRESENCE_ACCEPT = 13 };
+       HOS_COOP_CMD_GO_FRIEND = 11, HOS_COOP_CMD_DUEL_READY = 12, HOS_COOP_CMD_PRESENCE_ACCEPT = 13,
+       HOS_COOP_CMD_KIT_ACCEPT = 14 };
 
 /* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
    registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most

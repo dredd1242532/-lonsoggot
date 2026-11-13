@@ -43,6 +43,8 @@ int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTic
 int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game);
 /* Temporary-kit readback, never a duel permission. Current accepted context only. */
 int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch);
+int hos_oot_coop_kit_token(char *out, size_t cap);
+int hos_oot_coop_kit_accept(const char *stamp, uint32_t token);
 int oot_coop_kit_step(Ctx *c, OotCoopKitRun *run, const OotCoopKitWork *work);
 extern volatile int hos_oot_coop_kit_active;
 void hos_oot_coop_kit_update(Ctx *c);
@@ -65,6 +67,7 @@ void hos_oot_coop_players_tick(int loaded, int open);
 int hos_oot_coop_players_last(int id, char area[COOP_POS_TEXT + 1], uint8_t *flags, uint64_t *age_ms);
 /* Copied newest pose, only for the still-current accepted presentation ticket. Freshness is returned, not assumed. */
 int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age_ms);
+int hos_oot_coop_players_mismatch(int member, uint64_t session);
 
 /* host/nn_fs.c: the save folder copied, under the lock the save mount's writes take, to <user>/<folder>/<prefix><UTC
    time>/ (the newest keep copies without a prefix are kept; prefixed ones stay until the player deletes them). 1 and

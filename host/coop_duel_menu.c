@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 int hos_oot_coop_offer(CoopOffer *out);
+int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members);
+int hos_oot_coop_kit_ready(uint32_t offer, uint32_t epoch);
+int rx_option(int id, int otherwise);
 void hos_log(const char *fmt, ...);
 
 void hos_coop_duel_menu_view(MkwVkCoopView *out, const CoopView *v, const CoopOffer *o) {
@@ -24,13 +27,16 @@ void hos_coop_duel_menu_view(MkwVkCoopView *out, const CoopView *v, const CoopOf
     coop_feature_present(&o->rules, 40, &kit);
     snprintf(out->duel_terms, sizeof out->duel_terms, "Arena %d; %d duel hearts; best of %d; %s kit mask %d (see signed Room rules)",
              arena, hearts, rounds, age == 0 ? "child" : age == 1 ? "adult" : "unspecified", kit);
-    if (!o->accepted) {
+    CoopRules rules;
+    uint32_t members = 0;
+    if (!hos_oot_coop_presentation(&rules, &members) || rules.epoch != o->rules.epoch) {
         snprintf(out->duel_note, sizeof out->duel_note, "Accept these signed terms first. This build cannot start a fight."); return;
     }
     if (!coop_profile_active()) {
         snprintf(out->duel_note, sizeof out->duel_note, "Use a temporary save copy. This build cannot start a fight."); return;
     }
-    if (v->n != 2 || v->member[0].away || v->member[1].away) {
+    if (v->n != 2 || v->member[0].away || v->member[1].away ||
+        !(members & (1u << v->member[0].id)) || !(members & (1u << v->member[1].id))) {
         snprintf(out->duel_note, sizeof out->duel_note, "Exactly two present accepted players are required. This build cannot start a fight."); return;
     }
     /* File IO is explicit, local and diagnostic, on an attempted Ready only (never menu drawing).
@@ -55,6 +61,12 @@ int hos_coop_duel_menu_ready(const char *digest, uint32_t epoch) {
     if (!menu.duel_diagnostic || !digest || !*digest || epoch != offer.rules.epoch ||
         strcmp(digest, menu.duel_digest)) {
         hos_log("coop: duel: Ready refused: terms, consent or participant sessions changed"); return 0;
+    }
+    if (rx_option(HOS_OPT_CHAT_FOCUS, 0) || rx_option(1, 0)) {   /* existing Insert-menu input owner */
+        hos_log("coop: duel: Ready refused while the menu or chat owns input; no fight started"); return 0;
+    }
+    if (!hos_oot_coop_kit_ready(offer.token, offer.rules.epoch)) {
+        hos_log("coop: duel: Ready refused: this copy's sword-practice kit is not verified; no fight started"); return 0;
     }
     const char *path = getenv("HOS_COOP_ARENA_FILE");
     CoopArena arena;

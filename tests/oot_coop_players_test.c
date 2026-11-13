@@ -400,6 +400,13 @@ int hos_oot_coop_offer(CoopOffer *out) {
     coop_feature_set(&out->rules, COOP_RULE_NAMES, names_permission);
     return out->accepted;
 }
+int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members) {
+    CoopOffer offer;
+    const int ok = hos_oot_coop_offer(&offer);
+    if (rules) *rules = offer.rules;
+    if (members) *members = accepted;
+    return ok;
+}
 static void owner_context(void) {
     CoopGameplayContext c = {0};
     c.version = COOP_GAMEPLAY_VERSION, c.size = sizeof c;
@@ -1391,6 +1398,23 @@ static void hud_privacy(void) {
     puts("PASS HUD: native health unknown/zero/bounds, each privacy bit, names/off/arrows, stale/map/acceptance/ticket/off paths");
 }
 
+static void version_notice(void) {
+    fresh(); room(1); ini_players=1; hos_oot_coop_players_start(); log_clear();
+    CoopPos pose={.pseq=1,.flags=COOP_POS_IN_WORLD,.area="Forest"};
+    uint8_t bytes[COOP_MAX_MESSAGE]; const size_t n=coop_pos_pack(bytes,sizeof bytes,&pose);
+    bytes[0]=2;
+    pos_fn(2,bytes,n-7,NULL);
+    CHECK(!hos_oot_coop_players_mismatch(2,22) && !logat); /* unaccepted sender cannot create a notice */
+    accepted=1u<<2; pos_fn(2,bytes,n-7,NULL);
+    CHECK(hos_oot_coop_players_mismatch(2,22) && !hos_oot_coop_players_mismatch(2,23) && !P.store.r[2].n);
+    CHECK(logged("uses a different build; their body is not shown"));
+    const size_t once=logat; pos_fn(2,bytes,n-7,NULL); CHECK(logat==once);
+    bytes[0]=COOP_POS_VERSION; pos_fn(2,bytes,n,NULL);
+    CHECK(!hos_oot_coop_players_mismatch(2,22));
+    bytes[0]=2; pos_fn(2,bytes,n-7,NULL); CHECK(logat==once && !P.store.r[2].n);
+    puts("PASS: incompatible POS refuses, retires old poses and explains the member once per accepted session");
+}
+
 int main(int argc, char **argv) {
     messages();
     slow();
@@ -1401,6 +1425,7 @@ int main(int argc, char **argv) {
     body_gear();
     gear_codec();
     hud_privacy();
+    version_notice();
     if (failures) { fprintf(stderr, "%d checks failed\n", failures); return 1; }
     printf("coop players: all checks passed\n");
     return 0;

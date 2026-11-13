@@ -1614,6 +1614,8 @@ Row rows[] = {
     {TAB_COOP, "Notices", &opts.coop_notices, 0, 2, 1, tx_notices, "Off, joins only, or everything. Only on your screen."},
     {TAB_COOP, "Ready for duel", nullptr, 0, 0, 0, nullptr,
      "Read the signed Room rules, then press twice. Diagnostics only: this build cannot start a fight."},
+    {TAB_COOP, "Sword-practice kit", nullptr, 0, 0, 0, nullptr,
+     "Press twice to change only this copy's sword and shield inventory, never your normal save."},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -1914,6 +1916,7 @@ bool coop_secret_shown = false;   // (Room secret: masked until Enter shows it; 
 uint32_t coop_accept_token = 0, coop_accept_epoch = 0;
 char coop_duel_armed[65]{};
 uint32_t coop_duel_epoch = 0;
+char coop_kit_armed[64]{};
 bool coop_accept_temporary = false;
 const char* coop_accept_notice = nullptr;
 const char* const coop_pvp_accept_help =
@@ -1924,10 +1927,10 @@ const char* const coop_presence_accept_help =
     "No progress, items, pools or saves are shared. Read your key fingerprints aloud to each other before: "
     "a name can be anyone's. Press twice.";
 const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
-enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopChat, kCoopMute, kCoopDuel, kCoopRows };
+enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopChat, kCoopMute, kCoopDuel, kCoopKit, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
-                                               "Leave the room",  "Room rules", "Temporary save", "Go to friend", "Chat", "Mute chat", "Ready for duel"};
+                                               "Leave the room",  "Room rules", "Temporary save", "Go to friend", "Chat", "Mute chat", "Ready for duel", "Sword-practice kit"};
 int coop_remove_at = 0;   // (Remove a player: which of the others with a key, Left and Right choose)
 /// The other members with a key (those the maker can remove): their count, and the one coop_remove_at chooses (*chosen)
 int coop_removable(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
@@ -2023,6 +2026,7 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopChat:
     case kCoopMute: return v.accepted != 0;
     case kCoopDuel: return v.state == HOS_COOP_STATE_JOINED && v.duel_diagnostic;
+    case kCoopKit: return v.temporary_save && v.accepted && v.kit_token[0];
     default: return true;
     }
 }
@@ -3113,6 +3117,20 @@ bool chat_focus_tick(bool mine, uint32_t raw) {
 /// maker's remedies and Leave at their second press, the first arming them (pending, as Restart and Quit)
 void coop_press(const Row& r) {
     const int k = coop_kind(r);
+    if (k == kCoopKit) {
+        if (!coop_row_shown(r, coop_now)) { pending = nullptr; return; }
+        if (pending != &r) {
+            pending = &r;
+            memcpy(coop_kit_armed, coop_now.kit_token, sizeof coop_kit_armed);
+            return;
+        }
+        MkwVkCoopView fresh{};
+        if (host && host->coop_view) host->coop_view(&fresh);
+        pending = nullptr;
+        if (coop_row_shown(r, fresh) && !strcmp(fresh.kit_token, coop_kit_armed) && host && host->coop_command)
+            host->coop_command(HOS_COOP_CMD_KIT_ACCEPT, coop_kit_armed, fresh.offer);
+        return;
+    }
     if (k == kCoopWarp) {
         const MkwVkCoopMember* friend_now = nullptr;
         if (!coop_friends(coop_now, &friend_now) || !friend_now) { pending = nullptr; return; }
@@ -3200,6 +3218,7 @@ void coop_refresh(bool* changed) {
     if (pending && coop_kind(*pending) == kCoopDuel &&
         (now.rules_epoch != coop_duel_epoch || strcmp(now.duel_digest, coop_duel_armed)))
         pending = nullptr;
+    if (pending && coop_kind(*pending) == kCoopKit && strcmp(now.kit_token, coop_kit_armed)) pending = nullptr;
     coop_now = now;
     coop_preview_refresh();
     *changed = true;
@@ -4049,6 +4068,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             const char* says = k == kCoopTemp ? (v.temporary_save ? "Return to normal saves" : "Copy and restart") :
                               k == kCoopChat ? (chat_feed.can_chat ? "Chat" : "Unavailable") :
                               k == kCoopDuel ? "Ready for duel" :
+                              k == kCoopKit ? "Sword-practice kit" :
                               k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : says, selected, false, false);
         }
@@ -4075,7 +4095,8 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
                 char hearts[48];
                 if (p.max_health_q) snprintf(hearts, sizeof hearts, "Hearts: %.2f/%.2f", p.health_q / 4.0, p.max_health_q / 4.0);
                 else snprintf(hearts, sizeof hearts, "%s", "Hearts: unknown");
-                const std::string details = std::string(i18n::tr(place)) + " | " + i18n::tr(hearts);
+                const std::string details = p.pos_incompatible ? i18n::tr("Different build; body not shown.") :
+                                            std::string(i18n::tr(place)) + " | " + i18n::tr(hearts);
                 ui::text_mid(c, c.f.body, 15 * s, left + 8 * s, y + 18 * s, ui::kSoft,
                              fit(c, c.f.body, 15 * s, right - left - 16 * s, details, false).c_str());
             }
@@ -4172,7 +4193,8 @@ void draw_options(ui::Ctx& c) {
         } else if (const int k = coop_kind(selr); k >= 0 && k != kCoopRules) {
             prompt_list[prompts_n++] = {ui::kConfirm, k == kCoopMake ? "Make" : k == kCoopSecret ? (coop_secret_shown ? "Hide" : "Show")
                                                     : pending == &selr ? "Confirm" : k == kCoopAccept ? "Accept" : k == kCoopRemove ? "Remove"
-                                                    : k == kCoopDuel ? "Ready for duel" : k == kCoopWarp ? "Go to friend" : k == kCoopChat ? "Chat" : k == kCoopMute ? "Change" :
+                                                    : k == kCoopKit ? "Sword-practice kit" : k == kCoopDuel ? "Ready for duel" :
+                                                      k == kCoopWarp ? "Go to friend" : k == kCoopChat ? "Chat" : k == kCoopMute ? "Change" :
                                                       k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
             if (k == kCoopRemove || k == kCoopWarp || k == kCoopMute) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
         } else if (selr.value || (selr.cheat >= 0 && (selr.cheat <= 1 || selr.cheat == 7 || cheat_chooses(selr.cheat) || age_shown(selr.cheat)))) {
