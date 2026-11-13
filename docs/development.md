@@ -275,6 +275,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_NAN_GUARD=0` | No NaN guard on float colour outputs (on by default on every card: one NaN texel spreads through bloom into glowing blocks) |
 | `RX_VK_FIFO=1`, `RX_VK_IMMEDIATE=1` | V-Sync On (FIFO) or Off (immediate) for one run, over the menu's V-Sync row |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
+| `HOS_VCORE_FIRST=<name part>,...` | The threads whose name holds one of the parts take a virtual core before any other thread (above every guest priority, for the virtual cores only; their yields and time slices still follow guest priority). For OoT, `Presentation`: its Presentation Thread no longer waits behind the six BaseProcExecutors (off by default) |
 
 ### Building
 
