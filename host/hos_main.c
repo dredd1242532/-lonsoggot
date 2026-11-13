@@ -439,20 +439,25 @@ static int env_line_allowed(const char *name, const char *value) {
     for (const char *p = name; *p; p++)
         if (!((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '_')) return 0;
     /* (longshot) the switches that name a file to write or a folder take no value here, not even a bare name: one
-       resolves in the game's folder (HOS_SAMPLE_FILE=longshot_vk.dll emptied the renderer) */
+       resolves in the game's folder (HOS_SAMPLE_FILE=longshot_vk.dll emptied the renderer). So do the test switches
+       whose value is a file or folder under another name (HOS_AUDIO_DUMP=image.bin overwrote the game's image), or
+       that press buttons and menu keys on a timer (a shared file erased a save from the file select): the switches
+       host/switches.def marks LOCAL. A name ending in _FILE or _DIR not listed yet is taken as one too */
+#define SWITCH_LOCAL_GAME 0
+#define SWITCH_LOCAL_LOCAL 1
+#define SWITCH_LOCAL_SYSTEM 0
+    static const struct { const char *name; int local; } listed[] = {
+#define SWITCH(name, type, scope, area, what) {#name, SWITCH_LOCAL_##scope},
+#include "switches.def"
+#undef SWITCH
+    };
+#undef SWITCH_LOCAL_GAME
+#undef SWITCH_LOCAL_LOCAL
+#undef SWITCH_LOCAL_SYSTEM
     const size_t nl = strlen(name);
-    int names_file = (nl > 5 && (!strcmp(name + nl - 5, "_FILE") || !strcmp(name + nl - 4, "_DIR"))) ||
-                     !strcmp(name, "RX_VK_FRAME_LOG") || !strcmp(name, "HOS_PRESENT_TRACE");
-    /* (longshot) and the test switches whose value is a file or folder under another name (HOS_AUDIO_DUMP=image.bin
-       overwrote the game's image), or that press buttons and menu keys on a timer (a shared file erased a save from
-       the file select) */
-    static const char *const by_name[] = {
-        "HOS_AUDIO_DUMP", "HOS_AUDIO_WB_DUMP", "HOS_SHADER_DUMP", "HOS_FS_OVERLAY", "HOS_MODS", "HOS_INPUT_LIVE",
-        "HOS_INPUT_SCRIPT", "HOS_SAMPLE_ALL", "HOS_CHAIN", "HOS_WATCH", "LONGSHOT_BUILDER_HOME", "RX_VK_SHOTS", "RX_VK_SHOT_GO",
-        "RX_VK_FRAMELOG", "RX_VK_HANG_DUMP", "RX_VK_DUMP", "RX_VK_DUMP_SPV", "RX_VK_DUMP_MESH_SPV", "RX_VK_DUMP_STAGES",
-        "RX_VK_DUMP_FAILED", "RX_VK_IR", "RX_VK_MENU_SCRIPT", "RX_DUMP_WGSL", "RX_DUMP_SLOW_WGSL", "RX_DUMP_TICS",
-        "RX_WGSL_OVERRIDE"};
-    for (size_t i = 0; i < sizeof by_name / sizeof *by_name; i++) names_file |= !strcmp(name, by_name[i]);
+    int names_file = nl > 5 && (!strcmp(name + nl - 5, "_FILE") || !strcmp(name + nl - 4, "_DIR"));
+    for (size_t i = 0; i < sizeof listed / sizeof *listed; i++)
+        if (!strcmp(name, listed[i].name)) names_file |= listed[i].local;
     /* RX_VK_DLSS_DIR: a folder on this PC, not a share (\\server\x or //server/x) or a device path */
     if (!strcmp(name, "RX_VK_DLSS_DIR"))
         return !((value[0] == '\\' || value[0] == '/') && (value[1] == '\\' || value[1] == '/'));
