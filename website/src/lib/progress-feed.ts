@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { REPOSITORY, normalizeItem, validateCuration, validateFeed } from './progress.ts';
 import { publicProgressItem } from './public-copy.ts';
+import { progressRequest } from './progress-request.ts';
 
 // Collects the public progress feed from Forgejo. The site's build calls buildFeed() once, and publishes the result
 // as /progress-feed.json and on the front page: the data is as fresh as the last build.
@@ -9,20 +10,13 @@ const API = `https://git.magicbean.dev/api/v1/repos/${REPOSITORY}`;
 // Astro bundles this module into dist/ when it builds, so the file is found from website/, where the build runs.
 const curationPath = path.resolve('progress-curation.json');
 
-export class ForgejoError extends Error {
-  constructor(response) {
-    super(`Forgejo progress request failed (${response.status}).`);
-  }
-}
-
-export async function collectFeed({ fetcher = fetch, token = '', curation = {}, now = Date.now(), maxPages = 100 } = {}) {
+export async function collectFeed({ fetcher = fetch, token = '', curation = {}, now = Date.now(), maxPages = 100, wait } = {}) {
   validateCuration(curation);
   const closedSince = new Date(now - 90 * 86400000).toISOString();
   const headers = { Accept: 'application/json', 'User-Agent': 'Longshot-docs-progress' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const repositoryResponse = await fetcher(API, { headers, signal: AbortSignal.timeout(15000), redirect: 'error' });
-  if (!repositoryResponse.ok) throw new ForgejoError(repositoryResponse);
-  const repository = await repositoryResponse.json();
+  const request = (url, allowNotFound = false) => progressRequest(url, { fetcher, headers, allowNotFound, wait });
+  const { data: repository } = await request(API);
   if (repository.private !== false || !Number.isSafeInteger(repository.id) || repository.id <= 0 ||
       repository.full_name?.toLowerCase() !== REPOSITORY.toLowerCase()) throw new Error('Progress source must be the expected public repository.');
   async function page(endpoint, query, next) {
@@ -32,21 +26,13 @@ export async function collectFeed({ fetcher = fetch, token = '', curation = {}, 
     if (url.origin !== 'https://git.magicbean.dev' || url.pathname !== `/api/v1/repos/${REPOSITORY}/${endpoint}` || url.username || url.password) {
       throw new Error('Unsafe Forgejo pagination link.');
     }
-    const response = await fetcher(url.href, { headers, signal: AbortSignal.timeout(15000), redirect: 'error' });
-    if (!response.ok) {
-      const error = new ForgejoError(response);
-      error.message += ` Endpoint: ${endpoint}, state: ${query.state || 'published'}.`;
-      throw error;
-    }
-    const data = await response.json();
+    const { data, headers: responseHeaders } = await request(url.href);
     if (!Array.isArray(data)) throw new Error('Unexpected Forgejo response.');
-    const link = response.headers.get('link') || '';
+    const link = responseHeaders.get('link') || '';
     const nextPage = link.split(',').map(part => part.match(/<([^>]+)>;\s*rel="next"/)).find(Boolean)?.[1] || null;
     return { data, next: nextPage };
   }
-  const latestResponse = await fetcher(`${API}/releases/latest`, { headers, signal: AbortSignal.timeout(15000), redirect: 'error' });
-  if (!latestResponse.ok && latestResponse.status !== 404) throw new ForgejoError(latestResponse);
-  const latest = latestResponse.ok ? await latestResponse.json() : null;
+  const { data: latest } = await request(`${API}/releases/latest`, true);
   if (latest && (latest.draft !== false || latest.prerelease !== false)) throw new Error('Invalid latest stable release.');
   const latestItem = latest ? normalizeItem(latest, 'release', curation) : null;
   if (latest && !latestItem) throw new Error('Invalid latest stable release.');
@@ -102,7 +88,7 @@ export async function collectFeed({ fetcher = fetch, token = '', curation = {}, 
 
 let built;
 // One collection per build (or dev server), shared by every page that shows progress. A failure leaves the pages
-// saying the data is unavailable rather than failing the build.
+// saying the data is unavailable for local previews. The publication check rejects that fallback before deployment.
 export function buildFeed() {
   built ??= (async () => {
     const curation = JSON.parse(await readFile(curationPath, 'utf8'));

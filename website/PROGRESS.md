@@ -12,8 +12,15 @@ another project's releases. Previous repository curation is not reused.
 The site's build collects the feed (`src/lib/progress-feed.mjs`, `buildFeed()`), once per build, and publishes it as
 `/progress-feed.json` (`src/pages/progress-feed.json.ts`) and in the front page's release and activity panels. Nothing
 is committed and no server runs: the data is as fresh as the last build, and the website workflow rebuilds it every
-hour. If collection fails, the build still succeeds and the pages say the data is unavailable, not that the tracker is
-empty. Collection fails as a whole if any required page fails or a pagination limit is hit.
+hour. Each API request allows 30 seconds (including its JSON body) and up to three attempts for timeouts, temporary
+network errors, HTTP 408/429 and HTTP 500/502/503/504. Retries wait 1 then 2 seconds, or a longer `Retry-After` up to
+30 seconds. Authentication errors, invalid JSON, private sources and unsafe pagination fail without retries.
+
+If collection fails, a local build can still render the unavailable-data fallback. `npm run check` rejects that
+fallback or any malformed feed before publication. Both the Website workflow and `npm run deploy` run this check
+before uploading a deployment, leaving the existing deployed site in place if it fails. Collection fails as a whole
+if any required page fails or a pagination limit is hit; partial results are never published. Check the collection
+log for the endpoint, failure and attempt count, then rebuild after recovery. No extra API permission is required.
 
 `FORGEJO_TOKEN` is optional and build-only: it is never sent to browsers or written to the feed. The collector rejects
 private repositories and redirects. Public collection needs no account token. The progress board refetches
