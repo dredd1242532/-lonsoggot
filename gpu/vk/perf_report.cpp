@@ -37,6 +37,7 @@ namespace mkwvk {
 
 std::atomic<bool> perf_measure{false};
 double menu_target_ms();   // (vk_menu.cpp fps_target_ms: the frame time the game aims for, 0 uncapped)
+bool shaders_preparing();  // (vk_main.cpp: the start-up screen's shader preparation)
 
 namespace {
 
@@ -153,7 +154,8 @@ void where_now() {
     int64_t movie[5] = {};
     const char* version = host->perf_info ? host->perf_info(map, sizeof map, movie) : nullptr;
     if (machine.gpu.empty()) read_machine(version);
-    const std::string name = map[0] ? map : "not known";
+    // (before a map: the start-up screen while the shaders are prepared, then the intro, the title and the file select)
+    const std::string name = map[0] ? map : shaders_preparing() ? pr::kPreparingShaders : pr::kTitleAndIntro;
     if (!current || name != current_map) {
         current_map = name;
         current = &maps[name];

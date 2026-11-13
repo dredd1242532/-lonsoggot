@@ -40,6 +40,11 @@ inline const char* cause_name(int c) {
     return c >= 0 && c < kCauses ? t[c] : "other";
 }
 
+/// The "map" before the game is in one: the start-up screen preparing the shaders, then the intro, title and file select
+/// (nx2/crash_report.py names them the same)
+constexpr const char* kPreparingShaders = "Preparing shaders";
+constexpr const char* kTitleAndIntro = "Title and intro";
+
 /// The renderer's events (the relay's EVENTS)
 enum Event { kProgramFailed, kDeviceLost, kSwapchainRecreated, kMovieUpscalerDropped, kDlssRecreated, kVramOverBudget, kEvents };
 inline const char* event_name(int e) {

@@ -21,7 +21,8 @@ under 60 KiB):
 - **The settings that change the frame:** the upscaler, the preset, the frame rate cap.
 - **The game:** its version and the release flag (a release's version built from the release's own sources), both
   filled in by the launcher.
-- **Per map** (the scene and Link's age, as the `map:` log line has it):
+- **Per map** (the scene and Link's age, as the `map:` log line has it; before the first map, "Preparing shaders" while the
+  start-up screen prepares them, then "Title and intro"):
   - frame times and the GPU's time as histograms (buckets around 240 to 20 fps, then stutters);
   - the FPS counter's parts (game, render, GPU wait, pacing);
   - hitches (a frame over twice its target and over 25 ms) by what they waited on most: pipelines, shader translation,
@@ -50,10 +51,9 @@ summary carries no ID, so two summaries can't be tied to one player.
     launcher doesn't fill the disk.
   - The map and the movies' totals come from the host (`hos_perf_info`, `MkwVkHost::perf_info`, API 22). Movie pictures
     are counted as the game takes them, so a movie still playing at a summary counts too.
-- **The launchers** (`nx2/perf_report.py`): the Linux builder (`builder/linux/longshot_builder.py`), the Windows builder
-  (`builder/LongshotBuilder`) and the Python one (`builder/py/longshot_builder/perf.py`) show the tick, and at their start
-  run `nx2/perf_report.py <folder> --send` in a process of its own, so Play, which closes the launcher at once, doesn't cut
-  a send short. It sends what is waiting to `perf_reports` in `nx2/addresses.ini`, oldest first. A summary the relay took
+- **The launcher** (LongshotLauncher, with `nx2/perf_report.py`): it shows the tick, and at its start runs
+  `nx2/perf_report.py <folder> --send` in a process of its own, so Play, which closes the launcher at once, doesn't cut a
+  send short. It sends what is waiting to `perf_reports` in `nx2/addresses.ini`, oldest first. A summary the relay took
   or refused is deleted; one it couldn't reach (or a 429 or 5xx) stays for next time.
 - **The relay** (Bean-Ops `deploy/perf-relay`): checks each summary, caps every label's values (the rest become
   `other`), and exposes them as Prometheus metrics. Grafana's **Longshot performance** dashboard reads them, with a

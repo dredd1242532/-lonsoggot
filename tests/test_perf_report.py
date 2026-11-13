@@ -8,7 +8,7 @@ frame added at each present, the events where they happen), and the launcher's s
     stays; with the tick off nothing is sent;
   - at most 48 wait: the oldest past that go unsent;
   - the relay's address is perf_reports in nx2/addresses.ini (none in the code);
-  - both builders' launcher pages have the tick and send at their start.
+  - the summary's map before the first one: "Preparing shaders", then "Title and intro".
 
 python -I -B tests/test_perf_report.py [--cxx g++]
 """
@@ -173,26 +173,11 @@ def wiring():
     api = (vk / "vk_api.h").read_text(encoding="utf-8")
     check("perf_info" in api, "the host gives the renderer the map and the movie totals (perf_info)")
     check("hos_perf_info" in (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8"), "rx_backend.c fills perf_info")
-    tk = (ROOT / "builder" / "linux" / "longshot_builder.py").read_text(encoding="utf-8")
-    launch = tk[tk.index("    def show_launch("):tk.index("    def older_ok(")]
-    check('"Send performance statistics"' in launch and "perf_report.set_sending" in launch and
-          "perf_report.start_sending(folder)" in launch, "the Linux launcher page has the tick and sends at its start")
-    qt = (ROOT / "builder" / "py" / "longshot_builder" / "window.py").read_text(encoding="utf-8")
-    check('Tick("Send performance statistics")' in qt and "perf.send_waiting(folder)" in qt,
-          "the Qt launcher page has the tick and sends at its start")
-    check("start_sending" in (ROOT / "builder" / "py" / "longshot_builder" / "perf.py").read_text(encoding="utf-8"),
-          "the Qt builder sends in a process of its own")
-    wpf = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml").read_text(encoding="utf-8")
-    cs = (ROOT / "builder" / "LongshotBuilder" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
-    shown = cs[cs.index("void ShowLauncher("):]
-    check('x:Name="PerfTick"' in wpf and 'Content="Send performance statistics"' in wpf and 'Click="PerfTickClick"' in wpf
-          and "PerfTick.IsChecked = PerfSending(folder);" in shown and "StartPerfSending(folder);" in shown,
-          "the Windows launcher page has the tick and sends at its start")
-    check('"longshot_perf.ini"' in cs and '"send=1\\n"' in cs and '"perf_pending"' in cs and '"--send"' in cs,
-          "the Windows launcher writes the tick as the game reads it, and runs nx2/perf_report.py --send")
     check("call_once(once, [] {\n        perf_report_final(perf_report::kDeviceLost);" in
           (vk / "vk_replay.cpp").read_text(encoding="utf-8"), "a lost device's summary is written once")
     check("if (!ticked(folder))" in cpp[cpp.index("void summarize("):], "unticked while the game runs: it stops")
+    check("shaders_preparing() ? pr::kPreparingShaders : pr::kTitleAndIntro" in cpp and
+          "bool shaders_preparing()" in main_cpp, "before a map: Preparing shaders, then Title and intro (not 'not known')")
 
 
 def unit(cxx):
