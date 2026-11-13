@@ -29,6 +29,7 @@ constexpr uint32_t FG_COPY_COMP_SPV[] = {0}, FG_LUMA_COMP_SPV[] = {0}, FG_FLOW_C
 /* ACTUAL_STRUCTS */
 int multiplier() { return opts.framegen; }
 int display_refresh_mhz() { return 60000; }
+bool xr_enabled() { return false; }   // (no headset, vk_xr.cpp)
 void logf(const char*, ...) {}
 struct Object { char kind; uint64_t parent; };
 std::map<uint64_t, Object> live;
