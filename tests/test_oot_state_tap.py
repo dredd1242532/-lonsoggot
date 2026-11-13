@@ -657,8 +657,11 @@ def mutate_sources(tap, control, mode):
         tap = once(tap, "if (!state_table(mgr, kind, &after) || !state_same_table(&h, &after)) goto invalid;",
                    "/* mutation: no post-slice header check */")
     elif mode == "scan-allocation":
-        tap = once(tap, "if (seen->capacity != h.size)", "if (1)")
-        tap = once(tap, "if (!state_same_table(&seen->table, &h))", "if (1)")
+        tap = once(tap, "if (!state_same_table(&seen->table, &h)) {",
+                   "if (seen->capacity == h.size) {\n"
+                   "            struct StatePair *p = realloc(seen->slot, (size_t)h.size * sizeof *p);\n"
+                   "            if (p) seen->slot = p;\n        }\n"
+                   "        if (!state_same_table(&seen->table, &h)) {")
     elif mode == "watch-generation":
         tap = once(tap, "if (state_sub[slot].generation == work[slot].generation)", "if (1)")
     elif mode == "status-types":
@@ -871,7 +874,7 @@ def socket_cases(fixture, module, address):
         check(default.event("default", 160)["map"] is None, "default subscription ignored its 60-present cadence")
         default.ask("unsubscribe")
         fixture.step("expect_watches 0")
-        print("PASS: socket status, all typed flags, collision, nulls, 6/12/default-60 cadence, independent baselines")
+        print("PASS: socket status, all typed flags, collision, nulls, 6/12/default-60 cadence, independent pending changes")
 
         fixture.step("restore")
         fast.ask("subscribe", rid="valid", events=["oot"], every=1, flags=["Test.Flag"], changes=True)
@@ -946,7 +949,7 @@ def socket_cases(fixture, module, address):
         fast.quiet()
         fixture.step("sample 221")
         check(fast.event("new-connection", 221)["changed"] == {}, "reused connection slot kept another client's baseline")
-        print("PASS: replacement, non-OoT replacement, unsubscribe and disconnect clear pending samples and baselines")
+        print("PASS: replacement, non-OoT replacement, unsubscribe and disconnect clear pending samples and changes")
 
         fixture.step("burst 1")
         fixture.step("sample 222")

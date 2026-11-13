@@ -170,8 +170,8 @@ Samples stop on the title, while paused and wherever Link is not updated. Compar
 fresh samples with `event` and `loading` false before their next step.
 
 `status` does not scan all flags. Watched values and changed flags belong to each `oot` subscription below.
-With no pending `status` request and no due `oot` subscriber, the snapshot path returns after a cheap atomic
-deadline check: it does not read the guest, query the clock, format JSON or take its snapshot lock. Merely
+With no pending `status` request, due `oot` subscriber or unfinished requested change pass, the snapshot path
+returns after a cheap atomic deadline check: no guest reads, clock queries, JSON formatting or snapshot lock. Merely
 opening the bridge does not capture every present. A disconnected/timed-out status request drops its demand.
 
 `state` is a guess from the draws a frame, the way test scripts read the log:
