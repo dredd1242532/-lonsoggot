@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import tempfile
 import unittest
 from unittest import mock
@@ -416,7 +417,7 @@ class Copy(Case):
             self.run_main(command, "lichii")
         self.assertEqual(tree(target), before)
         self.assertEqual(sorted(p.name for p in target.parent.iterdir()), [target.name])   # (nothing left beside it)
-        self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({n.split("/")[0] for n in before}))   # (or in it)
+        self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({Path(n).parts[0] for n in before}))   # (or in it)
         code, out, err = self.run_main(command, "lichii")   # (and the same copy works once the disk has room)
         self.assertEqual(code, 0, err)
         self.assertEqual(tree(target), tree(source))
@@ -451,7 +452,7 @@ class Copy(Case):
                     self.run_main(command, "lichii")
                 self.assertEqual(tree(target), before)
                 self.assertEqual(sorted(p.name for p in target.parent.iterdir()), [target.name])
-                self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({n.split("/")[0] for n in before}))
+                self.assertEqual(sorted(p.name for p in target.iterdir()), sorted({Path(n).parts[0] for n in before}))
 
     def test_target_behind_a_link_or_in_a_read_only_folder(self):
         # (a save folder that links to another disk, as when moved to an SD card, and one in a folder that can't be written:
@@ -487,6 +488,92 @@ class Copy(Case):
                 self.assertEqual(code, 0, err)
                 self.assertEqual(tree(self.hs), tree(self.li))
                 self.hs.parent.chmod(0o755)
+    def rollback_that_fails_too(self, place_option, take_back):
+        # (the forward failure: placing option.sav, the last new entry; then the new slot_00 can't be moved out again)
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if "-incoming-" in Path(src).parent.name and Path(src).name == "option.sav":
+                place_option(Path(dst).parent)
+            if Path(src).parent == self.hs and Path(src).name == "slot_00" and "-incoming-" in Path(dst).parent.name:
+                take_back()
+            return real_replace(src, dst)
+
+        before = tree(self.hs)
+        with mock.patch.object(oot.os, "replace", side_effect=replace):
+            code, out, err = self.run_main("import", "--from", str(self.li), "--longshot", str(self.hs))
+        self.assertEqual(code, 1)
+        (aside,) = [p for p in self.hs.iterdir() if p.name.startswith(".")]
+        (backup,) = self.backup_dirs()
+        self.assertIn("old ones left in %s: slot_00" % aside, err)
+        self.assertIn("put the old save back from the backup, %s" % backup, err)
+        # (every other old entry is back, the old slot_00 waits in aside, the new one stayed)
+        self.assertEqual(sorted(p.name for p in self.hs.iterdir()), sorted([aside.name, "account.sav", "option.sav", "slot_00", "slot_01"]))
+        for name, data in before.items():
+            self.assertEqual((aside if Path(name).parts[0] == "slot_00" else self.hs).joinpath(name).read_bytes(), data, name)
+        self.assertEqual(tree(self.hs / "slot_00"),
+                         {str(Path(k).relative_to("slot_00")): v for k, v in tree(self.li).items() if Path(k).parts[0] == "slot_00"})
+        self.assertEqual(tree(backup), before)
+
+    def test_rollback_that_fails_too(self):
+        def failing(_):
+            raise OSError(28, "No space left on device")
+
+        def held():
+            raise PermissionError(13, "Access is denied")
+
+        self.rollback_that_fails_too(failing, held)
+
+    @unittest.skipUnless(os.name == "nt", "Windows: a file held open without delete sharing")
+    def test_rollback_that_fails_too_with_a_file_held_open(self):
+        handles = []
+        self.addCleanup(lambda: [h.close() for h in handles])
+
+        def hold_and_fail(target):
+            handles.append(open(target / "slot_00" / "progress.sav", "rb"))   # (Python's open shares read and write, not delete)
+            raise OSError(28, "No space left on device")
+
+        self.rollback_that_fails_too(hold_and_fail, lambda: None)
+
+    def test_read_only_file_in_the_old_save(self):
+        # (on Windows a read-only file can't be deleted as it is: the old entries' folder was left in the target)
+        (self.hs / "slot_01" / "progress.sav").chmod(stat.S_IREAD)
+        code, out, err = self.run_main("import", "--from", str(self.li), "--longshot", str(self.hs))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("could not delete", out)
+        self.assertEqual(tree(self.hs), tree(self.li))
+        self.assertEqual(sorted(p.name for p in self.hs.iterdir()), ["account.sav", "option.sav", "slot_00"])
+        self.assertEqual(oot.save_problems(str(self.hs)), [])
+
+    def test_old_save_that_cannot_be_deleted(self):
+        # (the same on any system: a delete refused once is tried again after the read-only bit is cleared; one refused for
+        # good is named, and the copy itself still counts)
+        real_unlink = os.unlink
+        refusals = []
+
+        def unlink(path, *args, **kw):
+            if os.path.basename(path) == "progress.sav" and len(refusals) < limit:
+                refusals.append(path)
+                raise PermissionError(13, "Access is denied")
+            return real_unlink(path, *args, **kw)
+
+        for limit, left in ((1, False), (10 ** 6, True)):
+            with self.subTest(left=left):
+                self.fresh_saves()
+                refusals.clear()
+                with mock.patch.object(oot.os, "unlink", side_effect=unlink):
+                    code, out, err = self.run_main("import", "--from", str(self.li), "--longshot", str(self.hs))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(tree(self.hs) if not left else {k: v for k, v in tree(self.hs).items() if not k.startswith(".")},
+                                 tree(self.li))
+                leftovers = [p for p in self.hs.iterdir() if p.name.startswith(".")]
+                if left:
+                    (aside,) = leftovers
+                    self.assertIn("Copied, but could not delete %s: delete it by hand." % aside, out)
+                else:
+                    self.assertEqual(leftovers, [])
+                    self.assertNotIn("could not delete", out)
+                self.assertIn("Done.", out)
 
 class NX2navi(Case):
     def setUp(self):
