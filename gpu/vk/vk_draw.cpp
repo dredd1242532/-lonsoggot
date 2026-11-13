@@ -8403,8 +8403,9 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     }
     int64_t translated = 0, failed = 0;
     shader_stats(&translated, &failed);
-    logf("vk: prepared %zu shader programs%s (%zu new, %lld failed, %zu compute pipelines; %zu compute variants, %zu programs with "
-         "texture variants, %zu at the limit) in %.1f s", programs, background ? " in play" : "", made.load(), (long long)failed, libs.load(), variants.load(),
+    logf("vk: prepared %zu shader programs%s (%zu new, %lld failed, %lld networks left out, %zu compute pipelines; %zu compute variants, "
+         "%zu programs with texture variants, %zu at the limit) in %.1f s", programs, background ? " in play" : "", made.load(), (long long)failed,
+         (long long)shader_left_out(), libs.load(), variants.load(),
          asking.load(), capped.load(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     if (warm) {
         // (translated, whatever becomes of the libraries: a start that is closed in them goes on with them alone)

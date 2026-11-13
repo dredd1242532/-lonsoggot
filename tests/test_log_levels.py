@@ -134,13 +134,15 @@ def main():
         if r.returncode:
             raise SystemExit("FAIL: the log's levels")
     # (the shader's catch: the network left out is told apart from a failure, at trace, on a count of its own)
-    catch = shader[shader.index("static std::atomic<int> logged, left_out;"):]
-    catch = catch[:catch.index("st_translate_ns")]
-    if "strcmp(e.what(), network_left_out)" not in catch or "!trial && left_out++ < 30) logf_at(log_trace" not in catch:
-        raise SystemExit("FAIL: a network left out is not a trace line counted apart")
-    if 'throw std::runtime_error(network_left_out);' not in shader:
-        raise SystemExit("FAIL: the network left out is not thrown with the text the catch compares")
-    print("PASS: a network left out is a trace line, counted apart from failures")
+    # (a network left out on purpose is its own exception, counted apart from the failures and said once: the dozen of them on
+    # every AMD card took the 30 lines a failure gets; tests/test_left_out_not_failed.py runs the catch)
+    if 'throw LeftOut("a network left out on this card");' not in shader:
+        raise SystemExit("FAIL: the network left out is not thrown as LeftOut")
+    catch = shader[shader.index("} catch (const LeftOut& e) {"):]
+    catch = catch[:catch.index("} catch (const std::exception& e) {")]
+    if "st_left_out++" not in catch or "said.exchange(true)" not in catch or "st_failed" in catch:
+        raise SystemExit("FAIL: a network left out is not counted apart from failures and said once")
+    print("PASS: a network left out is counted apart from failures and said once")
 
 
 if __name__ == "__main__":
