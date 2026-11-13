@@ -11,6 +11,10 @@ in a made-up home, no game:
   - the crashed run's log is found after the game started again (longshot_log.1.txt), a log without a crash gives no
     report and drops the marker, and no marker means no report;
   - Always send crash reports: off until the launcher ticks it, per game folder, and never one of the sent settings;
+  - the device names the options file holds (the microphone's) and the audio log line's output device never reach the log
+    lines; a user name word is redacted only as written (alice, not Alice in "Alice's");
+  - a marker cut short or with a bad time is still a marker; an answer from the server that can't be read keeps the report;
+  - the window's rows (card), the settings' and the log's Show text: the same for the Tk and the Qt builders;
   - the report passes the relay's checks (Bean-Ops deploy/crash-relay/crash_relay.py parse, mirrored here: the version's
     characters, the CRASH: exception line with a module+offset place).
 
@@ -151,7 +155,9 @@ class CrashReportTest(unittest.TestCase):
         # (a user name anywhere as a word of its own, as in a temporary folder named after the home: not inside a word)
         self.assertEqual(cr.redact("/tmp/x-1000/-home-alice-Desktop/tools/longshot", home=HOME, user="alice"),
                          "/tmp/x-1000/-home-<user>-Desktop/tools/longshot")
-        self.assertEqual(cr.redact("Alice's malice", home=HOME, user="alice"), "<user>'s malice")
+        self.assertEqual(cr.redact("alice's malice", home=HOME, user="alice"), "<user>'s malice")
+        # (in its own case only: the Steam Deck's user is deck, and its report must still say Steam Deck)
+        self.assertEqual(cr.redact("Steam Deck, deck's", home="/home/deck", user="deck"), "Steam Deck, <user>'s")
         self.assertEqual(cr.redact("bob ran", home="/home/bo", user="bo"), "bob ran")   # (too short to tell)
 
     def test_the_log_tail_is_what_came_before_the_crash(self):
@@ -267,6 +273,57 @@ class CrashReportTest(unittest.TestCase):
         os.utime(Path(f.path, "longshot_log.txt"), (old, old))
         self.assertIsNone(f.report())
 
+
+    def test_device_names_never_reach_the_log(self):
+        log = LOG % SOURCE
+        log = log.replace("[hos Main] map: Hyrule Field\n", "[hos Main] map: Hyrule Field\n"
+                          "[hos audio] audio: output on Speakers (Realtek(R) Audio) (2 devices)\n"
+                          "[hos audio] mic: Alice's Blue Yeti opened\n")
+        r = self.make(log=log).report()
+        text = "\n".join(r["log_tail"] + r["crash"])
+        self.assertNotIn("Blue Yeti", text)
+        self.assertNotIn("Realtek", text)
+        self.assertIn("audio: output on <device> (2 devices)", text)
+        self.assertIn("mic: <device> opened", text)
+
+    def test_a_marker_cut_short_is_still_a_marker(self):
+        f = self.make()
+        Path(f.path, cr.MARKER).write_bytes(b"log=longshot_log.txt\ntime=17\xff")
+        self.assertIsNotNone(cr.read_marker(f.path))
+        self.assertIsNotNone(f.report())
+
+    def test_an_answer_that_cant_be_read_keeps_the_report(self):
+        import urllib.request
+        real = urllib.request.urlopen
+
+        def broken(*a, **kw):
+            raise ValueError("not an answer")
+        urllib.request.urlopen = broken
+        try:
+            ok, said, keep = cr.send({"version": "3.4.1"})
+        finally:
+            urllib.request.urlopen = real
+        self.assertFalse(ok)
+        self.assertTrue(keep)
+        self.assertIn("kept", said)
+
+    def test_the_windows_rows_and_show_texts(self):
+        f = self.make()
+        r = f.report()
+        rows = cr.settings(f.path)
+        card = cr.card(r, rows)
+        self.assertEqual([k for k, _v, _s in card], ["Version", "Release build", "Operating system", "Renderer",
+                                                     "Graphics card", "CPU and RAM", "Map", "Settings", "Crash", "Log"])
+        self.assertEqual({k: s for k, _v, s in card if s}, {"Settings": "settings", "Crash": "log", "Log": "log"})
+        changed = sum(1 for _k, _v, c in rows if c)
+        self.assertIn("%d, %d changed" % (len(rows), changed), dict((k, v) for k, v, _s in card)["Settings"])
+        text = cr.settings_text(rows)
+        self.assertEqual(len(text.splitlines()), len(rows))
+        self.assertIn("output_res=2560x1440    (changed)", text)
+        self.assertEqual(cr.settings_text([]), "(none)")
+        log = cr.log_text(r)
+        self.assertTrue(log.startswith(r["crash"][0]))
+        self.assertIn("--- the %d log lines before it ---" % len(r["log_tail"]), log)
 
 if __name__ == "__main__":
     unittest.main()

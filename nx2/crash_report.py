@@ -21,6 +21,7 @@ the hardware hashes, anything else from the game folder, and the user's name in 
 """
 import json
 import os
+import platform
 import re
 import sys
 import time
@@ -78,15 +79,37 @@ def redact(text, home=None, user=None):
     if user:
         text = re.sub(r"(?<=[/\\])" + re.escape(user) + r"(?![\w])", "<user>", text)
     if user and len(user) >= 3:   # (and as a word of its own anywhere, as in a folder named -home-alice-: not inside a
-        # longer word, and not a name so short it is a common one)
-        text = re.sub(r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>", text, flags=re.I)
+        # longer word, not a name so short it is a common one, and in its own case: a user named deck or arch keeps the
+        # "Steam Deck" and the "Arch Linux" of the system line)
+        text = re.sub(r"(?<![A-Za-z0-9])" + re.escape(user) + r"(?![A-Za-z0-9])", "<user>", text)
     for pattern, replacement in HOMES:
         text = pattern.sub(replacement, text)
     return text
 
 
-def clean(text, limit, home=None, user=None):
-    return redact(CONTROL.sub("", text), home, user).strip()[:limit]
+# The names of the player's devices in the log (host/nn_audio.c: "audio: output on Jane's AirPods (3 devices), stereo"): a
+# name the player gave them, so never sent. The microphone's is the options file's microphone_device (devices())
+DEVICE_LINES = [(re.compile(r"(audio: output on ).*?( \(\d+ devices?\))"), r"\1<device>\2")]
+
+
+def clean(text, limit, home=None, user=None, devices=()):
+    text = CONTROL.sub("", text)
+    for pattern, replacement in DEVICE_LINES:
+        text = pattern.sub(replacement, text)
+    for name in devices:
+        text = text.replace(name, "<device>")
+    return redact(text, home, user).strip()[:limit]
+
+
+def devices(folder):
+    """The device names the options file holds (microphone_device=<name>), to leave out of every line"""
+    names = []
+    for line in read_lines(os.path.join(folder, OPTIONS)) or []:
+        if line.startswith("microphone_device="):
+            name = line.split("=", 1)[1].strip()
+            if len(name) >= 3:
+                names.append(name)
+    return names
 
 
 def read_lines(path):
@@ -98,8 +121,10 @@ def read_lines(path):
 
 
 def read_marker(folder):
+    """crash_pending.txt's lines, None without it. A marker cut short (the disk full, the power lost while the crash handler
+    wrote it) is still a marker: what can't be read is left out, and pending() decides from the logs"""
     try:
-        with open(os.path.join(folder, MARKER), encoding="utf-8") as f:
+        with open(os.path.join(folder, MARKER), encoding="utf-8", errors="replace") as f:
             return dict(line.rstrip("\n").split("=", 1) for line in f if "=" in line)
     except OSError:
         return None
@@ -108,7 +133,10 @@ def read_marker(folder):
 def crash_log(folder, marker):
     """The log of the run that crashed: the newest of longshot_log.txt and the rotated ones that has a crash in it and was
     last written around the marker's time (the game renames longshot_log.txt to .1 when it starts again)"""
-    when = float(marker.get("time") or 0)
+    try:
+        when = float(marker.get("time") or 0)
+    except ValueError:   # (a marker cut short: any crash log will do)
+        when = 0
     for name in LOGS:
         path = os.path.join(folder, name)
         try:
@@ -188,6 +216,42 @@ def settings(folder):
     return sorted(rows, key=lambda r: (not r[2], r[0]))
 
 
+def this_os():
+    """The system, as the game's report: line words it (gpu/vk/vk_bug_report.cpp os_text), for a run whose log has none (the
+    Vulkan renderer never started: no driver, or WebGPU). The window runs on the PC that crashed"""
+    if sys.platform == "win32":
+        v = sys.getwindowsversion()
+        name = ("Windows 11" if v.build >= 22000 else "Windows 10") if v.major == 10 else "Windows %d.%d" % (v.major, v.minor)
+        return "%s (build %d)" % (name, v.build)
+    name = "Linux"
+    for path in ("/etc/os-release", "/usr/lib/os-release"):
+        for line in read_lines(path) or []:
+            if line.startswith("PRETTY_NAME="):
+                name = line[12:].strip().strip("\"'") or name
+        if name != "Linux":
+            break
+    return "%s (Linux %s)" % (name, platform.release())
+
+
+def this_cpu():
+    """The processor's name and threads, as the report: line words it (cpu_text), for a run whose log has none"""
+    name = ""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+                name = winreg.QueryValueEx(k, "ProcessorNameString")[0]
+        except OSError:
+            pass
+    else:
+        for line in read_lines("/proc/cpuinfo") or []:
+            if line.startswith("model name"):
+                name = line.split(":", 1)[1]
+                break
+    name = " ".join(name.split()) or "an unknown CPU"
+    return "%s (%d threads)" % (name, os.cpu_count() or 1)
+
+
 def release_source(folder):
     for line in read_lines(os.path.join(folder, VERSION_FILE)) or []:
         if line.startswith("source="):
@@ -197,6 +261,7 @@ def release_source(folder):
 
 def build(folder, lines, home=None, user=None):
     """The report, as the relay takes it, from the crashed run's log lines and the game folder"""
+    names = devices(folder)
     version, source = "", ""
     for line in lines[:5]:
         m = FIRST_LINE.search(line)
@@ -220,7 +285,7 @@ def build(folder, lines, home=None, user=None):
             line = PLACE_PATH.sub("", m.group(1))
             if CRASH_START.search(line):
                 line = PLACE_MODULE.sub(place_module, line, count=1)
-            crash.append(clean(line, LINE_LIMIT, home, user))
+            crash.append(clean(line, LINE_LIMIT, home, user, names))
     rows = settings(folder)
     options = ""
     for key, value, _changed in rows:
@@ -232,13 +297,13 @@ def build(folder, lines, home=None, user=None):
         "version": (VERSION_OK.sub("_", version) or "unknown")[:FIELD_LIMITS["version"]],
         # (a release's version, and the sources it was built from are the release's own: an edit changes the fingerprint)
         "release": bool(RELEASE_VERSION.match(version) and expected and source == expected),
-        "os": clean(found.get("os", ""), FIELD_LIMITS["os"], home, user),
+        "os": clean(found.get("os") or this_os(), FIELD_LIMITS["os"], home, user),
         "renderer": clean(found.get("renderer", ""), FIELD_LIMITS["renderer"], home, user),
         "gpu": clean(found.get("gpu", ""), FIELD_LIMITS["gpu"], home, user),
-        "cpu": clean(found.get("cpu", ""), FIELD_LIMITS["cpu"], home, user),
+        "cpu": clean(found.get("cpu") or this_cpu(), FIELD_LIMITS["cpu"], home, user),
         "map": clean(place, FIELD_LIMITS["map"], home, user),
         "crash": crash[:CRASH_LINES],
-        "log_tail": [clean(line, LINE_LIMIT, home, user) for line in lines[max(0, start - TAIL_LINES):start]],
+        "log_tail": [clean(line, LINE_LIMIT, home, user, names) for line in lines[max(0, start - TAIL_LINES):start]],
         "options": options.rstrip("\n"),
     }
     return report
@@ -248,6 +313,33 @@ def summary(report):
     """The crash in one line, as the window's Crash row and the relay's heading say it"""
     m = re.search(r"CRASH: exception (0x[0-9a-fA-F]+) \((read|write) [^)]*\) at (\S+)", report["crash"][0] if report["crash"] else "")
     return "%s (%s) at %s" % m.groups() if m else "unknown"
+
+
+def card(report, rows):
+    """The window's "What the report holds" rows, the same in both builders: (name, value, what Show opens: None,
+    "settings" or "log"). rows are settings()'s."""
+    changed = sum(1 for _k, _v, c in rows if c)
+    return [("Version", report["version"], None),
+            ("Release build", "Yes" if report["release"] else "No (a local or modified build)", None),
+            ("Operating system", report["os"] or "not known", None),
+            ("Renderer", report["renderer"] or "not known", None),
+            ("Graphics card", report["gpu"] or "not known", None),
+            ("CPU and RAM", report["cpu"] or "not known", None),
+            ("Map", report["map"] or "not known", None),
+            ("Settings", "%d, %d changed from the defaults" % (len(rows), changed), "settings"),
+            ("Crash", summary(report), "log"),
+            ("Log", "%d lines before the crash" % len(report["log_tail"]), "log")]
+
+
+def settings_text(rows):
+    """The settings' Show: one key=value a line, the changed ones marked"""
+    return "\n".join("%s=%s%s" % (k, v, "    (changed)" if changed else "") for k, v, changed in rows) or "(none)"
+
+
+def log_text(report):
+    """The crash's and the log's Show: the crash lines, then the log lines before it"""
+    return "\n".join(report["crash"] + ["", "--- the %d log lines before it ---" % len(report["log_tail"])] +
+                     report["log_tail"])
 
 
 def comment_link(link):
@@ -278,6 +370,10 @@ def send(report, url=ENDPOINT, timeout=10):
     except (urllib.error.URLError, OSError) as e:
         return False, "Couldn't reach the crash server (%s). Your report is kept, and offered again next time." % (
             getattr(e, "reason", e)), True
+    except Exception as e:   # (an answer that isn't the relay's: a captive portal's page, a body cut short. The windows wait
+        # for an answer: whatever went wrong is one, never a thread that ends without saying)
+        return False, "The crash server's answer could not be read (%s). Your report is kept, and offered again next time." % (
+            type(e).__name__), True
 
 
 def main():

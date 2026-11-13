@@ -329,7 +329,7 @@ int rx_start(void *hwnd) {
         if (r) hos_log("rx: the Vulkan back end could not start on the window: WebGPU");
     }
     const int ok = wgr_start(hwnd);
-    if (ok) hos_log("report: renderer WebGPU (no usable Vulkan device)");
+    if (ok) hos_log("report: renderer WebGPU (%s)", b && _stricmp(b, "vulkan") ? "RX_BACKEND" : "no usable Vulkan device");
     flush_early();
     return ok;
 }

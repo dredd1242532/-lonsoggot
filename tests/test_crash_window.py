@@ -4,7 +4,7 @@ stand-in builder, no game:
   - with builder= in longshot_version.txt, a crash leaves crash_pending.txt (the log's name and the time) and starts
     <builder> --crash <the game folder>, with its output kept out of the log;
   - once per process: a second crash starts no second window;
-  - nothing at all with crash_reports=0, LONGSHOT_NO_CRASH_WINDOW=1 or no builder= line (no marker either: the next
+  - nothing at all with crash_reports=0, LONGSHOT_NO_CRASH_WINDOW on (env_on: 0, false, off and no are off) or no builder= line (no marker either: the next
     launch has nothing to offer from a window that was turned off);
   - the wiring: report_crash opens it after the log is flushed, and the game's start makes the command once the log is
     open.
@@ -149,6 +149,10 @@ def main():
         f = folder("on in settings", options="crash_reports=1\n")
         run(f)
         check(wait_for(f / "tools" / "started.txt"), "crash_reports=1: the window starts")
+        for value in ("0", "false", "OFF", "no"):   # (the switches' one rule, longshot_env.h env_on: these are off)
+            f = folder("switch " + value)
+            run(f, env={"LONGSHOT_NO_CRASH_WINDOW": value})
+            check(wait_for(f / "tools" / "started.txt"), "LONGSHOT_NO_CRASH_WINDOW=%s: the window still starts" % value)
 
     print("%d failed" % len(failures) if failures else "all passed")
     return 1 if failures else 0

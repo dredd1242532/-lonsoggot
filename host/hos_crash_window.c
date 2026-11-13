@@ -23,6 +23,7 @@
 #include <string.h>
 #include <time.h>
 #include "hos_crash_window.h"
+#include "../gpu/vk/compat/longshot_env.h"
 
 void hos_log(const char *fmt, ...);
 
@@ -61,7 +62,8 @@ static void version_value(const char *folder, const char *key, char *out, size_t
     fclose(f);
 }
 
-/* crash_reports=0 in longshot_options.ini: the player turned the crash window off */
+/* crash_reports=0 in longshot_options.ini: the player turned the crash window off. Not hos_ini_option (host/nn_applet.c),
+   which reads the options beside the game's executable: init_in reads the folder it is given (the tests' own) */
 static int turned_off(const char *folder) {
     char path[CW_PATH + 32];
     snprintf(path, sizeof path, "%s%clongshot_options.ini", folder, CW_SEP);
@@ -77,8 +79,7 @@ static int turned_off(const char *folder) {
 
 void hos_crash_window_init_in(const char *folder) {
     InterlockedExchange(&ready, 0);
-    const char *no = getenv("LONGSHOT_NO_CRASH_WINDOW");
-    if (no && *no && strcmp(no, "0")) {
+    if (env_on("LONGSHOT_NO_CRASH_WINDOW")) {   /* (the switches' one rule: 0, false, off or no is off, longshot_env.h) */
         hos_log("crash window: off (LONGSHOT_NO_CRASH_WINDOW)");
         return;
     }
