@@ -235,7 +235,7 @@ for scripted input, screenshots, frame dumps and profiles are in the development
   RUN_ALL_SKIP = {"windows": "POSIX signals: the Linux guard"}          # can't run there, and why
   ```
 
-  `{name}` is a tool the runner finds (`cxx`, `vulkan_headers`, `spirv_headers`, `spirv_val`, `glslang`, `dotnet`).
+  `{name}` is a tool the runner finds (`cxx`, `vulkan_headers`, `spirv_headers`, `spirv_val`, `glslang`, `dotnet`, `openssl`).
 - Keep it fast, and make it pass on Linux and Windows where it can.
 - For a renderer or runtime fix, say what you saw before and after, on which GPU and driver, and where in the game.
 

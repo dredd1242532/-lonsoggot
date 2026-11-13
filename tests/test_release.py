@@ -4,10 +4,12 @@ SHA256SUMS and its signature; the channels as the launcher reads them from the r
 prune against a fake Forgejo on 127.0.0.1 (a draft first, every file uploaded and checked, published last; only nightlies
 pruned); the release page (the launcher's download links, Longshot's "download the launcher" notice, per channel); and the
 release a tag's commit already has (released-as: found by its tag's commit, taken only signed and whole).
-Needs git and the openssl command line.
+Needs git and the openssl command line (--openssl names it when it is not on PATH: tests/run_all.py finds Git
+for Windows' own, and skips this check where there is none).
 
-    python -I tests/test_release.py
+    python -I tests/test_release.py [--openssl <path of openssl>]
 """
+import argparse
 import base64
 import contextlib
 import hashlib
@@ -19,11 +21,14 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 import urllib.parse
+
+RUN_ALL_ARGS = ["--openssl", "{openssl}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release", ROOT / "scripts" / "release.py")
@@ -663,4 +668,9 @@ class TokenStaysHome(unittest.TestCase):
 
 if __name__ == "__main__":
     os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
-    unittest.main()
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--openssl")
+    a, rest = ap.parse_known_args()
+    if a.openssl:   # (release.py runs "openssl": its folder goes first on PATH, for this process and the ones it starts)
+        os.environ["PATH"] = os.path.dirname(os.path.abspath(a.openssl)) + os.pathsep + os.environ.get("PATH", "")
+    unittest.main(argv=sys.argv[:1] + rest)

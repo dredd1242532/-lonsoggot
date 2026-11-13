@@ -21,7 +21,7 @@ run_all = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run_all)
 
 TOOLS = {"cxx": None, "vulkan_headers": None, "spirv_headers": None, "spirv_val": None, "glslang": None, "dotnet": None,
-         "dav1d": None}
+         "dav1d": None, "openssl": None}
 
 
 class Reader(unittest.TestCase):

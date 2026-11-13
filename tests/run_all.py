@@ -18,7 +18,7 @@ no arguments and its own defaults.
     RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows") -> why it is skipped
 
 {name} in an argument is a tool or folder find_tools looks for (cxx, vulkan_headers, spirv_headers, spirv_val, glslang,
-dotnet, dav1d); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
+dotnet, dav1d, openssl); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
 with --strict. A check skipped on both OSes (a GPU, the game) names both. A declaration that is not a plain literal of
 that shape, names an unknown placeholder or OS, or any other RUN_ALL_ name, stops the run with the file and line; so
 does one set or changed anywhere but its own top-level line (inside an if or a try, .append(...), +=, a subscript).
@@ -102,8 +102,24 @@ def dav1d_prefix():
     return None
 
 
+def git_openssl():
+    """Git for Windows' own openssl.exe (in <Git>\\usr\\bin, which is not on PATH outside Git Bash), next to the git on
+    PATH (<Git>\\cmd\\git.exe or <Git>\\mingw64\\bin\\git.exe): every Windows checkout has one"""
+    git = shutil.which("git")
+    if not WINDOWS or not git:
+        return None
+    up = os.path.dirname(os.path.realpath(git))
+    for _ in range(2):
+        up = os.path.dirname(up)
+        p = os.path.join(up, "usr", "bin", "openssl.exe")
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def find_tools():
     return {
+        "openssl": which("openssl") or git_openssl(),
         "dav1d": None if WINDOWS else dav1d_prefix(),
         "spirv_headers": header_dir("LONGSHOT_SPIRV_HEADERS", "spirv-headers", os.path.join("spirv", "unified1", "spirv.h")),
         "vulkan_headers": header_dir("LONGSHOT_VULKAN_HEADERS", "vulkanheaders", os.path.join("vulkan", "vulkan.h")),
