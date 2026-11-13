@@ -1349,7 +1349,7 @@ static void gameplay_context_locked(void) {
     CoopOffer offer;
     CoopView view;
     coop_view_get(&view);
-    if (G.eng && G.bound && G.gate && G.loaded && view.state == COOP_JOINED &&
+    if (!coop_profile_active() && G.eng && G.bound && G.gate && G.loaded && view.state == COOP_JOINED &&
         coop_sync_offer(G.eng, &offer, coop_now_ms()) && offer.accepted && coop_sync_open(G.eng)) {
         context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
         context.capabilities = COOP_GAMEPLAY_DURABLE;

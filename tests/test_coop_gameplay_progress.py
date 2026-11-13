@@ -19,6 +19,8 @@ typedef struct { int unused; } Ctx;
 typedef struct { uint32_t hash; int cat, is_int; } GFlag;
 static GFlag flag = {123, COOP_CAT_ITEMS, 0};
 static int locked, guest_calls, writes, takes, cancel_after_take, untaken;
+static int temporary;
+int coop_profile_active(void) { return temporary; }
 static int TryAcquireSRWLockExclusive(int *lock) { (void)lock; assert(!locked); locked = 1; return 1; }
 static void ReleaseSRWLockExclusive(int *lock) { (void)lock; assert(locked); locked = 0; }
 static struct {
@@ -86,6 +88,8 @@ int main(void) {
     apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1);
     current.accepted = 1; G.gate = 0;
     apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1);
+    G.gate = 1; temporary = 1;
+    apply(&ctx, 1234); assert(takes == 2 && guest_calls == before && writes == 1 && !G.gameplay.context.capabilities);
     assert(!untaken);
     puts("PASS: actual progress apply uses one registered writer; off, revoked queued ticket, revoked acceptance and invalid game context make no native calls");
 }

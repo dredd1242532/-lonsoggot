@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 27
+#define MKWVK_API_VERSION 28
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -153,7 +153,7 @@ typedef struct MkwVkCoopView {
     uint8_t category[HOS_COOP_RULE_CATEGORIES], feature_count, feature_id[HOS_COOP_FEATURES];
     int16_t feature_value[HOS_COOP_FEATURES];
     char maker_key[24], room_title[40];
-    int32_t temporary_save;   /* native save mounts point to a local copy until exit */
+    int32_t temporary_save;   /* (version 26) native save mounts point to a local copy until exit */
     char save_note[160];
     /* (version 27; 26 belongs to the temporary-profile view) cancellation explanations only, not consent tokens. */
     uint32_t membership_revision;   /* signed admission/removal sets changed, even with an unchanged visible roster */

@@ -784,6 +784,9 @@ The same row in the copy leaves the room and restarts with the normal saves.
 It never replaces or renames the normal save folder and never copies progress back.
 The tab identifies the temporary domain. Normal progress synchronization is
 suspended there until a separately consented progress-return policy is available.
+The capability owner refuses durable writers for this domain as well as stopping the
+native progress scan. Renderer API 26 combines the signed received terms (API 25)
+with temporary-save status; rules-changed command 9 and copy/return command 10 stay distinct.
 
 Copies stay under the selected user folder's `coop-sessions`, using random local
 IDs, an immutable starting copy and a separate working `user/save`. Only local

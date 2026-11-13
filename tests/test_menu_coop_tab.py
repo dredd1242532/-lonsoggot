@@ -66,6 +66,7 @@ enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME =
 #ifdef COOP_MENU_REAL_ENGINE
 extern "C" void coop_test_charter_views(MkwVkCoopView* before, MkwVkCoopView* after, const char* kind);
 #endif
+static_assert(HOS_COOP_CMD_RULES_CHANGED == 9 && HOS_COOP_CMD_TEMP_SAVE == 10);
 @@TABS@@
 @@ROW@@
 @@TEXT@@
@@ -993,8 +994,8 @@ def main():
                         "int (*coop_feature)(int index, MkwVkCoopFeature *out);"]:
         raise SystemExit("FAIL: vk_api.h: the Co-op calls are not after take_text in MkwVkHost's appended order "
                          "(host/rx_backend.c fills it by position)")
-    if version < 27:
-        raise SystemExit("FAIL: vk_api.h: the membership/pool view needs API 27 (26 is already allocated)")
+    if version < 28:
+        raise SystemExit("FAIL: vk_api.h: membership/pool and temporary-save view need API 28")
     need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*\};",
          "rx_backend.c: vk_host does not end with the Co-op tab's calls")
     need(menu, r"TAB_DEBUG = 4,[^\n]*\n\s*TAB_COOP = 5,[^\n]*\n\s*TAB_COUNT = 6,", "vk_menu.cpp: the Co-op tab is not the strip's last")
