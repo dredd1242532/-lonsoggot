@@ -104,16 +104,19 @@ std::vector<TlsOwned>& tls_owned() {
     return list.v;
 }
 template <class T>
-T& tls_make(T*& slot) {
+[[gnu::noinline, gnu::cold]] T& tls_make(T*& slot) {
+    // (out of line and cold: inlined, its call of new and the list's push_back made every accessor below a full function, six
+    // registers saved and restored around the TLS lookup on each of a draw's ~50 calls of dw() and pass(): with the lookup, ~8%
+    // of the Steam Deck's render thread, the accessors' own share 5% (perf, U53abbb8))
     slot = new T();   // (value-initialized: zeroed as a thread_local's static storage was)
     tls_owned().push_back({slot, reinterpret_cast<void**>(&slot), [](void* p) { delete static_cast<T*>(p); }});
     return *slot;
 }
 #define TLS_OBJECT(name, ...)                                                         \
     thread_local __VA_ARGS__* name##_tls = nullptr;                                   \
-    inline __VA_ARGS__& name() {                                                      \
+    [[gnu::always_inline]] inline __VA_ARGS__& name() {                               \
         __VA_ARGS__* p = name##_tls;                                                  \
-        return p ? *p : tls_make(name##_tls);                                         \
+        return __builtin_expect(p != nullptr, 1) ? *p : tls_make(name##_tls);         \
     }
 
 // ---- (longshot) RX_VK_PROF_FINE=1: where a draw's time goes, finer than the frame line's phases, and what each draw does ----

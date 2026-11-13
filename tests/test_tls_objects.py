@@ -63,6 +63,11 @@ def main():
     objects = len(re.findall(r"(?m)^TLS_OBJECT\(", text))
     if objects < 10:
         raise SystemExit("only %d TLS_OBJECTs: the file's per-thread objects are not where this test looks" % objects)
+    # (an accessor is a TLS load and a test: the first use's allocation out of line and cold, or every accessor became a full
+    # function with registers saved around the lookup, ~5% of a Steam Deck's render thread)
+    if not re.search(r"\[\[gnu::noinline, gnu::cold\]\] T& tls_make\(T\*& slot\) \{", text) or \
+            "[[gnu::always_inline]] inline __VA_ARGS__& name() {" not in text:
+        raise SystemExit("TLS_OBJECT: the accessor is inlined and its first-use allocation (tls_make) is out of line and cold")
     if bad:
         raise SystemExit("thread_locals with a constructor or destructor (use TLS_OBJECT):\n  " + "\n  ".join(bad))
     print("PASS: %d TLS_OBJECTs; %d other namespace-scope thread_locals, none with a constructor or destructor" % (objects, light))
