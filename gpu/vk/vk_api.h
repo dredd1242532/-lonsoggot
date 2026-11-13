@@ -64,6 +64,8 @@ enum { HOS_OPT_HOLD_TOGGLE = 54 };
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* Chat owns all input until its finishing keys are released; duel Ready must refuse then. */
+enum { HOS_OPT_CHAT_FOCUS = 61 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
@@ -94,7 +96,7 @@ enum { HOS_PROMPTS_LIVE_TEXTURES = 1, HOS_PROMPTS_LIVE_LAYOUTS = 2, HOS_PROMPTS_
    take a gamepad input too, and share it: a note's key can be some other control's key at once, host/nn_hid.c has_pad */
 enum { HOS_KEY_MOVE_UP = HOS_SW_N, HOS_KEY_MOVE_DOWN, HOS_KEY_MOVE_LEFT, HOS_KEY_MOVE_RIGHT, HOS_KEY_CAM_UP,
        HOS_KEY_CAM_DOWN, HOS_KEY_CAM_LEFT, HOS_KEY_CAM_RIGHT, HOS_KEY_OC_NOTE_L, HOS_KEY_OC_NOTE_R,
-       HOS_KEY_OC_NOTE_A, HOS_KEY_OC_NOTE_Y, HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_N };
+       HOS_KEY_OC_NOTE_A, HOS_KEY_OC_NOTE_Y, HOS_KEY_OC_NOTE_X, HOS_KEY_WALK, HOS_KEY_CHAT, HOS_KEY_N };
 
 /* (longshot) the mouse over the window while it is free (not captured): the Insert menu's (host/display.c,
    host/posix/display_sdl.c). x and y: the cursor in the window's pixels, of a window width x height pixels (the
@@ -189,6 +191,20 @@ typedef struct MkwVkCoopOverlay {
     int32_t nmarks;
     MkwVkCoopMark mark[HOS_COOP_MEMBERS];
 } MkwVkCoopOverlay;
+/* (version 27) host-only transient feed. Text is data, never a format string or action. */
+enum { HOS_COOP_CHAT_BYTES = 192, HOS_COOP_FEED_LINES = 4 };
+enum { HOS_COOP_CHAT_SEND = 1, HOS_COOP_CHAT_MUTE, HOS_COOP_CHAT_NOTICES };
+enum { HOS_COOP_FEED_CHAT, HOS_COOP_FEED_JOIN, HOS_COOP_FEED_LEFT,
+       HOS_COOP_FEED_LOST, HOS_COOP_FEED_BACK, HOS_COOP_FEED_ITEM };
+typedef struct MkwVkCoopFeedLine {
+    uint8_t kind, member;
+    char name[32], text[HOS_COOP_CHAT_BYTES + 1];
+} MkwVkCoopFeedLine;
+typedef struct MkwVkCoopFeed {
+    uint32_t generation, members, muted;
+    int32_t visible, can_chat, count;
+    MkwVkCoopFeedLine line[HOS_COOP_FEED_LINES];
+} MkwVkCoopFeed;
 
 /* what the executable gives the back end */
 typedef struct MkwVkHost {
@@ -299,6 +315,9 @@ typedef struct MkwVkHost {
     int (*coop_feature)(int index, MkwVkCoopFeature *out);
     /* labels: 0 off, 1 names, 2 names and arrows; receiver-local display choice only. */
     int (*coop_overlay)(MkwVkCoopOverlay *out, int labels);
+    /* No guest reads: a bounded copy, and local send/mute/notice-mode commands. */
+    int (*coop_feed)(MkwVkCoopFeed *out);
+    int (*coop_chat)(int command, const char *text, uint32_t number);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

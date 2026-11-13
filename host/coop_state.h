@@ -96,6 +96,7 @@ enum {
                               COOP_PRESENCE_ARROWS | COOP_PRESENCE_PLACE
 };
 enum { COOP_RULE_WARP = 64 };
+enum { COOP_RULE_SOCIAL = 101, COOP_SOCIAL_CHAT = 1 };
 typedef struct {
     uint8_t count;
     uint8_t bytes[3 * COOP_FEATURE_MAX];   // ascending unique u8 ID, little-endian i16 value; ID 0 is reserved
@@ -140,6 +141,10 @@ CoopSync *coop_sync_new(uint64_t self_id, uint32_t schema);
 void coop_sync_free(CoopSync *s);
 // Trace lines (sent, received, by hash and value) go to fn when set.
 void coop_sync_trace(CoopSync *s, void (*fn)(void *user, const char *line), void *user);
+/* A newly raised verified shared flag, observed locally; the sender may be forwarding progress.
+   Called under the engine owner's lock, never for unaccepted sessions or unchanged/replayed values. */
+typedef void (*CoopSharedFn)(int member, uint64_t session, int category, uint32_t hash, uint32_t value, void *user);
+void coop_sync_observe_shared(CoopSync *s, CoopSharedFn fn, void *user);
 // What the local game takes from the room: the highest value of flag or counter (cat, hash), 0 when this game does not
 // share that hash in that category (a flag: 1 for a Bool; a pool counter: what the game can show). Every value a
 // member sends is checked against it before it is stored or passed on; one that fails is dropped and counted, and a

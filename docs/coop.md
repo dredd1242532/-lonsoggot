@@ -351,7 +351,7 @@ co-op registry before using it. This is the allocation table; a reservation is n
 | 12 | WORLD_EVENT | Reserved by `coop-world` (authority/lifecycle events) |
 | 13 | AREA | Reserved by `coop-area` (optional room clock) |
 | 14 | WARP | Reserved by `coop-warp`; that branch currently uses POS |
-| 15 | CHAT | Reserved for chat; no branch implements it |
+| 15 | CHAT | Accepted-member text, carried only by EVENT16/ACK17 |
 | 16 | EVENT | Session helper, not an application payload |
 | 17 | EVENT_ACK | Session helper, not an application payload |
 | 0xF0 | TEST | Fixtures only; 0xF0–0xFF are not production allocations |
@@ -1045,3 +1045,52 @@ safe ground; collision, environmental hazards and the current-head first arrival
 It includes all refusal gates, each cancellation phase, stale/moved targets, same-map placement, first cross-map
 arrival and deliberately broken copies. The menu fixture exercises the two presses and changed-identity/terms
 fences. These are game-free checks, not evidence of a running two-player journey.
+## Chat and notices
+
+The maker enables **Room chat** in Room rules (`coop_social_permissions=1`, signed rule101 bit0).
+Its default is0 and an absent rule is off. Once both players accept those terms, press **T**
+(change **Chat** in Controls, saved as `key_chat`) or choose **Chat** on the Co-op tab.
+Enter sends the line to the currently accepted members; Esc cancels. The keyboard, mouse,
+controller, scripted inputs and duel readiness belong to the text field until the finishing
+keys/buttons are released. Losing focus, entering an event, leaving or changed terms cancels it.
+The existing controller confirm/back/paste controls work in the field; controller-only text
+entry requires the platform's keyboard or a prepared clipboard, not a new on-screen keyboard.
+
+**Mute chat** chooses a currently accepted member with Left/Right; Enter mutes or unmutes
+that member's chat and notices locally, clearing their old feed entries. Mutes last for this
+room/session, not on disk. **Notices** (`coop_notices`) is local:0 Off,1 Joins only (including
+leave, lost connection and return),2 Everything (default). These switches change no other player's screen.
+Notices are generated locally from accepted roster/identity transitions and newly raised,
+verified shared item/song flags. They send no additional NOTICE packets and grant nothing.
+The item names reuse the existing inventory catalogue (including Fairy Slingshot and songs);
+unknown song markers say “a song”, never an invented title. Because signed progress can be
+forwarded, a pickup line says **“Bob shared Fairy Slingshot”**, not that Bob was its original finder.
+Catch-up can produce such lines too; neither a notice nor a signature proves an honest pickup.
+
+Messages hold at most192 UTF-8 bytes. Malformed encodings and oversized messages refuse;
+control, direction and invisible-format characters are removed. A player sends at most one
+message per1.5 seconds; each receiver independently applies that rate per sender. The
+volatile history holds16 entries; the feed shows at most4, each for8 seconds. Notices share
+a one-per-second per-member budget. Muted, malformed and rate-refused accepted messages
+stay consumed, so an old message cannot appear after unmuting or waiting.
+No chat text is written to the log, options or any other file.
+
+The feed sits above the dialogue region and is hidden throughout every native event,
+including conversations and cutscenes; unknown native context hides it too.
+It is also hidden on the title/loading screens and behind the Insert menu.
+Co-op off performs no chat guest reads, network work or feed rendering.
+
+CHAT version1 is `u8 version | u32 rules epoch | u64 sequence | u16 byte count | UTF-8`,
+little endian, at most207 bytes, inside the existing reliable EVENT helper.
+It uses the unchanged Longshot domains and transport budgets, current accepted sessions,
+explicit signed permission and a monotonic per-sender application sequence in addition
+to EVENT's deduplication. Pending old-rule messages cannot reach the feed.
+The room secret is shared: a malicious invited holder can still impersonate ephemeral
+chat or disrupt another sender's sequence. Chat is always labelled as a member's text,
+never interpreted as a command, path, link action or system notice.
+
+Renderer API27 adds bounded `coop_feed` and `coop_chat` callbacks. Input option61
+(`HOS_OPT_CHAT_FOCUS`) is the field/release fence; duel Ready/start admission must include it.
+`tests/test_coop_chat.py` exercises the production core, runtime callbacks, signed progress
+observer and menu/input entry without a game; `--mutations` requires broken copies to fail.
+Actual two-game rendering, physical typing/paste, Windows and controller input remain runtime proofs.

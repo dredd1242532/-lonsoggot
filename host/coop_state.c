@@ -171,6 +171,8 @@ struct CoopSync {
     uint32_t schema;
     CoopSyncLimitFn limit;          // the local game's table: what it shares and up to which value
     void *limit_user;
+    CoopSharedFn shared;
+    void *shared_user;
     uint64_t ik0, ik1;              // the index's key
     Reg *regs;
     int nregs, cap;
@@ -350,6 +352,8 @@ static const CoopFeatureRule feature_rules[] = {
      "Add permissions: 1 child bodies, 2 adult bodies, 4 health, 8 arrows, 16 gear, 64 place. Missing bits stay private."},
     {COOP_RULE_WARP, "coop_warp", 0, 1, 0, "Go to friend",
      "Allow confirmed travel to an accepted friend's shared position. Unsupported places refuse; no forced travel."},
+    {COOP_RULE_SOCIAL, "coop_social_permissions", 0, COOP_SOCIAL_CHAT, 0, "Room chat",
+     "On: accepted players may exchange short text messages. Each player can mute a member locally."},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -880,6 +884,7 @@ void coop_sync_free(CoopSync *s) {
 }
 
 void coop_sync_trace(CoopSync *s, void (*fn)(void *user, const char *line), void *user) { s->trace = fn, s->trace_user = user; }
+void coop_sync_observe_shared(CoopSync *s, CoopSharedFn fn, void *user) { s->shared = fn, s->shared_user = user; }
 
 // The signed bytes of the identity of member id in session (prev: its session in the room before, 0 none), with key pk
 // and name.
@@ -1957,6 +1962,8 @@ static void on_section(CoopSync *s, int from, const uint8_t *b, size_t n) {
         trace_flag(s, "received", &s->regs[idx], v, from);
         flag_raise(s, idx, v);
         s->st.merged++;
+        if (s->shared && coop_sync_member_accepted(s, from, p->session))
+            s->shared(from, p->session, cat, hash, v, s->shared_user);
     }
     update_caught_up(s);
 }

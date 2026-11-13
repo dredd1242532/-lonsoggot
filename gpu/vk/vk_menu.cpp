@@ -144,6 +144,7 @@ const char* hn_rule_keys(int v, int variant) {
                ? "With Progress per player, a room you make keeps small keys per player too."
                : nullptr;
 }
+const char* tx_notices(int v) { return v == 0 ? "Off" : v == 1 ? "Joins only" : "Everything"; }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
 const char* tx_fps_level(int v) { return fps_stats::level_name(v); }
 const char* tx_fps_corner(int v) { return fps_stats::corner_name(v); }   // (the FPS counter row: Off, FPS, Frame time, Graph, Breakdown)
@@ -1203,12 +1204,15 @@ MENU_HINTS(hn_prompts, 0,
 // the text (the field's apply, which can refuse it and say why), Esc puts the text back as it was. A controller's confirm and
 // back are Enter and Esc, its D-pad moves the caret and cycles characters, its shoulders add and remove a character,
 // its paste button (menu_keys::paste) pastes; a click elsewhere is Enter, a right click Esc; closing the menu is Esc too ----
+// Chat alone opts into bounded UTF-8 and code-point editing.
+#include "../../host/coop_chat_text.h"
 struct TextField {
-    char text[64];                     // (NUL-terminated)
-    int len = 0, caret = 0;            // (in bytes, a character each: ASCII)
+    char text[193];                   // UTF-8 bytes including the terminator
+    int len = 0, caret = 0;
     int max = 63;                      // (the most it holds, below sizeof text)
     bool (*allow)(char c) = nullptr;   // (of the printable ASCII, what it takes; nullptr all of it)
     const char* (*pad_chars)(const TextField&) = nullptr;   // (characters offered at the caret, in cycling order)
+    bool unicode = false;
 };
 enum { kTextGoOn, kTextDone, kTextCancel };
 /// One input to a field: a character typed (a Unicode code point) or HOS_TEXT_KEY | an editing key (vk_api.h). The text and its
@@ -1219,15 +1223,19 @@ int text_edit(TextField& f, uint32_t in) {
         switch (in & ~(uint32_t)HOS_TEXT_KEY) {
         case VK_RETURN: return kTextDone;
         case VK_ESCAPE: return kTextCancel;
-        case VK_LEFT: f.caret = std::max(f.caret - 1, 0); break;
-        case VK_RIGHT: f.caret = std::min(f.caret + 1, f.len); break;
+        case VK_LEFT:
+            if (f.caret) { f.caret--; while (f.unicode && f.caret && ((unsigned char)f.text[f.caret] & 0xc0) == 0x80) f.caret--; }
+            break;
+        case VK_RIGHT:
+            if (f.caret < f.len) { f.caret++; while (f.unicode && f.caret < f.len && ((unsigned char)f.text[f.caret] & 0xc0) == 0x80) f.caret++; }
+            break;
         case VK_HOME: f.caret = 0; break;
         case VK_END: f.caret = f.len; break;
-        case VK_BACK:
-            if (f.caret > 0) memmove(f.text + f.caret - 1, f.text + f.caret, (size_t)(f.len - f.caret + 1)), f.caret--, f.len--;
-            break;
-        case VK_DELETE:
-            if (f.caret < f.len) memmove(f.text + f.caret, f.text + f.caret + 1, (size_t)(f.len - f.caret)), f.len--;
+        case VK_BACK: {
+            const int end = f.caret;
+            if (f.caret) { f.caret--; while (f.unicode && f.caret && ((unsigned char)f.text[f.caret] & 0xc0) == 0x80) f.caret--; }
+            memmove(f.text + f.caret, f.text + end, (size_t)(f.len - end + 1));
+            f.len -= end - f.caret;
             break;
         case VK_UP:
         case VK_DOWN:
@@ -1248,20 +1256,37 @@ int text_edit(TextField& f, uint32_t in) {
             break;
         }
         }
+        case VK_DELETE: {
+            int end = f.caret;
+            if (end < f.len) { end++; while (f.unicode && end < f.len && ((unsigned char)f.text[end] & 0xc0) == 0x80) end++; }
+            memmove(f.text + f.caret, f.text + end, (size_t)(f.len - end + 1));
+            f.len -= end - f.caret;
+            break;
+        }
+        } // switch
         return kTextGoOn;
     }
-    if (in >= 0xff10 && in <= 0xff19) in = '0' + in - 0xff10;
-    else if (in == 0xff58) in = 'x';
-    if (in < 0x20 || in > 0x7e || f.len >= std::min(f.max, (int)sizeof f.text - 1) || (f.allow && !f.allow((char)in)))
-        return kTextGoOn;   // (not printable ASCII, not this field's, or no room: left out)
-    memmove(f.text + f.caret + 1, f.text + f.caret, (size_t)(f.len - f.caret + 1));
-    f.text[f.caret++] = (char)in;
-    f.len++;
+    if (!f.unicode) {
+        if (in >= 0xff10 && in <= 0xff19) in = '0' + in - 0xff10;
+        else if (in == 0xff58) in = 'x';
+    }
+    char bytes[4];
+    const int count = f.unicode ? (int)coop_text_encode(in, bytes) :
+                      in >= 0x20 && in <= 0x7e && (!f.allow || f.allow((char)in)) ? (bytes[0] = (char)in, 1) : 0;
+    if (!count || f.len + count > std::min(f.max, (int)sizeof f.text - 1)) return kTextGoOn;
+    memmove(f.text + f.caret + count, f.text + f.caret, (size_t)(f.len - f.caret + 1));
+    memcpy(f.text + f.caret, bytes, (size_t)count);
+    f.caret += count, f.len += count;
     return kTextGoOn;
 }
 /// A field's text set whole, cut to what it holds, the caret at its end
 void text_set(TextField& f, const char* t) {
     snprintf(f.text, sizeof f.text, "%.*s", std::clamp(f.max, 0, (int)sizeof f.text - 1), t ? t : "");
+    if (f.unicode) {
+        char clean[sizeof f.text];
+        const size_t n = coop_text_clean(clean, sizeof clean, (const uint8_t*)f.text, strlen(f.text));
+        memcpy(f.text, clean, n + 1);
+    }
     f.len = f.caret = (int)strlen(f.text);
 }
 
@@ -1584,6 +1609,9 @@ Row rows[] = {
     {TAB_COOP, "Friend labels", &opts.coop_labels, 0, 2, 1, tx_coop_labels,
      "Names above friends, with optional arrows to friends outside the picture. Only accepted friends in your map; room privacy rules still apply.",
      nullptr, false, true},
+    {TAB_COOP, "Chat", nullptr, 0, 0, 0, nullptr, "Enter sends. Esc cancels."},
+    {TAB_COOP, "Mute chat", nullptr, 0, 0, 0, nullptr, "Left and Right choose a player. Enter mutes or unmutes."},
+    {TAB_COOP, "Notices", &opts.coop_notices, 0, 2, 1, tx_notices, "Off, joins only, or everything. Only on your screen."},
     // (longshot) the Gameplay tab's Bug report (vk_bug_report.h): A or Enter writes the report's folder; the help says what is in it
     {TAB_GAMEPLAY, "Bug report", nullptr, 0, 0, 0, nullptr,
      "Saves what an issue needs in a new folder, bug-reports in the game folder: report.txt with the issue form's answers (this "
@@ -1887,10 +1915,10 @@ const char* const coop_pvp_accept_help =
     "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
     "fingerprints aloud to each other before: a name can be anyone's. Press twice.";
 const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
-enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopRows };
+enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopChat, kCoopMute, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
-                                               "Leave the room",  "Room rules", "Temporary save", "Go to friend"};
+                                               "Leave the room",  "Room rules", "Temporary save", "Go to friend", "Chat", "Mute chat"};
 int coop_remove_at = 0;   // (Remove a player: which of the others with a key, Left and Right choose)
 /// The other members with a key (those the maker can remove): their count, and the one coop_remove_at chooses (*chosen)
 int coop_removable(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
@@ -1979,6 +2007,8 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopLeave: return coop_in_room(v);
     case kCoopRules: return makers || v.rules_epoch || !coop_in_room(v);
     case kCoopTemp: return v.temporary_save || !coop_in_room(v);
+    case kCoopChat:
+    case kCoopMute: return v.accepted != 0;
     default: return true;
     }
 }
@@ -2236,7 +2266,7 @@ const char* ini_key(const Row& r) {
 const char* const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", "r", "zl", "zr", "plus", "minus",
                                            "left", "up", "right", "down", "move_up", "move_down", "move_left",
                                            "move_right", "cam_up", "cam_down", "cam_left", "cam_right",
-                                           "note_l", "note_r", "note_a", "note_y", "note_x", "walk"};
+                                           "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "chat"};
 bool can_bind() { return host && host->binding && host->bind && host->pad_raw; }
 const char* tx_pad_layout(int v) {
     static const char* t[] = {"Nintendo (Def)", "Xbox / PC", "Swap Face", "Custom"};
@@ -2278,7 +2308,7 @@ int detect_pad_layout() {
 const struct { int* value; const char* key; } coop_options[] = {
     {&opts.coop, "coop"},           {&opts.coop_progress, "coop_progress"}, {&opts.coop_items, "coop_items"},
     {&opts.coop_songs, "coop_songs"}, {&opts.coop_quest, "coop_quest"},       {&opts.coop_keys, "coop_keys"},
-    {&opts.coop_rupees, "coop_rupees"}, {&opts.coop_ammo, "coop_ammo"}, {&opts.coop_labels, "coop_labels"}};
+    {&opts.coop_rupees, "coop_rupees"}, {&opts.coop_ammo, "coop_ammo"}, {&opts.coop_labels, "coop_labels"}, {&opts.coop_notices, "coop_notices"}};
 /// A row's key in longshot_options.ini: a Room rules row's from coop_options, any other row's the one ini_key named
 const char* row_key(const Row& r, const char* named) {
     for (const auto& o : coop_options)
@@ -2291,7 +2321,7 @@ const char* row_key(const Row& r, const char* named) {
 bool coop_option_line(const char* key, const char* text) {
     if (coop_feature_option_line(key, text)) return true;
     for (Row& r : rows) {
-        if ((r.tab != TAB_RULES && r.value != &opts.coop_labels) || !r.value) continue;
+        if ((r.tab != TAB_RULES && r.value != &opts.coop_labels && r.value != &opts.coop_notices) || !r.value) continue;
         if (!strcmp(key, row_key(r, ""))) *r.value = std::min(std::max(atoi(text), r.lo), r.hi);
         if (!strcmp(key, row_key(r, "")) || !strcmp(key, ini_key(r))) return true;
     }
@@ -2420,6 +2450,7 @@ void save() {
         }
         fclose(f);
         if (host && host->coop_command) host->coop_command(HOS_COOP_CMD_RULES_CHANGED, nullptr, 0);
+        if (host && host->coop_chat) host->coop_chat(HOS_COOP_CHAT_NOTICES, nullptr, (uint32_t)opts.coop_notices);
     }
 }
 
@@ -2995,6 +3026,12 @@ const FieldRow* field_row(const Row& r) {
         if (!r.value && !strcmp(r.name, f.name)) return &f;
     return nullptr;
 }
+MkwVkCoopFeed chat_feed{};
+TextField chat_field{{}, 0, 0, HOS_COOP_CHAT_BYTES, nullptr, true};
+std::atomic<bool> chat_capture{false};
+int64_t chat_release_at = 0;
+uint32_t chat_generation = 0;
+int chat_mute_at = 0;
 TextField* editing = nullptr;            // (the field that has the keyboard, menu_tick; nullptr none)
 const char* (*edit_apply)() = nullptr;   // (what its Enter sets)
 char edit_kept[sizeof TextField::text];  // (its text before: Esc puts it back)
@@ -3010,7 +3047,53 @@ void edit_start(TextField& f, const char* (*apply)()) {
 void edit_end(bool done) {
     if (!editing || (done && edit_apply && (edit_why = edit_apply()))) return;
     if (!done) text_set(*editing, edit_kept), edit_why = nullptr;
+    if (editing == &chat_field) {
+        text_set(chat_field, "");
+        chat_release_at = prof_now() + 50000000LL;
+        if (host && host->take_text) host->take_text(HOS_TEXT_OFF, nullptr, 0);
+    }
     editing = nullptr, edit_apply = nullptr;
+}
+const char* chat_send() {
+    return host && host->coop_chat && host->coop_chat(HOS_COOP_CHAT_SEND, chat_field.text, 0) ?
+           nullptr : "Chat is unavailable or busy. Try again.";
+}
+void chat_open() {
+    if (editing || !host || !host->coop_feed || !host->coop_feed(&chat_feed) || !chat_feed.can_chat) return;
+    text_set(chat_field, "");
+    pending = nullptr;
+    open_now = false;
+    chat_generation = chat_feed.generation;
+    chat_capture.store(true, std::memory_order_release);
+    edit_start(chat_field, chat_send);
+    edit_enter_held = false;
+    if (host->take_text) host->take_text(HOS_TEXT_ON, nullptr, 0);
+}
+const MkwVkCoopMember* chat_member() {
+    const MkwVkCoopMember* choices[HOS_COOP_MEMBERS];
+    int n = 0;
+    for (int i = 0; i < coop_now.n && i < HOS_COOP_MEMBERS; i++) {
+        const auto& m = coop_now.member[i];
+        if (m.id >= 1 && m.id <= HOS_COOP_MEMBERS && (chat_feed.members & (1u << m.id))) choices[n++] = &m;
+    }
+    return n ? choices[((chat_mute_at % n) + n) % n] : nullptr;
+}
+/* The single input owner retains focus until all finishing keys/buttons are up. */
+bool chat_focus_tick(bool mine, uint32_t raw) {
+    const bool active = host && host->coop_feed && host->coop_feed(&chat_feed);
+    if (!active && (chat_feed.visible || chat_feed.generation)) chat_feed = {};
+    if (!active && !chat_capture.load(std::memory_order_acquire)) return false;
+    const bool scripted = getenv("RX_VK_MENU_SCRIPT") != nullptr;
+    if (editing == &chat_field && (!chat_feed.can_chat || chat_generation != chat_feed.generation || (!mine && !scripted)))
+        edit_end(false);
+    if (!chat_capture.load(std::memory_order_acquire) || editing == &chat_field) return active;
+    bool held = raw != 0;
+    for (int k = 1; mine && k < 256; k++) {
+        held |= (GetAsyncKeyState(k) & 0x8000) != 0;
+        if (host && host->take_key_press) (void)host->take_key_press(k);
+    }
+    if (!held && prof_now() >= chat_release_at) chat_capture.store(false, std::memory_order_release);
+    return active;
 }
 /// (longshot) Enter (or a click) on a Co-op row that is no field: Make a room at once; Room secret shown or hidden; Accept, the
 /// maker's remedies and Leave at their second press, the first arming them (pending, as Restart and Quit)
@@ -3030,6 +3113,12 @@ void coop_press(const Row& r) {
         pending = nullptr;
         if (coop_friend_matches(fresh) && host && host->coop_command)
             host->coop_command(HOS_COOP_CMD_GO_FRIEND, coop_friend_key, (uint32_t)coop_friend_pending);
+        return;
+    }
+    if (k == kCoopChat) { chat_open(); return; }
+    if (k == kCoopMute) {
+        const auto* member = chat_member();
+        if (member && host && host->coop_chat) host->coop_chat(HOS_COOP_CHAT_MUTE, nullptr, (uint32_t)member->id);
         return;
     }
     if (k == kCoopSecret) {
@@ -3114,12 +3203,13 @@ const Control controls[] = {{HOS_SW_A, "A"}, {HOS_SW_B, "B"}, {HOS_SW_X, "X"}, {
                             {HOS_KEY_CAM_DOWN, "Camera down"}, {HOS_KEY_CAM_LEFT, "Camera left"},
                             {HOS_KEY_CAM_RIGHT, "Camera right"}, {HOS_KEY_WALK, "Walk"}, {HOS_KEY_OC_NOTE_L, "Ocarina note (L)"},
                             {HOS_KEY_OC_NOTE_R, "Ocarina note (R)"}, {HOS_KEY_OC_NOTE_A, "Ocarina note (A)"},
-                            {HOS_KEY_OC_NOTE_Y, "Ocarina note (Y)"}, {HOS_KEY_OC_NOTE_X, "Ocarina note (X)"}};
+                            {HOS_KEY_OC_NOTE_Y, "Ocarina note (Y)"}, {HOS_KEY_OC_NOTE_X, "Ocarina note (X)"},
+                            {HOS_KEY_CHAT, "Chat"}};
 constexpr int kControls = sizeof controls / sizeof controls[0];   // (then "Reset to defaults")
-// (the stick's and camera's directions and Walk: keys only; the ocarina's note rows take a gamepad input too, host/nn_hid.c)
+// (the stick's and camera's directions, Walk and Chat: keys only; the ocarina's note rows take a gamepad input too, host/nn_hid.c)
 bool keys_only(int i) {
     return i < kControls && ((controls[i].button >= HOS_KEY_MOVE_UP && controls[i].button <= HOS_KEY_CAM_RIGHT) ||
-                             controls[i].button == HOS_KEY_WALK);
+                             controls[i].button == HOS_KEY_WALK || controls[i].button == HOS_KEY_CHAT);
 }
 // a pad input's name on the controller of the button prompts (the Button prompts row's choice; Auto: the face in use),
 // else by its place
@@ -3499,13 +3589,48 @@ void text_cell(ui::Ctx& c, ImVec2 a, ImVec2 b, const TextField& f, bool sel, boo
         const float caret = ui::size_of(font, px, t.substr(0, (size_t)std::clamp(f.caret, 0, (int)t.size())).c_str()).x;
         const float shift = std::max(0.0f, caret - room);
         c.d->PushClipRect(ImVec2(x0 - 3 * s, a.y), ImVec2(x0 + room + 3 * s, b.y), true);
-        ui::text_mid(c, font, px, x0 - shift, mid, ui::kInkBright, t.c_str());
+        if (f.unicode) c.d->AddText(font, px, ImVec2(x0 - shift, mid - px * 0.5f), ui::kInkBright, t.c_str());
+        else ui::text_mid(c, font, px, x0 - shift, mid, ui::kInkBright, t.c_str());
         c.d->AddRectFilled(ImVec2(x0 - shift + caret, mid - 11 * s), ImVec2(x0 - shift + caret + 2 * s, mid + 11 * s), ui::kGoldHi);
         c.d->PopClipRect();
         c.d->AddRect(a + ImVec2(in * 0.5f, in * 0.5f), b - ImVec2(in * 0.5f, in * 0.5f), ui::kGoldHi, 0, 2.5f * s);
     }
     if (sel) ui::glow(c, a, b);
 }
+
+bool chat_drawn() { return chat_feed.visible && (chat_feed.count || editing == &chat_field); }
+void draw_chat(ui::Ctx& c) {
+    if (!chat_drawn()) return;
+    // Upper middle, above native dialogue; the host additionally hides every event/dialogue.
+    const float scale = std::min(c.s, c.h / 720.0f), px = 18 * scale, pitch = 26 * scale;
+    const float left = c.w * 0.20f, right = c.w * 0.80f, top = c.h * 0.17f;
+    const int count = std::clamp(chat_feed.count, 0, (int)HOS_COOP_FEED_LINES);
+    const bool typing = editing == &chat_field;
+    const float bottom = top + count * pitch + (typing ? 76 * scale : 0) + 12 * scale;
+    c.d->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), IM_COL32(10, 16, 20, 200), 4 * scale);
+    c.d->PushClipRect(ImVec2(left + 10 * scale, top), ImVec2(right - 10 * scale, bottom), true);
+    for (int i = 0; i < count; i++) {
+        const auto& line = chat_feed.line[count - 1 - i];
+        char text[HOS_COOP_CHAT_BYTES + 80];
+        const char* format = line.kind == HOS_COOP_FEED_JOIN ? "%s joined" :
+                             line.kind == HOS_COOP_FEED_LEFT ? "%s left" :
+                             line.kind == HOS_COOP_FEED_LOST ? "%s lost connection" :
+                             line.kind == HOS_COOP_FEED_BACK ? "%s is back" : "%s shared %s";
+        if (line.kind == HOS_COOP_FEED_CHAT) snprintf(text, sizeof text, "%s: %s", line.name, line.text);
+        else snprintf(text, sizeof text, i18n::tr(format), line.name, line.text);
+        c.d->AddText(c.f.body, px, ImVec2(left + 12 * scale, top + 6 * scale + i * pitch),
+                     line.kind == HOS_COOP_FEED_CHAT ? ui::kInkBright : ui::kGoldHi, text);
+    }
+    c.d->PopClipRect();
+    if (typing) {
+        const float y = top + count * pitch + 8 * scale;
+        text_cell(c, ImVec2(left + 8 * scale, y), ImVec2(right - 8 * scale, y + 38 * scale),
+                  chat_field, true, true, "");
+        ui::text_mid(c, c.f.body, 15 * scale, left + 12 * scale, y + 57 * scale, ui::kInk,
+                     edit_why ? edit_why : "Enter sends. Esc cancels.");
+    }
+}
+
 /// "Restart needed: " and the pending rows, on one line of width: the last ones as "and N more" when they do not fit
 std::string restart_line(ui::Ctx& c, float px, float width) {
     const unsigned all = restart_pending();
@@ -3874,6 +3999,13 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             const int n = k == kCoopWarp ? coop_friends(v, &chosen) : coop_removable(v, &chosen);
             const std::string who = chosen ? std::string(chosen->name) + "  " + chosen->key : "";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : who, selected, n > 1, n > 1);
+        } else if (k == kCoopMute) {
+            const auto* member = chat_member();
+            const std::string text = member ? std::string(member->name) + " - " +
+                i18n::tr(chat_feed.muted & (1u << member->id) ? "Muted" : "On") : i18n::tr("None");
+            choice_cell(c, va, vb, text, selected, true, true);
+        } else if (r.value) {
+            choice_cell(c, va, vb, r.text(*r.value), selected, *r.value > r.lo, *r.value < r.hi);
         } else if (k == kCoopRules) {   // (opens its page, as the tabs' page rows)
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, y + rh * 0.5f), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
@@ -3881,7 +4013,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
             choice_cell(c, va, vb, r.text(*r.value), selected, *r.value > r.lo, *r.value < r.hi);
         } else {
             const char* says = k == kCoopTemp ? (v.temporary_save ? "Return to normal saves" : "Copy and restart") :
-                              k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
+                              k == kCoopChat ? "Chat" : k == kCoopMake ? "Make" : k == kCoopAccept ? "Accept" : k == kCoopReset ? "Reset" : "Leave";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : says, selected, false, false);
         }
         if (y + rh >= top + box_h + 8 * s && y <= bottom + 8 * s)
@@ -4004,8 +4136,9 @@ void draw_options(ui::Ctx& c) {
         } else if (const int k = coop_kind(selr); k >= 0 && k != kCoopRules) {
             prompt_list[prompts_n++] = {ui::kConfirm, k == kCoopMake ? "Make" : k == kCoopSecret ? (coop_secret_shown ? "Hide" : "Show")
                                                     : pending == &selr ? "Confirm" : k == kCoopAccept ? "Accept" : k == kCoopRemove ? "Remove"
-                                                    : k == kCoopWarp ? "Go to friend" : k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
-            if (k == kCoopRemove || k == kCoopWarp) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
+                                                    : k == kCoopWarp ? "Go to friend" : k == kCoopChat ? "Chat" : k == kCoopMute ? "Change" :
+                                                      k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
+            if (k == kCoopRemove || k == kCoopWarp || k == kCoopMute) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
         } else if (selr.value || (selr.cheat >= 0 && (selr.cheat <= 1 || selr.cheat == 7 || cheat_chooses(selr.cheat) || age_shown(selr.cheat)))) {
             if (!(cur_tab == TAB_RULES && coop_rules_readonly)) prompt_list[prompts_n++] = {ui::kLeftRight, "Change"};
             if (selr.cheat >= 0) if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
@@ -5108,6 +5241,7 @@ void menu_init() {
         host->coop_command(HOS_COOP_CMD_NAME, coop_name_field.text, 0);
         host->coop_command(HOS_COOP_CMD_SERVER, coop_relay_field.text, 0);
     }
+    if (host && host->coop_chat) host->coop_chat(HOS_COOP_CHAT_NOTICES, nullptr, (uint32_t)opts.coop_notices);
     // (the environment over the saved rows, for this run only: env_override, save)
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
     if (const char* e = getenv("RX_VK_PACE")) env_override(&opts.pace, !env_value_off(e));
@@ -5193,7 +5327,8 @@ void menu_set_gpu_count(int count) {
         if (rows[i].value == &opts.gpu_device) restart_state.restart_value(restart_slot[i], opts.gpu_device);
 }
 
-bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
+bool menu_chat_focus() { return chat_capture.load(std::memory_order_acquire); }
+bool menu_is_open() { return open_now.load(std::memory_order_relaxed) || menu_chat_focus(); }
 bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }
 // (the tools off on the Debug tab: flight, the free camera and heart protection put away; -1, heart protection never set, is the
 // host's own HOS_OOT_PROTECT_HEARTS)
@@ -5689,6 +5824,15 @@ void menu_tick() {
     const uint32_t chord = 1u << HOS_PAD_BACK | 1u << HOS_PAD_START;
     const bool chord_now = (raw & chord) == chord && (pad_held & chord) != chord;
     pad_held = raw;
+    const bool chat_active = chat_focus_tick(mine, raw);
+    bool chat_key = false;
+    for (int slot = 0; chat_active && host && host->binding && slot < 2; slot++) {
+        const int key = host->binding(HOS_BIND_KEY, HOS_KEY_CHAT, slot);
+        if (key > 0 && key < 256) chat_key |= mine && (GetAsyncKeyState(key) & 0x8000);
+    }
+    static bool chat_key_held = false;
+    if (chat_key && !chat_key_held && !open_now.load() && !editing && !menu_chat_focus()) chat_open();
+    chat_key_held = chat_key;
     if (pad_press) pad_last = true;   // (a controller: its buttons in the prompts)
 #ifndef VK_RSHIFT
 #define VK_RSHIFT 0xA1
@@ -5759,6 +5903,7 @@ void menu_tick() {
             static const struct { const char* name; int vk; } edit_keys[] = {
                 {"ENTER", VK_RETURN}, {"ESC", VK_ESCAPE}, {"LEFT", VK_LEFT}, {"RIGHT", VK_RIGHT}, {"HOME", VK_HOME},
                 {"END", VK_END}, {"BACK", VK_BACK}, {"DEL", VK_DELETE}};
+            if (!strcmp(key, "CHAT") && !editing) chat_open();
             if (!strcmp(key, "TYPE") && next[n] == ':') {
                 const size_t len = strcspn(next + n + 1, ",");
                 for (size_t i = 0; i < len; i++) scripted.push_back((unsigned char)next[n + 1 + i]);
@@ -5794,7 +5939,7 @@ void menu_tick() {
     // with the controller's paste button; the host is told whether one has it, so that the window takes text only then
     uint32_t typed[64];
     int typed_n = 0;
-    const bool pasting = editing && open_now.load() && pad(pad_paste);
+    const bool pasting = editing && pad(pad_paste);
     if (host && host->take_text) typed_n = host->take_text(!editing ? HOS_TEXT_OFF : pasting ? HOS_TEXT_PASTE : HOS_TEXT_ON, typed, 64);
     if (editing && press[0] && !(pad(HOS_PAD_GUIDE) || chord_now)) press[0] = false;   // (Insert is the field's: Shift+Insert pastes)
     if (editing && (press[0] || press[6])) edit_end(false);   // (F1 or Home: the menu closes, the text as it was)
@@ -5838,7 +5983,7 @@ void menu_tick() {
     // ESC alone (the gamepad's back is Esc only while it is open, above). The press that opened it does not go back a page
     // below; with the compact menu key held it opens the compact bar, as Insert and F1 do (tune_mode). No
     // control can be bound to Esc, so nothing in play changes; the window gives the captured mouse back on the close)
-    const bool esc_opens = opts.menu_shortcut == 2 && press[5] && !open_now.load();
+    const bool esc_opens = !menu_chat_focus() && opts.menu_shortcut == 2 && press[5] && !open_now.load();
     if (esc_opens) press[5] = false;
     if ((press[0] || press[6]) && open_now.load() && page == 5) {
         later();
@@ -5856,7 +6001,7 @@ void menu_tick() {
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
         if (open_now.load()) coop_secret_shown = false, coop_refresh(&changed);   // (longshot: the room's secret masked again)
     }
-    if (open_now.load() && editing) {   // (longshot) a text field has the keyboard: the keys type into it (text_edit), nothing else
+    if (editing && (open_now.load() || editing == &chat_field)) {   // the sole text owner consumes the whole finishing frame
         int done = kTextGoOn;
         auto feed = [&](uint32_t in) {
             if (done == kTextGoOn) done = text_edit(*editing, in), edit_why = nullptr, changed = true;
@@ -5875,7 +6020,7 @@ void menu_tick() {
         if (pad(HOS_PAD_LSHOULDER)) feed(HOS_TEXT_KEY | (editing->caret < editing->len ? VK_DELETE : VK_BACK));
         if (pad(pad_confirm)) feed(HOS_TEXT_KEY | VK_RETURN);
         if (pad(pad_back)) feed(HOS_TEXT_KEY | VK_ESCAPE);
-        if (mouse && done == kTextGoOn) {   // (a click elsewhere sets the text, a right click puts it back; no wheel scrolling)
+        if (mouse && editing != &chat_field && done == kTextGoOn) {   // chat never sends from a click outside it
             const menu_hit::Hit hit = hits.at((float)mx, (float)my);
             const bool on_field = hit.part == menu_hit::kRow && hit.index == tab_selected[cur_tab];
             if ((ptr.pressed & HOS_MOUSE_LEFT) && !on_field) done = kTextDone;
@@ -6166,6 +6311,8 @@ void menu_tick() {
             coop_remove_at += press[4] ? 1 : -1, pending = nullptr, changed = true;
         if ((press[3] || press[4]) && coop_kind(r) == kCoopWarp)
             coop_friend_at += press[4] ? 1 : -1, pending = nullptr, changed = true;
+        if ((press[3] || press[4]) && coop_kind(r) == kCoopMute)
+            chat_mute_at += press[4] ? 1 : -1, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;
             set_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);
@@ -6189,11 +6336,12 @@ void menu_tick() {
             if (drag_row >= 0) save();   // (a slider let go off the window: kept now)
             hover_tab = -1, drag_row = -1, mouse_read = false;
             pending = nullptr;
-            edit_end(false);   // (longshot: a text field being edited, its text as it was)
+            if (editing != &chat_field) edit_end(false);   // (longshot: a text field being edited, its text as it was)
         }
-        if (now_open != told && app_window()) {
-            told = now_open;
-            PostMessageA(app_window(), WM_APP + 8, (WPARAM)now_open, (LPARAM)(now_open && esc_opens));
+        const bool capture = now_open || menu_chat_focus();
+        if (capture != told && app_window()) {
+            told = capture;
+            PostMessageA(app_window(), WM_APP + 8, (WPARAM)capture, (LPARAM)(capture && esc_opens));
         }
     }
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);   // (what vk_fps.cpp measures)
@@ -6223,7 +6371,8 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool open = open_now.load(std::memory_order_relaxed);
     MkwVkCoopOverlay co{};
     const bool coop = coop_overlay_read(co, start || open ? 0 : opts.coop_labels);
-    if (!start && !fps && !open && !coop) {   // (nothing shows: no ImGui frame, no render pass)
+    const bool feed = !start && !open && chat_drawn();
+    if (!start && !fps && !open && !coop && !feed) {   // no overlay: no ImGui frame or render pass
         // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
         // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
         if (prebake_needed(w, h) && ui::begin(w, h)) {
@@ -6249,6 +6398,7 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     if (coop) coop_overlay_draw(c, co);
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
+    if (feed) draw_chat(c);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record(cmd, index, w, h);
 }
@@ -6258,12 +6408,14 @@ void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uin
     const bool fps = opts.show_fps && !startup_on.load(std::memory_order_acquire);
     MkwVkCoopOverlay co{};
     const bool coop = coop_overlay_read(co, open || startup_on.load(std::memory_order_acquire) ? 0 : opts.coop_labels);
-    if (!open && !fps && !coop) return;
+    const bool feed = !startup_on.load(std::memory_order_acquire) && !open && chat_drawn();
+    if (!open && !fps && !coop && !feed) return;
     if (!ui::begin(w, h)) return;
     ui::Ctx c = ui_ctx(w, h);
     if (coop) coop_overlay_draw(c, co);
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
+    if (feed) draw_chat(c);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record_to(cmd, image, view, w, h);
 }

@@ -60,6 +60,7 @@ MENU_FIXTURE = r'''#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <type_traits>
+#include "host/coop_chat_text.h"
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25,
        VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_INSERT = 0x2d, VK_DELETE = 0x2e };
@@ -71,7 +72,7 @@ static_assert(HOS_COOP_CMD_RULES_CHANGED == 9 && HOS_COOP_CMD_TEMP_SAVE == 10);
 @@TABS@@
 @@ROW@@
 @@TEXT@@
-static struct { int coop_progress = 1, compact_menu_key = 0, coop_labels = 1; } opts;
+static struct { int coop_progress = 1, compact_menu_key = 0, coop_labels = 1, coop_notices = 2; } opts;
 @@RULES@@
 Row rows[] = {
     {TAB_GAMEPLAY, "Restart", nullptr, 0, 0, 0, nullptr, nullptr},
@@ -109,8 +110,12 @@ static int host_feature(int index, MkwVkCoopFeature* out) {
     return 1;
 }
 struct { void (*coop_view)(MkwVkCoopView*); int (*coop_command)(int, const char*, uint32_t);
-         int (*coop_feature)(int, MkwVkCoopFeature*); } the_host{host_view, host_command, host_feature},
+         int (*coop_feature)(int, MkwVkCoopFeature*); int (*coop_chat)(int, const char*, uint32_t); } the_host{host_view, host_command, host_feature, host_command},
     *host = &the_host;
+static TextField chat_field;
+static TextField* editing;
+static void chat_open() {}
+static const MkwVkCoopMember* chat_member() { return nullptr; }
 @@PREVIEW@@
 @@COOP@@
 bool row_shown(int i) { return rows[i].tab != TAB_COOP || coop_row_shown(rows[i], coop_now); }   // (vk_menu.cpp's Co-op clause)
@@ -1021,7 +1026,7 @@ def main():
                 objects.append(str(obj))
             objects.append(str(tmp / "monocypher.o"))
         run([a.cxx, "-std=c++20", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
-             "-Wno-missing-field-initializers"] + (["-DCOOP_MENU_REAL_ENGINE=1"] if real_engine else []) +
+             "-Wno-missing-field-initializers", "-I" + str(ROOT)] + (["-DCOOP_MENU_REAL_ENGINE=1"] if real_engine else []) +
             [str(tmp / "menu.cpp")] + objects + ["-o", str(tmp / "menu")])
         env = {k: v for k, v in os.environ.items() if not k.startswith("HOS_COOP")}
         run([str(tmp / "menu")] + ([a.menu_case] if a.menu_case != "all" else []), env=env)
@@ -1036,8 +1041,11 @@ def main():
         # ---- the Room rules page against the engine: the rows as the source has them ----
         header = (root / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
         order = re.findall(r'\{&opts\.(\w+), "(\w+)"\}', between(menu, "} coop_options[] = {", "};"))
-        if len(order) != 9 or order[0] != ("coop", "coop") or order[-1] != ("coop_labels", "coop_labels"):
-            raise SystemExit("FAIL: named co-op options must include seven rules and the independent local label setting")
+        for name in ("coop_labels", "coop_notices"):
+            assert (name, name) in order
+            order.remove((name, name))  # local display choices are not signed progress categories
+        if len(order) != 8 or order[0] != ("coop", "coop"):
+            raise SystemExit("FAIL: vk_menu.cpp: coop_options is not co-op at the start and the seven rules")
         table = []
         for field, key in order[1:-1]:
             r = re.search(r'\{TAB_RULES, "[^"]+", &opts\.%s, (\d+), (\d+), (\d+), tx_rule_(?:shared|pool),' % field, menu)

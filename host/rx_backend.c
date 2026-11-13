@@ -215,6 +215,8 @@ void hos_coop_menu_view(MkwVkCoopView *out);                          /* host/co
 int hos_coop_menu_command(int cmd, const char *text, uint32_t number);
 int hos_coop_menu_feature(int index, MkwVkCoopFeature *out);
 int hos_coop_overlay_snapshot(MkwVkCoopOverlay *out, int labels);
+int hos_coop_feed(MkwVkCoopFeed *out);
+int hos_coop_chat_command(int command, const char *text, uint32_t number);
 
 /* (longshot) typed text for the Insert menu's text fields (MkwVkHost.take_text): the window's thread puts each character and
    editing key in (host/display.c WM_CHAR and WM_KEYDOWN, host/posix/display_sdl.c SDL's text input and key events), the menu
@@ -271,6 +273,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
     host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,
     hos_coop_overlay_snapshot,
+    hos_coop_feed, hos_coop_chat_command,
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

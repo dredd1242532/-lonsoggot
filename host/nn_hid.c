@@ -510,7 +510,7 @@ static void stick_max(int32_t stick[4], const int32_t v[4]) {
 static const char *const bind_names[HOS_KEY_N] = {"a", "b", "x", "y", "ls", "rs", "l", "r", "zl", "zr", "plus",
                                                   "minus", "left", "up", "right", "down", "move_up", "move_down",
                                                   "move_left", "move_right", "cam_up", "cam_down", "cam_left",
-                                                  "cam_right", "note_l", "note_r", "note_a", "note_y", "note_x", "walk"};
+                                                  "cam_right", "note_l", "note_r", "note_a", "note_y", "note_x", "walk", "chat"};
 static const signed char pad_default[HOS_SW_N] = {
     HOS_PAD_EAST, HOS_PAD_SOUTH, HOS_PAD_NORTH, HOS_PAD_WEST, HOS_PAD_LSTICK, HOS_PAD_RSTICK, HOS_PAD_LSHOULDER,
     HOS_PAD_RSHOULDER, HOS_PAD_LTRIGGER, HOS_PAD_RTRIGGER, HOS_PAD_START, HOS_PAD_BACK, HOS_PAD_LEFT, HOS_PAD_UP,
@@ -530,7 +530,7 @@ static int is_mouse_vk(int vk) { return vk == VK_LBUTTON || vk == VK_RBUTTON || 
 static const unsigned char key_default[HOS_KEY_N][2] = {
     {'E'}, {VK_SHIFT}, {VK_SPACE}, {VK_LBUTTON}, {VK_CONTROL}, {'C'}, {'Q'}, {'R'}, {'Z', VK_RBUTTON}, {'X', 'F'},
     {VK_TAB, VK_RETURN}, {'M'}, {'1'}, {'2'}, {'3'}, {'4'}, {'W'}, {'S'}, {'A'}, {'D'}, {VK_UP, 'I'}, {VK_DOWN, 'K'},
-    {VK_LEFT, 'J'}, {VK_RIGHT, 'L'}, {0}, {0}, {0}, {0}, {0}, {VK_CAPITAL}};   /* (the five note rows start unset: oc_pad_word) */
+    {VK_LEFT, 'J'}, {VK_RIGHT, 'L'}, {0}, {0}, {0}, {0}, {0}, {VK_CAPITAL}, {'T'}};   /* (the five note rows start unset: oc_pad_word; T opens co-op chat) */
 static volatile LONG toggle_reset;
 static HoldToggle toggles;
 void hos_input_clear_toggles(void) { InterlockedExchange(&toggle_reset, 1); }
@@ -1014,6 +1014,8 @@ static void move_keys_stick(int x, int y, int percent, int32_t out[2]) {
 static void read_input(uint64_t *buttons, int32_t stick[4]) {
     *buttons = 0;
     memset(stick, 0, 4 * sizeof *stick);
+    /* Before scripts, bridge input, ocarina, background pads and mouse: typing drives nothing in the game. */
+    if (rx_option(HOS_OPT_CHAT_FOCUS, 0)) { hos_oc_note_bits = 0; return; }
     void hos_mouse_native_stick(int held);
     scripted_input(buttons, stick);
     void hos_oot_autoload_input(void);   /* (host/oot_autoload.c: the Skip title screen row's presses) */
@@ -1179,6 +1181,11 @@ static void npad_states(Ctx *c) {
     if (connected) buttons = hos_title_input(buttons);
     uint64_t hos_frame_step_buttons(uint64_t buttons);   /* nn_vi.c: the frame step of the wheel and quick menus */
     if (connected) buttons = hos_frame_step_buttons(buttons);
+    if (connected && rx_option(HOS_OPT_CHAT_FOCUS, 0)) {
+        buttons = 0;
+        memset(stick, 0, sizeof stick);
+        hos_oc_note_bits = 0;
+    }
     int64_t s = ++sampling;
     for (int i = 0; i < count; i++) {
         uint64_t e = out + (uint64_t)i * STATE_SIZE;

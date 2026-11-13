@@ -56,6 +56,7 @@ MENU_FIXTURE = r'''#define _CRT_SECURE_NO_WARNINGS
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include "host/coop_chat_text.h"
 #include "host/hos_wide_size.h"
 #include "host/hold_toggle.h"
 #include "gpu/vk/display_modes.h"
@@ -671,7 +672,7 @@ def main():
     need(tick, r"host->take_text\(!editing \? HOS_TEXT_OFF : pasting \? HOS_TEXT_PASTE : HOS_TEXT_ON, typed, 64\)",
          "menu_tick: the host is not told whether a field has the keyboard")
     # (while a field has the keyboard, its branch comes before every page's: no key does anything else)
-    first = tick.index("if (open_now.load() && editing) {")
+    first = tick.index("if (editing && (open_now.load() || editing == &chat_field)) {")
     if first > tick.index("} else if (open_now.load() && page == 5) {"):
         raise SystemExit("FAIL: menu_tick: a page's keys are read before the field's")
     need(tick, r"edit_end\(false\);\s*// \(longshot: a text field being edited", "menu_tick: closing the menu does not end the edit")

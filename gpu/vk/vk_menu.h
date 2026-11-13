@@ -116,6 +116,7 @@ struct Options {
     int coop_progress = 1, coop_items = 1, coop_songs = 1, coop_quest = 1;   // (shared or per player)
     int coop_keys = 2, coop_rupees = 0, coop_ammo = 0;                       // (one pool or per player)
     int coop_labels = 1; // local 0 off, 1 names, 2 names and arrows; signed privacy rules still apply
+    int coop_notices = 2;   // local feed: 0 off, 1 joins/leaves/loss, 2 shared pickups too
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)
@@ -134,6 +135,7 @@ void menu_set_gpu_count(int count);
 std::string driver_text();   // (vk_main.cpp: the driver as it names itself, for the log and Save my pipeline list)
 void menu_tick();             // (each frame shown: the keys, while the game's window has the focus)
 bool menu_is_open();
+bool menu_chat_focus();   // field or finishing-key release fence; blocks game input and duel readiness
 /// (longshot) The game's scene tone mapped by PsychoV35: HDR set to Native on an HDR display, and the Tone mapper row so
 bool scene_tonemap_on();
 bool resolution_auto();       // (the game's dynamic resolution: Resolution Auto)

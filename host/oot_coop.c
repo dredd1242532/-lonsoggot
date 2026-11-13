@@ -66,6 +66,7 @@
 #include "oot_coop.h"
 #include "oot_coop_hits.h"
 #include "oot_coop_warp.h"
+#include "coop_chat.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -617,6 +618,7 @@ static int ensure_engine(void) {
     coop_sync_index_key(e, key);
     coop_sync_seed(e, key + 16);
     coop_sync_limits(e, limit_fn, NULL);
+    coop_sync_observe_shared(e, hos_coop_chat_shared, NULL);
     if (TRACE_ON) coop_sync_trace(e, trace_line, NULL);
     AcquireSRWLockExclusive(&G.lock);
     G.eng = e;
@@ -656,6 +658,9 @@ static void publish_members(void) {
     coop_accept_members(&v, members);
     gameplay_revoke_locked(&v);
     coop_download_members(&v, G.eng ? coop_sync_download_members(G.eng) : 0);
+    CoopOffer offer;
+    const int has = G.eng && coop_sync_offer(G.eng, &offer, coop_now_ms());
+    hos_coop_chat_room(&v, has ? &offer : NULL, members);
 }
 
 static void on_message(int from, const uint8_t *bytes, size_t n, void *user) {
@@ -862,6 +867,8 @@ int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void 
 /* No engine (co-op off, or no save played yet): nothing to read. */
 static void publish_none(void) {
     coop_accept_members(NULL, 0);
+    hos_coop_chat_room(NULL, NULL, 0);
+    hos_coop_chat_scene(0);
     AcquireSRWLockExclusive(&G.lock);
     coop_gameplay_publish(&G.gameplay, NULL);
     __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
@@ -1553,6 +1560,7 @@ static int start(void) {
     coop_on_tick(on_tick, NULL);
     coop_on_remove(on_remove, NULL);
     hos_oot_hits_start();
+    hos_coop_chat_start();
     /* host/oot_coop_players.c: the other players in the world, when its own switch asks for them. Its hooks are
        registered like the ones above, whether co-op is on or not; it does nothing in the game until "being played" is
        published, which needs co-op on (gate) */
@@ -1573,12 +1581,13 @@ void hos_oot_coop_present(Ctx *c) {
     if (s != ST_ON) return;   /* (another thread is starting) */
     const int on = __atomic_load_n(&G.on, __ATOMIC_ACQUIRE);
     if (on && !G.eng && !ensure_engine()) { hos_oot_hits_frame(NULL, 0); return; }
-    if (coop_profile_active()) { hos_oot_hits_frame(NULL, 0); return; }   /* identities only; no temporary progress */
+    if (coop_profile_active()) { hos_coop_chat_scene(0); hos_oot_hits_frame(NULL, 0); return; }   /* identities only; no temporary progress */
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");
         hos_oot_hits_frame(NULL, 0);
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
+        if (on) hos_coop_chat_scene(0);
         hos_oot_coop_players_tick(0, 0);   /* (no save: the title screen as far as the room is told) */
         return;
     }
@@ -1586,6 +1595,13 @@ void hos_oot_coop_present(Ctx *c) {
                     recomp_load64(c, mgr + C_INT + CN_ENTRIES) != G.int_entries))
         unbind("the game made its flags anew");
     const int open = gate(c, mgr);
+    if (on) {
+        /* Reuse the body adapter's tested EventMgr gate. Hide during ALL events, including dialogue;
+           unknown manager state is unsafe. The renderer receives only this boolean, never guest memory. */
+        const uint64_t holder = recomp_load64(c, 0x84c9e090ULL);
+        const uint64_t events = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
+        hos_coop_chat_scene(open && rd_ok(events, 112) && !recomp_load64(c, events + 104));
+    }
     hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
     hos_oot_coop_warp_present(c);   /* pending travel only; no native effect from the present */
     if (__atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED)) {
