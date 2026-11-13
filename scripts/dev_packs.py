@@ -310,9 +310,15 @@ def prepare(game, b, required=True):
     level = (getattr(mg, "folder_compile_level", lambda g: None)(game) or "most") if hasattr(mg, "COMPILE_LEVELS") else None
     cmd = [os.path.join(game, GAME), "--prepare-shaders"] + (["--compile-shaders", level] if level else [])
     print("+ %s%s" % (" ".join([GAME] + cmd[1:]), " (RX_VK_PREDICT_S=%d)" % b["predict_s"] if b.get("predict_s") else ""), flush=True)
-    code = subprocess.run(cmd, cwd=game, check=required, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0)))).returncode
+    try:
+        code = subprocess.run(cmd, cwd=game, check=required, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0)))).returncode
+    except OSError as e:   # (the game could not start: a missing DLL, launch denied)
+        if required:
+            raise
+        code, why = None, str(e)
     if code:
         why = PREPARE_FAILED.get(code, "the game stopped with exit status %d" % code)
+    if code != 0:
         print("the shaders were not prepared now (%s): the game prepares them at its first start" % why, flush=True)
         return why
     return None

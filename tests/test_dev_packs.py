@@ -477,12 +477,15 @@ def test_prepare_outcomes(d):
             if m[1]:
                 write(Path(work) / "sa" / "build" / m[1], b"map")
     for name, env, code, prepares, why in (("vulkan", None, 3, True, "no usable Vulkan here"),
+                                           ("oserror", None, OSError("cannot start"), True, "cannot start"),
                                            ("skip", "1", 0, False, "LONGSHOT_NO_PREPARE is set"),
                                            ("zero", "0", 0, True, None)):
         calls = []
 
         def fake_run(argv, **kw):
             calls.append(argv)
+            if isinstance(code, OSError):   # (the game could not start)
+                raise code
             if kw.get("check") and code:   # (as subprocess.run does)
                 raise packs.subprocess.CalledProcessError(code, argv)
             return packs.subprocess.CompletedProcess(argv, code)
@@ -495,7 +498,7 @@ def test_prepare_outcomes(d):
             os.environ["LONGSHOT_NO_PREPARE"] = env
         try:
             packs.main(["base", str(d / name), "--romfs", "r", "--exefs", "e", "--tree", str(ROOT)])
-        except packs.subprocess.CalledProcessError:
+        except (packs.subprocess.CalledProcessError, OSError):
             pass
         finally:
             packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved[:4]
