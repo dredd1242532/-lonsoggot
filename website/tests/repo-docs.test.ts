@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { sectionsAt, formatInstallHub } from '../src/repo-docs/format-install.ts';
+import { sectionsAt, formatInstallHub, launcherChannels } from '../src/repo-docs/format-install.ts';
+import { launcherHref } from '../src/lib/launcher-channel.ts';
 import { formatCommonIssues, headingId, legacyAnchors } from '../src/repo-docs/format-common-issues.ts';
 import { revealManualTarget } from '../src/lib/manual-navigation.ts';
 
@@ -17,6 +18,29 @@ test('installation hub retains source sections and links', () => {
   const formatted = formatInstallHub(source);
   for (const line of source.split('\n').filter(Boolean)) assert(formatted.includes(line));
   assert.equal((formatted.match(/class="install-hub-card"/g) || []).length, 2);
+});
+
+test('the launcher download buttons get a channel picker, hidden until a script runs it', async () => {
+  const source = await readFile(new URL('../../docs/getting-started.md', import.meta.url), 'utf8');
+  const page = source.replace(/https:\/\/longshot\.magicbean\.dev\//g, '/');
+  const formatted = formatInstallHub(page);
+  assert.equal((formatted.match(/data-launcher-channel /g) || []).length, 1);
+  assert.match(formatted, /<fieldset class="launcher-channel" data-launcher-channel hidden>[\s\S]*<\/fieldset>\n<div class="download-buttons">/);
+  for (const c of launcherChannels) assert(formatted.includes(`value="${c.value}"`), `Missing channel: ${c.name}`);
+  assert.equal((formatted.match(/ checked>/g) || []).length, 1);
+  assert(formatted.includes('value="rc" data-note="The next version, to try before it is stable." checked>'));
+  assert(formatted.includes('value="" data-note="For playing." disabled> Stable <small>coming soon</small>'));
+  // (no blank line inside, so Markdown keeps it one HTML block)
+  assert(!/<fieldset[\s\S]*\n\n[\s\S]*<\/fieldset>/.test(formatted));
+  assert(!formatInstallHub('## Elsewhere\n- [Other](/download/other)\n').includes('launcher-channel'));
+});
+
+test('a channel moves the launcher links, and only them', () => {
+  assert.equal(launcherHref('/download/launcher/windows', 'nightly'), '/download/launcher/nightly/windows');
+  assert.equal(launcherHref('/download/launcher/nightly/windows-portable', 'rc'), '/download/launcher/rc/windows-portable');
+  assert.equal(launcherHref('/download/launcher/rc/linux', ''), '/download/launcher/linux');
+  assert.equal(launcherHref('/download', 'rc'), '/download');
+  assert.equal(launcherHref('/download/launcher/nightly', 'rc'), '/download/launcher/nightly');
 });
 
 test('symptom cards keep every line of the help page, its anchors and the old topic anchors', async () => {

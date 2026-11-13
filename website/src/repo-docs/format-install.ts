@@ -26,7 +26,26 @@ export function formatInstallHub(source) {
 function downloadButtons(body) {
   return body.replace(/^(?:- \[[^\]]+\]\(\/download\/[^)\s]+\)\n)+/m, (list) => {
     const links = [...list.matchAll(/- \[([^\]]+)\]\(([^)\s]+)\)/g)];
-    return `<div class="download-buttons">\n${links.map(([, text, url], i) =>
+    const buttons = `<div class="download-buttons">\n${links.map(([, text, url], i) =>
       `<a class="button${i < 2 ? ' primary' : ''}" href="${url}">${text}</a>`).join('\n')}\n</div>\n`;
+    return (links.some(([, , url]) => url.startsWith('/download/launcher/')) ? channelPicker() : '') + buttons;
   });
+}
+
+// The launcher's channels (website/worker/index.ts): the buttons' links name one once a script picks it
+// (lib/launcher-channel.ts). Hidden until then, so without scripts the buttons keep the best channel there is.
+// While there is no stable launcher (v1.0.0 is still a candidate), Stable shows as coming soon and the release
+// candidate is picked: once it is out, drop `soon` and move `picked` to Stable.
+export const launcherChannels = [
+  { value: '', name: 'Stable', note: 'For playing.', soon: true },
+  { value: 'rc', name: 'Release candidate', note: 'The next version, to try before it is stable.', picked: true },
+  { value: 'nightly', name: 'Nightly', note: 'Every change, untested: it may break your saves or settings, so copy them first.' },
+];
+
+function channelPicker() {
+  const picked = launcherChannels.find(c => c.picked) || launcherChannels.find(c => !c.soon);
+  return `<fieldset class="launcher-channel" data-launcher-channel hidden>\n<legend>Channel</legend>\n${launcherChannels.map(c =>
+    `<label><input type="radio" name="launcher-channel" value="${c.value}" data-note="${c.note}"` +
+    `${c === picked ? ' checked' : ''}${c.soon ? ' disabled' : ''}> ${c.name}${c.soon ? ' <small>coming soon</small>' : ''}</label>`).join('\n')}\n` +
+    `<p data-launcher-channel-note>${picked.note}</p>\n</fieldset>\n`;
 }
