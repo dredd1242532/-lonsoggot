@@ -43,6 +43,7 @@ def main():
 #include <cassert>
 #include <cstdlib>
 #include <cstdint>
+#include <string>
 #include "gpu/vk/upscaler_rows.h"
 namespace ur = mkwvk::upscaler_rows;
 using VkFormat = int;
@@ -52,7 +53,9 @@ bool tone=false;
 int temporal_mode() { return mode; }
 bool scene_tonemap_on() { return tone; }
 int env_switch(const char* n) { const char* e=std::getenv(n); return e && *e ? std::atoi(e) : -1; }
-template<class... T> void logf(const char*, T...) {}
+unsigned logs=0;
+std::string route;
+void logf(const char*, const char* value, unsigned, unsigned, unsigned) { ++logs; route=value; }
 /* GATE */
 /* PAIR */
 struct S { bool psycho_last=false; unsigned history_input=122; unsigned long long last_frame=30; };
@@ -60,7 +63,9 @@ void transition(S& s, bool psycho, unsigned format=122) {
   struct { unsigned scene_format=97; } cam;
   struct T { unsigned format=122; } ti, to;
   ti.format=format;
+  to.format=format;
   T *in=&ti, *out=&to;
+  const bool rgba=psycho && format==97;
 /* SWITCH */
 }
 int main(int argc, char**) {
@@ -80,13 +85,18 @@ int main(int argc, char**) {
     }
   }
   S s;
+  s.history_input=0; // First Vanilla evaluation resets history without a Psycho/HDR log.
+  transition(s,false); assert(s.last_frame==0 && logs==0);
+  s.last_frame=30;
   transition(s,false); assert(s.last_frame==30);
-  transition(s,true); assert(s.last_frame==0 && s.psycho_last);
+  transition(s,true); assert(s.last_frame==0 && s.psycho_last && logs==1 && route=="packed");
   s.last_frame=60; transition(s,true); assert(s.last_frame==60);
   transition(s,false); assert(s.last_frame==0 && !s.psycho_last);
   s.last_frame=80; transition(s,true,97); assert(s.last_frame==0 && s.history_input==97);
+  assert(route=="RGBA16F linear");
   s.last_frame=90; transition(s,true,97); assert(s.last_frame==90);
   transition(s,true,122); assert(s.last_frame==0 && s.history_input==122);
+  assert(route=="packed");
 }
 '''.replace('/* GATE */', gate).replace('/* PAIR */', pair).replace('/* SWITCH */', switch)
     # All three scene consumers agree: camera, animated characters, reactive mask.
@@ -124,13 +134,8 @@ int main(int argc, char**) {
     rgba_pipe = function(chain, 'bool make_rgba_output(')
     assert 'square = VK_FALSE' in rgba_pipe and 'DLSS_OUT_RGBA_COMP_SPV' in rgba_pipe
     # Changing storage precision must not skip the network's perceptual-to-linear decode.
-    # A mid-grey linear sample encoded for the network is sqrt(0.18); passthrough raises it to 0.424.
-    import math
     prep=(ROOT/'gpu/vk/shaders/dlss_prep.comp').read_text()
     assert 'kSquare ? e * e : e' in prep
-    for linear in (0.0, 0.001, 0.02, 0.18, 0.5, 1.0, 2.0, 6.5):
-        encoded=math.sqrt(linear)
-        assert math.isclose(encoded*encoded, linear, rel_tol=1e-12, abs_tol=1e-15)
     # Validate the compiled storage image type, not just a source-file string.
     header=(ROOT/'gpu/vk/shaders/dlss_out_rgba_comp_spv.h').read_text()
     shader=(ROOT/'gpu/vk/shaders/dlss_out.comp').read_bytes()
