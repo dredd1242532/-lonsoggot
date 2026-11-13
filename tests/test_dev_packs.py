@@ -236,11 +236,13 @@ def test_generated_and_runtime(d):
     write(game / "longshot_options.ini", b"[menu]")
     write(game / "mkw_vk_pipelines_play_2.bin", b"seeded play cache")   # (what --seed brings, before the build records outputs)
     write(game / "mkw_vk_pipelines.stamp", b"the pipeline cache's stamp")
+    write(game / "longshot_pipelines.bin.predicting", b"a prediction a crash left unfinished")
     if packs.MODULES[0][1]:   # (the game's map: Windows only)
         write(game / packs.MODULES[0][1], b"map")
     outputs = packs.build_outputs(str(game))
     check("a play cache and the pipeline stamp are not build outputs (%s)" % outputs,
-          "mkw_vk_pipelines_play_2.bin" not in outputs and "mkw_vk_pipelines.stamp" not in outputs)
+          "mkw_vk_pipelines_play_2.bin" not in outputs and "mkw_vk_pipelines.stamp" not in outputs
+          and "longshot_pipelines.bin.predicting" not in outputs)
     write(game / "user" / "save0.bin", b"a save, made in play")
     write(game / "longshot_env.txt", b"HOS_X=1")
     os.makedirs(out / "romfs" / "a")
@@ -255,9 +257,12 @@ def test_generated_and_runtime(d):
     check("generated files the build no longer makes are gone; saves, settings and the game's own files are not: %s" % gone,
           gone == ["longshot_pipeline_states_shipped.bin", "prompts/Common.bntx"])
     check("a base that recorded no outputs (adopted) loses nothing", packs.generated_changes(str(game), str(out))[1] == [])
-    legacy = outputs + ["mkw_vk_pipelines.stamp", "mkw_vk_pipelines_play_2.bin"]   # (a list recorded before caches were filtered)
+    # (a list recorded before caches and the preparation's recovery markers were filtered: a crash mid-prediction leaves one)
+    legacy = outputs + ["mkw_vk_pipelines.stamp", "mkw_vk_pipelines_play_2.bin", "longshot_pipelines.bin.predicting",
+                        "longshot_pipelines.bin.running", "longshot_pipelines.bin.built.warming"]
     gone = packs.generated_changes(str(game), str(out), legacy)[1]
-    check("an older base's outputs list never deletes a cache, and still a generated file the build no longer makes: %s" % gone,
+    check("an older base's outputs list never deletes a cache or a recovery marker, and still a generated file the build no "
+          "longer makes: %s" % gone,
           gone == ["longshot_pipeline_states_shipped.bin", "prompts/Common.bntx"])
     write(out / "stale.bin", b"an earlier pack's")
     packs.clear_output(str(out))

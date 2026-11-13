@@ -86,7 +86,8 @@ SOURCES = (".c", ".cc", ".cpp") + HEADERS
 # (what the game writes beside itself while it runs, never a build's output: settings, logs and reports, and the markers of a
 # skipped preparation and of a slow load (vk_main.cpp, vk_draw.cpp); not seeded either)
 WRITTEN_IN_PLAY = ("longshot_options.ini", "longshot_log.txt", "longshot_log.1.txt", "longshot_driver_faults.txt",
-                   "longshot_prepared.bin.warming", "longshot_prepare_skipped", "longshot_load_start.txt",
+                   "longshot_prepared.bin.warming", "longshot_pipelines.bin.predicting", "longshot_pipelines.bin.running",
+                   "longshot_pipelines.bin.built.warming", "longshot_prepare_skipped", "longshot_load_start.txt",
                    "longshot_load_start.txt.waited", "longshot_pipeline_report.txt", "longshot_frames.csv",
                    "longshot_damaged_files.txt")
 
@@ -258,7 +259,8 @@ def generated_changes(base_game, game, base_outputs=None):
             if not (os.path.isfile(q) and same_file(p, q)):
                 changed.append(rel)
     # (never a cache, even in an outputs list a base recorded before the caches' family was complete)
-    gone = [rel for rel in base_outputs or () if not is_cache(rel) and not os.path.isfile(os.path.join(game, rel))]
+    gone = [rel for rel in base_outputs or ()
+            if not is_cache(rel) and rel not in WRITTEN_IN_PLAY and not os.path.isfile(os.path.join(game, rel))]
     return changed, gone
 
 
