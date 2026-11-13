@@ -1735,7 +1735,7 @@ void maybe_split(VkCommandBuffer& cmd) {
     // of them: the submission's last part writes them all, as an unsplit submission does (finish_recording). Written at
     // each part's end, the draws of the later parts that read those ranges from guest memory saw a state an unsplit
     // submission never shows: on Intel, white blocks and haze at Kokiri, and a whole-screen white flash every 8 frames on
-    // the Arc 140V (issue 999). Measured on Intel only, so the default there; RX_VK_SPLIT_UBFLUSH=1: written at each part's
+    // the Arc 140V (NotRexed/Hookshot#999). Measured on Intel only, so the default there; RX_VK_SPLIT_UBFLUSH=1: written at each part's
     // end, as before, =0: at the last part's on any GPU)
     static const bool part_flush = [] {
         const char* e = getenv("RX_VK_SPLIT_UBFLUSH");
