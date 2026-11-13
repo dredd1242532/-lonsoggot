@@ -28,7 +28,6 @@ The socket defaults to $HOS_CONTROL. Plain lines by default, --json for the repl
 1 an error reply, 2 no game or bad usage, 3 a timeout.
 """
 import argparse
-import errno
 import json
 import os
 import re
@@ -63,11 +62,8 @@ class Bridge:
                         self.pipe = open(name, "r+b", buffering=0)
                         break
                     except OSError as e:
-                        # (busy: winerror 231, ERROR_PIPE_BUSY, where Python reports one. open() goes through the C runtime, which
-                        # has no errno for it and says EINVAL without a winerror: seen when several clients connect in a row and
-                        # the bridge's next instance is not up yet. A pipe that does not exist is ENOENT, and is not waited for)
-                        busy = getattr(e, "winerror", 0) == 231 or e.errno == errno.EINVAL
-                        if not busy or time.monotonic() > deadline:
+                        # (busy: winerror 231, ERROR_PIPE_BUSY; missing pipes are not waited for)
+                        if getattr(e, "winerror", 0) != 231 or time.monotonic() > deadline:
                             raise
                         time.sleep(0.02)
             else:
