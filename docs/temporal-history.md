@@ -10,6 +10,10 @@ The game-free fixture compiles actual reprojection math, both preparation polici
 
 `RX_VK_PSYCHOV35_DLSS=1` lets NVIDIA DLSS/DLAA take the Native HDR PsychoV35 scene, whose gameplay network input and output are RGBA16F. It is off by default. Vanilla's packed B10G11R11 route is unchanged; this switch does not enable PsychoV35 for FSR or TAAU.
 
+The pre-existing Upscaler Off stretch also only writes packed output, so Off with PsychoV35 still falls back to the
+game's network, even at 100%. It must not be labelled native with no anti-aliasing in a benchmark. This DLSS-only
+switch does not change that route; Vanilla with Off and 100% provides the true native, no-upscaling comparison.
+
 The network's perceptual colour encoding still needs the existing HDR prep square to linear light, even though the scene tone-map pass itself writes linear colour. Storage precision does not determine that encoding. The typed RGBA16F output pass writes DLSS's linear result without squaring again. Changing the tone mapper or input format resets history.
 
 Regenerate the output variant with glslang 16.6.0:
@@ -89,3 +93,12 @@ passed, 10 failed, 41 skipped. Eight failures reproduce in the unchanged `d4a694
 `test_bake_portability`, `test_control`, `test_fpx_sticky`, `test_lift_cache`, `test_nup_paths`, `test_spawn_emit`,
 `test_team_chat`); `test_linux_play_scope` hangs there too. `test_oot_wide_save_picture` timed out compiling under
 the parallel suite's load and passes alone on both trees. No checks were weakened or skipped to obtain these results.
+
+After rebasing onto `2a2da67f`, the renderer rebuilt with NGX (207 files, zero failures; source fingerprint `4255c3b1`).
+With the bundled Python dependencies and llvm-mingw selected explicitly, the refreshed whole suite gives 492 passed,
+4 failed, 35 skipped (`--jobs 6 --timeout 180`). All four failures also reproduce in unchanged `2a2da67f`:
+`test_nup_paths` (Windows symlink privilege), `test_check_third_party` (Windows output handling), `test_setup_runtime`
+(Windows path handling) and `test_release` (missing OpenSSL and Windows newlines). The focused checks pass after rebase.
+The earlier runtime measurements remain identified by their actual renderer/host versions above. No temporal-chain,
+view-binding or renderer-API changes intervened on main; its DLSS change settles preset-row selection, whereas these
+runs held preset K fixed. The player subsequently confirmed that the isolated HDR build worked well visually.
