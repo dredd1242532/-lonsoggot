@@ -1043,6 +1043,11 @@ is waited for for about half a second, and each picture after that for about a t
 behind the sound. `HOS_VIDEO_NO_CATCHUP=1` skips nothing. `HOS_VIDEO_ACQUIRE_TRIES=1` waits by a count of sleeps instead
 of the clock. After a movie stops or is flushed, and nothing new has been submitted, there is no wait.
 
+On Windows, a PC with 4 logical processors or fewer decodes the movies on 2 threads rather than one per processor, so
+the decoder leaves the game's own threads their time. One such report (Intel UHD Graphics, 4 threads, 16 GB) showed the
+title and the opening movie at about 35 fps of 60, with the game's thread waiting 14 to 24 ms on most frames; that report
+was not run again with this change. `HOS_DAV1D_THREADS=<n>` sets the count on any PC.
+
 On Windows, Intel's compiler (UHD and Arc) is entered by one thread. A fault inside it leaves that shader out instead
 of closing the game. This covers the game's shaders and the renderer's own (texture decoding, upscaling, frame
 generation). The first scene can still pause while shaders compile, especially when they were not prepared at the build.
