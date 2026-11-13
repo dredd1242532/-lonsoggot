@@ -19,6 +19,7 @@ the hardware hashes, anything else from the game folder, and the user's name in 
     python -I nx2/crash_report.py <game folder>          prints the report the window would show, sends nothing
     python -I nx2/crash_report.py <game folder> --send   sends it (a test: the window is the way players send)
 """
+import configparser
 import json
 import os
 import platform
@@ -28,8 +29,17 @@ import time
 import urllib.error
 import urllib.request
 
-ENDPOINT = "https://data.magicbean.gmatte.xyz/crash"
-ISSUE_URL = "https://git.magicbean.dev/MagicBeanDev/Longshot/issues/81"   # (where the reports are: comment_link)
+
+
+def address(key):
+    """A service's address from nx2/addresses.ini (kept out of the code, to edit in one place); "" when it isn't there"""
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.read(os.path.join(os.path.dirname(os.path.abspath(__file__)), "addresses.ini"), encoding="utf-8")
+    return ini.get("addresses", key, fallback="").strip()
+
+
+ENDPOINT = address("crash_reports")
+ISSUE_URL = address("crash_issue")   # (where the reports are: comment_link)
 MARKER = "crash_pending.txt"   # (the game's crash handler writes it: log=<file name>, time=<unix seconds>)
 LOGS = ["longshot_log.txt"] + ["longshot_log.%d.txt" % k for k in range(1, 5)]
 OPTIONS, DEFAULTS, VERSION_FILE = "longshot_options.ini", "longshot_defaults.ini", "longshot_version.txt"
@@ -345,7 +355,7 @@ def log_text(report):
 def comment_link(link):
     """Where the Sent page's link goes: the report's own comment on #81 (the relay's answer, the comment it posted or added
     this crash to), else #81 itself; never anywhere else, whatever the answer says"""
-    if link and link.startswith(ISSUE_URL + "#issuecomment-") and link[len(ISSUE_URL) + 14:].isdigit():
+    if ISSUE_URL and link and link.startswith(ISSUE_URL + "#issuecomment-") and link[len(ISSUE_URL) + 14:].isdigit():
         return link
     return ISSUE_URL
 
@@ -354,6 +364,8 @@ def send(report, url=ENDPOINT, timeout=10):
     """Posts the report: (True, the comment's link, False), or (False, why, for the player, whether to keep it for next
     time: yes when the server could not be reached or was busy, no when it refused the report, which sending again
     would not change)"""
+    if not url:   # (no crash_reports in nx2/addresses.ini)
+        return False, "No crash server is set (nx2/addresses.ini). Your report is kept, and offered again next time.", True
     req = urllib.request.Request(url, data=json.dumps(report).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "longshot-crash-report"})
     try:

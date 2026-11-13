@@ -14,6 +14,7 @@ in a made-up home, no game:
   - the device names the options file holds (the microphone's) and the audio log line's output device never reach the log
     lines; a user name word is redacted only as written (alice, not Alice in "Alice's");
   - a marker cut short or with a bad time is still a marker; an answer from the server that can't be read keeps the report;
+  - the addresses come from nx2/addresses.ini (none in the code), and with none set nothing is sent and the report kept;
   - the window's rows (card), the settings' and the log's Show text: the same for the Tk and the Qt builders;
   - the report passes the relay's checks (Bean-Ops deploy/crash-relay/crash_relay.py parse, mirrored here: the version's
     characters, the CRASH: exception line with a module+offset place).
@@ -324,6 +325,16 @@ class CrashReportTest(unittest.TestCase):
         log = cr.log_text(r)
         self.assertTrue(log.startswith(r["crash"][0]))
         self.assertIn("--- the %d log lines before it ---" % len(r["log_tail"]), log)
+
+    def test_the_addresses_are_in_addresses_ini(self):
+        self.assertTrue(cr.ENDPOINT.startswith("https://") and cr.ENDPOINT.endswith("/crash"))
+        self.assertTrue(cr.ISSUE_URL.startswith("https://") and cr.ISSUE_URL.endswith("/issues/81"))
+        source = (ROOT / "nx2" / "crash_report.py").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"[\"']https?://", "an address in the code: it goes in nx2/addresses.ini")
+        self.assertEqual(cr.address("no_such_service"), "")
+        ok, said, keep = cr.send({"version": "3.4.1"}, url="")
+        self.assertEqual((ok, keep), (False, True))
+        self.assertIn("addresses.ini", said)
 
 if __name__ == "__main__":
     unittest.main()

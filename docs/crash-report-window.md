@@ -195,10 +195,13 @@ thread in the game cannot take it down.
   register and memory rows, redacts user names, caps every field to the relay's limits. The crash's place is made one
   the relay takes: a library's path goes (`/usr/lib/libc.so.6+0xb5a22` is `libc.so.6+0xb5a22`), and a place in no
   module (`?+0x10`, a jump to a bad address) is `unknown+0x10`. Both were refused (400) before, from real crashes.
-- `send(report) -> (ok, text, keep)`: POST to `https://data.magicbean.gmatte.xyz/crash`, 10 s timeout, the JSON as
-  is. 201 or 200 give the comment's URL; 400, 413 and 429 say why, and whether to keep the report.
+- `send(report) -> (ok, text, keep)`: POST to `crash_reports` in `nx2/addresses.ini` (now
+  `https://data.magicbean.gmatte.xyz/crash`), 10 s timeout, the JSON as is. With no address set, nothing is sent and the
+  report is kept. 201 or 200 give the comment's URL; 400, 413 and 429 say why, and whether to keep the report.
 - `comment_link(url)`: the Sent page's *See it on #81*: the report's own comment when the relay's answer is one on
-  #81, else #81 itself (`ISSUE_URL`).
+  #81, else #81 itself (`crash_issue` in `nx2/addresses.ini`).
+- `card(report, settings)`, `settings_text(settings)`, `log_text(report)`: the window's rows and its two Show texts, the
+  same in both builders.
 - `clear(folder, when=None)`: removes the marker, only that crash's with `when` (after Send Help, I am sorry, or a
   400: a report the relay refuses is never retried).
 - `always_send(folder)`, `set_always_send(folder, on)`: step 6.
