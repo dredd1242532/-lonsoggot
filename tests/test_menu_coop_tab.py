@@ -84,7 +84,8 @@ static int saves = 0;
 void save() { saves++; }
 static bool open_now = true;
 static int restarts, pipeline_saves;
-static int app_window() { return 1; }
+static int window_token = 1;
+static int app_window() { return window_token; }
 enum { WM_APP = 100 };
 static void PostMessageA(int, int msg, int, int) { CHECK(msg == WM_APP + 9); restarts++; }
 static void pipeline_cache_save() { pipeline_saves++; }
@@ -557,6 +558,7 @@ int main(int argc, char** argv) {
     CHECK(coop_name_apply() == nullptr && saves == 2 && asked[1].cmd == HOS_COOP_CMD_NAME && !std::strcmp(asked[1].text, "Malon") &&
           asked[1].number == 1);
     n_asked = 0;
+    window_token = 0;   // the same copy/return action must work without an OS window
     coop_press(row(kCoopTemp));
     CHECK(pending == &row(kCoopTemp) && !restarts);
     answer = 0;

@@ -217,6 +217,15 @@ __attribute__((visibility("default"))) void hos_posix_post_message(uint32_t msg,
     if (msg == WM_APP + 9) __atomic_store_n(&restart_asked, 1, __ATOMIC_RELEASE);
     if (msg == WM_CLOSE) __atomic_store_n(&close_asked, 1, __ATOMIC_RELEASE);
 }
+
+/* The UI only publishes requests. The main thread closes/relaunches, with or without SDL. */
+void hos_display_poll_close(void) {
+    const int restart = __atomic_load_n(&restart_asked, __ATOMIC_ACQUIRE);
+    if (!restart && !__atomic_load_n(&close_asked, __ATOMIC_ACQUIRE)) return;
+    if (restart) hos_relaunch_ask();
+    rx_close_asked();
+    hos_window_closed_exit();
+}
 /* the menu opened: the mouse let go (its capture kept for later); closed: the capture back, if the window still has the focus */
 static int captured_before_menu;
 static void menu_mouse(int request) {
@@ -423,15 +432,7 @@ void hos_display_loop(void) {
         if (asked >= 0) set_fullscreen(asked);
         const int menu = __atomic_exchange_n(&menu_asked, -1, __ATOMIC_ACQ_REL);
         if (menu >= 0) menu_mouse(menu);
-        if (__atomic_load_n(&restart_asked, __ATOMIC_ACQUIRE)) {
-            hos_relaunch_ask();
-            rx_close_asked();
-            hos_window_closed_exit();
-        }
-        if (__atomic_load_n(&close_asked, __ATOMIC_ACQUIRE)) {
-            rx_close_asked();
-            hos_window_closed_exit();
-        }
+        hos_display_poll_close();
         pointer_update(0, 0);
         keys_update();
     }

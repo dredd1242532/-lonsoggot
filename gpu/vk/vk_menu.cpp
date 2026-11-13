@@ -3020,7 +3020,7 @@ void coop_press(const Row& r) {
     else if (k == kCoopRemove && coop_removable(coop_now, &chosen) && chosen) host->coop_command(HOS_COOP_CMD_REMOVE, chosen->key, 0);
     else if (k == kCoopReset) host->coop_command(HOS_COOP_CMD_RESET_POOLS, nullptr, 0);
     else if (k == kCoopLeave) host->coop_command(HOS_COOP_CMD_LEAVE, nullptr, 0);
-    else if (k == kCoopTemp && app_window() && host->coop_command(HOS_COOP_CMD_TEMP_SAVE, nullptr, 0)) {
+    else if (k == kCoopTemp && host->coop_command(HOS_COOP_CMD_TEMP_SAVE, nullptr, 0)) {
         save();
         pipeline_cache_save();
         open_now = false;

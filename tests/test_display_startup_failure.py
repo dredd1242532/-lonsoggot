@@ -14,7 +14,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("headless", "headless_zero", "load_failure", "init_failure", "window_failure",
          "visible_success", "thread_failure", "prepare_success", "prepare_no_vulkan",
-         "flag_as_romfs", "flag_as_user")
+         "flag_as_romfs", "flag_as_user", "headless_restart", "headless_close", "headless_idle")
 
 
 def function(source, signature):
@@ -49,8 +49,11 @@ def main():
     loop = loop[:loop.index("    vk_window.window = window;")] + "    ++visible_window_started;\n}\n"
     app_main = function(host, "int main(int argc, char **argv)").replace("int main(", "int app_main(", 1)
     # Include the real title helper used by both initialization and window creation.
+    close = function(display, "void hos_display_poll_close(void)") if "void hos_display_poll_close(void)" in display else \
+        "[[maybe_unused]] void hos_display_poll_close(void) {}"
     actual = "\n\n".join([function(display, "static const char *window_title("),
                              function(display, "int hos_display_init(void)"),
+                             function(display, "void hos_posix_post_message("), close,
                              function(display, "void hos_display_start(void)"), loop, app_main])
     flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if os.name == "nt" else 0
     env = dict(os.environ)

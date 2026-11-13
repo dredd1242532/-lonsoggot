@@ -14,9 +14,16 @@
 using HANDLE = void*;
 constexpr int TRUE = 1, FALSE = 0;
 constexpr unsigned INFINITE = ~0u;
+constexpr unsigned WAIT_TIMEOUT = 258, WAIT_OBJECT_0 = 0;
+constexpr uint32_t WM_APP = 0x8000, WM_CLOSE = 0x10;
+static int fullscreen_asked, menu_asked, restart_asked, close_asked;
+static unsigned restarts, closes, exits;
+static void hos_relaunch_ask() { ++restarts; }
+static void rx_close_asked() { ++closes; }
 constexpr unsigned HOS_SDL_VIDEO = 1, HOS_SDL_EVENTS = 2;
 struct HosSdlEvent {};
 struct ProcessExit { int code; };
+[[noreturn]] static void hos_window_closed_exit() { ++exits; throw ProcessExit{0}; }
 static int sdl_ready, start_asked, visible_window_started;
 static int game_argc, game_token, event_token;
 static char** game_argv;
@@ -96,9 +103,12 @@ static HANDLE CreateThread(void*, unsigned, unsigned (*entry)(void*), void* arg,
     return &game_token;
 }
 static void SetThreadDescription(HANDLE h, const wchar_t*) { require(h == &game_token, "wrong game thread"); }
-static void WaitForSingleObject(HANDLE h, unsigned timeout) {
-    require(h == &game_token && timeout == INFINITE, "changed game-thread wait");
+static unsigned WaitForSingleObject(HANDLE h, unsigned timeout) {
+    require(h == &game_token, "changed game-thread handle");
+    const bool polling = mode.starts_with("headless") && mode != "headless_zero";
+    require(timeout == (polling ? 50u : INFINITE), "changed game-thread wait");
     ++waited;
+    return polling && mode != "headless" && waited == 1 ? WAIT_TIMEOUT : WAIT_OBJECT_0;
 }
 static void load_longshot_env() {}
 static void hos_game_layout() {}   // (host/game_layout.c: the game folder's cache/ and logs/)
@@ -121,7 +131,10 @@ static void headless_setting(const char* value) {
 int main(int argc, char** argv) {
     mode = argc == 2 ? argv[1] : "";
     try {
-        headless_setting(mode == "headless" ? "1" : mode == "headless_zero" ? "0" : nullptr);
+        const bool headless = mode.starts_with("headless") && mode != "headless_zero";
+        headless_setting(headless ? "1" : mode == "headless_zero" ? "0" : nullptr);
+        if (mode == "headless_restart") hos_posix_post_message(WM_APP + 9, 0, 0);
+        if (mode == "headless_close") hos_posix_post_message(WM_CLOSE, 0, 0);
         char prepare_flag[] = "--prepare-shaders";
         char* prepare_argv[] = {argv[0], argv[1], prepare_flag, nullptr};
         char romfs_flag[] = "--romfs", user_flag[] = "--user";
@@ -148,6 +161,14 @@ int main(int argc, char** argv) {
                     "changed explicit headless/offscreen behavior");
             require(!loads && !inits && !windows && !visible_window_started && !flushes,
                     "explicit headless used the display");
+        } else if (mode == "headless_restart" || mode == "headless_close" || mode == "headless_idle") {
+            const bool idle = mode == "headless_idle";
+            require(status == 0 && threads == 1 && offscreen == 1 && waited == (idle ? 2u : 1u),
+                    "headless main did not service the pending request while the game ran");
+            require(exits == (idle ? 0u : 1u) && closes == exits && restarts == (mode == "headless_restart" ? 1u : 0u),
+                    "headless close/restart was lost, repeated or mistaken for the other");
+            require(!loads && !inits && !windows && !visible_window_started && !flushes,
+                    "headless close/restart used SDL");
         } else if (mode == "visible_success" || mode == "headless_zero" || path_value) {   // (HOS_HEADLESS=0: off, a window)
             require(status == 0 && threads == 1 && waited == 1 && loads && inits == 1 && windows == 1 &&
                     visible_window_started == 1 && !offscreen && !flushes && !sleeps,

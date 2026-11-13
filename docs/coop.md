@@ -797,6 +797,9 @@ under an open native save handle, and is made before the first game mount.
 A successful request closes the old process's save-write gate before releasing
 the copy barrier, so a late autosave cannot rewrite the original before exit.
 Copy/return restarts suppress inherited automatic room joining and acceptance.
+On Linux, the same two-press copy/return action works in a windowless scripted run:
+the main thread services the restart request while waiting for the game thread.
+Shader preparation still waits for its worker normally and does not enter this menu lifecycle.
 
 A private one-use restart ticket binds the complete working copy's BLAKE2b-256
 digest. `HOS_COOP_PROFILE_TICKET` is internal restart state, not a user setting.

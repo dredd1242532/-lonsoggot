@@ -2129,6 +2129,7 @@ static void driver_cache_folder(void) {
 int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
+    void hos_display_poll_close(void);
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there, --prepare-shaders too: host/game_layout.c) */
     load_longshot_env();
     driver_cache_room();
@@ -2156,7 +2157,9 @@ int main(int argc, char **argv) {
     }
     SetThreadDescription(t, L"Game");
     if (window) hos_display_loop();   /* (does not return: the window's events until the process ends) */
-    WaitForSingleObject(t, INFINITE);
+    if (!window && !prepare_shaders) {
+        while (WaitForSingleObject(t, 50) == WAIT_TIMEOUT) hos_display_poll_close();
+    } else WaitForSingleObject(t, INFINITE);
     return 0;
 }
 #endif
