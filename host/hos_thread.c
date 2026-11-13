@@ -42,6 +42,7 @@ struct HosThread {
        hos_vcore_back) */
     int vc_held, vc_last, vc_queued, vc_escaped;
     volatile int vc_kick;
+    int vc_first;   /* (HOS_VCORE_FIRST: named there, ahead of every guest priority for a virtual core) */
     int64_t vc_since;
     CONDITION_VARIABLE vc_cv;
     /* (longshot) fibers: the context running now (NULL: ctx, the thread's own), the thread's host fiber once it
@@ -651,9 +652,29 @@ int64_t hos_spin_ns(void) {
     return hos_thread_serial(hos_self()) ? b >> 32 : b & 0xFFFFFFFF;
 }
 
+/* HOS_VCORE_FIRST=<name part>,... (experiment, off by default): the threads whose name holds one of the parts get a
+   virtual core before any other, as if their priority were above every guest priority (-1; Horizon's are 0-63): a
+   waiter asks a holder for its core at once, and no waiter takes theirs. The guest's own priority (GetThreadPriority)
+   and the host thread's priority stay as they are. OoT's Presentation Thread (the renderer's replay runs on it with no core
+   held) wakes when the main thread hands it the frame, and needs a core for the guest code before its submit just as
+   the six BaseProcExecutors, woken by the same hand-off, take all six: it waited ~1.2 ms for one twice in every slow
+   frame pair at Lon Lon Ranch, on the frame's critical path (HOS_CHAIN). */
+static int vc_first_named(const char *name) {   /* (at each naming, a few a run: the variable read each time) */
+    const char *parts = getenv("HOS_VCORE_FIRST");
+    for (const char *p = parts ? parts : ""; *p;) {
+        const char *end = strchr(p, ',');
+        const size_t n = end ? (size_t)(end - p) : strlen(p);
+        char part[64];
+        snprintf(part, sizeof part, "%.*s", (int)(n < sizeof part ? n : sizeof part - 1), p);
+        if (part[0] && strstr(name, part)) return 1;
+        p += n + (end ? 1 : 0);
+    }
+    return 0;
+}
 void hos_thread_set_name(HosThread *t, const char *name) {
     snprintf(t->name, sizeof t->name, "%s", name);
     __atomic_store_n(&t->serial, serial_name(t->name), __ATOMIC_RELAXED);   /* (atomic: SetThreadName may name another thread) */
+    __atomic_store_n(&t->vc_first, vc_first_named(t->name), __ATOMIC_RELAXED);   /* (as serial: another thread may name it) */
     if (t->handle) {
         wchar_t w[48];
         MultiByteToWideChar(CP_UTF8, 0, t->name, -1, w, 48);
@@ -1638,9 +1659,11 @@ static unsigned vc_allowed(HosThread *t) {
     if (!m) m = 1u << hos_thread_core(t);
     return m;
 }
+/* the priority the virtual cores go by */
+static int vc_prio(const HosThread *t) { return __atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) ? -1 : t->priority; }
 /* a runs before b */
 static int vc_better(HosThread *a, HosThread *b) {
-    return a->priority != b->priority ? a->priority < b->priority : a->vc_since < b->vc_since;
+    return vc_prio(a) != vc_prio(b) ? vc_prio(a) < vc_prio(b) : a->vc_since < b->vc_since;
 }
 /* a free core t may run on (its last one, its ideal one, then the lowest), or -1; holding vc_lock */
 static int vc_free_for(HosThread *t) {
@@ -1723,13 +1746,13 @@ static void vc_acquire(HosThread *t) {
         HosThread *worst = NULL;
         for (int k = 0; k < vc_cores(); k++) {
             HosThread *h = vc_owner[k];
-            if ((m >> k & 1) && h && h->priority > t->priority && (!worst || h->priority > worst->priority)) worst = h;
+            if ((m >> k & 1) && h && vc_prio(h) > vc_prio(t) && (!worst || vc_prio(h) > vc_prio(worst))) worst = h;
         }
         if (!worst && hos_now_ns() - t0 > slice)
             for (int k = 0; k < vc_cores() && !worst; k++)
-                if ((m >> k & 1) && vc_owner[k] && vc_owner[k]->priority == t->priority) worst = vc_owner[k];
+                if ((m >> k & 1) && vc_owner[k] && vc_prio(vc_owner[k]) == vc_prio(t)) worst = vc_owner[k];
         if (worst && !worst->vc_kick) {
-            worst->vc_kick = worst->priority > t->priority ? 1 : 2;
+            worst->vc_kick = vc_prio(worst) > vc_prio(t) ? 1 : 2;
             Ctx *rc = worst->run_ctx;   /* (a fiber's context while it runs one) */
             __atomic_store_n(rc ? &rc->poll : &worst->ctx.poll, 1, __ATOMIC_RELAXED);
             vc_st.kicks++;
@@ -1786,7 +1809,7 @@ static void vc_yield(HosThread *t, int strict) {
     int any = 0;
     for (int i = 0; i < vc_nq && !any; i++) {
         HosThread *w = vc_queue[i];
-        any = (vc_allowed(w) >> c & 1) && (strict ? w->priority < t->priority : w->priority <= t->priority);
+        any = (vc_allowed(w) >> c & 1) && (strict ? vc_prio(w) < vc_prio(t) : vc_prio(w) <= vc_prio(t));
     }
     t->vc_kick = 0;
     if (any) vc_st.yields++;
