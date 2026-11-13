@@ -34,7 +34,7 @@ using DWORD = unsigned long;
 constexpr int MAX_PATH = 260;
 DWORD hos_game_path_a(char *path, int size) { return snprintf(path, size, "./longshot.exe"); }
 void hos_log(const char *, ...) {}
-// (the main screen at boot, for an options file with no output_res=: none known here, so the game's own)
+// (the main screen at boot, for an options file with no output_res=: none known here, so the game's 2560x1440)
 constexpr int SM_CXSCREEN = 0, SM_CYSCREEN = 1;
 int GetSystemMetrics(int) { return 0; }
 volatile uint64_t hos_wide_out = 0;   // (host/hos_main.c: the widescreen picture, 0 = none; nn_applet.c reads it)
@@ -71,7 +71,11 @@ int main(int argc, char **argv) {
     // (the menu reads the same text: the ini's, or HOS_OUTPUT_RES over it)
     const char* e = getenv("HOS_OUTPUT_RES");
     char text[80] = "";
-    if (!e && !ini_text("output_res", text, sizeof text)) strcpy(text, "0");
+    if (!e && !ini_text("output_res", text, sizeof text)) {   // (none chosen: the default, as vk_menu.cpp menu_init takes it)
+        uint32_t dw = 0, dh = 0;
+        hos_output_default(0, 0, &dw, &dh);
+        snprintf(text, sizeof text, "%ux%u", dw, dh);
+    }
     opts.handheld = handheld();
     opts.output_res = opts.handheld ? 0 : parse_output(e ? e : text);
     if (!opts.handheld) assert(opts.output_res == mode);
@@ -311,8 +315,11 @@ int main(int argc, char **argv) {
         ("3840 x 2160", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (not a size)
         ("abc", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
         ("5120x2880", 1, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
+        (None, 0, None, 2, 2560, 1440, "2560x1440", 512, "2560x1440"),   # (none chosen, a new install: the game's 2560x1440)
+        (None, 1, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (handheld: its own, as before)
+        (None, 0, "2048x1152", 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (the reduced size, asked for)
     )
-    # (none chosen, a new install: a screen of fewer pixels than the game's 2048x1152 takes its own size, host and menu alike)
+    # (none chosen, a new install: the game's 2560x1440, or the screen's own size where that has fewer pixels, host and menu alike)
     for need, where, text in (("hos_output_default(", "host/nn_applet.c output_mode", host[host.index("static int output_mode(void)"):]),
                               ("hos_output_default(", "vk_menu.cpp menu_init", menu[menu.index("void menu_init() {"):])):
         if need not in text[:text.index("\n}\n")]:
@@ -326,15 +333,22 @@ int main(int argc, char **argv) {
 #include "host/hos_wide_size.h"
 int main() {
     uint32_t w = 1, h = 1;
-    assert(hos_output_default(1280, 800, &w, &h) && w == 1280 && h == 800);    // (a Steam Deck)
-    assert(hos_output_default(1920, 1080, &w, &h) && w == 1920 && h == 1080);  // (1080p: fewer pixels than 2048x1152)
-    assert(hos_output_default(1366, 768, &w, &h) && w == 1360 && h == 768);    // (a multiple of 8)
-    assert(!hos_output_default(2048, 1152, &w, &h) && !w && !h);               // (the game's own)
-    assert(!hos_output_default(2560, 1440, &w, &h) && !w && !h);               // (larger: the game's own)
-    assert(hos_output_default(1920, 1200, &w, &h) && w == 1920 && h == 1200);  // (16:10 at 1200: fewer pixels still)
-    assert(!hos_output_default(0, 0, &w, &h) && !w && !h);                     // (not known)
-    assert(!hos_output_default(800, 1280, &w, &h) && !w && !h);                // (portrait: no size the game takes)
-    std::printf("the Output resolution none chose: the screen's below 2048x1152\n");
+    const auto is = [&](uint32_t sw, uint32_t sh, uint32_t ew, uint32_t eh) {
+        hos_output_default(sw, sh, &w, &h);
+        return w == ew && h == eh;
+    };
+    assert(is(1280, 800, 1280, 800));     // (a Steam Deck)
+    assert(is(1920, 1080, 1920, 1080));   // (1080p: fewer pixels than 2560x1440)
+    assert(is(1366, 768, 1360, 768));     // (a multiple of 8)
+    assert(is(1920, 1200, 1920, 1200));   // (16:10 at 1200)
+    assert(is(2560, 1080, 2560, 1080));   // (21:9 at 1080: fewer pixels still)
+    assert(is(2048, 1152, 2048, 1152));   // (which both sides read as the game's own reduced size: output_mode, output_choice_of)
+    assert(is(2560, 1440, 2560, 1440));   // (the game's picture)
+    assert(is(3840, 2160, 2560, 1440));   // (larger: the game's picture, not the screen's)
+    assert(is(3440, 1440, 2560, 1440));   // (21:9 at 1440: more pixels; the Aspect ratio widens the game's)
+    assert(is(0, 0, 2560, 1440));         // (not known)
+    assert(is(800, 1280, 2560, 1440));    // (portrait: no size the game takes)
+    std::printf("the Output resolution none chose: the game's 2560x1440, the screen's below it\n");
 }
 '''
     with tempfile.TemporaryDirectory(prefix="output-default-") as tmp:
@@ -348,7 +362,8 @@ int main() {
         source.write_text(fixture, encoding="utf-8")
         subprocess.run([args.cxx, "-std=c++17", "-I", str(ROOT), str(source), "-o", str(exe)], check=True)
         for saved, handheld, override, mode, w, h, label, pool, writes in cases:
-            (work / "longshot_options.ini").write_text(f"output_res={saved}\nhandheld_profile={handheld}\n", encoding="ascii")
+            (work / "longshot_options.ini").write_text(   # (saved None: no output_res= line, a new install)
+                ("" if saved is None else f"output_res={saved}\n") + f"handheld_profile={handheld}\n", encoding="ascii")
             env = os.environ.copy()
             for key in ("HOS_OUTPUT_RES", "HOS_HANDHELD", "HOS_RT_POOL_MB"):
                 env.pop(key, None)

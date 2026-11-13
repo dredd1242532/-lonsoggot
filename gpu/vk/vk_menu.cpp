@@ -4188,14 +4188,14 @@ void menu_init() {
     first_start = !has_options;
     const char* handheld_env = getenv("HOS_HANDHELD");   // (host/nn_applet.c handheld(): the environment over the file's)
     if (!has_output && !(handheld_env ? atoi(handheld_env) != 0 : opts.handheld != 0)) {
-        // (none chosen, a new install: the size host/nn_applet.c took at boot, the main screen's where it has fewer pixels than
-        // the game's own (a Steam Deck's 1280x800), hos_output_default. Saved from now on, so the two never part. HOS_OUTPUT_RES,
-        // below, is over it, as over a chosen one)
+        // (none chosen, a new install: the size host/nn_applet.c took at boot, the game's 2560x1440 or the main screen's where
+        // it has fewer pixels (a Steam Deck's 1280x800), hos_output_default. Saved from now on, so the two never part.
+        // HOS_OUTPUT_RES, below, is over it, as over a chosen one)
         uint32_t sw = 0, sh = 0, w = 0, h = 0;
-        if (host_screen_size(&sw, &sh) && hos_output_default(sw, sh, &w, &h)) {
-            opts.output_res = output_choice_of(w, h);
-            logf("vk: the Output resolution: none chosen, the screen's %ux%u (smaller than the game's 2048x1152)", w, h);
-        }
+        host_screen_size(&sw, &sh);   // (not known: 0 x 0, the game's 2560x1440)
+        hos_output_default(sw, sh, &w, &h);
+        opts.output_res = output_choice_of(w, h);
+        logf("vk: the Output resolution: none chosen, %ux%u (the game's 2560x1440, or the screen's where smaller)", w, h);
     }
     // An opt-in profile for 4 GB cards: keep existing options authoritative, but make a first run usable on
     // low-VRAM hardware without requiring the menu to render first.
