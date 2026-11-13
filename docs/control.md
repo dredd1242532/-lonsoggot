@@ -685,6 +685,9 @@ not a whose-save picker and has no load, import or progress-return command.
   `room_offer`, `rules_epoch`, member names/key fingerprints, transfer state,
   actual byte counts and exact `manifest` hash. State values: 0 idle, 1 offered,
   2 transferring, 3 verified on disk, 4 cancelled. `mounted` is always false.
+  The preview also includes `maker_key`, `unidentified`, `disagree` and the received
+  `rules` array, ordered progress, items, songs, quest, keys, rupees, ammo (0 own,
+  1 shared, 2 pool). These are received terms, not local defaults.
 - After checking the preview, each side explicitly sends
   `{"cmd":"coop_save","action":"identity","token":77}` with its current offer
   number. This accepts identities for downloading only, never room progress.

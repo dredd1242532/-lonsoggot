@@ -239,6 +239,7 @@ static int fake_save_exchange(const char *action, int member, unsigned slot, uin
     __atomic_add_fetch(&save_calls, 1, __ATOMIC_RELEASE);
     memset(out, 0, sizeof *out); memset(preview, 0, sizeof *preview);
     preview->token = 77; preview->rules.epoch = 3;
+    strcpy(preview->maker_key, "1111-2222-3333-4444");
     if (!strcmp(action, "status")) return 1;
     if (!strcmp(action, "offer")) return member == 2 && slot == 5;
     if (!strcmp(action, "identity")) return token == 77;
@@ -1067,6 +1068,7 @@ int main(int argc, char **argv) {
     {
         ask(c, "{\"id\":810,\"cmd\":\"coop_save\",\"action\":\"status\"}\n", "810", line, sizeof line, 2000);
         CHECK(strstr(line, "\"room_offer\":77") && strstr(line, "\"mounted\":false") && strstr(line, "\"progress_return\":false"));
+        CHECK(strstr(line, "\"rules\":[0,0,0,0,0,0,0]") && strstr(line, "\"maker_key\":\"1111-2222-3333-4444\""));
         const int calls = __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE);
         ask(c, "{\"id\":811,\"cmd\":\"coop_save\",\"action\":\"offer\",\"member\":2}\n", "811", line, sizeof line, 2000);
         CHECK(strstr(line, "\"error\":\"bad_request\"") && __atomic_load_n(&save_calls, __ATOMIC_ACQUIRE) == calls);

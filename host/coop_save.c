@@ -148,7 +148,7 @@ static void control(CoopSave *s, Transfer *t, uint64_t now) {
 }
 static void take_control(CoopSave *s, int from, uint64_t session, const uint8_t *p, size_t n, uint64_t now, uint64_t utc) {
     if (n != COOP_SAVE_CONTROL_BYTES || !domain_is(p, 2) || !zeros(p + 25, 7) || !zeros(p + 84, 12)) return;
-    Transfer *t = !memcmp(p + 32, s->out.offer + 24, 16) ? &s->out : &s->in;
+    Transfer *t = !memcmp(p + 32, s->out.offer + 24, 16) && !memcmp(p + 48, s->out.hash, 32) ? &s->out : &s->in;
     if (terminal(t->state) || t->member != from || session != t->binding.peer_session || memcmp(p + 48, t->hash, 32) ||
         !live(s, t, now, utc) || !coop_sign_check(p + 96, t->binding.peer, p, 96)) return;
     if (p[24] == CTRL_CANCEL) { cancel_one(s, t, t == &s->in); t->control = 0; return; }

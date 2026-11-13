@@ -1879,7 +1879,11 @@ static void cmd_coop_save(int ci, const JDoc *d, int req, const char *id) {
                v.incoming, v.outgoing, v.owner, v.recipient, v.received_bytes, v.sent_bytes, v.total_bytes);
     for (int i = 0; i < 32; i++) buf_printf(&b, "%02x", v.manifest_hash[i]);
     buf_puts(&b, "\",\"verified_id\":"); buf_str(&b, v.verified_id);
-    buf_printf(&b, ",\"room_offer\":%u,\"rules_epoch\":%u,\"members\":[", preview.token, preview.rules.epoch);
+    buf_printf(&b, ",\"room_offer\":%u,\"rules_epoch\":%u,\"maker_key\":", preview.token, preview.rules.epoch);
+    buf_str(&b, preview.maker_key);
+    buf_printf(&b, ",\"unidentified\":%d,\"disagree\":%s,\"rules\":[", preview.unidentified, preview.disagree ? "true" : "false");
+    for (int i = 0; i < COOP_CAT_N; i++) buf_printf(&b, "%s%u", i ? "," : "", (unsigned)preview.rules.mode[i]);
+    buf_puts(&b, "],\"members\":[");
     for (int i = 0; i < preview.n; i++) {
         buf_printf(&b, "%s{\"member\":%d,\"name\":", i ? "," : "", preview.member[i].id);
         buf_str(&b, preview.member[i].name); buf_puts(&b, ",\"key\":"); buf_str(&b, preview.member[i].key); buf_puts(&b, "}");
