@@ -46,6 +46,7 @@ jobs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
       checked: ${{ steps.name.outputs.checked }}
+      authenticode: ${{ steps.authenticode.outputs.enabled }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,6 +90,11 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "$tag, from $ref"
+      - name: Windows Authenticode configuration
+        id: authenticode
+        env:
+          AUTHENTICODE_CERTIFICATE_SHA1: ${{ secrets.AUTHENTICODE_CERTIFICATE_SHA1 }}
+        run: python3 -I scripts/authenticode.py plan
 
   linux:
     name: Linux builder
@@ -109,6 +115,9 @@ jobs:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
       checked: ${{ needs.version.outputs.checked }}
+      authenticode: ${{ needs.version.outputs.authenticode == 'true' }}
+    secrets:
+      AUTHENTICODE_CERTIFICATE_SHA1: ${{ secrets.AUTHENTICODE_CERTIFICATE_SHA1 }}
 
   publish:
     name: Sign and publish

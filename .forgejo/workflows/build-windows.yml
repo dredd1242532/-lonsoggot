@@ -34,6 +34,14 @@ on:
         type: string
         required: false
         default: ''
+      authenticode:
+        description: sign on the isolated release runner when the certificate secret is configured
+        type: boolean
+        default: false
+    secrets:
+      AUTHENTICODE_CERTIFICATE_SHA1:
+        description: the signing account's hardware-backed certificate thumbprint (never its private key)
+        required: false
 
 permissions:
   contents: read
@@ -125,6 +133,21 @@ jobs:
           dotnet publish builder/LongshotBuilder/LongshotBuilder.csproj --configuration Release
           --runtime win-x64 -p:EnableWindowsTargeting=true
           -p:Version="$VERSION" -p:NuGetAudit=false --output "$RUNNER_TEMP/publish"
+
+      # Sign the two project executables before either copy of the setup is packaged, and before release.yml hashes the zip.
+      # No signing secret is passed to a PR step, including same-repository PRs and pull_request_target.
+      - name: Authenticode (optional)
+        if: inputs.authenticode && github.event_name == 'push' && github.repository == 'MagicBeanDev/Longshot' && inputs.ref == github.sha && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          AUTHENTICODE_CERTIFICATE_SHA1: ${{ secrets.AUTHENTICODE_CERTIFICATE_SHA1 }}
+        run: >-
+          python -I scripts/authenticode.py sign
+          --setup "$RUNNER_TEMP/LongshotBuilder-Setup.exe" --publish "$RUNNER_TEMP/publish"
+      - name: Authenticode not configured
+        if: ${{ !inputs.authenticode }}
+        run: >-
+          python -I scripts/authenticode.py sign
+          --setup "$RUNNER_TEMP/LongshotBuilder-Setup.exe" --publish "$RUNNER_TEMP/publish"
 
       # (it stops when assets/pipeline_states/, the sources of the pipeline state list every release ships, hold none or one does not read)
       - name: Package folder

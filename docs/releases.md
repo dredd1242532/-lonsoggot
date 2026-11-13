@@ -1,8 +1,8 @@
 # Releases and updates
 
 How Longshot and the Longshot Launcher are released on git.magicbean.dev, and how the launcher finds, checks and installs
-them. This document is the same in both repositories, [MagicBeanDev/Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/releases.md)
-and [MagicBeanDev/LongshotLauncher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/src/branch/main/docs/releases.md).
+them. The release design is shared with [MagicBeanDev/LongshotLauncher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/src/branch/main/docs/releases.md);
+the optional Windows Authenticode preparation below applies to Longshot's builder workflow only.
 How to make a release, step by step, is in each repository's **RELEASING.md**.
 
 Longshot's numbers start at **v3.0.0**; the launcher's are its own and start at **v1.0.0**. Nothing here reads or writes
@@ -98,6 +98,153 @@ secret or runner: the key would then sign anything. A second, **offline** key fo
 for `vX.Y.Z`) can be added later without changing the files: a second signature file beside `SHA256SUMS.sig`.
 
 Rotating the key: RELEASING.md, "Rotate the key".
+
+### Windows Authenticode (Longshot)
+
+The release signature above and Windows code signing solve different problems:
+
+| Signature | What checks it | What it proves |
+|---|---|---|
+| `SHA256SUMS.sig`, with the project's P-256 key | the launcher, or `release.py verify` | the release files match the checksums approved by that key; the checked `tools.lock` in turn pins the downloaded tools |
+| Authenticode, embedded in an executable | Windows | the executable has not changed in the areas covered by Authenticode, and its signer chains to a trusted publisher certificate |
+
+Neither signature proves that the build faithfully used the named source, or that the program is harmless. The
+project's release key is **not** a Windows publisher certificate. The merged release design uses one key and
+`SHA256SUMS`, not the earlier proposal's `longshot-release.json`, signed channel pointers or nightly/release key split.
+
+Authenticode can replace an **unknown publisher** with a verified publisher name. It does **not** promise acceptance
+by SmartScreen, Smart App Control, Defender or another antivirus. Microsoft distinguishes file-hash reputation from
+publisher reputation; new signed programs can still warn, and EV certificates no longer bypass SmartScreen. See
+[Microsoft's reputation guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+Signing the builder or launcher does not sign the player's locally compiled `longshot.exe` or `longshot_vk.dll`.
+Smart App Control can also block locally built unsigned programs: this is a separate limit, not advice to turn
+security features off.
+
+#### Coverage and order
+
+Longshot's `.forgejo/workflows/build-windows.yml` has an optional **Authenticode** step. It signs two project
+executables, not every `.exe` in a folder:
+
+| Distributed Windows file | Where it comes from | This step |
+|---|---|---|
+| `LongshotBuilder.exe` at the zip's top | the `LongshotBuilder-Setup.exe` step compiles `builder/setup/setup.c` with the pinned llvm-mingw; `builder_package.py zip` copies it under this name | signs the setup before the copy |
+| `LongshotBuilder/LongshotBuilder-Setup.exe` | `builder_package.py package` copies the same setup for the builder's Repair | the same signed bytes |
+| `LongshotBuilder/LongshotBuilder.exe` | the **Longshot Builder** step's `dotnet publish` of the WPF project | signs its final apphost |
+| .NET runtime executables/libraries in the publish folder; executables in downloaded `tools.lock` archives | Microsoft and the listed upstream tools | untouched; not represented as Longshot's code |
+| `LongshotLauncher-<v>-windows-x64-setup.exe` and `LongshotLauncher.exe` in the portable zip | the **other repository's** `release.yml` runs `scripts/package.sh`: `dotnet publish` for `win-x64`, then two copies of that single-file program | not changed by Longshot's step; needs its own integration |
+
+Signing happens **after** compilation and `dotnet publish`, **before** the package folder and zip are made.
+`release.yml` then hashes that zip and signs `SHA256SUMS` as before. Do not change an executable after signing,
+or sign a release file after making its checksums. No parts list or in-game updater is involved any more;
+`Updater.cs` only rebuilds a game folder with the installed builder's own tools or opens the launcher download page.
+
+#### Optional configuration, not a signing-required release policy
+
+Leave `AUTHENTICODE_CERTIFICATE_SHA1` unset until maintainers choose a publisher and signing arrangement.
+A release without it logs exactly **`not signed: no certificate configured`**, succeeds as before, and ships
+unsigned Windows executables. This is not a claim that Authenticode is already configured or that releases must
+be signed. Once a channel is promised to be code-signed, maintainers must make missing configuration fatal too;
+this optional preparation deliberately does not make that policy decision.
+
+To enable this certificate-store route:
+
+1. Provision the chosen code-signing certificate in the signing account's `CurrentUser\My` Windows store, with
+   its private key kept by its hardware token/HSM or compatible provider. Test noninteractive signing with that
+   provider first. This route does not export or import a PFX, install a trusted root, or implement Azure/SignPath's
+   service APIs. Those services need their own integration if selected.
+2. Supply a **release-only** Windows runner labelled `windows-signing`, otherwise equipped like `windows-2022`.
+   Do not give its account or key to PR runners. **A label is not an access control:** runner admission and the
+   provider's authorization/approval policy must prevent untrusted workflows from using the identity, even if a
+   PR asks for this label. Do not configure the secret until that isolation is in place.
+3. Set the repository Actions secret `AUTHENTICODE_CERTIFICATE_SHA1` to the certificate's exact 40-hex
+   thumbprint, without spaces. This is only a certificate selector, not a private key or a substitute for provider
+   authorization. No signing credentials belong in the repository or in workflow command arguments.
+4. Release from the repository's main/tag push as usual. `release.yml` passes the secret explicitly (not
+   `secrets: inherit`) and selects the signing runner only when configured. The checked-out commit must match
+   the triggering push. Pull requests, including fork and same-repository PRs, and manual build dispatches do
+   not sign or receive this secret in a signing step.
+
+`scripts/authenticode.py` uses **Windows' built-in Windows PowerShell**, addressed under `SystemRoot`, not a
+downloaded tool or a command from the checkout's `PATH`. No new download, action or dependency pin is needed:
+`tools.lock` and `scripts/tools.py` remain unchanged, and the signing tool is not installed on players' PCs.
+Existing compiler downloads still use `tools.py`'s size/SHA-256 checks.
+
+It requests SHA-256 Authenticode and a timestamp from `http://timestamp.digicert.com`, then checks the file again:
+Windows must report `Valid`, an embedded `Authenticode` signature, the configured certificate, and a timestamp
+certificate. Failure, a missing executable, or an invalid configured thumbprint fails the job before packaging.
+Child output and provider errors are not echoed, since they can contain secrets. The private key stays with the
+provider. The two setup copies are byte-for-byte copies of the signed setup.
+
+This uses the Windows cmdlet's Authenticode timestamp protocol, not a newly added RFC 3161 client.
+[Microsoft documents that its underlying API requires an HTTP URL](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-authenticodesignature#-timestampserver);
+HTTPS can leave a signed file without a timestamp. The timestamp is cryptographically signed; the step rejects a
+missing timestamp. The selected CA/provider and timestamp service still need a real Windows test before enabling
+this in releases. An offline self-signed **stand-in** can prove embedding and tamper detection, not public publisher
+trust, Windows prompts, this PowerShell/provider path, or the timestamp service.
+
+The game-free decision and command checks are `python -I -B tests/test_authenticode.py`.
+The optional Linux mechanics stand-in is
+`python -I -B tests/authenticode_standin.py --osslsigncode /path/to/osslsigncode`
+(also needs `openssl`, `clang` and `lld-link`). It downloads nothing, uses temporary keys without changing a trust
+store, verifies the signed PE in all three package paths, and rejects a modified code section. It is not a test of
+the Windows PowerShell signing step or a timestamp service.
+
+#### Certificate and ownership decisions
+
+For public downloads the team needs a code-signing certificate accepted by Windows' trust chain, not the
+project's existing PEM key and not a self-signed test certificate. Ordinary organization-validated (**OV**) and
+extended-validation (**EV**) certificates both supply publisher identity. EV adds stricter identity checks, but
+is not a way to buy an immediate SmartScreen bypass.
+
+The [CA/Browser Forum requirements, sections 6.2.7.4.1–6.2.7.4.2](https://cabforum.org/working-groups/code-signing/requirements/)
+require suitable hardware protection for subscriber keys (including non-EV certificates since June 2023).
+Depending on the CA this can be an approved token, HSM or cloud signing service; cloud storage specifically is
+not mandatory for every certificate. A downloadable exportable private-key PFX is not the normal procurement
+plan for a newly issued public certificate. Confirm the CA's hardware, provider and automated-signing terms
+before buying anything.
+
+**Estimates, not quotes (November 2026):**
+
+| Option | Estimated cost | Decision still needed |
+|---|---|---|
+| OV from a commercial CA | USD 150–300/year | eligible legal identity; token/cloud costs may be extra |
+| EV from a commercial CA | USD 400/year and up | whether its extra identity validation is needed for a reason other than SmartScreen |
+| Azure Artifact Signing | about USD 9.99/month | identity/region eligibility, account ownership and a service-specific integration |
+| SignPath Foundation | free if accepted | acceptance for Longshot and Forgejo, build provenance and manual approvals; the publisher would be SignPath Foundation |
+| Stay unsigned for now | no certificate charge | keep the warning and trust limits explicit; no promise of a verified Windows publisher |
+
+The paid estimates are from [Microsoft's signing comparison](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options).
+Prices, taxes and service limits can change. Microsoft's comparison and its
+[Artifact Signing prerequisites](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart#prerequisites)
+currently list different organization regions: check the service's current eligibility with Microsoft, rather than
+treating the shorter list as settled. Individuals are listed as USA/Canada in both.
+[SignPath's conditions](https://signpath.org/terms.html) require a code-signing policy, named author/reviewer/approver
+roles, MFA, privacy/uninstall provisions and verifiable builds with manual approval. No acceptance for Longshot is
+asserted here.
+
+Maintainers must choose the legal publisher, pay or apply, name the certificate/account holder and a backup
+custodian, and decide who approves releases and handles renewals/revocations. Prefer project-controlled accounts
+and least-privilege signing access with MFA and an audit trail; do not nominate an individual without consent.
+The setup's fixed `1.0.0` resources and missing `ProductVersion`/copyright strings still need release-versioned
+metadata and an agreed legal identity. This step does not invent that identity or change those resources.
+
+**Rotation:** before expiry, obtain the replacement through the chosen CA/service, provision it without exporting
+its protected key, and try a release candidate on a clean Windows PC. Confirm the expected subject, chain,
+timestamp and both setup copies. Change the certificate selector secret, publish the new expected publisher
+details, then retire the old signing access after the transition. Do not rewrite already published files or
+checksums. A valid timestamp can preserve validation after ordinary certificate expiry; revocation and policy
+changes are different, and reputation continuity is not guaranteed. For suspected compromise, stop signing and
+publication, revoke with the CA, replace credentials and tell players which releases are affected. Rotating this
+certificate does **not** rotate `RELEASE_SIGNING_KEY`; that separate procedure is in RELEASING.md.
+
+Players can inspect **Properties > Digital Signatures > Details**, or run
+`Get-AuthenticodeSignature -LiteralPath .\LongshotBuilder.exe` in PowerShell. Once a publisher is agreed, compare
+its subject with the project's published policy; a `Valid` signature alone does not identify the intended project.
+Missing signatures are expected while this optional step is unconfigured. Report incorrect malware detections
+through [Microsoft's submission portal](https://www.microsoft.com/en-us/wdsi/filesubmission), not by switching off
+protection. See [Get-AuthenticodeSignature](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature)
+for what Windows reports.
+
 
 ## tools.lock (Longshot)
 

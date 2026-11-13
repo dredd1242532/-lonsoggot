@@ -1,8 +1,8 @@
 # Releasing
 
 How a maintainer releases **Longshot** (MagicBeanDev/Longshot) and the **Longshot Launcher**
-(MagicBeanDev/LongshotLauncher). This file is the same in both repositories. The design (what a release is, the
-channels, signing, `tools.lock`, how the launcher reads it) is in [docs/releases.md](docs/releases.md).
+(MagicBeanDev/LongshotLauncher): the shared release procedure, plus Longshot's optional Authenticode setup.
+The design (releases, channels, signing, `tools.lock` and the launcher) is in [docs/releases.md](docs/releases.md).
 
 | | Longshot | The launcher |
 |---|---|---|
@@ -27,6 +27,7 @@ Contents:
 - [Bump a tool (Longshot)](#bump-a-tool-longshot)
 - [Rotate the key](#rotate-the-key)
 - [One-time setup](#one-time-setup)
+- [Optional Windows Authenticode](#optional-windows-authenticode)
 - [Troubleshooting](#troubleshooting)
 
 ## The commands
@@ -281,6 +282,26 @@ None of this is done yet. In order (the org secret is shared by both repositorie
 7. **Try it** on a fork, or with a throwaway key first: `LONGSHOT_LAUNCHER_TRUST=<test .pub.pem>` makes a launcher accept a
    release signed with it.
 8. **The first releases.** The launcher `v1.0.0-rc.1` and Longshot `v3.0.0-rc.1`, then their stables.
+
+## Optional Windows Authenticode
+
+This is separate from `RELEASE_SIGNING_KEY` and its `SHA256SUMS.sig`. The publisher identity, certificate purchase
+or service application, key custodians and signing-required channels are decisions for maintainers. No certificate
+is needed to keep making unsigned Windows builders.
+
+[docs/releases.md, Windows Authenticode](docs/releases.md#windows-authenticode-longshot) lists the exact executable
+coverage, current limits, sourced cost estimates, setup and rotation procedure. In Longshot only, setting the
+repository secret `AUTHENTICODE_CERTIFICATE_SHA1` selects the pre-provisioned hardware-backed certificate on an
+isolated `windows-signing` runner. Do not set it before the runner's admission and key authorization exclude PR
+workloads; a label alone does not protect the key.
+
+The Windows packaging job signs and timestamps the setup and WPF apphost before packaging, then checks both.
+An absent secret logs `not signed: no certificate configured` and succeeds unsigned. An invalid configured
+certificate or failed signing/verification fails the job. Check all three project EXE paths in the zip on Windows
+before offering the first signed release; a self-signed stand-in proves mechanics, not publisher trust. The launcher
+repository's own packaging needs separate integration. Removing the secret returns to unsigned output, so do not
+use that as an unnoticed workaround once players have been promised signed releases.
+
 
 ## Troubleshooting
 
