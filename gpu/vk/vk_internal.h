@@ -121,7 +121,7 @@ extern Device dev;
 
 /// (longshot) Windows Intel's compiler (igvk64, UHD and Arc) faults when two threads hand it shaders at once. An Arc
 /// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
-/// during the first scene's compiles (two frames in hookshot_vk.dll, and no "driver faulted compiling" line, so the
+/// during the first scene's compiles (two frames in longshot_vk.dll, and no "driver faulted compiling" line, so the
 /// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
 /// Other vendors, and Intel on other systems, are not held. RX_VK_NO_INTEL_SERIAL: side by side, as before.
 struct IntelDriverGate {

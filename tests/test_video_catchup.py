@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import tempfile
 
-ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "hookshot_env.h")
+ENV_ON_H = str(Path(__file__).resolve().parents[1] / "gpu" / "vk" / "compat" / "longshot_env.h")
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,6 +95,7 @@ static void decode_next(Dec *d) {
     d->qn++;
 }
 static void decode_pending(Dec *d) { (void)d; }
+static void input_room(Dec *d) { (void)d; }
 
 @ACQUIRE@
 

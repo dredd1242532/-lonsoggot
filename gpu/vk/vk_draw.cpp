@@ -1310,7 +1310,7 @@ bool gpl_libs_cached() {
     static const bool on = !env_on("RX_VK_GPL_NO_CACHE");
     return on;
 }
-// (hookshot) vkCreateShaderModule has no guard of its own. Translation workers call it, and on Windows their stack into
+// (longshot) vkCreateShaderModule has no guard of its own. Translation workers call it, and on Windows their stack into
 // igvk64 is short: an access violation there is not the pipeline guards' "driver faulted compiling" line, and it ends
 // the process. The same answer as those guards: that program is left out.
 #ifdef _WIN32
