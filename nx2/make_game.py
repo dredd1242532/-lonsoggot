@@ -83,7 +83,7 @@ def no_throttle(handle=None):
 
 
 PREPARE = False   # (--prepare) say() prints RecompLauncher's "progress <0..1> <text>" lines instead of the builder app's @@ lines
-STAGE_SPAN = {"read": (0.0, 0.05), "lift": (0.05, 0.25), "compile": (0.25, 0.95), "finish": (0.95, 1.0)}   # (a share of the whole each stage takes)
+STAGE_SPAN = {"read": (0.0, 0.15), "lift": (0.15, 0.26), "compile": (0.26, 0.87), "finish": (0.87, 1.0)}   # (a share of the whole each stage takes: docs/development.md, Build times)
 _stage = {"span": (0.0, 1.0), "text": ""}
 
 
@@ -189,16 +189,6 @@ def killed_reason():
         pass
     return ("the system stopped it, most likely because the PC ran out of memory%s. Close other programs and build again"
             % (" (%d GB here)" % total if total else ""))
-
-
-def reported(line):
-    """The sentence a builder shows. @@check is '@@check <ok|bad> <text>'; @@error is '@@error <text>'. None otherwise."""
-    if line.startswith("@@error "):
-        return line[len("@@error "):]
-    if line.startswith("@@check "):
-        parts = line.split(" ", 2)
-        return parts[2] if len(parts) == 3 else ""
-    return None
 
 
 class LogStream:
@@ -587,11 +577,12 @@ def check_cache_paths(out, paths):
                  "Choose a different output folder." % path)
 
 
-def check_cpu():
+def check_cpu(fsr=False):
     """(linux) The AppImage's Vulkan back end (LONGSHOT_VK_PREBUILT) is built for x86-64-v3 elsewhere
     (scripts/linux/appimage.sh), while the game follows this PC (nx2/host_cpu.py): on a CPU without AVX2 it would stop at
-    its start. Said now, before the game is read, not 40 minutes in (issue 363)"""
-    if not os.environ.get("LONGSHOT_VK_PREBUILT") or os.environ.get("RX_MARCH"):
+    its start. Said now, before the game is read, not 40 minutes in (issue 363). fsr: this build has AMD FSR 4, which compiles its
+    own back end (nx2/build.py prebuilt_renderer), for this PC"""
+    if not os.environ.get("LONGSHOT_VK_PREBUILT") or os.environ.get("RX_MARCH") or fsr:
         return
     sys.path.insert(0, HERE)
     from host_cpu import host_march
@@ -736,6 +727,9 @@ def check_linux_prerequisites(work=None):
                 missing.append("%s header %s (CPM package %s: RX_CPM, clone/cpm, work/eg/.cache/cpm, then sibling "
                                "mkw-recomp/Eglantine caches; then %s, package root or include/; then /usr/local, /usr)"
                                % (name, probe, package, env))
+        if build.FSR and not os.path.isfile(os.path.join(build.FSR_HEADERS, "api", "include", "ffx_api.h")):
+            missing.append("AMD's FSR API headers in %s (AMD FSR 4: third_party/fidelityfx; or build without --fsr)"
+                           % os.path.normpath(build.FSR_HEADERS))
     build.ffmpeg_linux(missing)
     cc = build.toolchain.find("clang")
     # A source checkout also builds a64emit with clang++, even with a prebuilt renderer.
@@ -1328,6 +1322,52 @@ def game_env(environ=None):
 
 def not_prepared(why):
     print("%s (%s): the game prepares them at its first start" % (NOT_PREPARED, why), flush=True)
+
+
+# (Compile shaders, the builders' and the launcher's choice: compile_shaders= in the game folder's longshot_options.ini, the
+# number the game reads (gpu/vk/vk_draw.cpp compile_all). Most, the default: every shader program and the pipelines the lists
+# name, before the title. All: the predicted pipelines too, about 40 % more time for pipelines play almost never draws)
+COMPILE_LEVELS = {"most": 0, "all": 1}
+COMPILE_KEY = "compile_shaders"
+
+
+def options_path(out):
+    return os.path.join(out, "longshot_options.ini")
+
+
+def folder_compile_level(out):
+    """The Compile shaders choice the folder's longshot_options.ini holds ("most" or "all"), or None when it holds none"""
+    try:
+        with open(options_path(out), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                key, eq, value = line.strip().partition("=")
+                if eq and key == COMPILE_KEY:
+                    n = int(value) if value.strip().lstrip("-").isdigit() else 0
+                    return next((name for name, v in COMPILE_LEVELS.items() if v == n), "most")
+    except OSError:
+        pass
+    return None
+
+
+def write_compile_level(out, level):
+    """compile_shaders=<n> into the folder's longshot_options.ini, the file's other lines as they are (the game's menu keeps the
+    line too). A file with only this line still makes the game's first start a first start (gpu/vk/vk_menu.cpp menu_init)"""
+    path = options_path(out)
+    lines = []
+    try:
+        with open(path, encoding="utf-8", errors="replace", newline="") as f:
+            lines = [l for l in f.read().splitlines() if l.partition("=")[0].strip() != COMPILE_KEY]
+    except OSError:
+        pass
+    lines.append("%s=%d" % (COMPILE_KEY, COMPILE_LEVELS[level]))
+    with open(path + ".new", "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(path + ".new", path)
+
+
+def compile_level(a, out):
+    """This build's Compile shaders: --compile-shaders, else the folder's own choice, else Most"""
+    return getattr(a, "compile_shaders", None) or (folder_compile_level(out) if out else None) or "most"
 
 
 def prepare_skipped(a, environ=None):
@@ -1928,50 +1968,6 @@ def place_ngx_runtime(out):
     return dst
 
 
-def portable_game_home(out):
-    """Validate the portable context before a build changes output; association is relative to this game."""
-    if os.name != "nt" or os.environ.get("LONGSHOT_BUILDER_PORTABLE") != "1":
-        return None
-    home = os.environ.get("LONGSHOT_SETUP_BASE", "")
-    if not ntpath.isabs(home) or not ntpath.splitdrive(home)[0] or home.startswith(("\\\\?\\", "\\\\.\\")):
-        raise ValueError("The portable Builder home must be a fully qualified drive or UNC folder.")
-    home = os.path.abspath(home)
-    with open(os.path.join(home, ".longshot-portable"), "rb") as f:
-        marker = f.read(36)
-    magic = b"Longshot Builder portable home v1"
-    if len(marker) > len(magic) + 2 or marker.rstrip(b"\r\n") != magic:
-        raise ValueError("The portable Builder home marker is invalid.")
-    if os.path.dirname(home) == home:
-        raise ValueError("The portable Builder home must be a dedicated folder.")
-    launcher = os.path.join(os.path.dirname(os.path.abspath(ROOT)), "LongshotBuilder-Setup.exe")
-    if not os.path.isfile(launcher):
-        raise ValueError("A portable game needs the packaged Builder setup launcher.")
-    try:
-        relative = os.path.relpath(home, os.path.abspath(out))
-    except ValueError as e:
-        raise ValueError("Keep a portable game and its Builder on the same volume.") from e
-    if len(home) >= 260 or len(relative.encode("utf-8")) >= 780 or any(c in relative for c in "\r\n\0:"):
-        raise ValueError("The portable Builder association cannot be represented by the Windows setup.")
-    return relative
-
-
-def write_game_home(out, relative):
-    """Only called after successful output finalization; never resolves relative to the process cwd."""
-    destination = os.path.join(out, ".longshot_builder_home")
-    if relative is None:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(destination)
-        return
-    fd, partial = tempfile.mkstemp(prefix=".longshot-home-", dir=out)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(relative)
-        os.replace(partial, destination)
-    finally:
-        if os.path.exists(partial):
-            os.remove(partial)
-
-
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     p.add_argument("--nup")
@@ -1992,6 +1988,10 @@ def parse_args():
     p.add_argument("--update", help="a game folder built before: built again from the game files it keeps (the game's update offer)")
     p.add_argument("--no-prepare-shaders", action="store_true",
                    help="leave the shaders' preparation to the game's first start (the builder's \"Prepare shaders now\" unticked)")
+    p.add_argument("--compile-shaders", choices=tuple(COMPILE_LEVELS),
+                   help="what the shaders' preparation builds: most (the default) every shader and the pipelines the lists name; "
+                        "all the predicted pipelines too (about 40%% longer). Kept in the folder's longshot_options.ini "
+                        "(compile_shaders=), which the game's own preparations follow; not given: the folder's")
     p.add_argument("--log", metavar="FILE", help="also save build output to a UTF-8 file (replaces the file if it exists)")
     # (NVIDIA DLSS, off unless asked: NVIDIA's SDK into LONGSHOT_NGX_SDK first, under NVIDIA's license. scripts/ngx_sdk.py)
     p.add_argument("--fetch-ngx-sdk", action="store_true", help="download NVIDIA's DLSS SDK into LONGSHOT_NGX_SDK before the build")
@@ -2110,7 +2110,6 @@ def end_stale_games(folders):
 def main(a=None):
     if a is None:
         a = parse_args()
-    portable_home = portable_game_home(a.update or a.out) if not a.check and (a.update or a.out) else None
     if a.jobs is not None and a.jobs < 0:
         fail("--jobs must be 1 or more, or 0 for automatic.")
     a.jobs = chosen_jobs(a.jobs)
@@ -2130,26 +2129,32 @@ def main(a=None):
     a.language = build_language(a, out)   # (now: the folder's own language.txt is still the one the player left)
     warn_slow_disk(out, work)   # (a warning, not a stop: a hard drive still builds, only much slower)
     check_writable(out)
-    check_cpu()   # (no game read yet: the AppImage on a CPU without AVX2 stops here)
+    # (AMD FSR 4: the build's switch for nx2/build.py, set or cleared here, before the checks: on Linux it compiles its own
+    # Vulkan back end, as with DLSS, so the AppImage's prebuilt one is neither checked nor used. One set in the shell is not
+    # taken for this build's: --fsr, or the folder's mark, decides)
+    fsr = fsr_wanted(a, out)
+    if fsr:
+        os.environ["LONGSHOT_FSR"] = "1"
+    else:
+        os.environ.pop("LONGSHOT_FSR", None)
+    check_cpu(fsr)   # (no game read yet: the AppImage on a CPU without AVX2 stops here)
     if getattr(a, "fetch_ngx_sdk", False):
         fetch_ngx_sdk(a)   # (the SDK selects a source renderer instead of LONGSHOT_VK_PREBUILT)
     check_windows_sdk(work)
     stop_stray_compilers(work, a.default_work)
     drop_stale_objects(work)
-    # (AMD FSR 4: the build's switch for nx2/build.py, and the folder's mark for the next --update)
-    if fsr_wanted(a, out):
-        os.environ["LONGSHOT_FSR"] = "1"
+    # (AMD FSR 4: the folder's mark for the next --update)
+    if fsr:
         if getattr(a, "fetch_fsr_runtime", False) and not LINUX:
             fetch_fsr_runtime(a)
         elif getattr(a, "fetch_fsr_runtime", False):
             print("--fetch-fsr-runtime: AMD publishes this runtime for Windows only; on Linux see the readme "
                   "(amd_fidelityfx_upscaler_vk.so)", flush=True)
         open(os.path.join(out, FSR_MARK), "w").close()
-        if os.environ.get("LONGSHOT_VK_PREBUILT"):   # (the AppImage's back end, built without FSR 4)
-            print("--fsr: this build uses the prebuilt Vulkan back end (LONGSHOT_VK_PREBUILT), which has no AMD FSR 4: the "
-                  "Upscaler row will not offer it", flush=True)
+        if os.environ.get("LONGSHOT_VK_PREBUILT"):   # (the AppImage's back end, built without FSR 4: nx2/build.py prebuilt_renderer)
+            print("--fsr: the Vulkan back end is compiled here with AMD FSR 4, not the prebuilt one (LONGSHOT_VK_PREBUILT)",
+                  flush=True)
     else:
-        os.environ.pop("LONGSHOT_FSR", None)
         if os.path.isfile(os.path.join(out, FSR_MARK)):
             os.remove(os.path.join(out, FSR_MARK))
     exefs = os.path.join(work, "exefs")
@@ -2391,9 +2396,8 @@ def main(a=None):
     built = os.path.join(work, "sa", "build")
     # (the new files are copied in beside the old ones as <name>.new and swapped in only once all are complete: a build stopped while
     # copying, or a full disk, left a half-written 460 MB longshot.exe and no game to play. The old game stays playable until the swap)
-    # (Windows) longshot.exe in the folder is the game's launcher: the builder's small setup, which opens the installed builder as a
-    # launcher for this folder (Play, and Update left of it when a newer release is out: builder/setup/setup.c launch mode), or starts
-    # the game when no builder is installed. The game and its DLLs are in bin\; its files (image.bin, romfs, saves, settings, caches)
+    # (Windows) longshot.exe in the folder is the game's launcher: the builder's small setup (builder/setup/setup.c), which starts
+    # bin\longshot.exe. The game and its DLLs are in bin\; its files (image.bin, romfs, saves, settings, caches)
     # stay in the folder (host/hos_paths.h). Without the setup (a development build) the game stays longshot.exe in the folder
     staged = []
     # (Linux) the same launcher, as a script, when this is a packaged builder (the AppImage sets LONGSHOT_TOOLS). A source
@@ -2483,16 +2487,10 @@ def main(a=None):
             if tag:
                 break
     if tag:
-        write_game_home(out, portable_home)
         with open(os.path.join(out, "longshot_version.txt"), "w", encoding="utf-8", newline="\n") as f:
             f.write("version=%s\n" % tag)
-            if portable_home is not None:
-                f.write("builder_local=1\n")
-            elif os.environ.get("LONGSHOT_BUILDER_EXE"):
+            if os.environ.get("LONGSHOT_BUILDER_EXE"):
                 f.write("builder=%s\n" % os.environ["LONGSHOT_BUILDER_EXE"])
-                # (the Python builder: builder is its pythonw.exe, and these the arguments before --update)
-                if os.environ.get("LONGSHOT_BUILDER_ARGS"):
-                    f.write("builder_args=%s\n" % os.environ["LONGSHOT_BUILDER_ARGS"])
     # (the game's code as read: written again by every build, so not left behind in the work folder. The translated code (sa\gen)
     # and the compiled objects stay: the next build skips the lift when nothing it reads changed (#428) and compiles only what
     # changed; the builder says how much stays and lets it go. Kept in a development checkout)
@@ -2523,11 +2521,14 @@ def main(a=None):
                                                     "" if previous is None else " (the last one %s)" % clock(previous)), flush=True)
     say("times", "%.0f" % total_seconds, "%.0f" % compile_seconds, "-1" if previous is None else "%.0f" % previous)
     # (after the times: they stay comparable from build to build, without a GPU's minutes that can be switched off)
+    if getattr(a, "compile_shaders", None):   # (the choice kept in the folder: the game's own preparations at a start follow it)
+        write_compile_level(out, a.compile_shaders)
+    level = compile_level(a, out)
     skipped = prepare_skipped(a)
     if skipped:
         not_prepared(skipped)
     else:
-        prepare_shaders([os.path.join(game_dir, BESIDE[0]), "--prepare-shaders"], out)
+        prepare_shaders([os.path.join(game_dir, BESIDE[0]), "--prepare-shaders", "--compile-shaders", level], out)
     say("done", out)
 
 

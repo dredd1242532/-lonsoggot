@@ -5,18 +5,30 @@ in), and --ready only when the description passes check_pr_description.py; pr re
 refuses an incomplete description (--force goes on with a warning), prints the check's warnings, and takes WIP: and the
 'needs measurements' label off; pr wip puts WIP: back (and the label, when asked); pr
 edit keeps the WIP state; pr update edits the description and comments in one step, or only comments; pr comment takes
---body-file; the fork and the PR's head use the login Forgejo has now, not the one saved at sign-in (an
-account can be renamed); pr status shows the state, the check, the checklist, the reviews and the last comments.
+--body-file, and with --attach posts the comment, puts each picture up as its attachment and edits it to show them
+(attach:NAME in the text becomes the picture's link, the rest go at the end), refusing before anything is posted a file
+that is missing, not a picture by name and bytes, or too big, and an attach: with no file; an upload that fails stops
+there and names the comment, what went up and what didn't (the upload itself: a stand-in urlopen reads its form); the
+fork and the PR's head use the login Forgejo has now, not the one saved at sign-in (an
+account can be renamed); pr status shows the state, the check, the checklist, the reviews and the last comments (and
+for a work-in-progress PR, which Forgejo never calls mergeable, whether main has moved past its base); pr
+review posts one review (approve, comment or request changes) with its inline comments on lines of the diff, refusing
+a line outside the diff's hunks before posting anything, and an approval of a work-in-progress PR.
 
     python -I -B tests/test_forge_pr.py
 """
 import contextlib
+import email.parser
+import email.policy
 import importlib.util
 import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest import mock
 
@@ -35,6 +47,13 @@ samples = load("test_check_pr_description", ROOT / "tests" / "test_check_pr_desc
 TEMPLATE = samples.TEMPLATE
 FILLED = samples.GOOD
 DIFF = samples.DIFF
+REAL_API_UPLOAD = forge.api_upload
+# (the first bytes of each kind of picture --attach takes, and a little more)
+PNG = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(24)
+JPEG = b"\xff\xd8\xff\xe0\0\x10JFIF\0" + bytes(24)
+GIF = b"GIF89a" + bytes(24)
+WEBP = b"RIFF\x24\0\0\0WEBPVP8 " + bytes(24)
+ATTACHMENT = "https://git.magicbean.dev/attachments/0f3c-%d"
 
 
 class Forgejo:
@@ -44,7 +63,9 @@ class Forgejo:
         self.prs, self.comments, self.calls = {}, {}, []
         self.labels = [{"id": 7, "name": "testing wanted"}, {"id": 9, "name": "needs measurements"}]
         self.reviews, self.diffs = {}, {}
+        self.assets, self.refuse, self.refuse_edit = [], set(), False   # (comment attachments; names to fail; edits)
         self.wip_prefixes = ("WIP:", "[WIP]")
+        self.main_head = "7afe6ae1" + "2" * 32
 
     def add(self, number, title, body, labels=()):
         self.prs[number] = {"number": number, "title": title, "body": body, "state": "open", "merged": False,
@@ -73,10 +94,17 @@ class Forgejo:
             pr = self.add(len(self.prs) + 1, body["title"], body["body"])
             pr["head"]["sha"], pr["merge_base"] = "992a2420" + "1" * 32, "7afe6ae1" + "2" * 32
             return dict(pr)
+        if parts == ["branches", "main"]:
+            return {"name": "main", "commit": {"id": self.main_head}}
         if parts[:2] == ["git", "commits"]:
             return {"commit": {"committer": {"date": "2026-11-10T12:00:00Z"}}}
         if parts[0] == "labels":
             return self.labels
+        if parts[:2] == ["issues", "comments"] and method == "PATCH":
+            if self.refuse_edit:
+                raise forge.ForgeError("PATCH %s: HTTP 502 Bad Gateway" % path)
+            self.comment(int(parts[2]))["body"] = body["body"]
+            return dict(self.comment(int(parts[2])))
         number = int(parts[1])
         pr = self.prs[number]
         if parts[0] == "pulls" and len(parts) == 2:
@@ -85,12 +113,17 @@ class Forgejo:
                 pr["draft"] = self.draft(pr["title"])
             return dict(pr)
         if parts[2:] == ["reviews"]:
+            if method == "POST":
+                self.reviews.setdefault(number, []).append(dict(body, user={"login": "alice"}, state=body["event"]))
+                return {"html_url": pr["html_url"] + "#issuecomment-%d" % (100 + len(self.reviews[number]))}
             return self.reviews.get(number, [])
         if parts[2:] == ["comments"]:
             if method == "POST":
-                self.comments[number].append({"body": body["body"], "user": {"login": "alice"},
-                                              "created_at": "2026-11-12T18:00:00Z"})
-                return {"html_url": pr["html_url"] + "#issuecomment-%d" % len(self.comments[number])}
+                cid = sum(len(c) for c in self.comments.values()) + 1
+                self.comments[number].append({"id": cid, "body": body["body"], "user": {"login": "alice"},
+                                              "created_at": "2026-11-12T18:00:00Z",
+                                              "html_url": pr["html_url"] + "#issuecomment-%d" % cid})
+                return dict(self.comments[number][-1])
             return self.comments[number]
         if parts[2] == "labels":
             if method == "POST":
@@ -99,6 +132,22 @@ class Forgejo:
                 pr["labels"] = [l for l in pr["labels"] if l["id"] != int(parts[3])]
             return None
         raise AssertionError("unexpected call %s %s" % (method, path))
+
+    def comment(self, cid):
+        found, = [c for comments in self.comments.values() for c in comments if c["id"] == cid]
+        return found
+
+    def upload(self, path, name, data, content_type):
+        """forge.api_upload: a picture put up as an attachment of a comment"""
+        self.calls.append(("POST", path, {"name": name, "bytes": data, "content_type": content_type}))
+        where, _, query = path.partition("?name=")
+        assert where.startswith("/repos/MagicBeanDev/Longshot/issues/comments/") and where.endswith("/assets"), path
+        assert urllib.parse.unquote(query) == name, path   # (the real name, which Forgejo takes before the form's)
+        self.comment(int(where.split("/")[-2]))
+        if name in self.refuse:
+            raise forge.ForgeError("POST %s: HTTP 500 the attachment storage is full" % where)
+        self.assets.append(name)
+        return {"name": name, "size": len(data), "browser_download_url": ATTACHMENT % len(self.assets)}
 
     def text(self, path):
         self.calls.append(("GET", path, None))
@@ -118,11 +167,13 @@ class PR(unittest.TestCase):
         self.forgejo = Forgejo()
         self.patches = [mock.patch.object(forge, "api", self.forgejo),
                         mock.patch.object(forge, "api_text", self.forgejo.text),
+                        mock.patch.object(forge, "api_upload", self.forgejo.upload),
                         # (the login saved at sign-in, from before the account was renamed: the server's is the one used)
                         mock.patch.object(forge, "token", lambda: {"login": "alice-before", "access_token": "t"}),
                         mock.patch.object(forge, "ensure_fork", lambda login: ("%s/Longshot" % login, False)),
                         mock.patch.object(forge.auth, "forge_request", no_network),
-                        mock.patch.object(forge.auth, "forge_session", no_network)]
+                        mock.patch.object(forge.auth, "forge_session", no_network),
+                        mock.patch.object(forge.urllib.request, "urlopen", no_network)]
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
@@ -138,6 +189,13 @@ class PR(unittest.TestCase):
         path = os.path.join(self.tmp, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
+        return path
+
+    def picture(self, name, data=PNG, folder=""):
+        os.makedirs(os.path.join(self.tmp, folder), exist_ok=True)
+        path = os.path.join(self.tmp, folder, name)
+        with open(path, "wb") as f:
+            f.write(data)
         return path
 
     # --- create ---
@@ -333,6 +391,252 @@ class PR(unittest.TestCase):
         self.assertEqual([c["body"] for c in self.forgejo.comments[5]], ["Tested: fixed.\n", "Second."])
         self.assertIn("empty", self.run_forge("pr", "comment", "5")[2])
 
+    # --- comment --attach: pictures in the comment ---
+
+    def test_comment_without_attach_is_as_before(self):
+        self.forgejo.add(5, "fix: x", FILLED)
+        text = "![not a file here](attach:nothing.png)"
+        code, out, err = self.run_forge("pr", "comment", "5", text)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(self.forgejo.writes(),
+                         [("POST", "/repos/MagicBeanDev/Longshot/issues/5/comments", {"body": text})])
+        self.assertEqual(out, self.forgejo.comments[5][0]["html_url"] + "\n")
+
+    def test_comment_attach_shows_the_pictures(self):
+        self.forgejo.add(5, "fix: x", FILLED)
+        shot, kokiri, extra = (self.picture("main-21x9.png"), self.picture("kokiri.jpg", JPEG),
+                               self.picture("extra.webp", WEBP))
+        text = ("Test request T-XXXX: pass\n\n![main at 21:9](attach:main-21x9.png)\n\n"
+                "![Kokiri](attach:kokiri.jpg \"Kokiri Forest\") and again ![same](attach:main-21x9.png)\n")
+        code, out, err = self.run_forge("pr", "comment", "5", "--body-file", self.file(text),
+                                        "--attach", shot, kokiri, "--attach", extra)
+        self.assertEqual((code, err), (0, ""))
+        comment = self.forgejo.comments[5][0]
+        writes = self.forgejo.writes()
+        self.assertEqual([(m, p.split("?")[0]) for m, p, _ in writes],
+                         [("POST", "/repos/MagicBeanDev/Longshot/issues/5/comments")]
+                         + [("POST", "/repos/MagicBeanDev/Longshot/issues/comments/%d/assets" % comment["id"])] * 3
+                         + [("PATCH", "/repos/MagicBeanDev/Longshot/issues/comments/%d" % comment["id"])])
+        self.assertEqual([(b["name"], b["content_type"]) for _, _, b in writes[1:4]],
+                         [("main-21x9.png", "image/png"), ("kokiri.jpg", "image/jpeg"), ("extra.webp", "image/webp")])
+        self.assertEqual([b["bytes"] for _, _, b in writes[1:4]], [PNG, JPEG, WEBP], "each file whole, once")
+        # (posted first with the placeholders, the picture the text doesn't show added at the end; then edited)
+        self.assertEqual(writes[0][2]["body"], text.rstrip() + "\n\n![extra.webp](attach:extra.webp)\n")
+        self.assertEqual(comment["body"], "Test request T-XXXX: pass\n\n![main at 21:9](%s)\n\n![Kokiri](%s \"Kokiri "
+                         "Forest\") and again ![same](%s)\n\n![extra.webp](%s)\n"
+                         % (ATTACHMENT % 1, ATTACHMENT % 2, ATTACHMENT % 1, ATTACHMENT % 3))
+        self.assertEqual(out.splitlines(),
+                         [comment["html_url"], "3 pictures in the comment: main-21x9.png, kokiri.jpg, extra.webp"])
+
+    def test_comment_attach_names(self):
+        self.forgejo.add(5, "fix: x", FILLED)
+        odd = self.picture("Zélda [1] (2).gif", GIF)
+        code, _, err = self.run_forge("pr", "comment", "5", "--attach", odd)   # (pictures alone)
+        self.assertEqual(code, 0, err)
+        (_, _, posted), (_, path, _), _ = self.forgejo.writes()
+        self.assertEqual(posted["body"], "![Zélda \\[1\\] (2).gif](attach:Z%C3%A9lda%20%5B1%5D%20%282%29.gif)\n")
+        self.assertTrue(path.endswith("/assets?name=Z%C3%A9lda%20%5B1%5D%20%282%29.gif"), path)
+        self.assertEqual(self.forgejo.comments[5][0]["body"], "![Zélda \\[1\\] (2).gif](%s)\n" % (ATTACHMENT % 1))
+        # (a name with a space is referred to percent-encoded; TEXT before --attach)
+        spaced = self.picture("main 21x9.png")
+        code, _, err = self.run_forge("pr", "comment", "5", "![main](attach:main%2021x9.png)", "--attach", spaced)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.forgejo.comments[5][1]["body"], "![main](%s)" % (ATTACHMENT % 2))
+
+    def test_comment_attach_refuses_before_posting(self):
+        self.forgejo.add(5, "fix: x", FILLED)
+        shot = self.picture("shot.png")
+        os.makedirs(os.path.join(self.tmp, "folder.png"))
+        missing, nso = os.path.join(self.tmp, "missing.png"), self.picture("main.nso", b"NSO0" + bytes(60))
+        for paths, want in (([missing], "missing.png: no such file"),
+                            ([os.path.join(self.tmp, "folder.png")], "folder.png: not a file"),
+                            ([nso], "main.nso: not a picture by its name"),
+                            ([self.picture("longshot_programs.bin", PNG)],
+                             "longshot_programs.bin: not a picture by its name"),
+                            ([self.picture("dump.png", b"\x7fELF" + bytes(60))],
+                             "dump.png: named as a PNG, but its bytes are no picture's"),
+                            ([self.picture("photo.png", JPEG)],
+                             "photo.png: named as a PNG, but its bytes are a JPEG's: rename it"),
+                            ([self.picture("empty.webp", b"")], "empty.webp: named as a WEBP, but its bytes are no"),
+                            ([shot, self.picture("shot.png", PNG, "other")], "a second file named shot.png"),
+                            ([missing, nso], "main.nso: not a picture")):   # (every problem at once)
+            code, out, err = self.run_forge("pr", "comment", "5", "Results.", "--attach", *paths)
+            self.assertEqual((code, out), (1, ""), want)
+            for line in (want, "--attach: nothing was posted", "no game files, keys or anything made from them",
+                         "CONTRIBUTING.md, The rule with no exceptions"):
+                self.assertIn(line, err)
+        self.assertIn("missing.png: no such file", err)
+        with mock.patch.object(forge, "ATTACH_MAX", len(PNG) - 1):
+            self.assertIn("shot.png: 0.0 MiB, over the 0 MiB a picture may have",
+                          self.run_forge("pr", "comment", "5", "x", "--attach", shot)[2])
+        code, _, err = self.run_forge("pr", "comment", "5", "![a](attach:shot.png) ![b](attach:other.png)",
+                                      "--attach", shot)
+        self.assertEqual(code, 1)
+        self.assertIn("the comment shows attach:other.png, but --attach gives no file of that name: nothing was "
+                      "posted", err)
+        self.assertEqual(self.forgejo.writes(), [])
+
+    def test_comment_attach_upload_fails(self):
+        self.forgejo.add(5, "fix: x", FILLED)
+        a, b, c = (self.picture(n) for n in ("a.png", "b.png", "c.png"))
+        self.forgejo.refuse = {"b.png"}
+        code, out, err = self.run_forge("pr", "comment", "5", "Shots: ![b](attach:b.png)", "--attach", a, b, c)
+        self.assertEqual(code, 1)
+        comment = self.forgejo.comments[5][0]
+        self.assertEqual(out.splitlines(), [comment["html_url"]], "the link first: the comment is there")
+        for want in ("the comment is posted, but not all its pictures show: " + comment["html_url"],
+                     "  uploaded: a.png",
+                     "  failed: b.png (POST /repos/MagicBeanDev/Longshot/issues/comments/1/assets: HTTP 500",
+                     "  not tried: c.png", "the others still read attach:NAME", "Don't post it again",
+                     "pr comment 5 --attach FILE"):
+            self.assertIn(want, err)
+        # (each tried once, no retry, and none after the failure; the comment shows the one that went up)
+        self.assertEqual([b["name"] for _, p, b in self.forgejo.writes() if "/assets" in p], ["a.png", "b.png"])
+        self.assertEqual(comment["body"], "Shots: ![b](attach:b.png)\n\n![a.png](%s)\n\n![c.png](attach:c.png)\n"
+                         % (ATTACHMENT % 1))
+        # (the first fails: nothing to show, so no edit)
+        self.forgejo.refuse = {"a.png"}
+        writes = len(self.forgejo.writes())
+        code, _, err = self.run_forge("pr", "comment", "5", "Shots.", "--attach", a, b)
+        self.assertEqual(code, 1)
+        self.assertIn("  uploaded: none\n  failed: a.png", err)
+        self.assertIn("  not tried: b.png", err)
+        self.assertEqual([m for m, _, _ in self.forgejo.writes()[writes:]], ["POST", "POST"])
+        self.assertEqual(self.forgejo.comments[5][1]["body"],
+                         "Shots.\n\n![a.png](attach:a.png)\n\n![b.png](attach:b.png)\n")
+        # (all went up but the edit fails: their links, to put in by hand)
+        self.forgejo.refuse, self.forgejo.refuse_edit = set(), True
+        code, _, err = self.run_forge("pr", "comment", "5", "Shots.", "--attach", a)
+        self.assertEqual(code, 1)
+        self.assertIn("  uploaded: a.png\nThe edit that shows them failed too (PATCH", err)
+        self.assertIn("\n  a.png %s\n" % (ATTACHMENT % 2), err)
+
+    def test_upload_sends_the_form(self):
+        sent, answer = [], {"size": len(PNG), "browser_download_url": ATTACHMENT % 1}
+
+        def urlopen(req, timeout):
+            sent.append((req, timeout))
+            return io.BytesIO(json.dumps(answer).encode())
+
+        with mock.patch.object(forge, "api_upload", REAL_API_UPLOAD), \
+                mock.patch.object(forge.urllib.request, "urlopen", urlopen):
+            self.assertEqual(forge.upload_picture(12, "Zélda 1.png", PNG, "image/png"), ATTACHMENT % 1)
+            (req, timeout), = sent
+            self.assertEqual(req.full_url, "https://git.magicbean.dev/api/v1/repos/MagicBeanDev/Longshot/issues/"
+                                           "comments/12/assets?name=Z%C3%A9lda%201.png")
+            self.assertEqual((req.get_method(), req.get_header("User-agent"), req.get_header("Authorization")),
+                             ("POST", forge.auth.USER_AGENT, "Bearer t"))
+            ctype = req.get_header("Content-type")
+            self.assertTrue(ctype.startswith("multipart/form-data; boundary=longshot-"), ctype)
+            form = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+                b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + req.data)
+            part, = form.iter_parts()
+            self.assertEqual((part.get_param("name", header="content-disposition"), part.get_filename(),
+                              part.get_content_type(), part.get_payload(decode=True)),
+                             ("attachment", "Z_lda_1.png", "image/png", PNG))
+            answer["size"] = 3   # (the server kept part of it)
+            with self.assertRaisesRegex(forge.ForgeError, r"Zélda 1.png: the server's answer is not this picture's"):
+                forge.upload_picture(12, "Zélda 1.png", PNG, "image/png")
+
+            def refused(req, timeout):
+                raise urllib.error.HTTPError(req.full_url, 413, "Too Large", {}, io.BytesIO(b"too big"))
+
+            def down(req, timeout):
+                raise urllib.error.URLError("connection refused")
+
+            for opener, want in ((refused, r"issues/comments/12/assets: HTTP 413 too big"), (down, "cannot reach")):
+                with mock.patch.object(forge.urllib.request, "urlopen", opener), \
+                        self.assertRaisesRegex(forge.ForgeError, want):
+                    forge.upload_picture(12, "a.png", PNG, "image/png")
+
+    # --- review ---
+
+    REVIEW_DIFF = """diff --git a/gpu/vk/a.cpp b/gpu/vk/a.cpp
+index 1111111..2222222 100644
+--- a/gpu/vk/a.cpp
++++ b/gpu/vk/a.cpp
+@@ -10,4 +10,5 @@ void f() {
+ int a;
+--- removed, though it reads like a header
++++ added, though it reads like a header
++int c;
+ int d;
+@@ -40,2 +41,2 @@
+-old();
++new_();
+diff --git a/docs/new.md b/docs/new.md
+new file mode 100644
+--- /dev/null
++++ b/docs/new.md
+@@ -0,0 +1,2 @@
++# New
++text
+diff --git a/old.txt b/old.txt
+deleted file mode 100644
+--- a/old.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-gone
+-too
+"""
+
+    def review_pr(self, title="fix: x"):
+        self.forgejo.add(5, title, FILLED)["head"]["sha"] = "abc123" + "0" * 34
+        self.forgejo.diffs[5] = self.REVIEW_DIFF
+
+    def test_diff_lines(self):
+        lines = forge.diff_lines(self.REVIEW_DIFF)
+        self.assertEqual(lines["gpu/vk/a.cpp"], ({10, 11, 12, 13, 41}, {10, 11, 12, 40}))
+        self.assertEqual(lines["docs/new.md"], ({1, 2}, set()))
+        self.assertEqual(lines["old.txt"], (set(), {1, 2}))
+
+    def test_review_approve_with_line_comments(self):
+        self.review_pr()
+        inline = self.file('[{"path": "docs/new.md", "line": 2, "body": "typo"},'
+                           ' {"path": "gpu/vk/a.cpp", "old_line": 40, "body": "why remove it?"}]', "inline.json")
+        code, out, err = self.run_forge("pr", "review", "5", "--approve", "--body", "Looks right.", "--inline", inline,
+                                        "--at", "gpu/vk/a.cpp:12", "c is never read", "--at", "old.txt:-2", "fine")
+        self.assertEqual(code, 0, err)
+        self.assertIn("approved, 4 inline comments: https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/5#issuecomment-101", out)
+        (method, path, body), = self.forgejo.writes()
+        self.assertEqual((method, path), ("POST", "/repos/MagicBeanDev/Longshot/pulls/5/reviews"))
+        self.assertEqual((body["event"], body["body"], body["commit_id"]), ("APPROVED", "Looks right.", "abc123" + "0" * 34))
+        self.assertEqual(body["comments"], [
+            {"path": "docs/new.md", "body": "typo", "new_position": 2, "old_position": 0},
+            {"path": "gpu/vk/a.cpp", "body": "why remove it?", "new_position": 0, "old_position": 40},
+            {"path": "gpu/vk/a.cpp", "body": "c is never read", "new_position": 12, "old_position": 0},
+            {"path": "old.txt", "body": "fine", "new_position": 0, "old_position": 2}])
+
+    def test_review_refuses_lines_off_the_diff(self):
+        self.review_pr()
+        for at in (["gpu/vk/a.cpp:30", "x"], ["gpu/vk/a.cpp:-41", "x"], ["README.md:1", "x"]):
+            code, _, err = self.run_forge("pr", "review", "5", "--comment", "--at", *at)
+            self.assertEqual(code, 1)
+            self.assertIn("off the diff", err)
+        for bad in (["--at", "gpu/vk/a.cpp", "x"], ["--at", "a.cpp:x", "x"], ["--at", "gpu/vk/a.cpp:12", " "],
+                    ["--inline", self.file('{"path": "a"}', "bad.json")], ["--inline", self.file("not json", "bad2.json")],
+                    ["--inline", self.file('[{"path": "docs/new.md", "line": 1, "old_line": 1, "body": "x"}]', "both.json")]):
+            self.assertEqual(self.run_forge("pr", "review", "5", "--comment", *bad)[0], 1, bad)
+        self.assertEqual(self.forgejo.writes(), [])
+
+    def test_review_wip_empty_and_closed(self):
+        self.review_pr("WIP: fix: x")
+        code, _, err = self.run_forge("pr", "review", "5", "--approve")
+        self.assertEqual(code, 1)
+        self.assertIn("work in progress", err)
+        self.assertIn("empty", self.run_forge("pr", "review", "5", "--request-changes")[2])
+        self.assertEqual(self.forgejo.writes(), [])
+        code, out, _ = self.run_forge("pr", "review", "5", "--request-changes", "--at", "gpu/vk/a.cpp:41", "breaks Linux")
+        self.assertEqual(code, 0)
+        self.assertIn("request changes, 1 inline comment:", out)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            forge.main(["pr", "review", "5", "--body", "no verdict"])
+        self.forgejo.prs[5].update(title="fix: x", draft=False, state="closed")
+        self.assertIn("#5 is closed", self.run_forge("pr", "review", "5", "--approve")[2])
+        self.forgejo.prs[5]["state"] = "open"
+        self.assertEqual(self.run_forge("pr", "review", "5", "--approve")[0], 0)   # (an approval may say nothing more)
+        self.assertEqual([r["event"] for r in self.forgejo.reviews[5]], ["REQUEST_CHANGES", "APPROVED"])
+
     # --- status ---
 
     def test_status(self):
@@ -354,6 +658,18 @@ class PR(unittest.TestCase):
         out = self.run_forge("pr", "status", "6")[1]
         for want in ("ready for review", "Description: complete", "For everyone: 10 of 10 ticked", "Reviews: none"):
             self.assertIn(want, out)
+
+    def test_status_mergeable_of_a_wip_pr(self):
+        # (Forgejo answers not mergeable for any WIP PR: a rebase is named only where one can be needed)
+        head = self.forgejo.main_head
+        for title, merge_base, want in (("fix: x", head, "Mergeable: no (rebase onto main)"),
+                                        ("WIP: fix: x", head, "work in progress (Forgejo merges no WIP PR); it is on "
+                                                              "main's head, no rebase needed"),
+                                        ("WIP: fix: x", "0" * 40, "main has moved past its base: rebase if it conflicts"),
+                                        ("WIP: fix: x", None, "whether it needs a rebase shows once it is ready")):
+            pr = self.forgejo.add(7, title, TEMPLATE)
+            pr.update(mergeable=False, merge_base=merge_base)
+            self.assertIn(want, self.run_forge("pr", "status", "7")[1], title)
 
     def test_view_shows_wip(self):
         self.forgejo.add(5, "[wip] fix: x", FILLED)

@@ -52,6 +52,9 @@ What CONTRIBUTING.md doesn't spell out, and agents trip on:
   (no `CP_ACP`; `tests/test_utf8_paths.py`).
 - **No CI, and no game in the checks.** Forgejo runs no checks yet: run `python -I -B tests/run_all.py` yourself
   and say so in the PR. The checks run without a dump; a run in the game is yours to do locally and report.
+- **Test a change against a base, not in a new full build**: `scripts/dev_packs.py`, [Testing a change against a
+  base](docs/development.md#testing-a-change-against-a-base). Agents sharing a PC share one base and agree before
+  moving it; it is for development and A/B runs only. Bases, packs and runtimes are built from the game: never send them.
 
 ## Open the pull request
 
@@ -68,6 +71,10 @@ Never push to `forge`: Longshot's `main` takes reviewed pull requests only. `pr 
 - **Work in progress until measured.** A PR opens as WIP (a `WIP:` title; `pr create` does it) and is marked ready
   (`pr ready`) only when the Measurements have real numbers and every *For everyone* box is ticked. Don't `--force`
   it, and don't review a WIP PR. One that needs more work goes back (`pr wip <n>`).
+- **Take it out of WIP yourself once it is ready.** When the description check passes (`pr status <n>`) and the
+  change is tested and measured, run `pr ready <n>` in the same session. Don't wait to be asked: nobody reviews a WIP
+  PR, so one left WIP waits for nothing. A change the game doesn't run (a script, the docs, the checks) is measured by
+  its game-free checks. Forgejo shows a WIP PR as not mergeable: that alone isn't a reason to rebase.
 - **The description is the PR as it is now; the comments are its history.** When the change, the numbers or what was
   tested change, edit the description and post a short comment saying what changed and why, in one step: `pr update`.
 - **The checklist is yours to keep true, on every update.** Each box is a statement about the PR as it is now, and

@@ -8,6 +8,11 @@
 # 1. version: tools.lock is checked first (scripts/tools.py check --require: every tool the Windows and the Linux builder
 #    need is in Longshot's packages), then the version's name; a tag is checked too (scripts/release.py check-tag: its form, on main, above
 #    every release, and as high as the commits since the last stable call for). Either refused builds nothing.
+#    A tag whose commit CI has released already (its nightly; for a stable, its release candidate) names that release in
+#    `checked` (scripts/release.py released-as: published, its SHA256SUMS signed by a key the launcher trusts and naming its
+#    every file; one that is not stops the run). Its run passed every check of the commit, so the build checks that ship
+#    no file are not run again. Its files are not reused: each carries its version (the AppImage's VERSION and Vulkan back
+#    end, the zip's VERSION and builder), and a release never ships a file that names another version.
 # 2. linux, windows: Longshot-<v>-x86_64.AppImage and LongshotBuilder-<v>-windows-x64.zip (build-linux.yml, build-windows.yml).
 # 3. publish: SHA256SUMS over the files and tools.lock, SHA256SUMS.sig (the release key), the notes (git-cliff, cliff.toml),
 #    then a draft release with every file, published last: until then no launcher sees it. A nightly also prunes the
@@ -35,11 +40,12 @@ defaults:
 jobs:
   version:
     name: The version
-    runs-on: ubuntu-latest
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.name.outputs.tag }}
       ref: ${{ steps.name.outputs.ref }}
+      checked: ${{ steps.name.outputs.checked }}
     steps:
       - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,13 +62,28 @@ jobs:
       - id: name
         env:
           RELEASE_TOKEN: ${{ forgejo.token }}
+          FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
         run: |
           git fetch -q --tags origin main
           ref=$(git rev-parse HEAD)
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             tag=${GITHUB_REF#refs/tags/}
             python3 -I scripts/release.py check-tag "$tag" --main origin/main
+            # (the release CI made of this commit already, checked: its build checks are not run again; it stops here when
+            # a release of this commit is not signed or not whole)
+            checked=$(python3 -I scripts/release.py released-as "$ref" --not "$tag")
+            echo "checked=$checked" >> "$GITHUB_OUTPUT"
+            [[ -z $checked ]] || echo "::notice::$checked is this commit's release: its build checks are not run again"
           else
+            # (a nightly whose commit is no longer main's skips itself: the release runs queue one at a time, and of a few
+            # merges in a row only the newest one builds; the one already running goes on)
+            head=$(git rev-parse origin/main)
+            if [[ $GITHUB_EVENT_NAME == push && $head != "$ref" ]]; then
+              echo "::notice::main has moved on to ${head:0:8}: this nightly skips, the newer one builds"
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              echo "ref=$ref" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             tag=$(python3 -I scripts/release.py nightly-name)
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -72,23 +93,28 @@ jobs:
   linux:
     name: Linux builder
     needs: version
+    if: needs.version.outputs.tag != ''
     uses: ./.forgejo/workflows/build-linux.yml
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
+      checked: ${{ needs.version.outputs.checked }}
 
   windows:
     name: Windows builder
     needs: version
+    if: needs.version.outputs.tag != ''
     uses: ./.forgejo/workflows/build-windows.yml
     with:
       tag: ${{ needs.version.outputs.tag }}
       ref: ${{ needs.version.outputs.ref }}
+      checked: ${{ needs.version.outputs.checked }}
 
   publish:
     name: Sign and publish
     needs: [version, linux, windows]
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.tag != ''
+    runs-on: quick  # (a short job: it starts as the builds end, never behind them; the same machine and secrets)
     timeout-minutes: 60
     env:
       TAG: ${{ needs.version.outputs.tag }}
@@ -101,11 +127,27 @@ jobs:
           ref: ${{ needs.version.outputs.ref }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+      # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
+      - id: download_1
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: Longshot-linux-x86_64
           path: files
-      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+      - if: steps.download_1.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+        with:
+          name: Longshot-linux-x86_64
+          path: files
+      # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
+      - id: download_2
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+        with:
+          name: LongshotBuilder-windows
+          path: files
+      - if: steps.download_2.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: LongshotBuilder-windows
           path: files
@@ -130,7 +172,8 @@ jobs:
           cat files/SHA256SUMS
       - name: The notes
         run: |
-          export GIT_CLIFF=$(python3 -I scripts/release.py git-cliff "$RUNNER_TEMP/cliff")
+          GIT_CLIFF=$(python3 -I scripts/release.py git-cliff "$RUNNER_TEMP/cliff")
+          export GIT_CLIFF
           python3 -I scripts/release.py notes "$TAG" --out notes.md
           cat notes.md
       - name: Publish

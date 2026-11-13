@@ -12,7 +12,9 @@ Standard library only (Windows and Linux), so any agent can use it; people may p
     python -I scripts/forge.py pr wip N [--needs-measurements]      put WIP: back: it needs more work
     python -I scripts/forge.py pr edit N [--title T] [--body TEXT | --body-file F]
     python -I scripts/forge.py pr update N [--body TEXT | --body-file F] (--comment TEXT | --comment-file F)
-    python -I scripts/forge.py pr comment N (TEXT | --body-file F)
+    python -I scripts/forge.py pr comment N (TEXT | --body TEXT | --body-file F) [--attach FILE ...]   with pictures
+    python -I scripts/forge.py pr review N (--approve | --comment | --request-changes) [--body TEXT | --body-file F]
+                                  [--inline F.json] [--at PATH:LINE TEXT]...   a review, with comments on lines of the diff
     python -I scripts/forge.py pr status N                          WIP or ready, the checklist, reviews, last comments
     python -I scripts/forge.py pr list [--mine] [--state open|closed|all]
     python -I scripts/forge.py pr view N [--comments]
@@ -44,8 +46,24 @@ the branch's head). pr ready takes WIP: off after the same check as the PR descr
 ticked; the Flags note only warns), and refuses when it fails
 (--force goes on with a warning); pr wip puts it back. The description is the PR as it is now, the comments its
 history: pr update edits the description and posts a comment saying what changed in one step.
+
+pr review posts one review: the verdict, a summary and comments on lines of the diff, each on the line of the PR's
+version of the file (PATH:LINE), or of main's for a line the PR removes (PATH:-LINE; "old_line" in --inline's JSON,
+a list of {"path", "line", "body"}). A line outside the diff's hunks is refused before anything is posted, since
+Forgejo would put the comment on no line. A work-in-progress PR can be commented on, not approved. The verdict
+follows what the review asks for: --request-changes for a change that has to land before the merge (a bug, a broken
+rule), on a WIP PR too; --comment for questions and suggestions; --approve when it can merge as it is.
+
+pr comment --attach puts pictures in the comment: it posts the comment, puts each file up as an attachment of it, then
+edits it so they show. In the text, a link target attach:NAME (![main at 21:9](attach:main-21x9.png); NAME as given,
+or percent-encoded) becomes the link of the file of that name; a file the text doesn't show is added at the end. Only
+pictures go up (PNG, JPEG, GIF or WebP, by name and by their first bytes, 25 MiB at most each), so that no game file,
+key or build goes up by mistake (CONTRIBUTING.md, The rule with no exceptions; screenshots are fine). Anything else, a
+missing file and an attach: with no file of its name are refused before anything is posted. An upload that fails stops
+there, with no retry: the error names the comment, what went up and what didn't, and the comment shows those that did.
 """
 import argparse
+import json
 import os
 import re
 import shlex
@@ -103,6 +121,30 @@ def api_text(path):
             return r.read().decode("utf-8", "replace")
     except (urllib.error.URLError, OSError) as e:
         raise ForgeError("GET %s: %s" % (path, e))
+
+
+def api_upload(path, name, data, content_type):
+    """The JSON answer to a file POSTed as the form Forgejo's attachment calls take (one field, "attachment"), with the
+    same sign-in as api(). The form's file name is kept to plain ASCII: the real one goes in the path's ?name=, which
+    Forgejo takes first."""
+    boundary = "longshot-" + os.urandom(16).hex()
+    plain = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    form = (('--%s\r\nContent-Disposition: form-data; name="attachment"; filename="%s"\r\nContent-Type: %s\r\n\r\n'
+             % (boundary, plain, content_type)).encode("ascii") + data + ("\r\n--%s--\r\n" % boundary).encode("ascii"))
+    req = urllib.request.Request(BASE + "/api/v1" + path, data=form, method="POST", headers={
+        "User-Agent": auth.USER_AGENT, "Accept": "application/json",
+        "Authorization": "Bearer " + token()["access_token"],
+        "Content-Type": "multipart/form-data; boundary=" + boundary})
+    where = "POST " + path.split("?")[0]
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        raise ForgeError("%s: HTTP %d %s" % (where, e.code, e.read()[:200].decode("utf-8", "replace")))
+    except (urllib.error.URLError, OSError) as e:
+        raise ForgeError("%s: cannot reach %s: %s" % (where, HOST, e))
+    except ValueError as e:
+        raise ForgeError("%s: the answer is not JSON (%s)" % (where, e))
 
 
 def text_arg(args):
@@ -352,6 +394,251 @@ def open_or_refuse(pr):
         raise ForgeError("#%d is %s" % (pr["number"], "merged" if pr.get("merged") else pr.get("state")))
 
 
+# --- pictures in a comment: pr comment --attach -------------------------------------------------------------------
+
+# Pictures only, by their name and by their first bytes: the guard that keeps a game file, a key or a build from going
+# up by mistake (CONTRIBUTING.md, The rule with no exceptions; screenshots are fine). 25 MiB holds a 4K PNG of the
+# game (2-3 bytes a pixel), so side-by-side pictures can stay lossless; the server would take far more
+# ([attachment] MAX_SIZE, docs/releases.md).
+PICTURES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+            ".webp": "image/webp"}
+ATTACH_MAX = 25 << 20
+ATTACH_REF = re.compile(r"(?<=\]\()attach:([^)\s]+)")   # (a link's target: ![caption](attach:NAME "title"))
+
+
+def picture_type(data):
+    """The content type a file's first bytes say, when they are a picture's"""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def check_picture(path):
+    """(name, bytes, content type) of a file --attach may put up, read whole now so that what is checked is what goes
+    up; or why not, as a string"""
+    if not os.path.isfile(path):
+        return "not a file" if os.path.exists(path) else "no such file"
+    name = os.path.basename(path)
+    want = PICTURES.get(os.path.splitext(name)[1].lower())
+    if not want:
+        return "not a picture by its name (.png, .jpg, .jpeg, .gif or .webp)"
+    with open(path, "rb") as f:
+        data = f.read(ATTACH_MAX + 1)
+    if len(data) > ATTACH_MAX:
+        return "%.1f MiB, over the %d MiB a picture may have: crop it, or save it as JPEG or WebP" % (
+            os.path.getsize(path) / (1 << 20), ATTACH_MAX >> 20)
+    got = picture_type(data)
+    if got != want:
+        kind = lambda t: t.split("/")[1].upper()
+        return "named as a %s, but its bytes are %s" % (
+            kind(want), "a %s's: rename it" % kind(got) if got else "no picture's")
+    return name, data, want
+
+
+def read_pictures(paths):
+    """[(name, bytes, content type)] of the files given with --attach. Refuses, before anything is posted, a file that
+    is missing, not a picture or too big, and two of one name (attach:NAME could not tell them apart), all in one go."""
+    found, wrong = [], []
+    for path in paths:
+        got = check_picture(path)
+        if isinstance(got, str):
+            wrong.append("%s: %s" % (path, got))
+        elif any(name == got[0] for name, _, _ in found):
+            wrong.append("%s: a second file named %s: rename one (attach:NAME names one file)" % (path, got[0]))
+        else:
+            found.append(got)
+    if wrong:
+        raise ForgeError("--attach: nothing was posted:\n  %s\nOnly pictures go up (PNG, JPEG, GIF or WebP, by name "
+                         "and by contents, %d MiB at most each): no game files, keys or anything made from them leave "
+                         "the PC; screenshots are fine (CONTRIBUTING.md, The rule with no exceptions)."
+                         % ("\n  ".join(wrong), ATTACH_MAX >> 20))
+    return found
+
+
+def attach_name(ref, names):
+    """The file an attach: reference names: NAME as given, or percent-encoded (attach:my%20shot.png)"""
+    return ref if ref in names else urllib.parse.unquote(ref)
+
+
+def placeholder_body(text, names):
+    """text, with each picture it doesn't show added at the end as ![NAME](attach:NAME); refuses an attach: reference to
+    a file --attach doesn't give"""
+    refs = ATTACH_REF.findall(text)
+    unknown = [r for r in dict.fromkeys(refs) if attach_name(r, names) not in names]
+    if unknown:
+        raise ForgeError("the comment shows %s, but --attach gives no file of %s: nothing was posted" % (
+            ", ".join("attach:" + r for r in unknown), "that name" if len(unknown) == 1 else "those names"))
+    shown = {attach_name(r, names) for r in refs}
+    rest = ["![%s](attach:%s)" % (re.sub(r"([\\\[\]])", r"\\\1", n), urllib.parse.quote(n, safe=""))
+            for n in names if n not in shown]
+    if not rest:
+        return text
+    return (text.rstrip() + "\n\n" if text.strip() else "") + "\n\n".join(rest) + "\n"
+
+
+def show_pictures(text, links):
+    """text with each attach:NAME whose picture went up turned into its link; the others stay as they are"""
+    return ATTACH_REF.sub(lambda m: links.get(attach_name(m.group(1), links), m.group(0)), text)
+
+
+def upload_picture(comment_id, name, data, content_type):
+    """Puts a picture up as an attachment of the comment; its link"""
+    path = "/repos/%s/issues/comments/%d/assets?name=%s" % (REPO, comment_id, urllib.parse.quote(name, safe=""))
+    got = api_upload(path, name, data, content_type) or {}
+    if got.get("size") != len(data) or not got.get("browser_download_url"):
+        raise ForgeError("%s: the server's answer is not this picture's (%s of %d bytes, link %s)" % (
+            name, got.get("size"), len(data), got.get("browser_download_url")))
+    return got["browser_download_url"]
+
+
+def post_with_pictures(number, text, paths):
+    """Posts the comment, puts each picture up as an attachment of it, then edits it so they show. Prints the comment's
+    link first. An upload that fails stops there, with no retry; the error says what went up and what didn't, and the
+    comment shows those that did (the rest keep their attach:NAME)."""
+    pictures = read_pictures(paths)
+    body = placeholder_body(text, [name for name, _, _ in pictures])
+    comment = api("POST", "/repos/%s/issues/%d/comments" % (REPO, number), {"body": body})
+    print(comment["html_url"])
+    links, failed, edit_failed = {}, None, None
+    for name, data, content_type in pictures:
+        try:
+            links[name] = upload_picture(comment["id"], name, data, content_type)
+        except ForgeError as e:
+            failed = (name, e)
+            break
+    if links:
+        try:
+            api("PATCH", "/repos/%s/issues/comments/%d" % (REPO, comment["id"]), {"body": show_pictures(body, links)})
+        except ForgeError as e:
+            edit_failed = e
+    if not failed and not edit_failed:
+        print("%d picture%s in the comment: %s" % (len(links), "" if len(links) == 1 else "s", ", ".join(links)))
+        return
+    lines = ["the comment is posted, but not all its pictures show: %s" % comment["html_url"],
+             "  uploaded: %s" % (", ".join(links) or "none")]
+    if failed:
+        lines.append("  failed: %s (%s)" % failed)
+        rest = [name for name, _, _ in pictures[len(links) + 1:]]
+        if rest:
+            lines.append("  not tried: %s" % ", ".join(rest))
+    if edit_failed:
+        lines.append("The edit that shows them failed too (%s): put each link where its attach:NAME is, on the "
+                     "comment's page (Edit):" % edit_failed)
+        lines += ["  %s %s" % item for item in links.items()]
+    else:
+        lines.append("The comment shows those that went up; the others still read attach:NAME.")
+    lines.append("Don't post it again: add the missing ones on the comment's page (Edit), or in a new comment "
+                 "(python -I scripts/forge.py pr comment %d --attach FILE ...)." % number)
+    raise ForgeError("\n".join(lines))
+
+
+# --- reviews: a verdict, a summary and comments on lines of the diff ----------------------------------------------
+
+REVIEW_EVENTS = {"approve": "APPROVED", "comment": "COMMENT", "request_changes": "REQUEST_CHANGES"}
+
+
+def diff_lines(diff):
+    """{path: (new lines, old lines)} a comment can sit on: the lines of the diff's hunks, context included"""
+    def name(line, prefix):
+        n = line[4:].split("\t")[0]
+        return None if n == "/dev/null" else n[2:] if n.startswith(prefix) else n
+
+    files, new, old, path, before, hunk = {}, 0, 0, None, None, False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            path, before, hunk = None, None, False
+        elif not hunk and line.startswith("--- "):
+            before = name(line, "a/")
+        elif not hunk and line.startswith("+++ "):
+            path = name(line, "b/") or before   # (a deleted file keeps its old name: comments go on its old lines)
+            if path:
+                files.setdefault(path, (set(), set()))
+        elif line.startswith("@@ ") and path:
+            m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            if m:
+                old, new, hunk = int(m.group(1)), int(m.group(2)), True
+        elif path and hunk and line[:1] in (" ", "+", "-"):
+            lines_new, lines_old = files[path]
+            if line[0] in (" ", "+"):
+                lines_new.add(new)
+                new += 1
+            if line[0] in (" ", "-"):
+                lines_old.add(old)
+                old += 1
+    return files
+
+
+def inline_comments(args):
+    """The review's line comments, from --inline (a JSON list) and --at, as [{path, line or old_line, body}]"""
+    found = []
+    if args.inline:
+        with open(args.inline, encoding="utf-8") as f:
+            try:
+                found = json.load(f)
+            except ValueError as e:
+                raise ForgeError("%s: not JSON (%s)" % (args.inline, e))
+        if not isinstance(found, list) or not all(isinstance(c, dict) for c in found):
+            raise ForgeError("%s: want a list of {\"path\", \"line\" (or \"old_line\"), \"body\"}" % args.inline)
+    for where, text in args.at or []:
+        path, _, line = where.rpartition(":")
+        old = line.startswith("-")
+        if not path or not line.lstrip("-").isdigit():
+            raise ForgeError("--at %s: want PATH:LINE (PATH:-LINE for a removed line)" % where)
+        found.append({"path": path, ("old_line" if old else "line"): int(line.lstrip("-")), "body": text})
+    return found
+
+
+def check_inline(comments, diff):
+    """Each comment as the API takes it ({path, new_position | old_position, body}); refuses one off the diff"""
+    lines = diff_lines(diff) if diff is not None else None
+    out, wrong = [], []
+    for c in comments:
+        path, body = c.get("path"), c.get("body")
+        new, old = c.get("line"), c.get("old_line")
+        if not isinstance(path, str) or not isinstance(body, str) or not body.strip() or (new is None) == (old is None):
+            raise ForgeError("an inline comment needs a path, a body and one of line / old_line: %r" % (c,))
+        number = new if new is not None else old
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            raise ForgeError("an inline comment's line is a number from 1: %r" % (c,))
+        if lines is not None:
+            if path not in lines:
+                wrong.append("%s is not in the diff" % path)
+            elif number not in lines[path][0 if new is not None else 1]:
+                wrong.append("%s:%s%d is not a line of the diff's hunks" % (path, "" if new is not None else "-", number))
+        out.append({"path": path, "body": body, "new_position": new or 0, "old_position": old or 0})
+    if wrong:
+        raise ForgeError("inline comments off the diff (they would land on no line):\n  " + "\n  ".join(wrong))
+    return out
+
+
+def cmd_pr_review(args):
+    pr = get_pr(args.number)
+    open_or_refuse(pr)
+    event = REVIEW_EVENTS[args.event]
+    if event == "APPROVED" and desc.is_draft(pr["title"], pr.get("draft")):
+        raise ForgeError("#%d is work in progress: comment on it (--comment), approve it once it is marked ready"
+                         % pr["number"])
+    body = text_arg(args)
+    comments = inline_comments(args)
+    if event != "APPROVED" and not body.strip() and not comments:
+        raise ForgeError("the review is empty: give a summary (--body or --body-file) or inline comments")
+    diff = pr_diff(pr["number"]) if comments else None
+    if comments and diff is None:
+        print("forge.py: the inline comments' lines are not checked", file=sys.stderr)
+    review = {"event": event, "body": body, "comments": check_inline(comments, diff)}
+    if (pr.get("head") or {}).get("sha"):
+        review["commit_id"] = pr["head"]["sha"]   # (the commit read: a later push marks the comments outdated)
+    r = api("POST", "/repos/%s/pulls/%d/reviews" % (REPO, pr["number"]), review)
+    print("%s, %d inline comment%s: %s" % (event.lower().replace("_", " "), len(comments),
+                                          "" if len(comments) == 1 else "s", (r or {}).get("html_url") or pr["html_url"]))
+
+
 def label_id(name):
     page = 1
     while True:
@@ -437,6 +724,23 @@ def cmd_pr_update(args):
     print(post_comment(pr["number"], comment))
 
 
+def mergeable_note(pr, wip):
+    """Forgejo says a work-in-progress PR is not mergeable whatever its base: only a ready one's answer means a rebase"""
+    if pr.get("mergeable"):
+        return "yes"
+    if not wip:
+        return "no (rebase onto main)"
+    try:
+        main = api("GET", "/repos/%s/branches/main" % REPO)["commit"]["id"]
+    except (ForgeError, KeyError, TypeError):
+        main = None
+    base = pr.get("merge_base") or ""
+    return "not while it is work in progress (Forgejo merges no WIP PR); %s" % (
+        "it is on main's head, no rebase needed" if main and base == main
+        else "main has moved past its base: rebase if it conflicts" if main and base
+        else "whether it needs a rebase shows once it is ready")
+
+
 def cmd_pr_status(args):
     pr = get_pr(args.number)
     body = pr.get("body") or ""
@@ -470,7 +774,7 @@ def cmd_pr_status(args):
     items = desc.boxes(lists.get("If applicable", ""))
     print("Checklist, If applicable: %d kept, %d ticked" % (len(items), sum(t for t, _ in items)))
     if pr["state"] == "open":
-        print("Mergeable: %s" % ("yes" if pr.get("mergeable") else "no (rebase onto main)"))
+        print("Mergeable: %s" % mergeable_note(pr, wip))
     labels = [l["name"] for l in pr.get("labels") or []]
     print("Labels: %s" % (", ".join(labels) or "none"))
     latest = {}
@@ -490,7 +794,7 @@ def cmd_pr_status(args):
 
 def cmd_pr(args):
     commands = {"ready": cmd_pr_ready, "wip": cmd_pr_wip, "edit": cmd_pr_edit, "update": cmd_pr_update,
-                "status": cmd_pr_status}
+                "status": cmd_pr_status, "review": cmd_pr_review}
     if args.action in commands:
         return commands[args.action](args)
     if args.action == "create":
@@ -549,7 +853,10 @@ def cmd_pr(args):
         if args.comments:
             show_comments(args.number)
     elif args.action == "comment":
-        print(post_comment(args.number, text_arg(args)))
+        if args.attach:
+            post_with_pictures(args.number, text_arg(args), args.attach)
+        else:
+            print(post_comment(args.number, text_arg(args)))
     elif args.action == "checkout":
         branch = "pr/%d" % args.number
         url = "%s/%s.git" % (BASE, REPO)
@@ -648,9 +955,33 @@ def main(argv=None):
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--comment", metavar="TEXT", help="what changed and why")
     g.add_argument("--comment-file", metavar="F", help="what changed and why, from a file (UTF-8)")
-    s = pr.add_parser("comment", help="post a comment")
+    s = pr.add_parser("comment", help="post a comment, with pictures (--attach)",
+                      description="Posts a comment. --attach puts pictures in it: each goes up as an attachment of the "
+                      "comment, shown where the text has ![caption](attach:NAME), or at the end. Only PNG, JPEG, GIF "
+                      "or WebP, 25 MiB at most each, checked before anything is posted: no game files or anything "
+                      "made from them leave the PC (CONTRIBUTING.md).")
     s.add_argument("number", type=int)
     body_args(s, text=True, what="the comment")
+    s.add_argument("--attach", nargs="+", action="extend", metavar="FILE",
+                   help="pictures to put in the comment (repeatable; TEXT goes before it, or use --body)")
+    s = pr.add_parser("review", help="post a review: approve, comment or request changes, with comments on lines",
+                      description="Posts one review of the pull request: the verdict, a summary (--body or --body-file) "
+                      "and inline comments, each on a line of the diff: --at PATH:LINE TEXT (the line in the PR's "
+                      "version of the file; PATH:-LINE for a line the PR removes), or --inline F, a JSON list of "
+                      "{\"path\", \"line\" (or \"old_line\"), \"body\"}. Lines outside the diff's hunks are refused "
+                      "before anything is posted. A work-in-progress PR can be commented on, not approved. "
+                      "A review that asks for a change that has to land before the merge requests changes.")
+    s.add_argument("number", type=int)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--approve", dest="event", action="store_const", const="approve",
+                   help="it can merge as it is (nits may ride along as inline comments)")
+    g.add_argument("--comment", dest="event", action="store_const", const="comment",
+                   help="questions and suggestions the author may take or leave")
+    g.add_argument("--request-changes", dest="event", action="store_const", const="request_changes",
+                   help="a change has to land before the merge: a bug, a broken rule (a WIP PR too)")
+    body_args(s, what="the review's summary")
+    s.add_argument("--inline", metavar="F", help="the inline comments, a JSON list (UTF-8)")
+    s.add_argument("--at", nargs=2, action="append", metavar=("PATH:LINE", "TEXT"), help="an inline comment (repeatable)")
     s = pr.add_parser("status", help="WIP or ready, the description check, the checklist, mergeable, reviews, comments")
     s.add_argument("number", type=int)
     s.add_argument("--last", type=int, default=3, metavar="N", help="the last N comments (default 3)")
