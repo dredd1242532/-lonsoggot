@@ -12,12 +12,8 @@
 name: Windows builder
 
 on:
-  # (not for a pull request that changes only documentation: nothing of it is compiled or packaged but README.md, which is
-  # only copied in. Pushes to main and tags are built by the Release workflow, which calls this one)
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
+  # (no pull_request trigger for now: the Release workflow builds main's pushes and tags by calling this one; build a
+  # branch by hand with Run workflow)
   workflow_dispatch:
   workflow_call:
     inputs:

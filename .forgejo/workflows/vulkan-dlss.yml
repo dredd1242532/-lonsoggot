@@ -10,43 +10,7 @@
 name: Vulkan back end with NVIDIA DLSS
 
 on:
-  push:
-    branches: [main, dev]
-    paths:
-      - 'gpu/vk/vk_dlss*'
-      - 'gpu/vk/vk_temporal*'
-      - 'gpu/vk/vk_fsr4*'
-      - 'third_party/fidelityfx/**'
-      - 'gpu/vk/vk_reflex*'
-      - 'gpu/vk/vk_ngx_msvc_rt.cpp'
-      - 'gpu/vk/upscaler_rows.h'
-      - 'gpu/vk/dlss_math.h'
-      - 'gpu/vk/dlss_checks.h'
-      - 'gpu/vk/shaders/dlss_*'
-      - 'host/mingw_msvc_shims.c'
-      - 'nx2/oot_jitter.py'
-      - 'nx2/build.py'
-      - 'nx2/make_game.py'
-      - 'scripts/ngx_sdk.py'
-      - '.forgejo/workflows/vulkan-dlss.yml'
-  pull_request:
-    paths:
-      - 'gpu/vk/vk_dlss*'
-      - 'gpu/vk/vk_temporal*'
-      - 'gpu/vk/vk_fsr4*'
-      - 'third_party/fidelityfx/**'
-      - 'gpu/vk/vk_reflex*'
-      - 'gpu/vk/vk_ngx_msvc_rt.cpp'
-      - 'gpu/vk/upscaler_rows.h'
-      - 'gpu/vk/dlss_math.h'
-      - 'gpu/vk/dlss_checks.h'
-      - 'gpu/vk/shaders/dlss_*'
-      - 'host/mingw_msvc_shims.c'
-      - 'nx2/oot_jitter.py'
-      - 'nx2/build.py'
-      - 'nx2/make_game.py'
-      - 'scripts/ngx_sdk.py'
-      - '.forgejo/workflows/vulkan-dlss.yml'
+  # (off for now on pushes and pull requests: run it by hand with Run workflow when the DLSS or FSR 4 code changes)
   workflow_dispatch:
 
 permissions:

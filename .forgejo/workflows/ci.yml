@@ -59,8 +59,11 @@ jobs:
           print("ok: %s" % title)
           PY
 
+  # (off for now: pushes and pull requests run only the light checks; run these by hand, Actions > CI > Run workflow.
+  # CONTRIBUTING.md asks for tests/run_all.py's results in each pull request)
   python:
     name: Python source checks (${{ matrix.os }}${{ matrix.shard != '1/1' && format(', part {0}', matrix.shard) || '' }})
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -180,8 +183,11 @@ jobs:
   # (the focused shader recompiler fixtures, in one job: they build the same recompiler sources, through ccache with the
   # cache main's runs leave, as the Python checks' above; the direct surface atomic fixture takes the objects the global
   # load/store one made. The F2I fixture's steps run whether or not the others passed, as when it was a job of its own)
+  # (off for now: pushes and pull requests run only the light checks; run these by hand, Actions > CI > Run workflow.
+  # CONTRIBUTING.md asks for tests/run_all.py's results in each pull request)
   spirv-fixtures:
     name: SPIR-V fixtures (global narrow load/store, direct surface atomics, F2I immediate)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
