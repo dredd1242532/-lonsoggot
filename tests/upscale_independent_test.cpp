@@ -12,6 +12,7 @@
 #include <mutex>
 #include <utility>
 #include "vk_present_rect.h"
+#include "colour_filter.h"
 using mkwvk::PresentSourceRect;
 using mkwvk::present_source_rect;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
@@ -42,7 +43,7 @@ struct Layers { int aspect = 0, level = 0, first = 0, count = 0; };
 struct VkImageBlit { Layers srcSubresource, dstSubresource; Offset srcOffsets[2], dstOffsets[2]; };
 struct Extent { uint32_t width = 0, height = 0, depth = 0; };
 struct VkImageCopy { Layers srcSubresource; Offset srcOffset; Layers dstSubresource; Offset dstOffset; Extent extent; };
-struct { int upscale = 0, sharpness = 0, framegen = 0; } opts;
+struct { int upscale = 0, sharpness = 0, framegen = 0, hdr = 0, colour_filter = 0; } opts;
 struct SpyMutex {
     bool held = false;
     void lock() { CHECK(!held); held = true; }
@@ -72,7 +73,7 @@ VkImageCopy last_copy;
 bool make_pipe(Pipe& p, const uint32_t* code, size_t bytes, std::initializer_list<int> types, uint32_t push) {
     const bool pq = code == FG_SCALE_PQ_COMP_SPV;
     CHECK((pq ? bytes == sizeof FG_SCALE_PQ_COMP_SPV : code == FG_SCALE_COMP_SPV && bytes == sizeof FG_SCALE_COMP_SPV));
-    CHECK(types.size() == 3 && push == 20);
+    CHECK(types.size() == 3 && push == 56);
     CHECK(*types.begin() == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER && *(types.begin() + 1) == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
     const bool fail = pq ? pq_pipe_fail : pipe_fail;
     ++pipe_calls; p.set = 1; p.layout = 2; p.pipe = fail ? 0 : pq ? 5 : 3; return !fail;
@@ -111,11 +112,13 @@ void vkCmdCopyImage(int, VkImage src, int, VkImage dst, int, int count, const Vk
 }
 void pass(int, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSampler>> b,
           uint32_t w, uint32_t h, const void* data, uint32_t bytes) {
-    CHECK((p.pipe == 3 || p.pipe == 5) && b.size() == 3 && b.begin()->first && b.begin()->second == 4 && bytes == 20);
+    CHECK((p.pipe == 3 || p.pipe == 5) && b.size() == 3 && b.begin()->first && b.begin()->second == 4 && bytes == 56);
     CHECK((b.begin() + 2)->first && (b.begin() + 2)->second == 4);
     CHECK((b.begin() + 1)->first && !(b.begin() + 1)->second);
-    struct PC { int mode; float sharp; float x0, x1; int side; } pc;
+    struct PC { int mode; float sharp; float x0, x1; int side; float colour[9]; } pc;
     std::memcpy(&pc, data, sizeof pc);
+    float expected[9]; colour_filter_matrix(opts.hdr == 2 ? 0 : opts.colour_filter, expected);
+    for (int i = 0; i < 9; i++) CHECK(pc.colour[i] == expected[i]);
     ++dispatches; dispatched_mode = pc.mode; dispatched_sharp = pc.sharp;
     dispatched_side = pc.side; dispatched_x0 = pc.x0; dispatched_x1 = pc.x1;
     dispatched_w = w; dispatched_h = h; sampled_view = b.begin()->first; dispatched_pipe = p.pipe;
@@ -133,7 +136,16 @@ VkImage draw(const int* crop = nullptr, uint32_t dw = 2560, uint32_t dh = 1440, 
 }
 int main() {
     reset(); CHECK(!draw()); CHECK(pipe_calls == 0 && image_calls == 0 && dispatches == 0);
-    opts.upscale = 1;
+    for (int hdr : {0, 1}) for (int mode : {1, 2, 3}) {
+        reset(); opts.hdr = hdr; opts.colour_filter = mode;
+        CHECK(draw() && dispatches == 1 && image_calls == 1);
+        opts.colour_filter = 0; CHECK(!draw() && dispatches == 1); // live Off restores the bypass
+    }
+    reset(); opts.hdr = 2; opts.colour_filter = 1;
+    CHECK(!draw() && !draw(nullptr, 2560, 1440, true) && dispatches == 0);
+    opts.upscale = 1; CHECK(draw(nullptr, 2560, 1440, true)); // Native HDR still scales with identity
+    CHECK(dispatched_pipe == 5);
+    reset(); opts.upscale = 1;
     CHECK(!framegen_scale(1, 0, 11, 2560, 1440, nullptr, 100, 100, false));
     CHECK(!framegen_scale(1, 12, 11, 0, 1440, nullptr, 100, 100, false));
     CHECK(!draw(nullptr, 0));

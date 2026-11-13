@@ -1118,6 +1118,10 @@ const char* hn_sharpness(int v, int variant) {
 }
 MENU_HINTS(hn_handheld, 0, "As on a TV: the game at the Output resolution's size.",
            "As in the hands: the game at the console's handheld size (1536x864), lighter on the GPU.")
+const char* tx_colour_filter(int v) {
+    static const char* names[] = {"Off", "Protanopia", "Deuteranopia", "Tritanopia"};
+    return names[std::clamp(v, 0, 3)];
+}
 const char* tx_wide_menus(int v) {
     static const char* t[] = {"Full width", "Centred, blurred sides", "Centred, black bars"};
     return t[std::min(std::max(v, 0), 2)];
@@ -1241,6 +1245,8 @@ Row rows[] = {
      "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour.",
      nullptr, false, true},
     {TAB_GRAPHICS, "Detail", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
+    {TAB_GRAPHICS, "Colour filter", &opts.colour_filter, 0, 3, 1, tx_colour_filter,
+     "Colour-blindness correction, not simulation. Game image only. Works in SDR and Expanded HDR; disabled in Native HDR. Changes at once.", nullptr, false, true},
     {TAB_GRAPHICS, "Anisotropic filtering", &opts.anisotropy, 0, 4, 1, tx_anisotropy,
      "Keeps textures sharp on surfaces seen at a slant, such as the ground ahead: higher is sharper in the distance, for a "
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},
