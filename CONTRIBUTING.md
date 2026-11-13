@@ -323,11 +323,13 @@ Every pull request shows its effect with numbers or proof, `main` against this P
 | `docs`, `test` only | test output on `main` and with this PR (a new test failing on `main` is the best proof) |
 
 Every number says plainly what it was measured on. The columns are `main @ <hash>` and `this PR @ <hash>` (`main @
-7afe6ae1`, `this PR @ 992a2420`), never a bare Before and After, and the same names caption the screenshots. When
-something else is compared, the column says exactly what: `this PR @ 992a2420, RX_VK_X=0` against `this PR @ 992a2420,
-RX_VK_X=1`, or a build by its name (`nightly-123-abcd1234`), with a line saying why `main` wasn't the comparison. A Δ
-column is optional; its sign is this PR against `main`. When the PR is rebased onto a newer `main`, measure again, or
-say why the numbers still hold.
+7afe6ae1`, `this PR @ 992a2420`), never a bare Before and After, and the same names caption the screenshots. One
+column is the change, the other the baseline it is compared with. When something else is compared, each column says
+exactly what, with its hash: `this PR @ 992a2420, RX_VK_X=0` against `this PR @ 992a2420, RX_VK_X=1`, or a build by
+its name (`nightly @ 55b976c0`, `nightly-123-abcd1234`). Then a `Baseline: <its column>` line says which one is the
+baseline, and a line says why `main` against this PR wasn't the comparison. A Δ column is optional; its sign is the
+change against the baseline. When the PR is rebased onto a newer `main`, measure again, or say why the numbers still
+hold.
 
 For the two sides to compare:
 
@@ -339,19 +341,19 @@ For the two sides to compare:
 
 The numbers come from the FPS counter's **Breakdown** or **Dev** level (Insert menu, Gameplay), the `fps` lines of
 `longshot_log.txt`, `RX_VK_DRAW_STATS`, or a test. A filled-in Measurements section, from a real run (a
-full one also names the driver, CPU, RAM, the settings and where each number comes from). The change was measured in
-the nightly that carried it, so the nightly's column says so:
+full one also names the driver, CPU, RAM, the settings and where each number comes from). This one compares against
+another baseline, so it names it:
 
 ```
-main: 87991bc8 (2026-11-12)
-this PR: nightly @ 55b976c0
+Baseline: nightly @ 55b976c0 (last nightly before #2602)
+main: 87991bc8 (2026-11-12), with #2602
+#2602 had merged already, so this is main against the last nightly before it; main also carried about 50 other merges.
 Hardware: RTX 3080, Windows 11
 Scene: adult Link in Hyrule Field, uncapped
-Method: 120 s each after a warm-up, two interleaved pairs (main, nightly, main, nightly)
+Method: 120 s each after a warm-up, two interleaved pairs (nightly, main, nightly, main)
 How to reproduce: a save in Hyrule Field by the ranch gate, Ultra preset, the FPS counter at Breakdown
-The change was measured in the nightly build that carried it, not on its branch: the nightly stands in for this PR.
 
-| | main @ 87991bc8 | this PR, as nightly @ 55b976c0 | Δ |
+| | nightly @ 55b976c0 (last nightly before #2602) | main @ 87991bc8 (with #2602) | Δ |
 |---|---|---|---|
 | fps (run 1 / run 2) | 59.7 / 60.8 | 78.4 / 79.3 | +31% |
 | median frame time | 16.35 ms | 12.2 ms | -4.15 ms |

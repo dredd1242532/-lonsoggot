@@ -55,7 +55,7 @@ def example_measurements():
     """CONTRIBUTING.md's filled-in Measurements section"""
     text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
     block = text[text.index("### Measurements"):]
-    return re.search(r"```\n(main: .*?)```", block, re.S).group(1)
+    return re.search(r"```\n(Baseline: .*?)```", block, re.S).group(1)
 
 
 def filled():
@@ -86,7 +86,8 @@ class Check(unittest.TestCase):
 
     def test_the_plain_fill_and_contributings_example_pass(self):
         self.assertEqual(check.problems(filled()), [])
-        self.assertIn("this PR, as nightly @ 55b976c0", example_measurements(), "the alternative form, named")
+        self.assertIn("| | nightly @ 55b976c0 (last nightly before #2602) | main @ 87991bc8 (with #2602) | Δ |",
+                      example_measurements(), "another baseline, named, and said to be the baseline")
 
     def test_the_sections_follow_the_order(self):
         names = list(check.sections(TEMPLATE))
@@ -134,20 +135,42 @@ class Check(unittest.TestCase):
             "compared, with its hash"])
         self.assertEqual(problems(header, "| | main @ latest | this PR @ 992a2420 | Δ |"),
                          ["## Measurements' column 'main @ latest': 'latest' is not a commit (7 to 40 hex characters)"])
-        self.assertEqual(problems(header, "| | main @ 7afe6ae1 | mine @ 992a2420 | Δ |"),
-                         ["## Measurements' table has no 'this PR @ <hash>' column"])
+        self.assertIn("does not say which column is the baseline",   # (a named build: which is the baseline?)
+                      " ".join(problems(header, "| | main @ 7afe6ae1 | mine @ 992a2420 | Δ |")))
         self.assertEqual(problems("main: 7afe6ae1 (2026-11-10)", "main: (2026-11-10)"),
                          ["## Measurements has no 'main: <hash> (<date>)' line"])
         self.assertEqual(problems("this PR: fix/menu-font-4k @ 992a2420", "this PR: fix/menu-font-4k"),
                          ["## Measurements has no 'this PR: <branch> @ <hash>' line"])
         self.assertEqual(problems("| 0.41 / 0.42 ms | 0.41 / 0.41 ms |", "| | |"), [], "one full row is enough")
-        # (comparing something else is fine when every column says what it is)
-        for other in ("| | this PR @ 992a2420, RX_VK_X=0 | this PR @ 992a2420, RX_VK_X=1 | Δ |",
-                      "| | nightly-123-abcd1234 | this PR @ 992a2420 | Δ |"):
-            self.assertEqual(problems(header, other), [], other)
+        self.assertEqual(problems("this PR: fix/menu-font-4k @ 992a2420", "this PR: fix/menu-font-4k @ 1234567"),
+                         ["## Measurements' 'this PR:' line names 1234567, and its column 992a2420"])
         self.assertEqual(problems(header, "| | this PR @ 992a2420 | Δ |"), [
-            "## Measurements' table has nothing to compare with: add 'main @ <hash>' (or what else was compared, with "
-            "its hash)"])
+            "## Measurements' table has nothing to compare with: add 'main @ <hash>' (or the baseline it was compared "
+            "with, named, with its hash)"])
+        # (no "this PR, <anything>" wildcard: another build is named by itself)
+        self.assertEqual(problems(header, "| | main @ 7afe6ae1 | this PR, as nightly @ 992a2420 | Δ |"), [
+            "## Measurements' column 'this PR, as nightly @ 992a2420': this PR's column is 'this PR @ <hash>', with "
+            "anything more after the hash ('this PR @ <hash>, RX_VK_X=1'); another build is named by itself"])
+
+    def test_another_baseline_is_named_and_said_to_be_the_baseline(self):
+        header = "| | main @ 7afe6ae1 | this PR @ 992a2420 | Δ |"
+        flag = "| | this PR @ 992a2420, RX_VK_X=0 | this PR @ 992a2420, RX_VK_X=1 | Δ |"
+        nightly = "| | nightly-123-abcd1234 | this PR @ 992a2420 | Δ |"
+        unsaid = ("## Measurements does not say which column is the baseline: add a 'Baseline: <its column>' line, "
+                  "with one line on why main against this PR wasn't the comparison")
+        for other in (flag, nightly):
+            self.assertEqual(check.problems(GOOD.replace(header, other)), [unsaid], other)
+        said = GOOD.replace("main: 7afe6ae1", "Baseline: this PR @ 992a2420, RX_VK_X=0\nmain: 7afe6ae1")
+        self.assertEqual(check.problems(said.replace(header, flag)), [])
+        said = GOOD.replace("main: 7afe6ae1", "Baseline: nightly-123-abcd1234\nmain: 7afe6ae1")
+        self.assertEqual(check.problems(said.replace(header, nightly)), [])
+        wrong = GOOD.replace("main: 7afe6ae1", "Baseline: the old one\nmain: 7afe6ae1")
+        self.assertEqual(check.problems(wrong.replace(header, nightly)), [
+            "## Measurements' 'Baseline:' line names no one column of the table: write the column's header there"])
+        # (the change can be a named build that carries it: main, here, against the nightly before it)
+        self.assertEqual(check.problems(section(filled(), "Measurements", example_measurements())), [])
+        self.assertEqual(check.problems(section(filled(), "Measurements", example_measurements().replace(
+            "Baseline: nightly @ 55b976c0 (last nightly before #2602)\n", ""))), [unsaid])
 
     def test_flags(self):
         self.assertEqual(check.problems(section(GOOD, "Flags and settings", "None.")), [])

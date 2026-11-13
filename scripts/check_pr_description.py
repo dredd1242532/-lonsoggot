@@ -5,9 +5,11 @@
     template's <...> stand-ins left;
   - Flags and settings: "None", or a table with a filled-in row per flag; every RX_*, HOS_* or LONGSHOT_* name the
     diff adds is listed there;
-  - Measurements: the "main: <hash>" and "this PR: <branch> @ <hash>" lines, and a table whose columns name what they
-    measured, "main @ <hash>" and "this PR @ <hash>" (or what else was compared, with its hash; never a bare Before
-    and After), with a row of values;
+  - Measurements: a table whose columns each name what they measured with its hash, never a bare Before and After:
+    one the change ("this PR @ <hash>", or a named build that carries it), one the baseline ("main @ <hash>", or a
+    named build). main against this PR needs nothing more; anything else says which column is the baseline in a
+    "Baseline: <its column>" line. A main or this PR column comes with its "main: <hash> (<date>)" or "this PR:
+    <branch> @ <hash>" line, on the same commit; and a row of values;
   - every box of "For everyone" ticked. The "If applicable" boxes may stay empty.
 
 Warnings, which do not fail it: a diff that changes the menu's code while Flags and settings says None, and a PR
@@ -114,21 +116,22 @@ def column(cell):
     return (m.group("name").strip(), m.group("hash")) if m else None
 
 
+def norm(text):
+    return " ".join(text.split()).lower()
+
+
 def measurement_problems(text):
-    out = []
-    if not re.search(r"^\W*main:\s*[0-9a-f]{7,40}\b", text, re.M | re.I):
-        out.append("## Measurements has no 'main: <hash> (<date>)' line")
-    if not re.search(r"^\W*this PR:.*@\s*[0-9a-f]{7,40}\b", text, re.M | re.I):
-        out.append("## Measurements has no 'this PR: <branch> @ <hash>' line")
+    """One column is the change (this PR @ <hash>, or a named build that carries it), one a labelled baseline (main @
+    <hash>, or a named build with its hash); main against this PR needs nothing more, anything else a Baseline: line"""
     found = tables(text)
     if not found:
-        return out + ["## Measurements has no table: | | main @ <hash> | this PR @ <hash> |"]
+        return ["## Measurements has no table: | | main @ <hash> | this PR @ <hash> |"]
     header, rows = found[0]
     values = [i for i, c in enumerate(header) if i and c and not DELTA.match(c)]
     if any(header[i].strip("* ").lower() in ("before", "after") for i in values):
-        return out + ["## Measurements' columns are a bare Before and After: name them 'main @ <hash>' and "
-                      "'this PR @ <hash>', or what else was compared, with its hash"]
-    named = []
+        return ["## Measurements' columns are a bare Before and After: name them 'main @ <hash>' and 'this PR @ <hash>', "
+                "or what else was compared, with its hash"]
+    out, cols = [], []
     for i in values:
         c = column(header[i])
         if c is None:
@@ -136,14 +139,42 @@ def measurement_problems(text):
                        "else was compared, with its hash" % header[i])
         elif not COMMIT.match(c[1]):
             out.append("## Measurements' column '%s': '%s' is not a commit (7 to 40 hex characters)" % (header[i], c[1]))
+        elif c[0].lower().startswith("this pr") and c[0].lower() != "this pr":
+            out.append("## Measurements' column '%s': this PR's column is 'this PR @ <hash>', with anything more after "
+                       "the hash ('this PR @ <hash>, RX_VK_X=1'); another build is named by itself" % header[i])
         else:
-            named.append(c[0].lower())
-    if not out:
-        if not any(n.startswith("this pr") for n in named):
-            out.append("## Measurements' table has no 'this PR @ <hash>' column")
-        elif len(named) < 2:
-            out.append("## Measurements' table has nothing to compare with: add 'main @ <hash>' (or what else was "
-                       "compared, with its hash)")
+            cols.append((c[0].lower(), c[1], norm(header[i])))
+    if not out and len(cols) < 2:
+        out.append("## Measurements' table has nothing to compare with: add 'main @ <hash>' (or the baseline it was "
+                   "compared with, named, with its hash)")
+    elif not out:
+        said = re.search(r"^\W*baseline:\s*(.+)$", text, re.M | re.I)
+        names = [n for n, _, _ in cols]
+        if said:
+            line = norm(said.group(1))
+            hits = [c for c in cols if c[2] in line]
+            if not hits:   # (the column by its name and hash only, when that is enough to tell it)
+                hits = [c for c in cols if "%s @ %s" % (c[0], c[1]) in line
+                        and sum(d[:2] == c[:2] for d in cols) == 1]
+            if len(hits) != 1:
+                out.append("## Measurements' 'Baseline:' line names no one column of the table: write the column's "
+                           "header there")
+            elif len(hits) == len(cols):
+                out.append("## Measurements' table has only the baseline")
+        elif not ("main" in names and "this pr" in names):
+            out.append("## Measurements does not say which column is the baseline: add a 'Baseline: <its column>' "
+                       "line, with one line on why main against this PR wasn't the comparison")
+    for name, pattern, line in (("main", r"^\W*main:\s*([0-9a-f]{7,40})\b", "main: <hash> (<date>)"),
+                                ("this pr", r"^\W*this PR:.*?@\s*([0-9a-f]{7,40})\b", "this PR: <branch> @ <hash>")):
+        hashes = [h for n, h, _ in cols if n == name]
+        if not hashes:
+            continue
+        m = re.search(pattern, text, re.M | re.I)
+        if not m:
+            out.append("## Measurements has no '%s' line" % line)
+        elif not any(h.startswith(m.group(1)) or m.group(1).startswith(h) for h in hashes):
+            out.append("## Measurements' '%s' line names %s, and its column %s" % (line.split(":")[0] + ":",
+                                                                                   m.group(1), hashes[0]))
     if not any(r and r[0] and all(i < len(r) and r[i] for i in values) for r in rows):
         out.append("## Measurements' table has no row with a value in each column")
     return out

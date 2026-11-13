@@ -32,9 +32,9 @@
 
 <!-- What counts for each kind of change, and what makes the two sides comparable: CONTRIBUTING.md, "Measurements".
      Name the columns "main @ <hash>" and "this PR @ <hash>", never a bare Before and After. Comparing something else
-     (a flag off and on, a nightly)? Name it exactly ("this PR @ <hash>, RX_VK_X=0") and say in one line why main
-     wasn't the comparison. A Δ column is optional: this PR against main. Rebased onto a newer main: measure again, or
-     say why the numbers still hold. -->
+     (a flag off and on, a nightly)? Name each column exactly ("this PR @ <hash>, RX_VK_X=0"), add a line
+     "Baseline: <its column>" and one on why main wasn't the comparison. A Δ column is optional: the change against
+     the baseline. Rebased onto a newer main: measure again, or say why the numbers still hold. -->
 
 main: <commit> (<date>)
 this PR: <branch> @ <commit>
