@@ -55,7 +55,7 @@ FIXTURE = r'''#define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "hookshot_env.h"   /* (env_on: the switches' one rule) */
+#include "longshot_env.h"   /* (env_on: the switches' one rule) */
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 /* (the Win32 calls the HLE uses, on pthreads) */
 typedef pthread_mutex_t SRWLOCK;
