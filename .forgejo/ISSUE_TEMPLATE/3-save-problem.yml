@@ -1,7 +1,7 @@
 name: Save problem
 about: A save lost or not loading, or a copy from Hookshot or an emulator that went wrong
 title: "Saves: "
-labels: [bug]
+labels: [kind/bug]
 body:
   - type: markdown
     attributes:

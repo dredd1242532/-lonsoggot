@@ -34,6 +34,16 @@ The AppImage uses tools.lock's Linux tools (builder/linux/linux_tools.py sets `E
 `LONGSHOT_FFMPEG`, `LONGSHOT_SDL2` and `RX_CPM` to them),
 and `RX_TARGET=windows` keeps the Windows toolchain checks rather than requiring Linux development libraries.
 The button-prompt packages in `nx2/prompt_requirements.txt` remain optional; this check installs nothing.
+The sysroot (`scripts/linux/deps.sh tools`) copies the system libraries it takes by value: a host's absolute
+development alias such as `libmvec.so` becomes the library's bytes, so the packed tool does not depend on the player's
+filesystem. Only its own relative `lib -> usr/lib` stays a link.
+
+On Linux, a game folder's `longshot` (`builder/linux/longshot-folder`) starts the program named by `builder=` in
+`longshot_version.txt`, the one that built the folder (the Longshot Launcher, or a builder AppImage), with
+`--launch <folder>`; when that one is gone, it starts `bin/longshot` (`tests/test_linux_downgrade.py`). The builders have
+no window: the AppImage's `--launch <folder>` (a folder it built with `--cli`) plays that folder's game, and `--cli` runs
+`make_game.py`. On Windows the folder's `longshot.exe` (`builder/setup/setup.c`) starts `bin\longshot.exe` itself. They never look
+for or install another version (the Longshot Launcher does).
 
 Run everything with `python -I` from this folder.
 
@@ -73,6 +83,15 @@ or file, is logged as he wrote it, within those limits.
 `mapping=available` means SDL returned a mapping, not that its origin is known; `mapping=none` means SDL returned
 none, and `unavailable` means the loaded SDL lacks a required diagnostic call. A zero GUID is `unknown`.
 These queries do not change bindings, load a mapping file, or change which controllers are read.
+
+### Log levels
+
+A log line is info unless it says otherwise: `hos_log` and the renderer's `logf` write it as before. `hos_log_at(HOS_LOG_TRACE,
+...)` (host/hos.h) and `logf_at(log_trace, ...)` (gpu/vk/vk_internal.h) give it another level, written after the thread's tag:
+`[hos host] [trace] vk: ...`, and likewise `[error]`, `[warn]` and `[debug]`. The log file keeps every line. The Longshot
+Launcher's build log shows info and above unless its level picker asks for more; a builder or launcher that doesn't read the tag
+shows the line with it. Per-item lines a player can't act on (one per program or pipeline, a decoder's details) are debug or
+trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags.
 
 ## Switches for testing and debugging
 
@@ -184,8 +203,9 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_SKIP_PROG=<prefix>,...` | Leaves out the draws of these programs (default `53509044401d78d2`; `-` leaves out none) |
 | `RX_VK_PIPE_SKIP=0`, `1` or `2` | Default/`1`: wait for shader translation (with `RX_VK_TRANSLATE_WAIT_MS` set, a draw whose targets hold an earlier frame waits at most that long a frame in all, then is left out). A pending pipeline can be skipped only for attachment-only draws whose targets hold an earlier frame. `0`: wait for every translation and pipeline. `2`: restore the old skip for untranslated draws with persistent targets at once; this can omit writes before the shader is known. Translated memory-writing draws still wait |
 | `RX_VK_TRANSLATE_WAIT_MS=<ms>` | Off by default: each shader still translating is waited out, as #1573 does. Set (`8` is the tested value): how long, in all, each recording thread waits in a frame for shaders still translating before leaving their draws on earlier frames' targets out. For first-visit pauses of 0.2-3 s on a cold or changed program bank; a translation slower than the bound can lose a memory write, since its writes are not known before it is translated. A negative value is off; anything but a number is ignored with a warning; the value in use is logged. Compute dispatches still wait their translation out |
-| `RX_VK_LOAD=create` or `start` | When programs and their pipelines are loaded from what the preparation kept. Without the switch: `create` where the GPU has mesh shaders, `start` where it draws mesh programs through the compute fallback; and `start` on an install where a session's first uses waited for loads for over 100 ms at once or 500 ms in all, or where the loads found over 500 listed pipelines in no cache (draws left out for pipelines no list names are not counted: they happen in `start` too) (`longshot_load_start.txt` in the game folder, removed by a preparation or by hand). The first start of the game after a preparation builds every noted pipeline and every kept compute program's pipeline into the pipeline cache once, before the title, and lets each go; the preparation's own process does the same to fill the driver's cache but leaves no marker, since its pipeline cache does not answer the game's process on NVIDIA. With the compressed program cache (`RX_VK_PROGRAM_CACHE_ZSTD=1`) always `start`, whatever this switch says: its records are only read whole. The log says which and why. `start`: every listed one before the title, as before. `create`: none by a list; each program's kept variants and noted pipelines are loaded by a background job when the game makes the program (from the caches only: never a translation or a compile there), and a first draw that comes before its job ran runs it itself. The first start after a preparation builds each noted pipeline into the pipeline cache once and lets it go (before the title, with the precompile's progress), and only then loads at create. `RX_VK_LOAD_WORKERS=<n>` (2): the jobs that run at once (0, to measure: none, a draw loads what it needs itself); `RX_VK_LOAD_UNLISTED=1`: programs no list has a pipeline of are loaded at their create call too (otherwise at their first draw, as with `start`); `RX_VK_LOAD_WORKERS_LOADING=<n>`: while no frame was presented for 100 ms (the same unless set) |
+| `RX_VK_LOAD=create` or `start` | When programs and their pipelines are loaded from what the preparation kept. Without the switch: `create` where the GPU has mesh shaders, `start` where it draws mesh programs through the compute fallback; and `start` on an install where first uses waited for loads for over 2 s in one session, or for over 500 ms in two sessions running (only waits longer than 20 ms count; one such session alone leaves `longshot_load_start.txt.waited`, which the next start takes away), or where the loads found over 500 listed pipelines in no cache (draws left out for pipelines no list names are not counted: they happen in `start` too) (`longshot_load_start.txt` in the game folder, removed by a preparation or by hand). The first start of the game after a preparation builds every noted pipeline and every kept compute program's pipeline into the pipeline cache once, before the title, and lets each go; the preparation's own process does the same to fill the driver's cache but leaves no marker, since its pipeline cache does not answer the game's process on NVIDIA. With the compressed program cache (`RX_VK_PROGRAM_CACHE_ZSTD=1`) always `start`, whatever this switch says: its records are only read whole. The log says which and why. `start`: every listed one before the title, as before. `create`: none by a list; each program's kept variants and noted pipelines are loaded by a background job when the game makes the program (from the caches only: never a translation or a compile there), and a first draw that comes before its job ran runs it itself. The first start after a preparation builds each noted pipeline into the pipeline cache once and lets it go (before the title, with the precompile's progress), and only then loads at create. `RX_VK_LOAD_WORKERS=<n>` (2): the jobs that run at once (0, to measure: none, a draw loads what it needs itself); `RX_VK_LOAD_UNLISTED=1`: programs no list has a pipeline of are loaded at their create call too (otherwise at their first draw, as with `start`); `RX_VK_LOAD_WORKERS_LOADING=<n>`: while no frame was presented for 100 ms (the same unless set) |
 | `RX_VK_MODULE_IDS=0` | Shader module identifiers off (`VK_EXT_shader_module_identifier`). With them a compute program's module is learned by its identifier when it is first made from its code (`longshot_module_ids.bin`, for one program cache and one driver), and in a later run the load at the program's create call makes that variant's pipeline from the caches without reading its code or making a module; where no cache has the pipeline the code is read as before |
+| `RX_VK_COMPILE_SHADERS=all` or `most` | What a preparation builds, over `compile_shaders` in `longshot_options.ini` (the game's `--compile-shaders` sets it): `all` the predicted pipelines too (`predict_run`), `most` without them. The log's `vk: Compile shaders:` line says which and why. Most also removes what an earlier preparation on All left (`longshot_pipelines.bin.predicting`, `.predicted`, `.predicted_keys`) |
 | `RX_VK_PRECOMPILE=0` or `1` | The shader preparation before the title off or on (on in builds made with `RX_RELEASE=1`, as the builders' are) |
 | `RX_VK_MESH_SHADERS=native` or `compute` | How task and mesh programs run, read as the device is made (`gpu/vk/mesh_mode.h`; it was the Graphics tab's Mesh shaders row). Unset or any other value: Automatic, the GPU's own mesh shaders where it has them; the compute fallback where it has not, on Linux AMD (RADV, issue 2245), and for the task + mesh draws of the GPUs `RX_VK_TASK_MESH_FALLBACK`'s default names. `native`: the GPU's own for every draw (a GPU without them still gets the fallback). `compute`: the fallback on every GPU. `RX_VK_FORCE_MESH_FALLBACK=1` is `compute` over it. The log's `vk: mesh shaders:` line says which and where it came from. A change translates the programs again, as the program cache's stamp holds the GPU's mesh path (and every `RX_VK_MESH*` switch's text). The old `mesh_shaders=` line in `longshot_options.ini` is no longer read: the log names it, and the menu's next save drops it |
 | `RX_VK_TASK_MESH_FALLBACK=0` or `1` | Task + mesh draws through the compute fallback (1) or the driver's mesh shaders (0). By default the fallback is on for AMD's Navi 21 and Navi 22 on Windows (RX 6800, 6800 XT, 6900 XT, 6950 XT, 6700 XT), where the native path timed out the driver (issue 996) |
@@ -228,7 +248,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 ### Building
 
 A build reads and writes tens of gigabytes. When the game folder or the build files folder is on a hard drive,
-`make_game.py` warns that an SSD is much faster and builds anyway (the builders ask before they start).
+`make_game.py` warns that an SSD is much faster and builds anyway.
 
 | Switch | What it does |
 |---|---|
@@ -244,14 +264,14 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `RX_HOT_OPT=<level>` | The hot pieces' optimisation level (default `O2`); `O1` for [a faster build for development](#a-faster-build-for-development) |
 | `RX_MARCH=<level>` | The CPU level to build for (default this PC's: `x86-64-v3`, else `x86-64-v2`, else `x86-64`) |
 | `RX_VK_ONLY=1` | Only the Vulkan back end, with no lift |
+| `LONGSHOT_VK_PREBUILT=<longshot_vk.so>` | (Linux) The Vulkan back end as built already, the AppImage's; set aside by a build with DLSS (`LONGSHOT_NGX_SDK`) or AMD FSR 4 (`LONGSHOT_FSR=1`, `make_game.py --fsr`), which compiles its own |
 | `OOT_WORK`, `OOT_DUMP`, `OOT_EXEFS`, `OOT_ROMFS` | The work folder and the dump's folders, over `work/dump.txt` |
 
-The Windows Builder's own choices set two of these for its build. **Build workers**: Automatic keeps `LONGSHOT_JOBS`
-(or the free-memory policy without it); a number overrides it for that build only, and is not saved, so a new window,
-or one started to update a game, is back on Automatic. More workers need more memory and are not always faster.
-**Build memory** is saved with the build's other settings and used by updates too: Automatic keeps the free-memory
-policy; a number of GB sets `LONGSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free
-now (the ones that always run, up to 4 on Windows, still run under a smaller number).
+The Longshot Launcher's build settings set two of these for its build. **Build workers**: Automatic keeps
+`LONGSHOT_JOBS` (or the free-memory policy without it); a number overrides it for that build. More workers need more
+memory and are not always faster. **Build memory**: Automatic keeps the free-memory policy; a number of GB sets
+`LONGSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free now (the ones that always run,
+up to 4 on Windows, still run under a smaller number). The builders' `--cli` passes both on as it finds them.
 
 Source-checkout builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
@@ -312,6 +332,63 @@ what you test.
 **Never use it for numbers:** no fps or frame-time measurements, build timings, hitch or stutter checks, profiles,
 and no release or player build. Build those with the defaults.
 
+### Build times
+
+A player's first build of **nightly-56-e7ed2f7a**, measured on **2026-11-13** on Linux: a Ryzen 9 7900X (12 cores,
+24 threads), 30 GB of memory, an RTX 3090 (driver 620.70.06) and an NVMe SSD, with a fast connection. It ran the
+Builder's own command line: 24 jobs (the default), Compile shaders Most, no DLSS. The times come from the build's log.
+
+| Step | Run 1 | Run 2 |
+|---|---|---|
+| Download the AppImage (100 MB) and check its signed `SHA256SUMS` | 3 s | 4 s |
+| Unpack it and install its build tools (160 MB) | 6 s | 7 s |
+| Read the game files | 64 s | 89 s |
+| Translate the game to C (the lift) | 56 s | 58 s |
+| Compile (274 files, all at `-O1`) and link | 5 min 11 s | 4 min 59 s |
+| Finish the game folder (shader list, button prompts) | 67 s | 65 s |
+| Prepare shaders, Most | 5 min 0 s (programs 133 s, pipelines 167 s) | 5 min 22 s (programs 124 s, pipelines 198 s) |
+| **In all** | **13 min 30 s** | **14 min 7 s** |
+
+- **Two clean runs, one after the other.** Run 2's read was slower because other work was running on the PC while
+  it read the game files.
+- **Run 2 is a player's first build:** it started with an empty NVIDIA shader cache. Run 1 started with a warm one,
+  which saved about 20 s of the shader preparation.
+- **Memory:** about 14-15 GB above what was already in use, at its peak during the compile.
+- **No hot pieces.** A release ships no hot list and no play profile (its `tools.lock` has no `profile` line), so
+  every lifted file is built at `-O1`. A checkout with `work/hot_funcs.txt` also builds the eight hot pieces at `-O2`,
+  which takes longer ([above](#a-faster-build-for-development)).
+- **Slower PCs:** the compile and the shader preparation use every CPU thread, so a 6-core PC can take twice as long or
+  more. That is an estimate, not a measurement.
+
+These numbers are quoted in the README ("Install and play", and the preparation's 292 s and 415 s under "Compile
+shaders"), [getting started](getting-started.md), [common problems](common-issues.md),
+[CONTRIBUTING.md](../CONTRIBUTING.md) ("Building") and the [design notes](design.md) (S2, and the findings of
+2026-11-06). Change them all together.
+
+**Measure them again** after a change to the lift, the compile flags, the shader preparation or the toolchain
+(`tools.lock`), and before each release candidate. Build the way a player does, in new folders, so nothing is reused:
+
+```sh
+export XDG_DATA_HOME=$PWD/data XDG_CACHE_HOME=$PWD/cache    # no tools, work folder or objects from earlier builds
+export __GL_SHADER_DISK_CACHE_PATH=$PWD/nvcache             # an empty NVIDIA shader cache (mkdir it first)
+B=https://git.magicbean.dev/MagicBeanDev/Longshot/releases/download/<tag>
+curl -fLO $B/SHA256SUMS -fLO $B/SHA256SUMS.sig -fLO $B/Longshot-<tag>-x86_64.AppImage
+python -I scripts/release.py verify SHA256SUMS              # then sha256sum -c for the AppImage's line
+chmod +x Longshot-<tag>-x86_64.AppImage && ./Longshot-<tag>-x86_64.AppImage --appimage-extract
+cd squashfs-root/usr/share/longshot
+../../../AppRun --cli --nup <your .nup> --out <new folder> --language en-US --compile-shaders most 2>&1 \
+    | ts -s '%.s' | tee build.log
+```
+
+`AppRun --cli` installs the build tools first, then runs `make_game.py`. To read the log:
+
+- **Build tools:** from the start to the `@@stage read` line.
+- **Read, lift, compile and finish:** the `where the time went:` table that ends the build.
+- **Shader preparation:** from `@@stage shaders` to `@@done`. Its `prepared <n> shader programs ... in <s> s` line
+  gives the programs' share.
+
+On Windows the launcher runs the same `make_game.py`. Note the date, the nightly and the PC with the numbers.
+
 ## The pipeline state list
 
 Every release ships a list of pipelines, merged from the sources in `assets/pipeline_states/`:
@@ -370,8 +447,7 @@ A list depends on the settings it was recorded with: its records hold the target
 at 1440p with DLSS shares few pipelines with one recorded at 360p.
 
 Players send theirs to issue #14 with **Save my pipeline list** (the menu's Debug tab, under Developer: `gpu/vk/pipeline_share.h` and
-`vk_menu.cpp` `share_pipeline_list`; the builders: `nx2/pipeline_share.py`, which the Linux builder imports and the Windows
-one runs with `--json`). It checks the list as `pipeline_states.py --check` does and writes
+`vk_menu.cpp` `share_pipeline_list`; from the command line: `nx2/pipeline_share.py`, `--json` for a program that runs it). It checks the list as `pipeline_states.py --check` does and writes
 `longshot-pipelines-<date>.zip` to the Downloads folder with exactly two files, the list and `longshot_pipeline_report.txt`
 (the issue's template filled in from the run or from the game folder's log and `longshot_options.ini`), then copies the
 template, shows the folder and opens the issue; never with `HOS_HEADLESS`. The list is zipped as the game wrote it, compute
@@ -405,6 +481,7 @@ number is not the obvious one:
 | `resolution` | 0 Auto, 1 100%, 2 75%, 3 67%, 4 50% |
 | `output_res` | A size, `<width>x<height>`: 2048x1152 (the game's own), one of the screen's display modes (the menu's Aspect ratio and Output resolution rows), or any other with each side a multiple of 8 (rounded down), at least 640x360, at most 5120x2880's pixels, 5:4 to 48:9; anything else is the game's own. A size more than 1 % off 16:9 sets the picture's shape (`host/hos_wide_size.h` `hos_output_own_shape`). The Aspect ratio row saves `ultrawide=` 1 for the monitor's own shape, else 0; another shape is `output_res`'s own. The numbers saved before (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, 5 5120x2880) are still read |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
+| `compile_shaders` | No menu row: the Builder's, `make_game.py --compile-shaders`'s and the launcher's Compile shaders, read by a preparation (`vk_draw.cpp` `compile_all`). 0 Most (the default), 1 All (the predicted pipelines too). A file with only this line still makes the game's first start a first start |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y` | percent |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
@@ -412,7 +489,7 @@ number is not the obvious one:
 | `game_speed` | 0 Per frame, 1 Real time |
 | `text_speed` | 0 Normal, 1 2x, 2 4x, 3 Instant |
 | `microphone` | 0 Off, 1 Default, 2 and up a microphone (the name in `microphone_device` decides which) |
-| `mouse_camera` | 0 As the stick, 1 Native |
+| `mouse_camera` | 0 As the stick, 1 Native, 2 Off (the mouse is never captured) |
 | `layout_preset` | 0 Nintendo, 1 Xbox / PC, 2 Swap Face, 3 Custom |
 
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
@@ -428,11 +505,11 @@ through (inputs timed in frames, screenshots, waits for the game's state, the In
 | Path | What |
 |---|---|
 | `docs/design.md` | why mkw-recomp's pipeline, the architecture, MKW's lessons as rules, stages, testing |
-| `nx2/` | the lift pipeline and its tests (mkw-recomp's, made game-neutral; `kit.py` has the paths), and `make_game.py`, which the builders run |
+| `nx2/` | the lift pipeline and its tests (mkw-recomp's, made game-neutral; `kit.py` has the paths), and `make_game.py`, which the launcher and the builders run |
 | `host/` | the standalone Horizon runtime (TOTKPort's `hos/` as adapted by mkw-recomp), with the native NVN2 layer `nvn_native.c`; `host/posix` has the Win32 calls on Linux |
 | `gpu/vk/` | the Vulkan back end (`longshot_vk.dll`, `longshot_vk.so`), with Eden's shader recompiler and sirit |
 | `gpu/render/`, `gpu/third_party/` | the WebGPU renderer the Windows exe falls back to when it was built with wgpu-native, its op stream (`rx_nvn.h`), suyu's decoders |
-| `builder/` | Longshot Builder: the Windows app (.NET 8 WPF), its setup and MSI, and the Linux builder and launcher scripts |
+| `builder/` | Longshot Builder, command-line only (players use the Longshot Launcher): the Windows `--cli` program (.NET 8), its setup (also a game folder's `longshot.exe`), and the Linux AppImage's `AppRun`, tools and game folder scripts |
 | `scripts/` | test runs, the profile and log readers, the save copier (`oot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
 | `third_party/` | a64-kit (with Hookshot's changes, marked `(hookshot)`, and Longshot's, `(longshot)`: its PROVENANCE.md), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
