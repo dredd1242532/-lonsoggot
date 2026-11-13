@@ -387,8 +387,8 @@ def check_sources():
     hid = (ROOT / "host" / "nn_hid.c").read_text(encoding="utf-8")
     if "hos_oot_restart_input();" not in function(hid, "static void read_input(uint64_t *buttons, int32_t stick[4]) {"):
         raise SystemExit("nn_hid.c: read_input does not run oot_restart.c")
-    if "Restart in place" not in (ROOT / "readme.md").read_text(encoding="utf-8"):
-        raise SystemExit("readme.md: the Restart in place row is not documented")
+    if "Restart in place" not in (ROOT / "README.md").read_text(encoding="utf-8"):
+        raise SystemExit("README.md: the Restart in place row is not documented")
 
 
 def main():
@@ -411,9 +411,10 @@ def main():
         windows = os.name == "nt"
         flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if windows else 0
         extra = {"creationflags": flags} if windows else {}
-        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"),
-                                "-I", str(ROOT / "gpu" / "vk"), str(src), str(ROOT / "host" / "oot_restart.c"),
-                                str(ROOT / "host" / "oot_autoload.c"), "-lm", "-o", str(exe)], **extra)
+        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS",
+                                "-I", str(ROOT / "host"), "-I", str(ROOT / "gpu" / "vk"), str(src),
+                                str(ROOT / "host" / "oot_restart.c"), str(ROOT / "host" / "oot_autoload.c"),
+                                "-lm", "-o", str(exe)], **extra)
         if build.returncode:
             raise SystemExit("the host did not compile: see the compiler's output above")
         run = subprocess.run([str(exe), (root / "user").as_posix(), (root / "old").as_posix()], capture_output=True, text=True, **extra)
