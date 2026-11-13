@@ -302,5 +302,5 @@ with tempfile.TemporaryDirectory(prefix='present-semaphores-') as directory:
     folder = Path(directory)
     cpp, exe = folder/'fixture.cpp', folder/'fixture.exe'
     cpp.write_text(fixture)
-    subprocess.run([a.cxx, '-std=c++20', '-include', ENV_ON_H, '-O1', str(cpp), '-o', str(exe)], check=True)
+    subprocess.run([a.cxx, '-std=c++20', '-include', ENV_ON_H, '-include', str(source/'host/hos_wide_size.h'), '-O1', str(cpp), '-o', str(exe)], check=True)
     raise SystemExit(subprocess.run([str(exe)]).returncode)
