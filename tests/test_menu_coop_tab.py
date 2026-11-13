@@ -562,13 +562,23 @@ int main(int argc, char** argv) {
           asked[1].number == 1);
     n_asked = 0;
     window_token = 0;   // the same copy/return action must work without an OS window
+    cur_tab = TAB_COOP;
     coop_press(row(kCoopTemp));
     CHECK(pending == &row(kCoopTemp) && !restarts);
+    tick_pending(row(kCoopTemp));
+    CHECK(pending == &row(kCoopTemp) && !restarts);
+    tick_pending(row(kCoopLeave));
+    CHECK(!pending && !restarts);
+    coop_press(row(kCoopTemp));
+    tick_pending(row(kCoopTemp));
     answer = 0;
     coop_press(row(kCoopTemp));
     CHECK(!restarts && open_now);   // failed copy never restarts
     answer = 1;
-    coop_press(row(kCoopTemp)), coop_press(row(kCoopTemp));
+    coop_press(row(kCoopTemp));
+    tick_pending(row(kCoopTemp));
+    CHECK(pending == &row(kCoopTemp) && !restarts);
+    coop_press(row(kCoopTemp));
     CHECK(restarts == 1 && pipeline_saves == 1 && !open_now && asked[1].cmd == HOS_COOP_CMD_TEMP_SAVE);
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
     for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
