@@ -94,6 +94,62 @@ Launcher's build log shows info and above unless its level picker asks for more;
 shows the line with it. Per-item lines a player can't act on (one per program or pipeline, a decoder's details) are debug or
 trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags.
 
+### Stopping a windowless game
+
+`HOS_HEADLESS=1` draws offscreen. **Quitting is not saving:** neither the control command nor a normal window close
+asks the guest game to save, waits for its pending save writes, or proves that a save is complete. Save from the game
+first and wait for it to finish. Do not use a process exit or a `quitting:true` reply as a save receipt.
+
+On Windows, prefer the opt-in [control bridge](control.md). For a game started with `HOS_CONTROL=longshot-owned`,
+run `python -I scripts/longshot_ctl.py --sock longshot-owned quit`. The reply acknowledges the request, not the
+process's exit. The owner must wait for that particular process to end; a client timeout is not permission to report
+a successful stop or retry against another process.
+
+After the offscreen renderer has started, a windowless Windows game also installs a console handler and a hidden
+top-level window. The window is never shown or activated, receives no gameplay input, and is not the render surface.
+Installation is after renderer startup because creating/freeing its preparation console resets console handlers.
+During startup, use the control bridge; console/window stop support is not ready yet.
+
+| Route | What it does |
+|---|---|
+| Control `quit` | Flushes its reply, closes the bridge, then takes the same normal-close path as a game window. It does not impose the four-second Windows-event deadline below. |
+| Ctrl+C or Ctrl+Break in the game's attached console | Requests normal close once on a separate host worker. Repeated events do not repeat the cleanup or extend its deadline. It creates/attaches no console. The launching terminal, debugger and console input mode can affect delivery; a detached process may have no console. |
+| Close the console | Requests the same work and holds the handler briefly rather than returning immediately (which lets Windows terminate the process). Windows can end it before the work finishes. |
+| `taskkill /PID <owned-game-pid>` without `/F` | The hidden top-level window handles a delivered `WM_CLOSE`. This is a separate route from console control events. Actual `taskkill` delivery still needs Windows testing; target the game PID, not the launcher, and inspect the game exit. |
+| Logoff/shutdown | The hidden window accepts `WM_QUERYENDSESSION`, but only confirmed `WM_ENDSESSION` requests a stop; a cancelled session end leaves the game running. Console logoff/shutdown events are also handled if delivered. Windows can impose a shorter deadline or terminate without delivery. |
+| `taskkill /F`, `TerminateProcess`, or other forced termination | Bypasses the close work. No save, cache or co-op leave guarantee. |
+
+The Windows-event worker first logs `stop: requested ... incomplete ...`, calls `rx_close_asked`, then
+`hos_window_closed_exit`, exactly as the normal window-close route. Those calls keep renderer caches, request that
+shader preparation stop, release frame-generation resources, and flush the host log. They do **not** drain arbitrary
+GPU jobs or guest saves. An older renderer without the close export cannot do that renderer work.
+
+The event deadline is four seconds from the first request, shorter than Windows' usual five-second console-close
+allowance. If the process still runs then, its independent message thread calls `TerminateProcess` with exit code
+**124**. This is a forced timeout, not a graceful stop, and can interrupt cache writes. Normal close can itself spend
+ten seconds stopping preparation, so use the control command when that time is needed. OS scheduling, an OS-imposed
+shorter deadline, or forced termination can preempt this work.
+
+Only `stop: normal close work returned; save drain unsupported` **together with the observed process exit 0** means
+the normal close hooks returned before exit. It is not a completed-save receipt or proof every cache write succeeded.
+Exit 124, a missing marker, or no exit is an incomplete stop. The timeout path deliberately avoids the logger's locks:
+if logging is blocked or Windows kills the process first, there may be no final timeout line. A log alone cannot
+prove a clean process exit.
+
+Co-op is not on main. In [pull request 68](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/68), the normal-close
+hook also requests BYE/LEAVE and stops the hosted relay/session, with a bounded wait. Using that hook preserves its
+attempt, not a delivery guarantee: the relay must actually log the leave. Pending reliable events are not drained.
+Windows delivery, co-op leave/hosted-relay shutdown, console close, and the forced-timeout path still need game tests.
+
+The Windows contract is documented by Microsoft: [console handler lifetime and timeouts](https://learn.microsoft.com/en-us/windows/console/handlerroutine),
+[the user32/logoff caveat](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler), and
+[message-only windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#message-only-windows).
+A message-only window would not suffice: it cannot be enumerated and does not receive broadcasts.
+
+On Linux, windowless SDL input disables its own SIGTERM/SIGINT-to-quit-event handlers. Those signals therefore end
+the process with the default signal action, **without** the control/window close hooks. Use control `quit` there too
+when those hooks are needed. SIGKILL always bypasses them.
+
 ## Switches for testing and debugging
 
 The running game reads its switches from the environment or from `longshot_env.txt` beside `image.bin` (one

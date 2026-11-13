@@ -386,8 +386,11 @@ With `"wait": false` the reply is at once, with `"sent": null`. The game logs it
 < {"id":14,"ok":true,"frame":7310,"age":"adult","sent":true,"map":"KokiriForest_Adult","accepted":true}
 ```
 
-**quit**: the reply, then the game exits as when its window is closed (the log flushed, exit code 0). The socket is
-removed.
+**quit**: the reply acknowledges the request, then the bridge closes and takes the normal window-close path
+(renderer close hooks, log flush, then exit code 0). The Unix socket is removed. This does not request a guest save
+or wait for pending save writes. Observe the game process's exit separately; the reply is not a save or exit receipt.
+See [Stopping a windowless game](development.md#stopping-a-windowless-game) for Windows console/window routes,
+their deadlines, and how incomplete shutdown differs from normal close.
 
 ## Saves
 

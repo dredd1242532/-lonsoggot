@@ -105,6 +105,7 @@ static void relaunch(void) {
 void hos_window_closed_exit(void) {
     const int again = relaunch_asked != 0;
     hos_log(again ? "display: window closed for a restart (the Insert menu's Restart now)" : "display: window closed, exiting");
+    hos_log("stop: normal close work returned; save drain unsupported");
     hos_log_flush();
     void hos_crash_clean_end(void);
     hos_crash_clean_end();
