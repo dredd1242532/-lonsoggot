@@ -81,19 +81,9 @@ jobs:
           persist-credentials: false
       # (the versions scripts/linux/deps.sh builds the Vulkan back end with)
       - name: Check out pinned SPIR-V headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/SPIRV-Headers
-          ref: 04f10f650d514df88b76d25e83db360142c7b174 # vulkan-sdk-1.4.341.0
-          path: _deps/spirv-headers
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/spirv-headers   # vulkan-sdk-1.4.341.0
       - name: Check out pinned Vulkan headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/Vulkan-Headers
-          ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
-          path: _deps/vulkan-headers
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/vulkan-headers   # v1.4.345
       - name: Set up Python
         uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -196,12 +186,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check out pinned SPIR-V headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/SPIRV-Headers
-          ref: 496543121ce6419f23d6fa5d7194ba66c36212d2
-          path: _deps/spirv-headers
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 496543121ce6419f23d6fa5d7194ba66c36212d2 _deps/spirv-headers
       - name: Install Clang C++20, SPIR-V validator and ccache
         run: sudo apt-get update && sudo apt-get install -y clang spirv-tools ccache
       - name: Compiler cache

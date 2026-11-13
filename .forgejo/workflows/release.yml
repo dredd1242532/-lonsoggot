@@ -101,11 +101,27 @@ jobs:
           ref: ${{ needs.version.outputs.ref }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+      # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
+      - id: download_1
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: Longshot-linux-x86_64
           path: files
-      - uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+      - if: steps.download_1.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+        with:
+          name: Longshot-linux-x86_64
+          path: files
+      # (from Forgejo's public address behind Cloudflare, as the build jobs' upload: fetched once more when it failed)
+      - id: download_2
+        continue-on-error: true
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
+        with:
+          name: LongshotBuilder-windows
+          path: files
+      - if: steps.download_2.outcome == 'failure'
+        uses: https://data.forgejo.org/forgejo/download-artifact@d8d0a99033603453ad2255e58720b460a0555e1e   # v4 (4.1.4 with the GHES check off)
         with:
           name: LongshotBuilder-windows
           path: files
