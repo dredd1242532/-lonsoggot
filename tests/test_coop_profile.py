@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
             !host_path("save:/slot_00/progress.sav", out, sizeof out, &writable) || !writable) return 5;
         for (char *p = out; *p; p++) if (*p == '\\') *p = '/';
         puts(out);
-        if (!user_mount("temp", "temp") || !user_mount("cache", "cache/0")) return 6;
+        if (!user_mount("temp", "temp") || !user_mount("cache", "cache\\0")) return 6;
         if (!host_path("temp:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 7;
         if (!host_path("cache:/new", out, sizeof out, &writable) || !strstr(out, "coop-sessions")) return 8;
         if (host_path("save:/../outside", out, sizeof out, &writable)) return 9;
