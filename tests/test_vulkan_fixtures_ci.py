@@ -128,26 +128,30 @@ class Output(unittest.TestCase):
 
 class Workflow(unittest.TestCase):
     def test_hosted_job_rules(self):
-        workflow = (SOURCE_ROOT / ".github/workflows/source-regressions.yml").read_text(encoding="utf-8")
+        workflow = (SOURCE_ROOT / ".forgejo/workflows/vulkan-fixtures.yml").read_text(encoding="utf-8")
         self.assertIn("\n  vulkan-fixtures:\n", workflow)
-        job = workflow.split("\n  vulkan-fixtures:\n", 1)[1].split("\n  actionlint:\n", 1)[0]
+        job = workflow.split("\n  vulkan-fixtures:\n", 1)[1]
         self.assertIn("runs-on: ubuntu-24.04", job)
         self.assertIn("timeout-minutes: 5", job)
         self.assertNotIn("self-hosted", job)
         self.assertNotIn("continue-on-error", job)
         self.assertNotIn("secrets.", job)
-        self.assertRegex(workflow, r"\npermissions:\n  contents: read\n")
+        # Forgejo does not enforce GitHub's permissions key. Do not pretend it
+        # confines the token; use fork pull_request semantics and no secrets.
+        self.assertNotIn("permissions:", workflow)
+        self.assertNotIn("pull_request_target", workflow)
         self.assertIn("concurrency:\n", workflow)
-        self.assertNotIn("permissions:", job)  # inherits read-only
+        self.assertIn("forgejo.event_name", workflow)
+        self.assertIn("env -u FORGEJO_TOKEN -u GITHUB_TOKEN python3", job)
         self.assertIn("persist-credentials: false", job)
         for use in re.findall(r"uses: (\S+)", job):
-            self.assertRegex(use, r"@[0-9a-f]{40}$")
+            self.assertRegex(use, r"^https://github\.com/actions/checkout@[0-9a-f]{40}$")
         self.assertNotIn("${{", job)  # all paths come from shell environment variables
         for required in ("mesa-vulkan-drivers", "vulkan-validationlayers", "libvulkan-dev", "vulkan-tools",
                          "dpkg-query", "lvp_icd*.json", "VK_DRIVER_FILES", "VK_ICD_FILENAMES",
                          "tests/run_vulkan_fixtures.py", "--device llvmpipe"):
             self.assertIn(required, job)
-        triggers = workflow.split("\npermissions:", 1)[0]
+        triggers = workflow.split("\nconcurrency:", 1)[0]
         self.assertIn("pull_request:\n    branches: [main]", triggers)
         self.assertNotIn("paths:", triggers)
 

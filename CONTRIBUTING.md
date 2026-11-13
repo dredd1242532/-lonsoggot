@@ -213,11 +213,26 @@ Forgejo doesn't run these on pull requests or on `main` for now: CI runs only th
 description, workflow lint, the third-party notes), and a maintainer can start the full checks by hand (*Actions* >
 *CI* > *Run workflow*). So run them before you open a pull request and put their results in it.
 
-The included GitHub workflow also runs `tests/run_vulkan_fixtures.py` on Ubuntu 24.04 with Mesa's lavapipe software
-driver and the Khronos validation layer. It executes the authored write-back shader, copy-span and seven offscreen
-aspect/crop cases; missing devices, skipped cases and validation errors fail the job. This is CPU Vulkan execution,
-not hardware GPU coverage, a swapchain or a game run. The ordinary source checks keep their GPU opt-ins/skips for
-machines without Vulkan.
+The optional [Vulkan fixture workflow](.forgejo/workflows/vulkan-fixtures.yml) is prepared for Forgejo, but does not
+enable Actions or register a runner. It needs an isolated runner labelled `ubuntu-24.04`, with Ubuntu 24.04, Bash,
+Git, Python 3, Node.js 24 for the pinned checkout action, passwordless `sudo` for apt, and package-network access.
+Its first completed Forgejo run is still required before calling this CI coverage. The job has no configured secrets
+or uploads, does not persist checkout credentials, and removes the forge tokens from the fixture command. Forgejo
+does not enforce GitHub's `permissions` key; this is not a substitute for disposable-runner isolation.
+
+The same game-free checks are usable locally now. With a C++ compiler, Vulkan loader/headers, `vulkaninfo`, Mesa's
+lavapipe driver and Khronos validation layer installed, select the single software ICD and run one command
+(use `lvp_icd.x86_64.json` instead on packages with that filename):
+
+```sh
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+  python3 -I -B tests/run_vulkan_fixtures.py --cxx g++ --headers /usr/include --device llvmpipe
+```
+
+It executes five authored write-back cases, one copy-span case and seven offscreen aspect/crop cases. Missing devices,
+skipped cases, missing validation-layer activation and validation errors fail; all thirteen cases are required.
+This is CPU Vulkan execution, not hardware GPU coverage, a swapchain or a game run. The ordinary source checks keep
+their GPU opt-ins/skips for machines without Vulkan.
 
 ### Checks that need your dump or a run
 

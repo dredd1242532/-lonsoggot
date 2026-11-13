@@ -1,6 +1,6 @@
 """Compile the authored write-back shader fixture; --run executes it on an actual Vulkan device.
 
-The source suite compiles only; CI's separate lavapipe job runs it. Execution needs Vulkan 1.3,
+The source suite compiles only; run_vulkan_fixtures.py runs it. Execution needs Vulkan 1.3,
 buffer device address, maintenance4 and compute subgroup votes. No game data, window or swapchain
 is used. --shader-header permits a causal run with the baseline shader.
 """
