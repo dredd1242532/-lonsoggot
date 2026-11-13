@@ -1525,14 +1525,18 @@ bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool wid
              tex.nvn_format, (unsigned long long)(total >> 20), ms);
     return true;
 }
+/// An image no upload takes, whatever memory there is: its upload fails every time, and it is not tried again
+bool upload_never(const Texture& tex) {
+    return !tex.gpu || tex.samples != VK_SAMPLE_COUNT_1_BIT || !tex.guest_size ||
+           (tex.guest_size > (1ull << 31) && !tex.sparse) ||   // (a sparse image: only what holds texels)
+           // (depth-stencil: the depth aspect only; packed D24S8 storage is not copied into it as is: such targets are
+           // rendered, not uploaded)
+           tex.aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+}
 bool upload_inner(Texture& tex, const Ranges* dirty) {
     PROF(PROF_UPLOAD);
-    if (!tex.gpu || tex.samples != VK_SAMPLE_COUNT_1_BIT) return false;
+    if (upload_never(tex)) return false;
     const uint64_t total = tex.guest_size;
-    if (!total || (total > (1ull << 31) && !tex.sparse)) return false;   // (a sparse image: only what holds texels)
-    // (depth-stencil: the depth aspect only; packed D24S8 storage is not copied into it as is: such targets are
-    // rendered, not uploaded)
-    if (tex.aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) return false;
     st_uploads++;
     {   // RX_VK_LOG_UPLOADS=<present>: the uploads from that present on (200 of them; what churns)
         static const int64_t from = getenv("RX_VK_LOG_UPLOADS") ? atoll(getenv("RX_VK_LOG_UPLOADS")) : -1;
@@ -2544,10 +2548,15 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     }
     if (tex->uploaded && tex->checked_epoch == epoch) return tex;
     tex->checked_epoch = epoch;
+    // (longshot) an image whose last upload failed waits before the next try, before anything is checked or taken as seen:
+    // a BC3 image's upload stages the whole ASTC source (some 200 MB for a terrain array), not to be repeated every
+    // submission while the memory it needs is not there
+    if (tex->retry_frame > frame_no) return tex;
     static thread_local Ranges dirty;
     static const bool no_partial = env_on("RX_VK_NO_PARTIAL");   // (A/B: whole re-uploads)
     // (a buffer the GPU wrote over its storage, done since: all of it again; the tiles of MKW's terrain are filled so
     // and stayed the flat placeholder they were made with)
+    const uint64_t seen_before = tex->gpu_wrote_seen;   // (put back if the upload fails: the write is still to be taken)
     const bool gpu_dirty = tex->uploaded && gpu_wrote_into(*tex);
     const bool partial = !no_partial && !gpu_dirty && tex->uploaded && !tex->gpu_written && !tex->released;
     // (a texture the GPU drew and the game finalized: only what the CPU wrote since then. Its memory never got the
@@ -2585,11 +2594,13 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
                  "memory all the same", tex->id, (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers,
                  tex->nvn_format);
     }
+    bool from_memory_taken = false;   // (put back if the upload fails)
     if (owned && !remade_skip_old()) {   // (one evicted that came from memory: uploaded from it again. Above)
         std::lock_guard lk(from_memory_mu);
         auto e = evicted_from_memory.find(evicted_key(tex->gpu, tex->width, tex->height, tex->nvn_format));
         if (e != evicted_from_memory.end() && e->second == tex->guest_size) {
             evicted_from_memory.erase(e);
+            from_memory_taken = true;
             owned = 0;
             const uint64_t n = ++st_remade_uploaded;
             if (n <= 20 || n % 100 == 0)
@@ -2650,9 +2661,6 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
                  tex->layers, tex->nvn_format, (unsigned long long)(frame_no - 1), (unsigned long long)frame_no,
                  tex->released ? "finalized" : "live", (unsigned long long)kb, dirty.size(), gpu_dirty ? ", a GPU buffer wrote it" : "");
     }
-    // (longshot) a BC3 image whose last upload failed waits before the next try: its upload stages the whole ASTC source (some
-    // 200 MB for a terrain array), not to be repeated every submission while the memory it needs is not there
-    if (tex->bc && !tex->uploaded && tex->bc_retry_frame > frame_no) return tex;
     const auto up0 = std::chrono::steady_clock::now();
     const bool up_ok = upload(*tex, partial || sparse_written ? &dirty : nullptr);
     {   // (an upload over 15 ms: what it was, 60 of them)
@@ -2715,19 +2723,32 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
         tex->upload_gen = gen;
         tex->gpu_written = false;
         tex->released = false;
-    } else if (tex->bc) {
-        // (longshot) a BC3 image holds nothing until its encode has run. Marked uploaded as the others are, its blocks as the
-        // memory had them were drawn as coloured noise, and never made again unless the game wrote its memory: the path, the
-        // trees and Saria after an alt-tab on a 4 GB RX 5500M, its VRAM full and the textures evicted and made again. Not
-        // uploaded, it is tried again 30 frames on, until the staging and the scratch it needs can be had
-        tex->bc_retry_frame = frame_no + 30;
-        static std::atomic<int> told{0};
-        if (told++ < 40)
-            logf("vk: BC3 texture #%u %#llx %ux%u x%u: its upload failed (%s): tried again in 30 frames", tex->id,
-                 (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, astc_fail ? astc_fail : "unknown");
-    } else {
-        tex->uploaded = true;   // (not retried every draw; a write to its memory tries again)
+        tex->retry_frame = 0;
+    } else if (upload_never(*tex)) {
+        tex->uploaded = true;   // (nothing to try again)
         tex->upload_gen = gen;
+    } else {
+        // (longshot) a BC3 image holds nothing until its encode has run. Marked uploaded, its blocks as the memory had them
+        // were drawn as coloured noise, and never made again unless the game wrote its memory: the path, the trees and Saria
+        // after an alt-tab on a 4 GB RX 5500M, its VRAM full and the textures evicted and made again. The other kinds the same
+        // way: a first upload that failed (no staging memory, the VRAM or RAM full) left an empty image, and one that failed
+        // again dropped what the CPU or a GPU buffer had written since. Nothing is marked done: uploaded, what it was
+        // uploaded after and the GPU write it found stay as they were, and it is tried again 30 frames on
+        tex->retry_frame = frame_no + 30;
+        tex->gpu_wrote_seen = seen_before;
+        if (from_memory_taken) {   // (still one that came from memory: the next try has to find it so again)
+            std::lock_guard lk(from_memory_mu);
+            evicted_from_memory[evicted_key(tex->gpu, tex->width, tex->height, tex->nvn_format)] = tex->guest_size;
+        }
+        static std::atomic<int> told{0};
+        if (told++ < 40) {
+            if (tex->bc)
+                logf("vk: BC3 texture #%u %#llx %ux%u x%u: its upload failed (%s): tried again in 30 frames", tex->id,
+                     (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, astc_fail ? astc_fail : "unknown");
+            else
+                logf("vk: texture #%u %#llx %ux%u x%u NVN %#x: its upload failed: tried again in 30 frames", tex->id,
+                     (unsigned long long)tex->gpu, tex->width, tex->height, tex->layers, tex->nvn_format);
+        }
     }
     return tex;
 }
