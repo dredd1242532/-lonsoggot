@@ -711,6 +711,9 @@ With presentation permitted and local display on, the existing POS message sends
 and up to four animation slots about15 times a second. Same-map accepted players are shown100ms behind the latest
 sample, interpolated between recent positions. A local display switched off may still share the map/state at the
 low rate, but only under that same signed permission. It never shares a precise position or creates a body.
+Animation phase comes from each native slot's current frame, not its clip duration; the receiver interpolates
+that phase and applies it through the native animation setter. A successful node request alone does not prove
+visible skeletal motion or full-pose parity.
 
 Receive-time admission captures a ticket from the central gameplay owner. Before any creation, placement or
 animation call, the body writer checks that ticket again under the owner's lock. Leaving, identity/rules/save/area

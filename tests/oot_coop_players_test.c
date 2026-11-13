@@ -449,6 +449,7 @@ static uint64_t give_anim(uint64_t actor, int n, const char *const *names) {
     for (int i = 0; i < n; i++) {
         const uint64_t slot = galloc(0x110);
         st(slots + 0x48ull * (unsigned)i, slot, 8), st(slot + 0x10, gtext(names[i]), 8);
+        stf(slot + 0x10c, 12.5f + (float)i);
     }
     return control;
 }
@@ -491,8 +492,7 @@ static void fake_mtx(Ctx *c) {
     for (int i = 0; i < 12; i++) mtx[i] = ldf(c->x[1] + 4u * (unsigned)i);
     clobber(c);
 }
-/* animation: Link's frames by slot; what an actor was asked to play and the frames set on it */
-static float link_frames[4] = {12.5f, 3.0f, 0, 0};
+/* The current frame lives in the slot; f_837d57c0 returns duration, a different value. */
 static uint64_t link_control;
 static struct { uint64_t actor; char node[64]; uint32_t slot; float rate, start, blend; uint8_t same; } played[8];
 static struct { uint64_t control; uint32_t slot; float frame; } frame_set;
@@ -500,7 +500,8 @@ static void fake_frame_get(Ctx *c) {
     calls[FN_FRAME_GET]++;
     CHECK(c->x[0] == link_control && c->x[1] < 4);
     uint32_t bits;
-    memcpy(&bits, &link_frames[c->x[1] & 3], 4);
+    const float duration = 90.0f;
+    memcpy(&bits, &duration, 4);
     c->vreg[0][0] = bits, c->vreg[1][0] = 0xdead;
     clobber(c);
 }
@@ -952,7 +953,17 @@ static void game_side(const char *steps_path) {
     CHECK(P.anim && !strcmp(P.actor_name, "CoopPuppet_Child"));
     frame(16);
     CHECK(sends == 1 && coop_pos_parse(sent, sent_n, &mine) && mine.nslots == 2 && !strcmp(mine.slot[0].node, "Wait") && mine.slot[0].frame == 12.5f &&
-          !mine.slot[1].node[0] && calls[FN_FRAME_GET] == 1);
+          !mine.slot[1].node[0] && calls[FN_FRAME_GET] == 0);
+    const uint64_t sampled_slot = ld(ld(link_control + 0x20, 8), 8);
+    for (int i = 0; i < 3; i++) {
+        const float current = i == 0 ? 17.25f : i == 1 ? 1.0f : NAN;
+        stf(sampled_slot + 0x10c, current);
+        frame(COOP_PLAYERS_SEND_MS);
+        CHECK(coop_pos_parse(sent, sent_n, &mine) && mine.nslots == 2);
+        CHECK(mine.slot[0].frame == (isfinite(current) ? current : 0));
+        CHECK(!calls[FN_FRAME_GET]);   /* duration must never become playback phase */
+    }
+    stf(sampled_slot + 0x10c, 12.5f);
     accepted = 1u << 2;
     made_has_anim = 1;
     {
@@ -1023,7 +1034,7 @@ static void game_side(const char *steps_path) {
     CHECK(logged("coop: puppet: member 8 is in Forest at 9.00 5.00 22.00"));
     game_makes();
     frame(100);
-    CHECK(P.puppet[8].state == PP_SHOWN && !calls[FN_PLAY] && calls[FN_FRAME_GET] > 0);
+    CHECK(P.puppet[8].state == PP_SHOWN && !calls[FN_PLAY] && !calls[FN_FRAME_GET]);
     frame(2900), frame(100), frame(100);       /* 3.2 s: between the lines at 2 s and 4 s, six tenths of the way less the 100 ms it is shown behind */
     CHECK(mtx[3] < 9 && mtx[3] > 7 && mtx[11] > 22 && mtx[11] < 24);
     frame(1000), frame(100), frame(100);       /* past 4 s: there */

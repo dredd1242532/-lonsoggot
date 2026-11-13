@@ -98,10 +98,9 @@ int hos_coop_players_assets(void);   /* mods.c: generated files indexed without 
 #define ACTOR_DELETE_FN 0x800c6490ULL
 #define SET_MTX_FN 0x80c8fd60ULL
 #define AS_PLAY_FN 0x802222a0ULL       /* (a request block): a node by name on one of an actor's animation slots */
-#define AS_FRAME_GET_FN 0x837d57c0ULL  /* (animation control, slot) -> s0 */
 #define AS_FRAME_SET_FN 0x837d5d70ULL  /* (animation control, slot, s0) */
 static const uint64_t game_fns[] = {CREATE_FN, TAKE_FN, DROP_FN, QUEUE_FIND_FN, REQUEST_FREE_FN, REQUEST_DELETE_FN, ACTOR_DELETE_FN, SET_MTX_FN,
-                                    AS_PLAY_FN, AS_FRAME_GET_FN, AS_FRAME_SET_FN};
+                                    AS_PLAY_FN, AS_FRAME_SET_FN};
 
 enum {
     A_ID = 0x18,            /* u32: the actor's number, another for each actor made */
@@ -111,6 +110,7 @@ enum {
     A_POS2 = 0x2ec, A_ROT2 = 0x2f8, A_POS = 0x31c, A_ROT = 0x328,
     A_SIZE = 0x400,
     AS_SLOT_NAME = 0x10,    /* a slot: the name of the node it plays (char *) */
+    AS_SLOT_FRAME = 0x10c,  /* current frame, as QueryASGetCurrentFrame reads it; f_837d57c0 is the length */
     S64_BASE = 0x608, S64_SIZE = 0x108, S64_TEXT = 0x68,   /* GameDataMgr's String64 container */
     CN_COUNT = 0x08, CN_ENTRIES = 0x10, CN_TABLE = 0x18, CN_CAP = 0x24,
     /* the host's block of guest memory for one request */
@@ -391,10 +391,8 @@ static void anim_read(Ctx *c, uint64_t actor, CoopPos *me) {
         const uint64_t slot = anim_slot(c, control, i);
         float frame = 0;
         text_at(rd64(c, slot + AS_SLOT_NAME), me->slot[i].node, sizeof me->slot[i].node);
-        if (me->slot[i].node[0]) {
-            const Call k = {.x = {control, (uint64_t)i}};
-            game_call(c, AS_FRAME_GET_FN, &k, &frame);
-        }
+        if (me->slot[i].node[0] && rd_ok(slot + AS_SLOT_FRAME, sizeof frame))
+            floats_at(slot + AS_SLOT_FRAME, &frame, 1);
         me->slot[i].frame = isfinite(frame) ? frame : 0;
         me->nslots = (uint8_t)(i + 1);
     }
