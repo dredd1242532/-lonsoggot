@@ -92,6 +92,14 @@ Save and update guides use Easy beans for everyday launcher steps and Advanced b
 for optional reference details. Their canonical sources remain `docs/saves.md` and
 `docs/updates-and-saves.md`; generated cards and disclosures preserve existing anchors.
 
+The graphics guide imports choices and defaults from the README's in-game menu table
+at build time. Section names and order come from `gpu/vk/vk_menu.cpp`; mismatched,
+missing or malformed rows stop the build. No network request or running game is needed.
+Edit those original sources, not the generated cards. Restart badges reflect explicit
+README annotations; absence of a badge is not a promise about every build or mode.
+Search and section filters enhance native disclosures; without JavaScript every card
+remains available. Setting links clear filters and printing includes the whole catalogue.
+
 ## Validation and limits
 
 `npm run check` verifies generated routes, links, anchors, edit destinations, artwork

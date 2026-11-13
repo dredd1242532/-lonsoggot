@@ -10,7 +10,7 @@ export default defineConfig({
     title: 'Longshot',
     description: 'Longshot by team magicbean. Guides, project updates, and practical help for your PC adventure.',
     favicon: '/branding/longshot.png',
-    customCss: ['./src/styles/forest.css', './src/styles/longshot.css', './src/styles/manual.css'],
+    customCss: ['./src/styles/forest.css', './src/styles/longshot.css', './src/styles/manual.css', './src/styles/graphics-settings.css'],
     components: {
       Header: './src/components/Header.astro',
       Hero: './src/components/LongshotHero.astro',

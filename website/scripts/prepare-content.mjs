@@ -5,6 +5,8 @@ import { formatManual, formatInstallHub, formatSaveGuide } from './format-manual
 import { siteConfig } from '../site.config.mjs';
 import { contentSources } from '../content-sources.mjs';
 import { verifyCompatibilitySources } from './verify-compatibility-sources.mjs';
+import { createMarkdownProcessor } from '@astrojs/markdown-remark';
+import { formatGraphicsSettings } from './graphics-settings.mjs';
 
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.resolve(site, '..');
@@ -54,6 +56,9 @@ for (const [source, slug] of pages) {
   if (source === 'README.md') text = formatManual(text);
   if (source === 'docs/getting-started.md') text = formatInstallHub(text);
   if (['docs/saves.md', 'docs/updates-and-saves.md'].includes(source)) text = formatSaveGuide(text);
+  if (source === 'docs/graphics-and-controls.md') text = await formatGraphicsSettings(text,
+    await readFile(path.join(root, 'README.md'), 'utf8'),
+    await readFile(path.join(root, 'gpu/vk/vk_menu.cpp'), 'utf8'), await createMarkdownProcessor());
   const front = [
     '---', `title: ${JSON.stringify(title)}`, `slug: ${JSON.stringify(slug)}`,
     `editUrl: ${JSON.stringify(siteConfig.editBase + source)}`,
