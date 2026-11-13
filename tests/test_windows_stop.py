@@ -27,13 +27,14 @@ def main():
     parser.add_argument("--cc", default="gcc")
     parser.add_argument("--source", type=Path, default=ROOT)
     parser.add_argument("--stop-source", type=Path)
+    parser.add_argument("--control-source", type=Path)
     parser.add_argument("--compile-only", action="store_true")
     args = parser.parse_args()
     source = (args.stop_source or args.source / "host/windows_stop.c").read_text(encoding="utf-8")
     source = source.replace("#ifdef _WIN32\n#include <windows.h>", "").removesuffix("#endif\n")
     fixture = (ROOT / "tests/windows_stop_test.c").read_text(encoding="utf-8")
     fixture = fixture.replace("/* ACTUAL_WINDOWS_STOP */", source)
-    control = (args.source / "host/control.c").read_text(encoding="utf-8")
+    control = (args.control_source or args.source / "host/control.c").read_text(encoding="utf-8")
     relaunch = (args.source / "host/hos_relaunch.c").read_text(encoding="utf-8")
     chain = r'''
 #define _CRT_SECURE_NO_WARNINGS
@@ -41,22 +42,36 @@ def main():
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-static int relaunch_asked, order, exited;
+static int relaunch_asked, order, exited, restarted, window_logs;
 static void rx_close_asked(void) { assert(order == 0); order = 1; }
 static void hos_log(const char *fmt, ...) {
-    if (strstr(fmt, "normal close work returned")) { assert(order == 1); order = 2; }
+    if (strstr(fmt, "close work done")) { assert(order == 1); order = 2; }
+    if (strstr(fmt, "display: window closed")) window_logs++;
 }
 static void hos_log_flush(void) { assert(order == 2); order = 3; }
-static void relaunch(void) { assert(0); }
+static void relaunch(void) { assert(order == 3); restarted++; }
 static void ExitProcess(unsigned code) { assert(order == 3 && code == 0); exited++; }
+/* ACTUAL_FINISH */
 /* ACTUAL_CLOSE */
 /* ACTUAL_QUIT */
 int main(void) {
+    order = 1;
+    hos_close_finish();
+    assert(order == 3 && exited == 0 && restarted == 0);   /* a returning tail, safe for the event worker */
+    order = 0; relaunch_asked = 1;
     game_quit();
-    assert(exited == 1);
-    puts("PASS: control quit uses the normal-close path and flushes its completion marker before exit");
+    assert(exited == 1 && restarted == 0 && window_logs == 0);
+    puts("PASS: control quit flushes the shared tail, ignores pending restart and does not claim a window closed");
+    order = 1; exited = 0;
+    hos_window_closed_exit();
+    assert(exited == 1 && restarted == 1 && window_logs == 1);
+    order = 1; exited = restarted = window_logs = 0; relaunch_asked = 0;
+    hos_window_closed_exit();
+    assert(exited == 1 && restarted == 0 && window_logs == 1);
+    puts("PASS: window close still flushes before its optional relaunch and ExitProcess");
 }
 '''
+    chain = chain.replace("/* ACTUAL_FINISH */", function(relaunch, "void hos_close_finish(void)"))
     chain = chain.replace("/* ACTUAL_CLOSE */", function(relaunch, "void hos_window_closed_exit(void)"))
     chain = chain.replace("/* ACTUAL_QUIT */", function(control, "static void game_quit(void)"))
     with tempfile.TemporaryDirectory(prefix="windows-stop-") as temp:

@@ -108,38 +108,51 @@ a successful stop or retry against another process.
 After the offscreen renderer has started, a windowless Windows game also installs a console handler and a hidden
 top-level window. The window is never shown or activated, receives no gameplay input, and is not the render surface.
 Installation is after renderer startup because creating/freeing its preparation console resets console handlers.
-During startup, use the control bridge; console/window stop support is not ready yet.
+During startup, use the control bridge; console/window stop support is not ready yet. Failure to start this
+best-effort helper leaves the game running and logs `stop: windowless stop route unavailable; use the control bridge`.
 
 | Route | What it does |
 |---|---|
-| Control `quit` | Flushes its reply, closes the bridge, then takes the same normal-close path as a game window. It does not impose the four-second Windows-event deadline below. |
-| Ctrl+C or Ctrl+Break in the game's attached console | Requests normal close once on a separate host worker. Repeated events do not repeat the cleanup or extend its deadline. It creates/attaches no console. The launching terminal, debugger and console input mode can affect delivery; a detached process may have no console. |
-| Close the console | Requests the same work and holds the handler briefly rather than returning immediately (which lets Windows terminate the process). Windows can end it before the work finishes. |
-| `taskkill /PID <owned-game-pid>` without `/F` | The hidden top-level window handles a delivered `WM_CLOSE`. This is a separate route from console control events. Actual `taskkill` delivery still needs Windows testing; target the game PID, not the launcher, and inspect the game exit. |
-| Logoff/shutdown | The hidden window accepts `WM_QUERYENDSESSION`, but only confirmed `WM_ENDSESSION` requests a stop; a cancelled session end leaves the game running. Console logoff/shutdown events are also handled if delivered. Windows can impose a shorter deadline or terminate without delivery. |
-| `taskkill /F`, `TerminateProcess`, or other forced termination | Bypasses the close work. No save, cache or co-op leave guarantee. |
+| Control `quit` | Flushes its reply, closes the bridge, runs the renderer close hooks and shared log tail, then calls `ExitProcess(0)`. It has no forced deadline and never honours a pending menu restart or claims a window closed. |
+| Ctrl+C or Ctrl+Break in the game's attached console | Requests close once on a separate host worker, with **no forced deadline**. Repeats do not repeat the work. It creates/attaches no console. The launching terminal, debugger and console input mode can affect delivery; a detached process may have no console. |
+| Close the console | Requests the same work and arms a **four-second deadline**. The handler waits only for the shared remaining time instead of returning immediately (which lets Windows terminate the process). Windows can end it sooner. |
+| `taskkill /PID <owned-game-pid>` without `/F` | The hidden top-level window handles a delivered `WM_CLOSE`, with **no forced deadline**. This is separate from console control events. Actual `taskkill` delivery still needs Windows testing; target the game PID, not the launcher, and inspect the game exit. |
+| Logoff/shutdown | The hidden window accepts `WM_QUERYENDSESSION`, but only confirmed `WM_ENDSESSION` requests a stop and arms a **four-second deadline**; a cancelled session end leaves the game running. Console logoff/shutdown events also arm that deadline if delivered. Windows may impose a shorter limit or terminate without delivery. |
+| `taskkill /F`, an external `TerminateProcess`, or other forced termination | Bypasses the close work. No save, cache or co-op leave guarantee. |
 
-The Windows-event worker first logs `stop: requested ... incomplete ...`, calls `rx_close_asked`, then
-`hos_window_closed_exit`, exactly as the normal window-close route. Those calls keep renderer caches, request that
-shader preparation stop, release frame-generation resources, and flush the host log. They do **not** drain arbitrary
-GPU jobs or guest saves. An older renderer without the close export cannot do that renderer work.
+The Windows-event worker first logs `stop: requested by ...`, calls `rx_close_asked`, then `hos_close_finish`.
+Those are the explicit close hooks also used by the ordinary window and control routes: they keep renderer caches,
+request that shader preparation stop, release frame-generation resources, and flush the host log. They do **not**
+drain arbitrary GPU jobs or guest saves. An older renderer without the close export cannot do that renderer work.
+After these hooks and the log flush return, **only the Windows-event worker** ends with
+`TerminateProcess(GetCurrentProcess(), 0)`, skipping DLL detach. `ExitProcess` would terminate the watchdog before
+DLL detach, so a driver hanging in detach could not be bounded by that watchdog. Normal window/restart and control
+exits still use `ExitProcess` and do not acquire this detach guarantee.
 
-The event deadline is four seconds from the first request, shorter than Windows' usual five-second console-close
-allowance. If the process still runs then, its independent message thread calls `TerminateProcess` with exit code
-**124**. This is a forced timeout, not a graceful stop, and can interrupt cache writes. Normal close can itself spend
-ten seconds stopping preparation, so use the control command when that time is needed. OS scheduling, an OS-imposed
-shorter deadline, or forced termination can preempt this work.
+Windows sets no close deadline for `WM_CLOSE`, Ctrl+C or Ctrl+Break, and neither does this helper. The normal close
+can wait ten seconds for preparation and two more for frame-generation teardown, besides cache writes and other
+driver work with no combined bound. A four-second kill on those routes would cut short valid work. Observe their
+process exit; a client/observer timeout is not a reason to label the stop successful or to force it automatically.
 
-Only `stop: normal close work returned; save drain unsupported` **together with the observed process exit 0** means
-the normal close hooks returned before exit. It is not a completed-save receipt or proof every cache write succeeded.
-Exit 124, a missing marker, or no exit is an incomplete stop. The timeout path deliberately avoids the logger's locks:
-if logging is blocked or Windows kills the process first, there may be no final timeout line. A log alone cannot
-prove a clean process exit.
+Only an **OS-ending event** (console close/logoff/shutdown or confirmed `WM_ENDSESSION`) starts the four-second
+budget, shorter than Windows' usual five-second console-close allowance. Such an event may follow an ordinary
+close already in progress: it arms the budget and wakes the monitor without asking for the close work again.
+Later events never extend it. If explicit close work is still running at the deadline, the monitor terminates this
+process with code **124**. A console handler returning first can instead produce **0xC000013A**
+(`STATUS_CONTROL_C_EXIT`). Both are incomplete stops and may interrupt cache writes. OS scheduling, a shorter
+system deadline, or external termination can preempt this work.
 
-Co-op is not on main. In [pull request 68](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/68), the normal-close
-hook also requests BYE/LEAVE and stops the hosted relay/session, with a bounded wait. Using that hook preserves its
-attempt, not a delivery guarantee: the relay must actually log the leave. Pending reliable events are not drained.
-Windows delivery, co-op leave/hosted-relay shutdown, console close, and the forced-timeout path still need game tests.
+Only `stop: close work done (the game's saves are not waited for)` **together with observed process exit 0** means
+the explicit close hooks returned before exit. It is not a completed-save receipt or proof every cache write
+succeeded. Exit 124, 0xC000013A, any other nonzero exit, a missing marker, or no exit is incomplete/unknown.
+The timeout path deliberately avoids logger locks: if logging is blocked or Windows kills the process first,
+there may be no final timeout line. A log alone cannot prove a clean process exit.
+
+Co-op is not on main. [Pull request 68](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/68) adds a bounded
+BYE/LEAVE and hosted relay/session stop. When integrating it, put its `coop_shutdown` call once in `hos_close_finish`
+before the marker and log flush, so all three routes reach it; do not leave it only in the window-exit wrapper.
+That preserves an attempt, not a delivery guarantee: the relay must actually log the leave. Pending reliable events
+are not drained. Windows delivery, co-op leave/hosted-relay shutdown and the OS-deadline path still need game tests.
 
 The Windows contract is documented by Microsoft: [console handler lifetime and timeouts](https://learn.microsoft.com/en-us/windows/console/handlerroutine),
 [the user32/logoff caveat](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler), and

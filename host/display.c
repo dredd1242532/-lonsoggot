@@ -576,7 +576,7 @@ void hos_display_start(void) {
         /* The renderer's startup may attach/free a console, which resets Windows' console handlers.
            Install the stop route afterwards; it needs neither a rendered frame nor the game's input loop. */
         int hos_windows_stop_start(void);
-        if (!hos_windows_stop_start()) display_start_failed("windowless stop setup");
+        if (!hos_windows_stop_start()) hos_log("stop: windowless stop route unavailable; use the control bridge");
         return;
     }
     renderer_up = CreateEventA(NULL, TRUE, FALSE, NULL);

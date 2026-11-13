@@ -89,7 +89,9 @@ int main(void) {
     CHECK("headless starts only offscreen renderer", renderer_calls == 1 && event_calls == 0 && thread_calls == 0);
     CHECK("headless installs its stop route once", stop_calls == 1 && exit_calls == 0);
     reset(); headless = 1; stop_result = 0; error_result = 404; run_startup(hos_display_start);
-    failed("windowless stop setup", 404);
+    CHECK("missing stop route is not fatal", exit_calls == 0 && renderer_calls == 1 && stop_calls == 1);
+    CHECK("missing stop route names the fallback without a stale error code",
+          !strcmp(log_line, "stop: windowless stop route unavailable; use the control bridge"));
 
     reset(); event_result = NULL; error_result = 101; run_startup(hos_display_start);
     failed("CreateEventA", 101);
