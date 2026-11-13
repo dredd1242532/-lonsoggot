@@ -1,5 +1,5 @@
 """A float add to a storage buffer is one OpAtomicFAddEXT where the GPU has it and it is wanted (by default with NVIDIA's
-driver only), and the compare-exchange loop elsewhere.
+and Intel's Windows drivers), and the compare-exchange loop elsewhere.
 
 The game's RED/ATOM.ADD.F32 were always a compare-exchange loop (f32_add_cas), and every such loop gives up after
 CAS_LOOP_MAX_TRIES attempts (issue 17's ceiling): when more invocations add to one word than that, the ones that give
@@ -12,8 +12,9 @@ it, and without descriptor aliasing (no f32 view to add through). Each must pass
 OpAtomicFAddEXT and no compare-exchange, the others the loop and no float-add capability. The device's half (the
 extension asked for only when wanted, only that feature on, the profile and the program cache's stamp) and the
 global-address fallback are checked in the source. Whether it is wanted (native_fadd_wanted, vk_main.cpp) is compiled
-alone against a table: unset, NVIDIA's driver alone (not RADV, AMD's, Intel's or NVK); set, RX_VK_NATIVE_FADD by #2042's
-rule on any driver, so =on is on and =off, =false, =no and empty are off. Nothing runs on a GPU.
+alone against a table: unset, NVIDIA's and Intel's Windows drivers (not RADV, AMD's, Mesa's Intel driver or NVK); set,
+RX_VK_NATIVE_FADD by #2042's rule on any driver, so =on is on and =off, =false, =no and empty are off. Nothing runs on a
+GPU.
 
     python -I -B tests/test_native_float_atomic_add.py --headers <SPIRV-Headers/include> [--cxx g++] [--spirv-val spirv-val]
 """
@@ -218,16 +219,17 @@ def check_source():
 
 
 # RX_VK_NATIVE_FADD's value (None: unset), the driver (VkDriverId: the Vulkan specification's numbers), and whether the
-# float add is then asked to be the GPU's own: unset, NVIDIA's driver alone; set, #2042's rule (longshot_env.h
-# env_value_off) whatever the driver
+# float add is then asked to be the GPU's own: unset, NVIDIA's and Intel's Windows drivers; set, #2042's rule
+# (longshot_env.h env_value_off) whatever the driver
 DRIVERS = {"AMD_PROPRIETARY": 1, "MESA_RADV": 3, "NVIDIA_PROPRIETARY": 4, "INTEL_PROPRIETARY_WINDOWS": 5,
            "INTEL_OPEN_SOURCE_MESA": 6, "MESA_NVK": 24}
-SWITCH_CASES = ([(None, "NVIDIA_PROPRIETARY", 1)] +
-                [(None, d, 0) for d in DRIVERS if d != "NVIDIA_PROPRIETARY"] +
+NATIVE_BY_DEFAULT = ("NVIDIA_PROPRIETARY", "INTEL_PROPRIETARY_WINDOWS")
+SWITCH_CASES = ([(None, d, 1) for d in NATIVE_BY_DEFAULT] +
+                [(None, d, 0) for d in DRIVERS if d not in NATIVE_BY_DEFAULT] +
                 [(v, d, 1) for v in ("1", "on", "yes", "true", "2") for d in ("MESA_RADV", "NVIDIA_PROPRIETARY")] +
                 [(v, "AMD_PROPRIETARY", 1) for v in ("1", "on")] + [("1", "INTEL_OPEN_SOURCE_MESA", 1)] +
                 [(v, "NVIDIA_PROPRIETARY", 0) for v in ("0", " 0 ", "off", "OFF", "false", "no", "")] +
-                [("0", "MESA_RADV", 0), ("off", "AMD_PROPRIETARY", 0)])
+                [("0", "MESA_RADV", 0), ("off", "AMD_PROPRIETARY", 0), ("0", "INTEL_PROPRIETARY_WINDOWS", 0)])
 SWITCH_FIXTURE = r"""
 #include <cstdio>
 #include <cstdlib>
@@ -266,10 +268,11 @@ def check_switch(cxx, tmp):
     r = subprocess.run([str(exe), *argv], capture_output=True, text=True, timeout=30)
     if r.returncode:
         print(r.stdout + r.stderr)
-        raise SystemExit("FAIL: the native float add is not wanted as it should be (NVIDIA's driver by default, "
+        raise SystemExit("FAIL: the native float add is not wanted as it should be (NVIDIA's and Intel's Windows drivers "
+                         "by default, "
                          "RX_VK_NATIVE_FADD by the switches' rule)")
-    print("switch: %d cases: unset, NVIDIA's driver alone; RX_VK_NATIVE_FADD by the switches' rule on any driver"
-          % len(SWITCH_CASES))
+    print("switch: %d cases: unset, NVIDIA's and Intel's Windows drivers; RX_VK_NATIVE_FADD by the switches' rule on "
+          "any driver" % len(SWITCH_CASES))
 
 
 def main():

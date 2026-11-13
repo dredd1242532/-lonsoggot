@@ -261,12 +261,12 @@ bool pick_device() {
 
 /// (longshot) Whether the shaders' float adds to storage buffers are asked to be the GPU's own atomic (create_device):
 /// RX_VK_NATIVE_FADD by the switches' rule (longshot_env.h env_value_off: 0, false, off, no or empty is off, any other
-/// value on); unset, only with NVIDIA's driver, the one the native add was tried on in the game (an RTX 4090 in Kakariko
-/// and on Death Mountain Trail). AMD's RDNA 3 and later and Intel's Arc report the feature too but were not tried: they
-/// keep the loop unless the switch asks, until runs on them say otherwise
+/// value on); unset, with NVIDIA's driver (an RTX 4090 and an RTX 5080 in Kakariko and on Death Mountain Trail) and
+/// Intel's Windows driver (an Arc iGPU there and in Kokiri Forest). AMD's RDNA 3 and later and Mesa's Intel driver report
+/// the feature too but were not tried: they keep the loop unless the switch asks, until runs on them say otherwise
 static bool native_fadd_wanted(const char* env, VkDriverId driver) {
     if (env) return !env_value_off(env);
-    return driver == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+    return driver == VK_DRIVER_ID_NVIDIA_PROPRIETARY || driver == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS;
 }
 
 bool create_device() {
@@ -354,8 +354,9 @@ bool create_device() {
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     // (longshot) the GPU's own float add on storage buffers: the game's RED/ATOM.ADD.F32 become one OpAtomicFAddEXT instead
     // of a compare-exchange loop, which gives up after CAS_LOOP_MAX_TRIES attempts and loses that add (eden
-    // spirv_emit_context.cpp DefineStorageBuffers). By default with NVIDIA's driver only (native_fadd_wanted);
-    // RX_VK_NATIVE_FADD=1 asks for it on any GPU, =0 keeps the loop on every one, the extension not even enabled
+    // spirv_emit_context.cpp DefineStorageBuffers). By default with NVIDIA's and Intel's Windows drivers
+    // (native_fadd_wanted); RX_VK_NATIVE_FADD=1 asks for it on any GPU, =0 keeps the loop on every one, the extension not
+    // even enabled
     const char* const fadd_env = getenv("RX_VK_NATIVE_FADD");
     VkPhysicalDeviceDriverProperties fadd_driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
     {
@@ -517,7 +518,8 @@ bool create_device() {
                                                      : "compare-exchange loop (no VK_EXT_shader_atomic_float)";
         if (fadd_env) logf("vk: float atomic add on storage buffers: %s, RX_VK_NATIVE_FADD=%s", how, fadd_env);
         else logf("vk: float atomic add on storage buffers: %s, %s", how,
-                  fadd_wanted ? "NVIDIA's driver" : "by default only with NVIDIA's driver (RX_VK_NATIVE_FADD=1: native where the GPU has it)");
+                  !fadd_wanted ? "by default only with NVIDIA's and Intel's Windows drivers (RX_VK_NATIVE_FADD=1: native where the GPU has it)"
+                  : fadd_driver.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY ? "NVIDIA's driver" : "Intel's Windows driver");
     }
     // (bounds-checked buffer access: an out-of-range access dropped instead of faulting the device. On by default: the GPU
     // culling pass 53caac5f faulted the device while a save loaded, about one start in three, and the scene's lighting read garbage
