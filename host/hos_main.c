@@ -2079,7 +2079,7 @@ static void driver_cache_folder(void) {
 #define HOS_STATIC_TLS_ROOM 98304
 static void static_tls_room(char **argv) {
     const char *off = getenv("HOS_STATIC_TLS");
-    if ((off && !strcmp(off, "0")) || getenv("HOS_STATIC_TLS_DONE")) return;
+    if ((off && !strcmp(off, "0")) || env_on("HOS_STATIC_TLS_DONE")) return;
     const char *was = getenv("GLIBC_TUNABLES");
     if (was && strstr(was, "glibc.rtld.optional_static_tls")) return;
     char tunables[2048];

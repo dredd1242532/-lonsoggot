@@ -100,7 +100,8 @@ static void WaitForSingleObject(HANDLE h, unsigned timeout) {
 }
 static void load_longshot_env() {}
 static void driver_cache_room() {}   // (host/hos_main.c: the drivers' shader caches' size, #2033)
-static void driver_cache_folder() {}   // (host/hos_main.c: the folder __GL_SHADER_DISK_CACHE_PATH names, made)
+static void driver_cache_folder() {}
+static void static_tls_room(char**) {}   // (host/hos_main.c: the static TLS restart, first in main)   // (host/hos_main.c: the folder __GL_SHADER_DISK_CACHE_PATH names, made)
 
 #include "display_startup_actual.inc"
 
