@@ -619,8 +619,8 @@ saving asks the existing engine to sign the changed draft and everyone must acce
 PvP Accept help and the acceptance log describe setup only:
 no progress is shared and no fight starts. Co-op keeps its progress-sharing help and copy/apply log wording.
 The normal copy-before-progress rule remains in force. Joining, accepting and readiness are separate decisions.
-The host/renderer view uses API 27 for the added membership revision and pool epoch (26 is already allocated to the
-temporary-profile view). Both binaries must use the matching interface.
+The host/renderer view uses API 28 for the combined membership revision, pool epoch and temporary-profile status
+(27 is the terms-only view; 26 was the earlier temporary-profile view). Both binaries must use the matching interface.
 
 The first Accept stays armed across menu frames while you read the signed terms, including moving between their rows.
 Back returns to the same Accept row for confirmation. Selecting a different room action, closing the menu or receiving
@@ -700,82 +700,6 @@ revocation against a setter. A failed setter is not recorded as an applied value
 off after use, returns before guest reads/calls (the separately requested read-only debug probe remains separate).
 PvP setup grants no gameplay capability. The native game still owns ordinary single-player state.
 
-## Child bodies in the world
-
-This first body family is opt-in twice: the maker signs `coop_presence_permissions=1` (feature99, bit0), and each
-player chooses `coop_players=1` or `HOS_COOP_PLAYERS=1` locally. The signed rule defaults to0; absent is off. No map,
-position or animation is disclosed without the accepted presentation capability. This slice supports child Link
-only. Adult pose packets do not create an adult body, and an adult local player sends no body pose.
-
-With presentation permitted and local display on, the existing POS message sends the child's map, position, facing
-and up to four animation slots about15 times a second. Same-map accepted players are shown100ms behind the latest
-sample, interpolated between recent positions. A local display switched off may still share the map/state at the
-low rate, but only under that same signed permission. It never shares a precise position or creates a body.
-Animation phase comes from each native slot's current frame, not its clip duration; the receiver interpolates
-that phase and applies it through the native animation setter. A successful node request alone does not prove
-visible skeletal motion or full-pose parity.
-
-Receive-time admission captures a ticket from the central gameplay owner. Before any creation, placement or
-animation call, the body writer checks that ticket again under the owner's lock. Leaving, identity/rules/save/area
-changes and revocation invalidate old work, even if the same terms are later accepted again. Cleanup only retires
-this adapter's existing actors; another actor occupying a reused address is never deleted or moved. Registration
-refuses a second body writer. Request storage is allocated only at the first authorized child-body effect.
-
-The native adapter is build-guarded and range-checks guest pointers. Missing animation components, excessive slot
-counts, malformed strings, non-finite poses and stale actor identities are refused or left untouched. Loading,
-title screens and events do not create or move a body. This is cosmetic presence, not a collision body, equipment
-replication, full skeletal-pose replication, shared enemies or PvP.
-The receiver's clock offset saturates at the signed-integer limit rather than overflowing on a peer timestamp.
-
-`nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
-only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
-or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
-The animation switch loads it only with local player display enabled. The shared filename contract is
-`host/coop_players_assets.h`: the child actor pack, its private animation graph, ActorInfo, GameActorInfo and the
-resource size table. Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
-`CoopPuppet_<id>` from that age's local source actors, paired with an `animation` row named `<id>_animation`.
-Both generator and loader consume every listed output; another age needs both rows, not a second age list or a
-literal file count. The generator resolves each versioned table name from the source RomFS and checks its output
-against that contract before writing. The loader requires each exact indexed output to be a nonempty file;
-another table version, a directory, or unrelated files cannot fill a missing slot. The child-only family does not
-generate or require an adult actor pack.
-Unrelated extra files do not change readiness. User mods still win; replacing a generated file disables animated
-actors with a clear log line, while nonconflicting mods leave them enabled. Missing or incomplete output keeps
-animation unavailable. Without animation assets the explicitly non-animated standing menu model remains available;
-it is not described as a walking/full-pose body.
-
-The private graph binds the primary locomotion slot to its source's existing full-body mask. The original graph
-binds that slot only to the lower body; the passive menu-derived actor has no native player controller to complete
-the upper-body pose. Other partial slots, commands and clips remain unchanged. This supplies a full-body base pose
-for standing and movement, not full controller-driven upper-body, face, fingers, IK or equipment parity. The source
-graph is never changed, and the generated graph has its own resource name so it cannot alter the local player.
-
-`tests/test_coop_players_assets.py --cc gcc` runs authored generation through the unchanged production loader over
-real temporary directories (native Win32 file calls on Windows, the production POSIX file calls on Linux).
-`--mods-revision COMMIT` selects that commit's `host/mods.c` without altering it; `--mods-source PATH` selects a saved
-source file. The generator can independently be selected with `LONGSHOT_COOP_ASSETS_SOURCE`.
-For a built copy, `--asset-folder GAME/coop-players/romfs --romfs GAME/romfs` instead checks the exact generated
-filename set and loader readiness read-only, with user mods isolated out. It reads no game asset contents and
-starts no game. These checks cover the asset boundary, not animation quality in play.
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `coop_presence_permissions` |0|Maker-signed permission; bit0 enables this child presence family. Unsupported higher bits refuse the charter.|
-| `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display and precise child pose sending; the environment overrides the saved local setting.|
-| `HOS_COOP_PLAYERS_ANIM` |0|Use the locally generated child actor and replay the existing four bounded animation slots. Other slots and equipment are not represented.|
-| `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic actor names; never chosen by a packet. Adult presentation remains unsupported.|
-| `HOS_COOP_PLAYERS_TEST` |unset|Diagnostic position feed for member8; it still needs that member's accepted presentation ticket, never synthetic consent.|
-| `HOS_COOP_TRACE` |0|Existing bounded position, creation, deletion and animation diagnostics.|
-
-A room-secret holder can still spoof another accepted member's ephemeral pose or delay/replay positions. Signed
-membership and receiver context limit who may cause cosmetic effects; they do not prove an invited client is honest.
-No pose authorizes a saved change or a hit. The game-free fixtures exercise codec bounds, native lifetime, admission,
-revocation, missing components and private asset generation. Current-head two-game body/pose quality remains a
-separate required proof before readiness.
-
-Interpolation clamps its weight, normalizes received rotations and keeps finite animation frames finite even at
-the floating-point limits. A refused request-storage allocation is retained for this start, not retried every frame.
-
 ## Temporary local saves
 
 Outside a room, **Temporary save** copies the saved checkpoints and restarts into
@@ -786,7 +710,7 @@ The tab identifies the temporary domain on its own line, alongside the room stat
 a refusal never disappears behind the copy banner. Normal progress synchronization is
 suspended there until a separately consented progress-return policy is available.
 The capability owner refuses durable writers for this domain as well as stopping the
-native progress scan. Renderer API 26 combines the signed received terms (API 25)
+native progress scan. Renderer API 28 combines the signed received terms and membership/pool revisions (API 27)
 with temporary-save status; rules-changed command 9 and copy/return command 10 stay distinct.
 
 Copies stay under the selected user folder's `coop-sessions`, using random local
@@ -905,3 +829,80 @@ shipped by these observations.
 The game-free `tests/test_oot_coop_hits.py` executes the production observer and generated hook code on synthetic
 memory: native setup/renewal/off, overkill, protected loss, successful/failed CAS, ownership, bounded queues,
 consent and replay. Its old-patch and mutation modes must fail behaviorally; they do not require game files.
+
+## Child bodies in the world
+
+This first body family is opt-in twice: the maker signs `coop_presence_permissions=1` (feature99, bit0), and each
+player chooses `coop_players=1` or `HOS_COOP_PLAYERS=1` locally. The signed rule defaults to0; absent is off. No map,
+position or animation is disclosed without the accepted presentation capability. This slice supports child Link
+only. Adult pose packets do not create an adult body, and an adult local player sends no body pose.
+
+With presentation permitted and local display on, the existing POS message sends the child's map, position, facing
+and up to four animation slots about15 times a second. Same-map accepted players are shown100ms behind the latest
+sample, interpolated between recent positions. A local display switched off may still share the map/state at the
+low rate, but only under that same signed permission. It never shares a precise position or creates a body.
+Animation phase comes from each native slot's current frame, not its clip duration; the receiver interpolates
+that phase and applies it through the native animation setter. A successful node request alone does not prove
+visible skeletal motion or full-pose parity.
+
+Receive-time admission captures a ticket from the central gameplay owner. Before any creation, placement or
+animation call, the body writer checks that ticket again under the owner's lock. Leaving, identity/rules/save/area
+changes and revocation invalidate old work, even if the same terms are later accepted again. Cleanup only retires
+this adapter's existing actors; another actor occupying a reused address is never deleted or moved. Registration
+refuses a second body writer. Request storage is allocated only at the first authorized child-body effect.
+
+The native adapter is build-guarded and range-checks guest pointers. Missing animation components, excessive slot
+counts, malformed strings, non-finite poses and stale actor identities are refused or left untouched. Loading,
+title screens and events do not create or move a body. This is cosmetic presence, not a collision body, equipment
+replication, full skeletal-pose replication, shared enemies or PvP.
+The receiver's clock offset saturates at the signed-integer limit rather than overflowing on a peer timestamp.
+
+`nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
+only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
+or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
+The animation switch loads it only with local player display enabled. The shared filename contract is
+`host/coop_players_assets.h`: the child actor pack, its private animation graph, ActorInfo, GameActorInfo and the
+resource size table. Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
+`CoopPuppet_<id>` from that age's local source actors, paired with an `animation` row named `<id>_animation`.
+Both generator and loader consume every listed output; another age needs both rows, not a second age list or a
+literal file count. The generator resolves each versioned table name from the source RomFS and checks its output
+against that contract before writing. The loader requires each exact indexed output to be a nonempty file;
+another table version, a directory, or unrelated files cannot fill a missing slot. The child-only family does not
+generate or require an adult actor pack.
+Unrelated extra files do not change readiness. User mods still win; replacing a generated file disables animated
+actors with a clear log line, while nonconflicting mods leave them enabled. Missing or incomplete output keeps
+animation unavailable. Without animation assets the explicitly non-animated standing menu model remains available;
+it is not described as a walking/full-pose body.
+
+The private graph binds the primary locomotion slot to its source's existing full-body mask. The original graph
+binds that slot only to the lower body; the passive menu-derived actor has no native player controller to complete
+the upper-body pose. Other partial slots, commands and clips remain unchanged. This supplies a full-body base pose
+for standing and movement, not full controller-driven upper-body, face, fingers, IK or equipment parity. The source
+graph is never changed, and the generated graph has its own resource name so it cannot alter the local player.
+
+`tests/test_coop_players_assets.py --cc gcc` runs authored generation through the unchanged production loader over
+real temporary directories (native Win32 file calls on Windows, the production POSIX file calls on Linux).
+`--mods-revision COMMIT` selects that commit's `host/mods.c` without altering it; `--mods-source PATH` selects a saved
+source file. The generator can independently be selected with `LONGSHOT_COOP_ASSETS_SOURCE`.
+For a built copy, `--asset-folder GAME/coop-players/romfs --romfs GAME/romfs` instead checks the exact generated
+filename set and loader readiness read-only, with user mods isolated out. It reads no game asset contents and
+starts no game. These checks cover the asset boundary, not animation quality in play.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `coop_presence_permissions` |0|Maker-signed permission; bit0 enables this child presence family. Unsupported higher bits refuse the charter.|
+| `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display and precise child pose sending; the environment overrides the saved local setting.|
+| `HOS_COOP_PLAYERS_ANIM` |0|Use the locally generated child actor and replay the existing four bounded animation slots. Other slots and equipment are not represented.|
+| `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic actor names; never chosen by a packet. Adult presentation remains unsupported.|
+| `HOS_COOP_PLAYERS_TEST` |unset|Diagnostic position feed for member8; it still needs that member's accepted presentation ticket, never synthetic consent.|
+| `HOS_COOP_TRACE` |0|Existing bounded position, creation, deletion and animation diagnostics.|
+
+A room-secret holder can still spoof another accepted member's ephemeral pose or delay/replay positions. Signed
+membership and receiver context limit who may cause cosmetic effects; they do not prove an invited client is honest.
+No pose authorizes a saved change or a hit. The game-free fixtures exercise codec bounds, native lifetime, admission,
+revocation, missing components and private asset generation. Current-head two-game body/pose quality remains a
+separate required proof before readiness.
+
+Interpolation clamps its weight, normalizes received rotations and keeps finite animation frames finite even at
+the floating-point limits. A refused request-storage allocation is retained for this start, not retried every frame.
+

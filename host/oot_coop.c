@@ -865,8 +865,8 @@ static void publish_none(void) {
     coop_gameplay_publish(&G.gameplay, NULL);
     __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
     ReleaseSRWLockExclusive(&G.lock);
-    __atomic_store_n(&G.pub_shown, 0, __ATOMIC_RELEASE);
     coop_download_members(NULL, 0);
+    __atomic_store_n(&G.pub_shown, 0, __ATOMIC_RELEASE);
     AcquireSRWLockExclusive(&G.pub_lock);
     if (G.pub_has || G.pub.n || G.pub_ncontrib || G.pub_maker)
         memset(&G.pub, 0, sizeof G.pub), G.pub_has = G.pub_maker = G.pub_ncontrib = 0, G.pub_contrib_at = 0;
@@ -1548,11 +1548,11 @@ static int start(void) {
     coop_on_view(on_view, NULL);
     coop_on_tick(on_tick, NULL);
     coop_on_remove(on_remove, NULL);
+    hos_oot_hits_start();
     /* host/oot_coop_players.c: the other players in the world, when its own switch asks for them. Its hooks are
        registered like the ones above, whether co-op is on or not; it does nothing in the game until "being played" is
        published, which needs co-op on (gate) */
     hos_oot_coop_players_start();
-    hos_oot_hits_start();
     if (want) sync_on();
     return __atomic_load_n(&G.state, __ATOMIC_ACQUIRE);
 }
@@ -1573,16 +1573,16 @@ void hos_oot_coop_present(Ctx *c) {
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
     if (!rd_ok(mgr, MGR_SIZE)) {
         unbind("the game's flags are gone");
+        hos_oot_hits_frame(NULL, 0);
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
         hos_oot_coop_players_tick(0, 0);   /* (no save: the title screen as far as the room is told) */
-        hos_oot_hits_frame(NULL, 0);
         return;
     }
     if (G.bound && (mgr != G.mgr || recomp_load64(c, mgr + C_BOOL + CN_ENTRIES) != G.bool_entries ||
                     recomp_load64(c, mgr + C_INT + CN_ENTRIES) != G.int_entries))
         unbind("the game made its flags anew");
     const int open = gate(c, mgr);
-    hos_oot_coop_players_tick(G.loaded, open);
+    hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
     if (__atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED)) {
         char area[COOP_POS_TEXT + 1] = {0};
         int hos_oot_current_map(char *out, size_t cap);

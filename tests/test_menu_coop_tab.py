@@ -914,8 +914,7 @@ def main():
     api = (root / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     backend = (root / "host/rx_backend.c").read_text(encoding="utf-8")
     draw = (root / "gpu/vk/vk_draw.h").read_text(encoding="utf-8")
-    cache_api = re.search(r"^void pipeline_cache_save\([^;
-]*\);", draw, re.M)
+    cache_api = re.search(r"^void pipeline_cache_save\([^;\n]*\);", draw, re.M)
     if not cache_api:
         raise SystemExit("FAIL: vk_draw.h: missing pipeline-cache save declaration")
     if "HOS_COOP_STATE_OFF" not in api:

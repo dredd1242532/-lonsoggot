@@ -153,11 +153,11 @@ typedef struct MkwVkCoopView {
     uint8_t category[HOS_COOP_RULE_CATEGORIES], feature_count, feature_id[HOS_COOP_FEATURES];
     int16_t feature_value[HOS_COOP_FEATURES];
     char maker_key[24], room_title[40];
-    int32_t temporary_save;   /* (version 26) native save mounts point to a local copy until exit */
-    char save_note[160];
-    /* (version 27; 26 belongs to the temporary-profile view) cancellation explanations only, not consent tokens. */
+    /* (version 27; 26 belongs to the older temporary-profile view) cancellation explanations only, not consent tokens. */
     uint32_t membership_revision;   /* signed admission/removal sets changed, even with an unchanged visible roster */
     uint32_t pool_epoch;            /* signed pool reset, not a member or category/feature edit */
+    int32_t temporary_save;   /* (version 28 combined view) native save mounts point to a local copy until exit */
+    char save_note[160];
 } MkwVkCoopView;
 /* what the tab asks (coop_command's cmd): make a room, join one (text: its secret as typed), leave it, accept the offer
    (number: its offer), the player's name and the relay ("host[:port]") as the fields set them (text; number 1: the field's

@@ -124,9 +124,6 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
     else memset(&accepted_view, 0, sizeof accepted_view);
     accepted_members = members;
 }
-void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
-/* (the same layer's tick: each present that read the flags, with the gate's answer) */
-void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
 void coop_download_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
 static int temporary_profile;
 int coop_profile_active(void) { return temporary_profile; }
@@ -135,6 +132,9 @@ static void hos_oot_hits_start(void) {}
 static void hos_oot_hits_room(const CoopRules *r, int accepted) { (void)r; (void)accepted; }
 static void hos_oot_hits_frame(const char *area, int playing) { (void)area; (void)playing; }
 int hos_oot_current_map(char *out, size_t cap) { (void)out; (void)cap; return 0; }
+void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
+/* (the same layer's tick: each present that read the flags, with the gate's answer) */
+void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
 static int rules_said, views, scans, applies, probes;
 static void read_rules(CoopRules *r, int say) { coop_rules_default(r); rules_said += say; }
 static void read_test_aid(void) {}
