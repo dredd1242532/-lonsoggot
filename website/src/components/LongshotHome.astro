@@ -24,6 +24,7 @@ const guides = [
       <h2 id="release-title">Longshot releases</h2>
       <p class="studio-release-status"><strong>{stable ? `Longshot ${stable.tag}` : feed ? 'No stable release in this snapshot' : 'Release information unavailable'}</strong>{stable && <span> · {date(stable.publishedAt)}</span>}</p>
       <p class="studio-release-description">{stable ? 'Get the build, read what changed, and check the installation notes.' : 'Check the official releases page for available builds and release notes.'}</p>
+      <p class="studio-release-disclaimer"><strong>No game files included.</strong> We do not host or distribute game files, game assets or keys. You must provide your own supported copy of the game.</p>
       {feed && <p class="studio-release-date">Snapshot checked {date(feed.generatedAt)}.</p>}
     </div>
     <div class="studio-release-actions">
