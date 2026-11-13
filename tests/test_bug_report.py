@@ -20,6 +20,7 @@ Checked:
 - started from a terminal (no log file), the run before's log is the game folder's longshot_log.txt, and without a frame
   the report says it has no picture; a picture that comes after the report went without it is removed again; a second
   report in the same second gets a folder of its own; a folder that cannot be made is reported with the system's reason;
+  a report.txt a full disk cuts off at its close is not shown as saved (where /dev/full is there);
 - the wiring: the Gameplay tab's row and its help, the press, the picture asked of shot_ask (its own image, copied from the
   game's frame without the menu), the host's map line.
 
@@ -40,6 +41,7 @@ DRIVER = r'''#include "vk_bug_report.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <thread>
 using namespace mkwvk::bug_report;
@@ -58,6 +60,12 @@ static bool ask(const char* path, uint64_t ticket) {   // (vk_replay.cpp's part:
 static std::string late_path;   // (the late picture: asked for, and written only once the report has gone without it)
 static uint64_t late_ticket;
 static bool ask_late(const char* path, uint64_t ticket) { late_path = path, late_ticket = ticket; return true; }
+static bool ask_full(const char* path, uint64_t) {   // (a full disk: report.txt, written next, goes to /dev/full)
+    std::string dir = path;
+    dir.resize(dir.find_last_of("/\\") + 1);
+    std::filesystem::create_symlink("/dev/full", dir + "report.txt");
+    return false;
+}
 static std::atomic<bool> held{true};   // (the menu's way: the report is still saving until the driver lets its picture ask go)
 static bool ask_held(const char*, uint64_t) {   // (no frame comes: the report goes without a picture)
     while (held.load()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -89,6 +97,7 @@ int main(int argc, char** argv) {
     in.picture_wait_ms = mode == "picture" ? 30000 : 300;   // (a picture ends the wait as soon as it is written)
     if (mode == "picture") in.ask_picture = ask;
     if (mode == "late") in.ask_picture = ask_late;
+    if (mode == "full") in.ask_picture = ask_full;
     if (mode == "start") {   // (the menu's way: on a thread of its own, its state read each frame)
         in.ask_picture = ask_held;
         CHECK(start(in));
@@ -392,8 +401,13 @@ def main():
         folders, out = run(exe, "plain", str(blocked) + os.sep, str(now_log), home, user, windows)
         said = next((ln for ln in out if "menu: bug report not written:" in ln), "")
         check(folders == [""] and ("(Windows error " if windows else "(Not a directory)") in said, "no folder: %s" % out)
+        # 8. report.txt cut off by a full disk (its write succeeds into the stream's buffer, the close fails): not saved
+        if Path("/dev/full").exists():
+            folders, out = run(exe, "full", game, str(now_log), home, user, windows)
+            said = next((ln for ln in out if "menu: bug report not written:" in ln), "")
+            check(folders == [""] and "report.txt could not be written" in said, "a report on a full disk: %s" % out)
     print("bug report: ok (report.txt as the issue form, both logs redacted, the picture, the long log, the terminal start, "
-          "switch values, NUL bytes, the folder's reason)")
+          "switch values, NUL bytes, the folder's reason, a full disk)")
 
 
 if __name__ == "__main__":
