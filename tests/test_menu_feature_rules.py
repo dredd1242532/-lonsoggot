@@ -160,7 +160,7 @@ struct Host { int (*binding)(int, int, int); int (*coop_command)(int, const char
     helpers = definition(menu, "const char* tx_onoff") + "\n" + feature_helpers + "\n" + options
     helpers += "\nbool row_shown(int) { return true; }\n" + definition(menu, "int tab_row_count") + "\n" + definition(menu, "int tab_row_to_global")
     helpers += "\n" + definition(menu, "int restart_slot_of")
-    helpers += "\nbool row_fixed(const int*) { return false; }\nstd::mutex menu_mu;\nvoid bridge_probe_first() {}\n"
+    helpers += "\nbool row_fixed(const int*) { return false; }\nstd::mutex menu_mu;\nvoid bridge_probe_first() {}\nvoid coop_refresh(bool*) {}\n"
     helpers += "\n".join(definition(menu, n) for n in ("bool bridge_row", "void bridge_fill", "int menu_setting"))
     cpp = replace_once(cpp, 'const char* row_key(const Row&, const char* named) { return named; }', helpers)
     cpp = replace_once(cpp, "bool coop_feature_saved_key(const char*) { return false; }", "")

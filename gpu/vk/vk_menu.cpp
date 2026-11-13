@@ -1947,7 +1947,7 @@ void coop_preview_refresh() {
         snprintf(t.help, sizeof t.help, "Signed terms, read only. Maker: %s. %s%s",
                  coop_now.maker_key, coop_now.room_title, id == 80 && t.value == 1 ?
                  ". This build cannot start a fight. Ready is unavailable." : ". Accept pins these exact terms.");
-        t.row = {TAB_RULES, t.name, &t.value, t.value, t.value, 0,
+        t.row = {TAB_RULES, t.name, &t.value, t.value, t.value, 1,
                  category ? tx_signed_category : id == 80 ? tx_room_mode : tx_feature, t.help, nullptr, false, true};
     }
 }
@@ -2052,8 +2052,23 @@ int tab_row_count(int t) {
 }
 
 int tab_row_to_global(int t, int local_idx) {
-    if (t == TAB_RULES && coop_rules_readonly)
+    int first = -1;
+    if (t == TAB_RULES && coop_rules_readonly) {
+        for (int i = 0; i < coop_terms_count; i++)
+            if (!strcmp(coop_terms[i].key, "coop_room_mode")) first = i;
+        if (first >= 0) {
+            if (!local_idx) return kRows + coop_feature_count + first;
+            if (--local_idx >= first) local_idx++;
+        }
         return local_idx >= 0 && local_idx < coop_terms_count ? kRows + coop_feature_count + local_idx : 0;
+    }
+    if (t == TAB_RULES) {
+        for (int i = 0; i < coop_feature_count; i++) if (coop_feature_rows[i].def.id == 80) first = i;
+        if (first >= 0) {
+            if (!local_idx) return kRows + first;
+            local_idx--;
+        }
+    }
     int count = 0;
     for (int i = 0; i < kRows; i++) {
         if (rows[i].tab == (MenuTab)t && row_shown(i)) {
@@ -2061,7 +2076,11 @@ int tab_row_to_global(int t, int local_idx) {
             count++;
         }
     }
-    if (t == TAB_RULES && local_idx >= count && local_idx - count < coop_feature_count) return kRows + local_idx - count;
+    if (t == TAB_RULES && local_idx >= count) {
+        int feature = local_idx - count;
+        if (first >= 0 && feature >= first) feature++;
+        if (feature < coop_feature_count) return kRows + feature;
+    }
     return 0;
 }
 
@@ -5220,6 +5239,8 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
 int menu_setting(int index, MkwVkSetting* out) {
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
+    bool changed = false;
+    coop_refresh(&changed);   // named reads obey the current room even while the Insert menu is closed
     for (int i = 0, n = 0; i < menu_row_count(); i++)
         if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
     return 0;
@@ -5319,6 +5340,8 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
 int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
+    bool changed = false;
+    coop_refresh(&changed);
     int i = 0;
     while (i < menu_row_count() && !(bridge_row(i) && !strcmp(row_key(menu_row(i), ini_key(menu_row(i))), key))) i++;
     if (i == menu_row_count()) return 0;

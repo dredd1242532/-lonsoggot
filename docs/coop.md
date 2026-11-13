@@ -644,8 +644,9 @@ before its signature. Numbers are nonzero, unique and increasing; values range f
 known rule's narrower range checked too. Unknown entries are kept byte for byte, verified and passed on with the
 original signature, not discarded or replaced by defaults. Thus a format-5 build that predates a particular feature
 still carries its rules. A maker using such a build also preserves unknown entries when signing a later charter.
-Pre-format-5 builds do not exchange progress with this format; they must update. An absent known rule reads as its
-registered default. Invalid or overflowing settings are refused, never truncated into a different signed rule set.
+Pre-format-5 builds do not exchange progress with this format; they must update. Defaults initialize the maker's
+settings only: an absent rule is not consent. Permission gates use `coop_feature_present`, never the fallback value
+from `coop_feature_rule`. Invalid or overflowing settings are refused, never truncated into a different signed rule set.
 
 ### Progress sync's switches and log lines
 

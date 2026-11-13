@@ -257,6 +257,7 @@ int main() {
     CHECK(coop_rules_readonly && coop_terms_count == HOS_COOP_RULE_CATEGORIES + 1);
     CHECK(coop_terms[0].value == 0 && opts.coop_progress == 1 && coop_feature_rows[0].value == 0);
     CHECK(coop_term_fixed(coop_terms[0].row.value) && coop_terms[0].row.lo == coop_terms[0].row.hi);
+    CHECK(!std::strcmp(menu_row(tab_row_to_global(TAB_RULES, 0)).name, "Mode"));
     CHECK(!std::strcmp(coop_terms[7].row.text(1), "PvP setup (no fighting)"));
     CHECK(std::strstr(coop_terms[7].help, "Ready is unavailable") && std::strstr(coop_terms[7].help, room.maker_key));
     const int requests_before = n_asked;
