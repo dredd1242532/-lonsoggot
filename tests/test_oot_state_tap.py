@@ -835,7 +835,7 @@ def main():
         warnings = ["-Wno-format-truncation"] if "clang" not in Path(args.cc).name else []
         libraries = ["-ladvapi32", "-lm"] if windows else ["-lpthread", "-lm"]
         subprocess.run([args.cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
-                        "-D_GNU_SOURCE", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), str(src),
+                        "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), str(src),
                         str(bridge_src), "-o", str(exe)] + warnings + libraries, check=True)
         address = "longshot-oot-test-%d" % os.getpid() if windows else str(tmp / "control.sock")
         # Legacy switches deliberately set: none may create a file, change cadence, flags or changed-field opt-in.

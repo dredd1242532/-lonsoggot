@@ -32,7 +32,7 @@ def main():
         libs = ["-ladvapi32"] if windows else ["-lpthread", "-lm"]
         warnings = ["-Wno-format-truncation"] if "clang" not in Path(a.cc).name else []
         subprocess.run([a.cc, "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
-                        "-D_GNU_SOURCE", "-DHOS_CONTROL_NO_GAME", "-I", str(a.source_root / "host"),
+                        "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(a.source_root / "host"),
                         str(ROOT / "tests" / "control_test.c"), str(a.source_root / "host" / "control.c"), "-o", exe]
                        + warnings + libs, check=True)
         # (the general cases, quit, the level unit, and the memory cases at each HOS_CONTROL_MEM level)
