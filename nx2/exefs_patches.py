@@ -228,6 +228,7 @@ class Main:
     def classify(self, writes):
         """(kind, note, {offset: byte}): code / data (what stays: bytes that differ from main's), empty, or unsupported"""
         keep = {}
+        relocated = 0
         for off in sorted(writes):
             if not 0 <= off < self.size:
                 return "unsupported", "it writes outside the game's code module at main+%X" % off, {}
@@ -237,13 +238,18 @@ class Main:
             if word is not None and self.bound[word] == "JUMP_SLOT":
                 return "unsupported", "it writes a function pointer the dynamic linker binds at main+%X" % word, {}
             if word is not None:
-                continue   # (an explicit-addend relocation's word: the dynamic linker writes over it, as on the console. A DT_RELR
-                           # word keeps the file's bytes as its addend: the relocation adds main's base to them)
+                # (a word the dynamic linker relocates: left out, and the file's note says so. With an explicit addend the
+                # linker writes over the word, as on the console. A DT_RELR word is different there: its addend is the word
+                # itself, so the console would take the patched bytes; here nso2.py has read the addend from the file
+                # before the patch, and the lift relocates from that)
+                relocated += self.image[off] != writes[off]
+                continue
             if self.image[off] != writes[off]:
                 keep[off] = writes[off]
+        note = "%d byte%s in words the dynamic linker relocates left out" % (relocated, "" if relocated == 1 else "s") if relocated else ""
         if not keep:
-            return "empty", "", {}
-        return ("code" if any(o < self.code_end for o in keep) else "data"), "", keep
+            return "empty", note, {}
+        return ("code" if any(o < self.code_end for o in keep) else "data"), note, keep
 
 
 def classify_file(main, path, raw):

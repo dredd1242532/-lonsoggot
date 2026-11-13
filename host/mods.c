@@ -133,6 +133,35 @@ static int game_file(const char *rel, char *out, size_t cap) {
     return at != INVALID_FILE_ATTRIBUTES && !(at & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+/* a RomFS path in the game's own case: the size table's keys are CRC32s of the game's paths, and a mod may ship ui/... where
+   the game has UI/... (Windows finds the game's file either way). Each part's name as the game's folder has it; the path as it
+   is where the game has no such file, and where the file system tells the cases apart itself */
+static void game_case(const char *rel, char *out, size_t cap) {
+    snprintf(out, cap, "%s", rel);
+#ifdef _WIN32
+    if (!hos_romfs_dir) return;
+    char dir[MAX_PATH], pat[MAX_PATH];
+    snprintf(dir, sizeof dir, "%s", hos_romfs_dir);
+    for (size_t at = 0; out[at];) {
+        size_t end = at;
+        while (out[end] && out[end] != '/' && out[end] != '\\') end++;
+        const char sep = out[end];
+        out[end] = 0;
+        snprintf(pat, sizeof pat, "%s/%s", dir, out + at);
+        out[end] = sep;
+        WIN32_FIND_DATAA fd;
+        HANDLE f = FindFirstFileA(pat, &fd);
+        if (f == INVALID_HANDLE_VALUE) return;
+        FindClose(f);
+        if (strlen(fd.cFileName) == end - at) memcpy(out + at, fd.cFileName, end - at);
+        const size_t dn = strlen(dir);
+        snprintf(dir + dn, sizeof dir - dn, "/%s", fd.cFileName);
+        if (!sep) break;
+        at = end + 1;
+    }
+#endif
+}
+
 /* a mod's romfs folder, recursively: rel is the path inside the RomFS so far ("" at its root) */
 static int index_romfs(const char *host_dir, const char *rel, int depth, int mod) {
     if (depth > 32) return 0;   /* (longshot: no RomFS is this deep) */
@@ -285,7 +314,7 @@ static void write_state(void) {
         hos_log("mods: cannot write %s", tmp);
         return;
     }
-    fputs("# Hookshot's mods: their order and switches, as the Mods tab sets them (Insert menu). One line a mod, top of the\n"
+    fputs("# Longshot's mods: their order and switches, as the Mods tab sets them (Insert menu). One line a mod, top of the\n"
           "# list first: \"on <folder>\" or \"off <folder>\". A mod lower in the list wins a file two mods have. Applies at the\n"
           "# next start.\n", f);
     for (int i = 0; i < nmods; i++) fprintf(f, "%s %s\n", mods[i].enabled ? "on" : "off", mods[i].name);
@@ -364,7 +393,7 @@ static void exefs_status(const char *game_dir) {
                 if (tab && !m->exefs_note[0])
                     snprintf(m->exefs_note, sizeof m->exefs_note, "%.*s", (int)(end ? end - tab - 1 : (long)strlen(tab + 1)), tab + 1);
             }
-            hos_log("mods: %s: ExeFS %s: %s", m->name, fd.cFileName, !line ? "not in the game yet: it is applied when the game is built again"
+            hos_log("mods: %s: ExeFS %s: %s", m->name, fd.cFileName, !line ? m->enabled ? "not in the game yet: it is applied when the game is built again" : "not applied: its mod is off"
                     : !strncmp(kind, "code", 4) || !strncmp(kind, "data", 4) ? "built into the game"
                     : !strncmp(kind, "other", 5) ? "for another game version: not used"
                     : !strncmp(kind, "empty", 5) ? "changes nothing in this version" : "cannot be applied");
@@ -461,7 +490,12 @@ static int fit_sizes(const char *game_dir) {
         const uint64_t now = zs ? hos_zs_content_size(host) : e->size;
         uint32_t entry, want;
         if (game_file(e->rel, game, sizeof game)) {
-            if (!restbl_get(base, key, &entry)) continue;   /* (the game sizes it without the table: streamed) */
+            if (!restbl_get(base, key, &entry)) {   /* (the mod's path in another case than the game's, or no entry at all) */
+                char cased[MAX_PATH];
+                game_case(e->rel, cased, sizeof cased);
+                if (!strcmp(cased, e->rel) || !restbl_get(base, restbl_key(cased, key, sizeof key), &entry))
+                    continue;   /* (the game sizes it without the table: streamed) */
+            }
             uint64_t was = 0;
             if (zs) was = hos_zs_content_size(game);
             else {
@@ -609,7 +643,7 @@ int hos_mods_file(const char *rel, char *out, size_t cap) {
     snprintf(key, sizeof key, "%s", rel);
     lower_slash(key);
     if (sizes_key[0] && !strcmp(key, sizes_key)) {
-        if (!sizes_fallback[0]) return 0;
+        if (sizes_served[0] || !sizes_fallback[0]) return 0;
         snprintf(out, cap, "%s", sizes_fallback);
         return 1;
     }
@@ -665,11 +699,13 @@ static void mod_text(Mod *m) {
     if (m->cheat_count) ADD("Cheats: %d. ", m->cheat_count);
     else if (m->cheats) ADD("Cheats: no file for this game version. ");
     if (k && d[k - 1] == ' ') d[--k] = 0;
-    if (!k) ADD("Nothing Hookshot uses.");
+    if (!k) ADD("Nothing Longshot uses.");
     k = 0, d = m->note;
     if (m->overridden) ADD("%d of its files are taken by a mod lower in the list. ", m->overridden);
-    if (m->exefs_waiting)
-        ADD("%d ExeFS patch file%s %s not in the game yet: build the game again (Hookshot Builder) to apply %s. ", m->exefs_waiting,
+    if (m->exefs_waiting && !m->enabled)   /* (the build leaves out the patches of a mod that is off) */
+        ADD("Its ExeFS patches are not applied while it is off. ");
+    else if (m->exefs_waiting)
+        ADD("%d ExeFS patch file%s %s not in the game yet: build the game again (Longshot Builder) to apply %s. ", m->exefs_waiting,
             m->exefs_waiting == 1 ? "" : "s", m->exefs_waiting == 1 ? "is" : "are", m->exefs_waiting == 1 ? "it" : "them");
     if (m->exefs_built && !m->enabled)
         ADD("Its ExeFS patches stay in the game until it is built again. ");
