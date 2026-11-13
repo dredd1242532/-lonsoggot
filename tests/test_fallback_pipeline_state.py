@@ -101,7 +101,7 @@ driver_faults::Quarantine& fault_quarantine() { static driver_faults::Quarantine
 std::string driver_faults_path() { return {}; }
 void driver_fault_note(uint64_t) {}
 constexpr VkResult kDriverFault = static_cast<VkResult>(-77);
-bool driver_cache_only = false;
+bool driver_cache_only = false, quick_build = false;
 VkPipelineCache pcache = VK_NULL_HANDLE, driver_ask_cache = VK_NULL_HANDLE;
 uint64_t pcache_built_since_save = 0, st_pipelines = 0, st_pipeline_us = 0;
 
