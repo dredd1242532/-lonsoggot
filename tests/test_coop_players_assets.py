@@ -110,7 +110,7 @@ def contract_variant(root, entry):
 
 def contract_entries(contract=ROOT / 'host/coop_players_assets.h'):
     text = contract.read_text(encoding='utf-8')
-    entries = re.findall(r'^COOP_PLAYER_ASSET\((actor|table), (\w+), "([^"]+)"\)$', text, re.M)
+    entries = re.findall(r'^COOP_PLAYER_ASSET\((actor|animation|table), (\w+), "([^"]+)"\)$', text, re.M)
     if not entries:
         raise ValueError('no required asset filenames in the shared contract')
     return entries
@@ -219,6 +219,23 @@ def fixture(root, endian='<'):
     return bytes(b)
 
 
+def animation_fixture():
+    """Authored ASB metadata: one lower-body slot and two distinct skeleton masks."""
+    data = bytearray(0xc0)
+    data[:8] = b'ASB ' + struct.pack('<I', 0x41b)
+    struct.pack_into('<II', data, 0x24, 1, 0x80)
+    struct.pack_into('<II', data, 0x58, 2, 0x90)
+    strings = b'Lower\0All_PB\0FixtureBone\0'
+    struct.pack_into('<I', data, 0x3c, len(data))
+    struct.pack_into('<I', data, 0x60, len(strings))
+    struct.pack_into('<IIII', data, 0x80, 0, 1, 0, 0)
+    struct.pack_into('<III', data, 0x90, 0xa8, 6, 1)
+    struct.pack_into('<III', data, 0x9c, 0xb0, 0, 1)
+    struct.pack_into('<IhBB', data, 0xa8, 13, 0, 1, 0)
+    struct.pack_into('<IhBB', data, 0xb0, 13, 1, 1, 0)
+    return bytes(data + strings)
+
+
 class IdentityCompression:
     def ZstdCompressor(self, **kwargs): return self
     def compress(self, b): return b
@@ -245,6 +262,9 @@ class FakeRomfs:
                 sizes[path.removesuffix('.zs')] = len(self.files[path]) + 300
                 sizes[param(n)] = len(pack[param(n)]) + 200
                 rows.append({'__RowId': n, 'InstanceHeapSize': heap if n == world else 123, 'Opaque': 0xffffffff})
+            animation = 'AS/' + age + '.asb.zs'
+            self.files[animation] = animation_fixture()
+            sizes[animation.removesuffix('.zs')] = len(self.files[animation]) + 200
         for kind in ('ActorInfo', 'GameActorInfo'):
             path = 'RSDB/' + kind + '.Product.999.rstbl.byml.zs'
             self.files[path] = fixture(rows)
@@ -300,7 +320,7 @@ class Assets(unittest.TestCase):
                 name = 'CoopPuppet_' + age
                 pack = a.sarc_read((Path(tmp) / pack_path).read_bytes())
                 params = a.Byml(pack['Actor/' + name + '.engine__actor__ActorParam.bgyml']).root['Components']
-                self.assertEqual(params['ASRef'], '?AS/' + age + '.asb')
+                self.assertEqual(params['ASRef'], '?AS/CoopPuppet_' + age + '.root.asb')
                 self.assertEqual(params['AIInfoRef'], '')
                 self.assertIn('Component/ASInfo/Base.bgyml', pack)
                 self.assertEqual(pack['opaque.bin'], b'not a model')
@@ -313,6 +333,41 @@ class Assets(unittest.TestCase):
                 sizes = a.Sizes((Path(tmp) / 'System/Resource/ResourceSizeTable.fixture.rsizetable.zs').read_bytes())
                 self.assertIn(zlib.crc32(('Pack/Actor/' + name + '.pack').encode()), sizes.values)
             self.assertEqual(rom.files, before)
+
+    def test_generated_primary_slot_covers_the_body_without_player_components(self):
+        rom = FakeRomfs()
+        source = rom.files['AS/Child.asb.zs']
+        with tempfile.TemporaryDirectory() as tmp:
+            a.generate(rom, tmp)
+            pack = a.sarc_read((Path(tmp) / 'Pack/Actor/CoopPuppet_Child.pack.zs').read_bytes())
+            params = a.Byml(pack['Actor/CoopPuppet_Child.engine__actor__ActorParam.bgyml']).root['Components']
+            self.assertEqual(params['ASRef'], '?AS/CoopPuppet_Child.root.asb')
+            self.assertNotIn('PlayerRef', params)
+            generated = (Path(tmp) / 'AS/CoopPuppet_Child.root.asb.zs').read_bytes()
+            expected = bytearray(source)
+            struct.pack_into('<I', expected, 0x84, 0)
+            self.assertEqual(generated, expected)  # only the primary mask binding changes
+            self.assertEqual(rom.files['AS/Child.asb.zs'], source)
+
+    def test_primary_mask_uses_named_source_index_and_refuses_unknown_layouts(self):
+        source = bytearray(animation_fixture())
+        # Full-body is now index 1, so a hard-coded zero cannot pass.
+        source[0x90:0xa8] = source[0x9c:0xa8] + source[0x90:0x9c]
+        struct.pack_into('<I', source, 0x84, 0)
+        got = a.body_animation(bytes(source))
+        self.assertEqual(struct.unpack_from('<I', got, 0x84)[0], 1)
+        for bad in (b'', bytes(source[:0x80]), bytes(source).replace(b'All_PB', b'Absent')):
+            with self.assertRaises(ValueError):
+                a.body_animation(bad)
+
+    def test_missing_full_body_mask_refuses_before_writing_assets(self):
+        rom = FakeRomfs()
+        rom.files['AS/Child.asb.zs'] = animation_fixture().replace(b'All_PB', b'Absent')
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, 'full-body mask'):
+                a.generate(rom, tmp)
+            self.assertFalse(any(Path(tmp).rglob('*.zs')))
+
 
     def test_missing_animation_component_refuses_generation(self):
         rom = FakeRomfs()
@@ -360,10 +415,11 @@ class Loader(unittest.TestCase):
         a.generate(rom, self.assets)
         self.required = required_output_names(self.romfs)
 
-    def test_one_contract_entry_adds_an_actor_for_generator_and_loader(self):
+    def test_contract_rows_add_an_actor_and_animation_for_generator_and_loader(self):
         root = Path(self.temp.name) / 'extended-contract'
         subject, contract = contract_variant(
-            root, 'COOP_PLAYER_ASSET(actor, Fixture, "Pack/Actor/CoopPuppet_Fixture.pack.zs")')
+            root, 'COOP_PLAYER_ASSET(actor, Fixture, "Pack/Actor/CoopPuppet_Fixture.pack.zs")\n'
+                  'COOP_PLAYER_ASSET(animation, Fixture_animation, "AS/CoopPuppet_Fixture.root.asb.zs")')
         # This entry exists only in the authored temporary fixture, never in the shipped contract.
         expected = required_output_names(self.romfs, contract)
         self.assertEqual(subject.generate(FakeRomfs(), self.assets), len(expected))
@@ -377,7 +433,7 @@ class Loader(unittest.TestCase):
         added = self.assets / 'Pack/Actor/CoopPuppet_Fixture.pack.zs'
         pack = a.sarc_read(added.read_bytes())
         params = a.Byml(pack['Actor/CoopPuppet_Fixture.engine__actor__ActorParam.bgyml']).root['Components']
-        self.assertEqual(params['ASRef'], '?AS/Fixture.asb')
+        self.assertEqual(params['ASRef'], '?AS/CoopPuppet_Fixture.root.asb')
         self.assertEqual(params['AIInfoRef'], '')
         added.rename(added.with_name('unrelated-filler.pack.zs'))
         ready, _, log = run_loader(exe, self.game, self.romfs, expected)

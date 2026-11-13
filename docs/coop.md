@@ -731,18 +731,24 @@ The receiver's clock offset saturates at the signed-integer limit rather than ov
 only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
 or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
 The animation switch loads it only with local player display enabled. The shared filename contract is
-`host/coop_players_assets.h`: the child actor pack, ActorInfo, GameActorInfo and the resource size table.
-Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
-`CoopPuppet_<id>` from that age's local source actors; both generator and loader consume every listed output.
-An additional age therefore needs one contract entry, with no separate age list or literal file count.
-The generator resolves each versioned table name from the source RomFS and checks its output against that contract
-before writing. The loader resolves those same source names and requires each exact indexed output to be a nonempty
-file; another table version, a directory, or unrelated files cannot fill a missing slot. The former total of five
-included an adult actor pack; the child-only family intentionally does not generate or require that pack.
+`host/coop_players_assets.h`: the child actor pack, its private animation graph, ActorInfo, GameActorInfo and the
+resource size table. Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
+`CoopPuppet_<id>` from that age's local source actors, paired with an `animation` row named `<id>_animation`.
+Both generator and loader consume every listed output; another age needs both rows, not a second age list or a
+literal file count. The generator resolves each versioned table name from the source RomFS and checks its output
+against that contract before writing. The loader requires each exact indexed output to be a nonempty file;
+another table version, a directory, or unrelated files cannot fill a missing slot. The child-only family does not
+generate or require an adult actor pack.
 Unrelated extra files do not change readiness. User mods still win; replacing a generated file disables animated
 actors with a clear log line, while nonconflicting mods leave them enabled. Missing or incomplete output keeps
 animation unavailable. Without animation assets the explicitly non-animated standing menu model remains available;
 it is not described as a walking/full-pose body.
+
+The private graph binds the primary locomotion slot to its source's existing full-body mask. The original graph
+binds that slot only to the lower body; the passive menu-derived actor has no native player controller to complete
+the upper-body pose. Other partial slots, commands and clips remain unchanged. This supplies a full-body base pose
+for standing and movement, not full controller-driven upper-body, face, fingers, IK or equipment parity. The source
+graph is never changed, and the generated graph has its own resource name so it cannot alter the local player.
 
 `tests/test_coop_players_assets.py --cc gcc` runs authored generation through the unchanged production loader over
 real temporary directories (native Win32 file calls on Windows, the production POSIX file calls on Linux).

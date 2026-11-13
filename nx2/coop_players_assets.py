@@ -1,7 +1,9 @@
 """Build co-op actors from the user's own RomFS; output is game data, never distributed.
 
 The menu actor supplies the model without a second player controller. Its world counterpart
-supplies animation references, settings and heap allowance. No model or animation bytes live here.
+supplies animation references, settings and heap allowance. Its primary command is bound to
+the existing full-body mask: this passive actor has no player controller to fill the upper body.
+No model, animation or extracted bone list lives here.
 """
 import argparse
 import copy
@@ -226,13 +228,51 @@ def asset_files():
     for line in text.splitlines():
         if not line.strip():
             continue
-        entry = re.fullmatch(r'COOP_PLAYER_ASSET\((actor|table), (\w+), "([^"]+)"\)', line.strip())
+        entry = re.fullmatch(r'COOP_PLAYER_ASSET\((actor|animation|table), (\w+), "([^"]+)"\)', line.strip())
         if not entry or entry[2] in files:
             raise ValueError('invalid co-op asset filename contract: ' + line)
         files[entry[2]] = entry[1], entry[3]
     if not files:
         raise ValueError('empty co-op asset filename contract')
     return files
+
+
+def body_animation(data):
+    """Bind the primary Lower slot to the source graph's full-body mask (ASB 0x41b).
+
+    Commands, clips, other partials and their overlays are unchanged. This is a base-body
+    pose, not the real player's controller-driven upper-body/IK/equipment composition.
+    """
+    if len(data) < 0x80 or data[:8] != b'ASB \x1b\x04\x00\x00':
+        raise ValueError('unsupported co-op animation graph')
+    word = lambda at: struct.unpack_from('<I', data, at)[0]
+    pool, pool_size = word(0x3c), word(0x60)
+    if pool < 0x80 or pool_size > len(data) - pool:
+        raise ValueError('invalid co-op animation string pool')
+
+    def text(offset):
+        if offset >= pool_size:
+            raise ValueError('invalid co-op animation name')
+        end = data.find(b'\0', pool + offset, pool + pool_size)
+        if end < 0:
+            raise ValueError('unterminated co-op animation name')
+        return data[pool + offset:end]
+
+    def table(count_at, start_at, stride):
+        count, start = word(count_at), word(start_at)
+        if not count or start < 0x80 or start > len(data) or count > (len(data) - start) // stride:
+            raise ValueError('invalid co-op animation table')
+        return range(start, start + count * stride, stride)
+
+    partials = table(0x24, 0x28, 0x10)
+    skeletons = table(0x58, 0x5c, 0x0c)
+    primary = [at for at in partials if text(word(at)) == b'Lower']
+    full = [i for i, at in enumerate(skeletons) if text(word(at + 4)) == b'All_PB']
+    if primary != [partials.start] or len(full) != 1 or word(primary[0] + 4) >= len(skeletons):
+        raise ValueError('co-op animation needs a primary Lower slot and one full-body mask')
+    out = bytearray(data)
+    struct.pack_into('<I', out, primary[0] + 4, full[0])
+    return bytes(out)
 
 
 def generate(rom, out):
@@ -266,8 +306,16 @@ def generate(rom, out):
             merged.update(resource.get('Components', {}))
             return merged
         world_components = inherited(world_doc.root)
-        for key in ('ASRef', 'ASInfoRef'):
-            components[key] = world_components[key]
+        animation_id = age + '_animation'
+        animation_path = required[animation_id]
+        if contract[animation_id][0] != 'animation' or not animation_path.endswith('.asb.zs'):
+            raise ValueError('actor needs its private animation output: ' + age)
+        original_path = packed_ref(world_components['ASRef']) + '.zs'
+        original = rom.read(original_path)
+        changed[animation_path] = body_animation(original)
+        sizes.grow(original_path, animation_path, len(original), len(changed[animation_path]))
+        components['ASRef'] = '?' + animation_path.removesuffix('.zs')
+        components['ASInfoRef'] = world_components['ASInfoRef']
         components['AIInfoRef'] = ''
         # The ASInfo may itself inherit settings: copy its chain from the world actor.
         ref = packed_ref(components['ASInfoRef'])
