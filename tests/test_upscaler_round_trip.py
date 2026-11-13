@@ -107,7 +107,6 @@ struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); } *host = 
 bool can_bind() { return false; }
 // No hardware profile or measured tuning owns the manual round trips.
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
-Out auto_output{};
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
 /* SAVE */
@@ -115,12 +114,11 @@ void restart() {
     opts = Options{};
     env_override_count = 0;
     auto_for = auto_tuned = 0;
-    auto_output = {};
     auto_tuning = {};
     // The hardware stand-ins (auto_choice and auto_fp) describe the same PC after a restart.
-    bool has_options = false, has_vram_budget = false, has_memory_budget = false;
+    bool has_options = false, has_output = false, has_vram_budget = false, has_memory_budget = false;
     /* LOAD */
-    CHECK(has_options && has_memory_budget && !has_vram_budget);
+    CHECK(has_options && !has_output && has_memory_budget && !has_vram_budget);
 }
 void apply_pad_layout(int) {}
 void sync_preset_budgets(int) {}
@@ -172,7 +170,6 @@ void fresh(int engine, int value) {
     opts = Options{};
     env_override_count = 0;
     auto_for = auto_fp = auto_tuned = 0;
-    auto_output = {};
     auto_choice = {};
     auto_tuning = {};
     opts.dlss = engine;
@@ -308,7 +305,6 @@ int main(int argc, char** argv) {
         restart();
         CHECK(opts.preset == kAutoPreset && opts.resolution == 5);
         CHECK(auto_for == auto_fp && auto_tuned == auto_fp);
-        CHECK(auto_output.w == 1920 && auto_output.h == 1080);
         CHECK(auto_tuning.steps == 1 && auto_tuning.went_down);
         if (via_bridge) bridge_to(ur::GAME);
         else arrow_to(ur::GAME);
