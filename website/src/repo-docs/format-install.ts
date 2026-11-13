@@ -44,8 +44,10 @@ export const launcherChannels = [
 
 function channelPicker() {
   const picked = launcherChannels.find(c => c.picked) || launcherChannels.find(c => !c.soon);
-  return `<fieldset class="launcher-channel" data-launcher-channel hidden>\n<legend>Channel</legend>\n${launcherChannels.map(c =>
+  // (a radiogroup, not a fieldset: a legend can't line up in the row of pills)
+  return `<div class="launcher-channel" role="radiogroup" aria-labelledby="launcher-channel-label" data-launcher-channel hidden>\n` +
+    `<span id="launcher-channel-label">Channel</span>\n${launcherChannels.map(c =>
     `<label><input type="radio" name="launcher-channel" value="${c.value}" data-note="${c.note}"` +
     `${c === picked ? ' checked' : ''}${c.soon ? ' disabled' : ''}> ${c.name}${c.soon ? ' <small>coming soon</small>' : ''}</label>`).join('\n')}\n` +
-    `<p data-launcher-channel-note>${picked.note}</p>\n</fieldset>\n`;
+    `<p data-launcher-channel-note>${picked.note}</p>\n</div>\n`;
 }

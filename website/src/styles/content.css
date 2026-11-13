@@ -26,8 +26,9 @@
   .install-hub-card h2 { margin-top: 0; font-size: var(--text-xl); }
   .install-hub-card p { color: var(--sl-color-gray-2); font-size: var(--text-sm); }
   .download-buttons { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.2rem 0; }
-  .launcher-channel:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; margin: 1.2rem 0 0; padding: 0; border: 0; }
-  .launcher-channel legend { float: left; margin-right: .25rem; padding: .3rem 0; border: 1px solid transparent; font-weight: 600; font-size: var(--text-sm); color: var(--sl-color-white); }
+  .launcher-channel:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; margin: 1.2rem 0 0; }
+  .launcher-channel > :is(span, label) { margin-block: 0; }  /* (not the content's flow spacing between them) */
+  .launcher-channel > span { margin-right: .25rem; font-weight: 600; font-size: var(--text-sm); color: var(--sl-color-white); }
   .launcher-channel label { padding: .3rem .85rem; border: 1px solid var(--border); border-radius: 999px; font-size: var(--text-sm); cursor: pointer; }
   .launcher-channel label:has(:checked) { border-color: var(--sl-color-text-accent); background: var(--sl-color-accent-low); color: var(--sl-color-white); }
   .launcher-channel label:has(:disabled) { border-style: dashed; color: var(--sl-color-gray-3); cursor: default; }
