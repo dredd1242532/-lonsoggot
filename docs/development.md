@@ -835,6 +835,13 @@ only the movement-key stick, so it never receives a latched Switch button as ano
 not accepted; choose `walk_mode` instead. Walk's Toggle selection survives Insert, focus loss and Switch-button latch
 resets; a key held across Insert/focus return must be released before it can switch walking again.
 
+The Mods tab keeps a file of its own beside it, `longshot_mods.txt` (`host/mods.c`): one line a mod in the list's order,
+`on <name>` or `off <name>`, and `cheat <key> on` or `off` for the cheats. A mod the file doesn't name comes after the
+named ones, by name, and is on; with no file the order is the folders' names'. `nx2/exefs_patches.py` reads the same
+file when the game is built, for the mods whose ExeFS patches go in. Two more files are written, not edited:
+`exefs_patches.txt` (the build: the patch files it applied, which the Mods tab compares with the mods' folders) and
+`modcache/rsizetable.zs` (the game, at each start with mods: the merged resource size table).
+
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`
 as its client. `status.game` holds Link's position/facing, the camera's yaw, event/loading/age, life, maximum life,
