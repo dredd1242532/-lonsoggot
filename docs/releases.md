@@ -26,7 +26,7 @@ Each version is one Forgejo release, made by `.forgejo/workflows/release.yml`:
 
 | Longshot (MagicBeanDev/Longshot) | The launcher (MagicBeanDev/LongshotLauncher) |
 |---|---|
-| `LongshotBuilder-<v>-windows-x64.zip`: the Windows builder (its setup as `LongshotBuilder.exe`, the builder and Longshot's sources in `LongshotBuilder\`, `tools.lock`, `VERSION`, and `recomplauncher.json` at the top) | `LongshotLauncher-<v>-windows-x64.exe`: one self-contained program |
+| `LongshotBuilder-<v>-windows-x64.zip`: the Windows builder (its setup as `LongshotBuilder.exe`, the builder and Longshot's sources in `LongshotBuilder\`, `tools.lock`, `VERSION`, and `recomplauncher.json` at the top) | `LongshotLauncher-<v>-windows-x64-setup.exe`: one self-contained program that installs itself (below); `LongshotLauncher-<v>-windows-x64-portable.zip`: the same program as `LongshotLauncher.exe` with its `portable` file |
 | `Longshot-<v>-x86_64.AppImage`: the Linux builder, with its tools and `recomplauncher.json` inside | `LongshotLauncher-<v>-x86_64.AppImage` |
 | `tools.lock`: the tools the Windows builder downloads | |
 | `SHA256SUMS`, `SHA256SUMS.sig` | `SHA256SUMS`, `SHA256SUMS.sig` |
@@ -39,11 +39,12 @@ Release files are Forgejo attachments: `[attachment] MAX_SIZE` (2048 MB on git.m
 site is behind Cloudflare, which refuses uploads over 100 MB: CI uploads to `FORGEJO_UPLOAD_API`, the instance's address
 without Cloudflare in front, when it is set (RELEASING.md, One-time setup). Downloads are not limited.
 
-CI makes each release with the job's own token (`secrets.GITHUB_TOKEN`), not a bot's: on a push or a tag in the
+CI makes each release with the job's own token (`forgejo.token`, given to `release.py` as `RELEASE_TOKEN`), with no
+secret and no bot account: on a push or a tag in the
 repository, Forgejo 17 gives it write access to that repository's every unit and to no other repository
 (`routers/api/v1/permissions/repo_access.go`; read-only for a pull request from a fork). That covers every call
 `release.py` makes: create a release, upload its files, edit and publish the draft, delete a nightly's release and its tag
-(a tag that isn't protected). Each repository releases into itself only, so nothing else is needed. The token ends with
+(a tag that isn't protected). Each repository releases into itself only, so no other token or fallback is needed. The token ends with
 the job. Forgejo 17 ignores a workflow's `permissions:` key, so the workflows have none.
 
 ## The channels
@@ -149,6 +150,24 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/
 
    It then starts the new launcher and closes. `--rollback` puts the previous launcher back (`<name>.old`). A build from a
    checkout is `dev` and never updates itself.
+
+### Installing the launcher
+
+There is no installer program: the launcher installs itself (the launcher's README, *Installing*; `Core/Installer.cs`,
+`LauncherLayout.cs`).
+
+- **Windows, the setup file.** Its first start asks: **Install** copies it to
+  `%LOCALAPPDATA%\Programs\LongshotLauncher\LongshotLauncher.exe` for the user (no administrator rights), with a Start
+  menu shortcut and an *Apps & features* entry, its data in `%LOCALAPPDATA%\LongshotLauncher`; **Run portable** puts a
+  file named `portable` beside the program and keeps everything in `LongshotLauncher-data` beside it, with no registry
+  or shortcut. `--install` installs without asking; `--uninstall` (what *Apps & features* runs) removes the program, its
+  shortcuts and its entry, and asks before deleting its data (never a build's game folder or the saves).
+- **Windows, the portable zip.** `LongshotLauncher.exe` with the `portable` marker already beside it, so it never asks.
+- **Linux.** The AppImage needs no installing. *Settings > Applications menu > Add to applications menu* writes a
+  `.desktop` entry that starts the AppImage where it is. Portable is the AppImage convention: a folder named
+  `<AppImage>.home` beside it holds its data.
+- **Updates keep the kind.** An installed launcher updates from the release's setup file, a portable one from the
+  portable zip, in place beside its `portable` file; the file keeps its name.
 
 `LONGSHOT_LAUNCHER_TRUST=<public key .pem>` trusts one more key, to try a release signed with a test key.
 `LONGSHOT_LAUNCHER_PARTS=<list>` builds from a local parts list with no release at all (development).

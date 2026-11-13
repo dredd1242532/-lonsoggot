@@ -289,7 +289,7 @@ class Publish(unittest.TestCase):
         self.addCleanup(self.server.shutdown)
         self.dir = Path(tempfile.mkdtemp(prefix="release-publish-"))
         self.addCleanup(shutil.rmtree, self.dir, True)
-        env = {"FORGEJO_API": "http://127.0.0.1:%d/api/v1" % self.server.server_port, "FORGEJO_TOKEN": "t",
+        env = {"FORGEJO_API": "http://127.0.0.1:%d/api/v1" % self.server.server_port, "RELEASE_TOKEN": "t",
                "GITHUB_REPOSITORY": "MagicBeanDev/Test"}
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()

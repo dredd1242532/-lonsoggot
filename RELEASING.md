@@ -8,7 +8,7 @@ channels, signing, `tools.lock`, how the launcher reads it) is in [docs/releases
 |---|---|---|
 | Repository | [MagicBeanDev/Longshot](https://git.magicbean.dev/MagicBeanDev/Longshot) | [MagicBeanDev/LongshotLauncher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher) |
 | First version | `v3.0.0` (rc first: `v3.0.0-rc.1`) | `v1.0.0` (rc first: `v1.0.0-rc.1`) |
-| What a release ships | the Windows and Linux builders, `tools.lock` | the launcher for Windows and Linux |
+| What a release ships | the Windows and Linux builders, `tools.lock` | the launcher: `LongshotLauncher-<v>-windows-x64-setup.exe` (installs itself or runs portable: docs/releases.md, *Installing the launcher*), `LongshotLauncher-<v>-windows-x64-portable.zip`, `LongshotLauncher-<v>-x86_64.AppImage` |
 | Nightly count | commits since the fork, e2a4d45 | commits since the first commit |
 
 Both have the same three channels: **stable**, **rc** and **nightly**. In the launcher, players pick a channel for their
@@ -157,7 +157,7 @@ its line:
 - **An upstream archive** (e.g. a new llvm-mingw):
   1. Edit the line: version, `sha256` and `size` (from the upstream release page, or download it and run `sha256sum`),
      `prefix` (the folder in the archive), and the upstream URL.
-  2. `FORGEJO_TOKEN=<your token> python -I scripts/tools.py mirror llvm-mingw`: it downloads the archive, checks it against the
+  2. `RELEASE_TOKEN=<your token> python -I scripts/tools.py mirror llvm-mingw`: it downloads the archive, checks it against the
      line, uploads the copy to the `tools` release, and makes its URL the line's first (the upstream URL stays as the
      fallback).
   3. `python -I scripts/tools.py check --require`, and open the pull request (`build(windows): llvm-mingw 20261201`).
@@ -168,7 +168,7 @@ its line:
   python -I scripts/tools.py assemble cpm --add <dav1d-cpm folder from build-windows.yml's dav1d artifact> --out cpm.zip
   python -I scripts/tools.py assemble third-party --from <an archive with tools/third_party> --out third-party.zip
   python -I scripts/tools.py assemble profile --work work --out profile.zip
-  FORGEJO_TOKEN=<your token> python -I scripts/tools.py add python 3.14.2-1 python.zip --dest LongshotBuilder/tools/python --prefix python
+  RELEASE_TOKEN=<your token> python -I scripts/tools.py add python 3.14.2-1 python.zip --dest LongshotBuilder/tools/python --prefix python
   ```
   `add` uploads the archive as `<sha256>-<name>.zip` to the `tools` release and writes the line. Check that nothing made
   from the game is in it (CONTRIBUTING.md): the profile is addresses and counts, never game code.
@@ -201,10 +201,11 @@ None of this is done yet. In order (the org secret is shared by both repositorie
    `Core/ReleaseTrust.cs` and in Longshot's `scripts/release_keys.json` (a pull request to each). Keep `release.pem` backed
    up offline. Losing it means a launcher with a new key that every player downloads by hand.
 2. **The secret** (MagicBeanDev > *Settings* > *Actions* > *Secrets*): `RELEASE_SIGNING_KEY`, the text of `release.pem`.
-   No token and no bot account: `release.yml` makes the release with the job's own token (`secrets.GITHUB_TOKEN`), which
-   Forgejo gives write access to its own repository on a push (never on a pull request from a fork). Don't protect
-   `nightly-*` tags (*Settings* > *Tags*): that token can't delete a protected tag, so the prune would fail. `tools.py`
-   run by hand (`mirror`, `add`) takes your own token as `FORGEJO_TOKEN`.
+   No token secret and no bot account: `release.yml` makes the release with the job's own token (`forgejo.token`, given
+   to `release.py` as `RELEASE_TOKEN`), which Forgejo gives write access to its own repository on a push or a tag (never
+   on a pull request from a fork). It needs no fallback. Don't protect `nightly-*` tags (*Settings* > *Tags*): that token
+   can't delete a protected tag, so the prune would fail. `tools.py` and `release.py` run by hand (`mirror`, `add`,
+   `prune`) take your own token as `RELEASE_TOKEN`.
 3. **The upload address.** Uploads through Cloudflare are cut at 100 MB, and the builders are larger. Set the variable
    `FORGEJO_UPLOAD_API` (organization *Actions* > *Variables*) to the API without Cloudflare, e.g.
    `http://forgejo:3000/api/v1` as the runners reach it on the server's network. Unset, uploads go to
@@ -243,4 +244,4 @@ None of this is done yet. In order (the org secret is shared by both repositorie
 | A launcher does not see a new release | it checks at start and on Retry; a draft is not seen | publish finished? Retry in the launcher |
 | `next` or `notes`: "git-cliff is needed" | git-cliff is not on PATH | `export GIT_CLIFF=$(python -I scripts/release.py git-cliff <folder>)` |
 | A Windows install fails at a tool | its upstream URL is gone and it has no mirror, or the archive changed | `tools.py mirror <name>` (the copy in the tools release), or bump it |
-| Too many nightlies | the prune step failed (HTTP 422: a protected `nightly-*` tag) | unprotect `nightly-*` (step 2), or `FORGEJO_TOKEN=<your token> python -I scripts/release.py prune` by hand |
+| Too many nightlies | the prune step failed (HTTP 422: a protected `nightly-*` tag) | unprotect `nightly-*` (step 2), or `RELEASE_TOKEN=<your token> python -I scripts/release.py prune` by hand |
