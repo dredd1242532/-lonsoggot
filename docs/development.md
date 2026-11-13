@@ -60,6 +60,11 @@ Run everything with `python -I` from this folder.
 | `python -I scripts/prof.py <stacks file>` | a profile sampled with `HOS_PROFILE=<seconds>` + `HOS_SAMPLE=<thread>` + `HOS_SAMPLE_FILE=<stacks file>` (the sampler runs only with `HOS_PROFILE` set), named from the linker maps |
 | `python -I scripts/tested_configurations.py [--output work/tested-configurations.md]` | Read the [tested configurations](tested-configurations.md), combining new run files with the frozen table; UTF-8 stdout by default, or a local Markdown file that is not committed |
 
+The recorder's game-free regression is `python -I -B tests/test_recorder_sync.py --headers <Vulkan-Headers/include>`.
+It compares fake-driver calls and rejects deliberately broken recorder variants without creating a Vulkan device.
+Its destruction case keeps the final copy unpublished until a boundary flushes it, so a skipped destruction wait is
+caught even if the producer is paused long enough for every already-published command to finish.
+
 The dump can also come from `OOT_DUMP` (its folder) or `OOT_EXEFS`; `OOT_WORK` moves the work folder.
 
 The built game's own arguments (`image.bin`, `--romfs`, `--user`, `--trace`, `--prepare-shaders`) are in the README's
