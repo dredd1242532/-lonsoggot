@@ -1777,6 +1777,65 @@ void outputs_sync() {
          custom_output.w ? ", and one of the player's own" : "", list.c_str());
 }
 
+// Compiled feature rules append ordinary rows to Room rules. The host owns the registry's immutable strings; only
+// the bounded display text is copied, once. Unlabelled/older entries stay off the page and their file lines stay opaque.
+struct CoopFeatureRow {
+    MkwVkCoopFeature def{};
+    int value = 0;
+    char name[64]{}, help[256]{};
+    Row row{};
+};
+CoopFeatureRow coop_feature_rows[HOS_COOP_FEATURES];
+int coop_feature_count = 0;
+const char* tx_feature(int value) {
+    static thread_local char text[16];
+    snprintf(text, sizeof text, "%d", value);
+    return text;
+}
+void coop_feature_init() {
+    coop_feature_count = 0;
+    if (!host || !host->coop_feature) return;
+    for (int i = 0; i < HOS_COOP_FEATURES; i++) {
+        MkwVkCoopFeature d{};
+        if (!host->coop_feature(i, &d)) break;
+        if (!d.name || !d.name[0]) continue;
+        CoopFeatureRow& f = coop_feature_rows[coop_feature_count++];
+        f.def = d, f.value = d.def;
+        snprintf(f.name, sizeof f.name, "%s", d.name);
+        snprintf(f.help, sizeof f.help, "%s", d.help ? d.help :
+                 "Rule for rooms this game makes. The maker signs it; each player must accept changed rules.");
+        f.row = {TAB_RULES, f.name, &f.value, d.lo, d.hi, 1,
+                 d.lo == 0 && d.hi == 1 ? tx_onoff : tx_feature, f.help, nullptr, false, true};
+    }
+}
+int menu_row_count() { return kRows + coop_feature_count; }
+Row& menu_row(int i) { return i < kRows ? rows[i] : coop_feature_rows[i - kRows].row; }
+const char* coop_feature_row_key(const Row& r) {
+    if (r.tab == TAB_RULES)
+        for (int i = 0; i < coop_feature_count; i++)
+            if (r.value == &coop_feature_rows[i].value) return coop_feature_rows[i].def.key;
+    return nullptr;
+}
+bool coop_feature_saved_key(const char* key) {
+    for (int i = 0; i < coop_feature_count; i++)
+        if (!strcmp(key, coop_feature_rows[i].def.key)) return true;
+    return false;
+}
+bool coop_feature_option_line(const char* key, const char* text) {
+    for (int i = 0; i < coop_feature_count; i++) {
+        CoopFeatureRow& f = coop_feature_rows[i];
+        if (strcmp(key, f.def.key)) continue;
+        const long value = strtol(text, nullptr, 10);
+        f.value = value >= f.def.lo && value <= f.def.hi ? (int)value : f.def.def;
+        return true;
+    }
+    return false;
+}
+void coop_feature_save(FILE* file) {
+    for (int i = 0; i < coop_feature_count; i++)
+        fprintf(file, "%s=%d\n", coop_feature_rows[i].def.key, coop_feature_rows[i].value);
+}
+
 int cur_tab = TAB_GRAPHICS;
 int tab_selected[TAB_RULES + 1] = {};   // (and the Motion page's and the Room rules page's; TAB_PAGE's is not used)
 bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !strcmp(r.name, "Motion"); }
@@ -1862,7 +1921,7 @@ void restart_init() {
         if (restart_slot[i] >= 0) restart_names[restart_slot[i]] = rows[i].name;
     }
 }
-int restart_slot_of(const Row& r) { return restart_slot[&r - rows]; }
+int restart_slot_of(const Row& r) { return r.restart && r.value ? restart_slot[&r - rows] : -1; }
 /// A row that takes a restart, changed from what the game started with (a row past menu_restart.h's kMax has no slot: never)
 bool restart_changed(const Row& r) {
     const int slot = restart_slot_of(r);
@@ -1910,6 +1969,7 @@ bool intel_compiler_row() {
 #endif
 }
 bool row_shown(int i) {
+    if (i >= kRows) return i < menu_row_count();   // (registered Room rules rows have no device-dependent visibility)
     const int* v = rows[i].value;
     return ((rows[i].cheat < 0 && v != &opts.damage_taken) || cheats_on()) && (v != &opts.reflex || reflex_available()) &&
            (v != &opts.antilag || antilag_available()) && (v != &opts.intel_compiles || intel_compiler_row()) &&
@@ -1922,7 +1982,7 @@ bool row_shown(int i) {
 int tab_row_count(int t) {
     int c = 0;
     for (int i = 0; i < kRows; i++) if (rows[i].tab == (MenuTab)t && row_shown(i)) c++;
-    return c;
+    return c + (t == TAB_RULES ? coop_feature_count : 0);
 }
 
 int tab_row_to_global(int t, int local_idx) {
@@ -1933,6 +1993,7 @@ int tab_row_to_global(int t, int local_idx) {
             count++;
         }
     }
+    if (t == TAB_RULES && local_idx >= count && local_idx - count < coop_feature_count) return kRows + local_idx - count;
     return 0;
 }
 
@@ -2069,11 +2130,13 @@ const struct { int* value; const char* key; } coop_options[] = {
 const char* row_key(const Row& r, const char* named) {
     for (const auto& o : coop_options)
         if (r.value == o.value) return o.key;
+    if (const char* key = coop_feature_row_key(r)) return key;
     return named;
 }
 /// A line of the options file (its key, and its text after the =) that is a Room rules row's: the value taken, within the
 /// row's range. Also a line keyed as such a row's name would be (progress=, small_keys=), which is no key: nothing taken
 bool coop_option_line(const char* key, const char* text) {
+    if (coop_feature_option_line(key, text)) return true;
     for (Row& r : rows) {
         if (r.tab != TAB_RULES || !r.value) continue;
         if (!strcmp(key, row_key(r, ""))) *r.value = std::min(std::max(atoi(text), r.lo), r.hi);
@@ -2153,6 +2216,7 @@ void save() {
             mine |= key == "mesh_shaders";
             for (const Row& r : rows)
                 if (!mine && r.value && key == row_key(r, ini_key(r))) mine = true;
+            if (!mine) mine = coop_feature_saved_key(key.c_str());
             if (!mine) others += line, others += others.back() == '\n' ? "" : "\n";
         }
         fclose(f);
@@ -2172,6 +2236,7 @@ void save() {
                 fprintf(f, "%s=%d\n", row_key(r, ini_key(r)), saved_value(r.value));
             }
         }
+        coop_feature_save(f);
         if (!mic_want.empty()) fprintf(f, "microphone_device=%s\n", mic_want.c_str());   // (longshot: also while it is unplugged)
         // (not a row: the budgets Custom keeps. 0 too: with a preset on, the VRAM budget row chosen by the player, which the next
         // start must not take back to the preset's)
@@ -3010,7 +3075,8 @@ std::string bug_report_saved_text(const std::string& folder);
 /// have: the help box keeps that height whichever row is selected and whatever its value
 float measure_help(ui::Ctx& c, float width) {
     float most = 0;
-    for (const Row& r : rows) {
+    for (int i = 0; i < menu_row_count(); i++) {
+        const Row& r = menu_row(i);
         float hint = 0;
         for (int v = r.lo; r.value && r.hint && v <= r.hi; v++)
             for (int k = 0; const char* t = r.hint(v, k); k++)
@@ -3273,15 +3339,15 @@ int debug_rows(int* out, int* dev, int* dev_head) {
     int n = 0;
     *dev_head = -1;
     for (int k = 0; k < count; ++k)
-        if (rows[tab_row_to_global(TAB_DEBUG, k)].value == &opts.debug_tools) out[n++] = k;
+        if (menu_row(tab_row_to_global(TAB_DEBUG, k)).value == &opts.debug_tools) out[n++] = k;
     for (int t = 0; t < kDebugTools; ++t)
         for (int k = 0; k < count; ++k) {
-            const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
+            const Row& r = menu_row(tab_row_to_global(TAB_DEBUG, k));
             if (debug_tools_order[t] < 0 ? r.value == &opts.damage_taken : r.cheat == debug_tools_order[t]) out[n++] = k;
         }
     *dev = n;
     for (int k = 0; k < count; ++k) {
-        const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
+        const Row& r = menu_row(tab_row_to_global(TAB_DEBUG, k));
         if (r.heading) *dev_head = k;
         else if (*dev_head >= 0 && r.cheat < 0 && r.value != &opts.debug_tools) out[n++] = k;
     }
@@ -3325,7 +3391,7 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     };
     float name_need[2] = {0, 0}, cell_full[2] = {halves_w + 64 * s, halves_w + 64 * s}, cell_tight[2] = {halves_w + 36 * s, halves_w + 36 * s};
     for (int i = 1; i < dev; ++i) {
-        const Row& r = rows[tab_row_to_global(TAB_DEBUG, order[i])];
+        const Row& r = menu_row(tab_row_to_global(TAB_DEBUG, order[i]));
         const int col = i - 1 >= debug_groups[0].to ? 1 : 0;   // (Player in the first, the rest in the second)
         name_need[col] = std::max(name_need[col], ui::size_of(c.f.strong, 18.5f * s, r.name).x + 40 * s);
         cell_full[col] = std::max(cell_full[col], need(r, false)), cell_tight[col] = std::max(cell_tight[col], need(r, true));
@@ -3370,10 +3436,10 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     c.d->PushClipRect(ImVec2(cx0, top), ImVec2(cx1, std::max(top, bottom)), true);
     for (int g = 0; tools && g < kDebugGroups; ++g)
         heading(head_col[g] ? mid + gap * .5f : left, !two || head_col[g] ? right : mid - gap * .5f, head_row[g], debug_groups[g].title);
-    if (dev_head >= 0 && n > dev) heading(left, right, dev_row, rows[tab_row_to_global(TAB_DEBUG, dev_head)].name);
+    if (dev_head >= 0 && n > dev) heading(left, right, dev_row, menu_row(tab_row_to_global(TAB_DEBUG, dev_head)).name);
     for (int i = 0; i < n; ++i) {
         const int k = order[i];
-        const Row& r = rows[tab_row_to_global(TAB_DEBUG, k)];
+        const Row& r = menu_row(tab_row_to_global(TAB_DEBUG, k));
         const float y = top + (vrow[i] - first) * pitch;
         if (y + pitch <= top || y >= bottom) continue;
         const bool in_tools = i > 0 && i < dev;
@@ -3580,7 +3646,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     const int count = tab_row_count(TAB_COOP);
     float y = top + box_h + 16 * s;
     for (int i = 0; i < count; i++, y += pitch) {
-        const Row& r = rows[tab_row_to_global(TAB_COOP, i)];
+        const Row& r = menu_row(tab_row_to_global(TAB_COOP, i));
         const bool selected = i == sel;
         const int k = coop_kind(r);
         name_cell(c, ImVec2(left, y), ImVec2(split, y + rh), r.name, selected);
@@ -3676,7 +3742,7 @@ void draw_options(ui::Ctx& c) {
     columns(c, &cx0, &cx1, &hx0, &hx1, &narrow);
     column(c, cx0, cx1, hh);
     const int count = tab_row_count(cur_tab), sel = tab_selected[cur_tab];
-    const Row& selr = rows[tab_row_to_global(cur_tab, sel)];
+    const Row& selr = menu_row(tab_row_to_global(cur_tab, sel));
     const FieldRow* field = field_row(selr);   // (longshot: a text field: why Enter did not take it, while it is edited)
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : field && editing == field->field ? edit_why : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
@@ -3760,7 +3826,7 @@ void draw_options(ui::Ctx& c) {
     for (int i = 0; i < count; i++) {
         const float y = top + (i - first) * pitch;
         if (y + rh < top - 8 * s || y > bottom + 8 * s) continue;
-        const Row& r = rows[tab_row_to_global(cur_tab, i)];
+        const Row& r = menu_row(tab_row_to_global(cur_tab, i));
         if (r.heading) {   // (a section's title: gold, a rule after it to the column's end; no cell, nothing to click)
             const float ty = y + rh * 0.62f, tw = ui::size_of(c.f.heading, 19 * s, r.name).x;
             ui::text_mid(c, c.f.heading, 19 * s, rx0 + 2 * s, ty, ui::kGoldHi, r.name);
@@ -3785,9 +3851,9 @@ void draw_tune_bar(ui::Ctx& c) {
     const int count = tab_row_count(cur_tab);
     int& sel = tab_selected[cur_tab];
     if (sel >= count) sel = count - 1;
-    auto heading_at = [&](int k) { return rows[tab_row_to_global(cur_tab, k)].heading; };
+    auto heading_at = [&](int k) { return menu_row(tab_row_to_global(cur_tab, k)).heading; };
     while (heading_at(sel)) sel = (sel + 1) % count;
-    Row& r = rows[tab_row_to_global(cur_tab, sel)];
+    Row& r = menu_row(tab_row_to_global(cur_tab, sel));
 
     const float bw = std::min(c.w - 2 * c.safe, 740 * s);
     const float bx0 = (c.w - bw) * 0.5f, bx1 = bx0 + bw;
@@ -3860,7 +3926,7 @@ void draw_controls(ui::Ctx& c) {
     const ui::Prompt option[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Change"}, {ui::kBack, "Back"}};
     const ui::Prompt wait[] = {{ui::kBack, "Cancel"}};
     const float bar_top = ui::prompt_bar_top(c);   // (the strip itself drawn last, over all: below)
-    const Row* page_row = sel_i < 0 ? &rows[tab_row_to_global(TAB_PAGE, csel)] : nullptr;
+    const Row* page_row = sel_i < 0 ? &menu_row(tab_row_to_global(TAB_PAGE, csel)) : nullptr;
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
@@ -3905,7 +3971,7 @@ void draw_controls(ui::Ctx& c) {
         const int i = j - kTop;
         const float y0 = std::max(y, top - 8 * s), y1 = std::min(y + rh, bottom + 8 * s);
         if (i < 0) {   // (one of the page's own rows: a name and a choice, as on the tabs)
-            const Row& r = rows[tab_row_to_global(TAB_PAGE, j)];
+            const Row& r = menu_row(tab_row_to_global(TAB_PAGE, j));
             // (their names wider than a control's, as wide as the tabs' rows': "Button prompts" whole at any size)
             const float opt_x = rx0 + (rx1 - rx0) * 0.5f;
             name_cell(c, ImVec2(rx0, y), ImVec2(opt_x, y + rh), r.name, sel, restart_changed(r), 17);
@@ -4680,6 +4746,7 @@ void menu_init() {
     static bool done;
     if (done) return;
     done = true;
+    coop_feature_init();   // (before reading the file or a migration saves it: defaults and visible registered keys)
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
     bool has_options = false;
     bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
@@ -5038,12 +5105,15 @@ void menu_option_set(int id, int value) {
 // longshot_options.ini (row_key: ini_key, or a Room rules row's coop_ key), which stays the same while rows come and go or
 // are renamed. The bridge calls these from its own thread: menu_mu keeps them apart from menu_tick (the present's thread)
 // and from menu_option_set (the game's)
-bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
+bool bridge_row(int i) {
+    const Row& r = menu_row(i);
+    return r.value && !r.heading && r.cheat < 0 && row_shown(i);
+}
 void bridge_fill(int i, MkwVkSetting* out) {
     static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "debug", "co-op", "motion", "controls",
                                        "room rules"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_RULES + 1, "a name for each MenuTab");
-    const Row& r = rows[i];
+    const Row& r = menu_row(i);
     *out = MkwVkSetting{};
     snprintf(out->key, sizeof out->key, "%s", row_key(r, ini_key(r)));
     snprintf(out->name, sizeof out->name, "%s", r.name);
@@ -5060,7 +5130,7 @@ static void bridge_probe_first() { (void)upscalers_available(), (void)dlss_why()
 int menu_setting(int index, MkwVkSetting* out) {
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
-    for (int i = 0, n = 0; i < kRows; i++)
+    for (int i = 0, n = 0; i < menu_row_count(); i++)
         if (bridge_row(i) && n++ == index) return bridge_fill(i, out), 1;
     return 0;
 }
@@ -5160,9 +5230,9 @@ int menu_setting_set(const char* key, int value, MkwVkSetting* out) {
     bridge_probe_first();
     std::lock_guard lk(menu_mu);
     int i = 0;
-    while (i < kRows && !(bridge_row(i) && !strcmp(row_key(rows[i], ini_key(rows[i])), key))) i++;
-    if (i == kRows) return 0;
-    Row& r = rows[i];
+    while (i < menu_row_count() && !(bridge_row(i) && !strcmp(row_key(menu_row(i), ini_key(menu_row(i))), key))) i++;
+    if (i == menu_row_count()) return 0;
+    Row& r = menu_row(i);
     if (row_fixed(r.value)) return bridge_fill(i, out), -1;
     const int want = std::min(std::max(value, r.lo), r.value == &opts.pad_layout ? std::min(r.hi, 2) : r.hi);   // (3: Custom, shown only)
     if (r.value == &opts.output_res && output_choice(want) == want &&
@@ -5466,9 +5536,9 @@ void menu_tick() {
             if (!strcmp(key, "ROW") && next[n] == ':') {   // (not while a field has the keyboard: skipped then)
                 const size_t len = strcspn(next + n + 1, ",");
                 const std::string want(next + n + 1, len);
-                for (int i = 0, k = 0; !editing && i < kRows && cur_tab != TAB_PAGE; i++)
-                    if (rows[i].tab == (MenuTab)cur_tab && row_shown(i)) {
-                        if (want == rows[i].name) tab_selected[cur_tab] = k, menu_refresh = true;
+                for (int i = 0, k = 0; !editing && i < menu_row_count() && cur_tab != TAB_PAGE; i++)
+                    if (menu_row(i).tab == (MenuTab)cur_tab && row_shown(i)) {
+                        if (want == menu_row(i).name) tab_selected[cur_tab] = k, menu_refresh = true;
                         k++;
                     }
                 n += (int)len + 1;
@@ -5655,7 +5725,7 @@ void menu_tick() {
             const int i = csel - kTop;   // (i: the control's, or reset's)
             if (press[5]) page = 0, changed = true;
             else if (i < 0 && (press[3] || press[4] || press[7])) {   // (the page's own rows: Enter as Right)
-                Row& r = rows[tab_row_to_global(TAB_PAGE, csel)];   // (Custom is only what the bindings are: set_row skips it)
+                Row& r = menu_row(tab_row_to_global(TAB_PAGE, csel));   // (Custom is only what the bindings are: set_row skips it)
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
@@ -5749,7 +5819,7 @@ void menu_tick() {
             int& sel = tab_selected[cur_tab];
             const bool on_row = hit.part == menu_hit::kRow || hit.part == menu_hit::kSlider;
             if (drag_row >= 0) {   // (a slider held: it follows the cursor's x until let go)
-                Row& d = rows[tab_row_to_global(cur_tab, drag_row)];
+                Row& d = menu_row(tab_row_to_global(cur_tab, drag_row));
                 if (!(ptr.held & HOS_MOUSE_LEFT) || !d.value) {
                     drag_row = -1;
                     save();
@@ -5769,13 +5839,13 @@ void menu_tick() {
                 else if (hit.part == menu_hit::kTabNext) tab_right = true;
                 else if (hit.part == menu_hit::kTab && hit.index != cur_tab) cur_tab = hit.index, changed = true;
                 else if (hit.part == menu_hit::kSlider) {
-                    Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
+                    Row& d = menu_row(tab_row_to_global(cur_tab, hit.index));
                     drag_row = hit.index;
                     const int v = menu_hit::slider_value(hit.permille, d.lo, d.hi, d.step);
                     if (v != *d.value) set_row(d, v, v > *d.value ? 1 : -1, false);
                     changed = true;
                 } else if (hit.part == menu_hit::kRow) {
-                    Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
+                    Row& d = menu_row(tab_row_to_global(cur_tab, hit.index));
                     if (!d.value && d.cheat >= 0 && (cheat_chooses(d.cheat) || age_shown(d.cheat) || d.cheat <= 1 || d.cheat == 7) &&
                         hit.side != 0)
                         press[hit.side < 0 ? 3 : 4] = true;   // (a tool's choice: its halves as Left and Right)
@@ -5811,7 +5881,7 @@ void menu_tick() {
         const int tab_count = tab_row_count(cur_tab);
         int& selected = tab_selected[cur_tab];
         if (selected >= tab_count) selected = tab_count - 1;   // (a row gone since: the debug tools turned off, HDR turned off: row_shown)
-        auto heading_at = [&](int k) { return rows[tab_row_to_global(cur_tab, k)].heading; };   // (stepped over)
+        auto heading_at = [&](int k) { return menu_row(tab_row_to_global(cur_tab, k)).heading; };   // (stepped over)
         if (heading_at(selected)) selected = (selected + 1) % tab_count;
         if (cur_tab == TAB_DEBUG && (press[1] || press[2])) {   // (the Debug tab: in its layout's order, debug_rows)
             selected = debug_step(selected, press[2] ? 1 : -1);
@@ -5828,7 +5898,7 @@ void menu_tick() {
                 changed = true;
             }
         }
-        Row& r = rows[tab_row_to_global(cur_tab, selected)];
+        Row& r = menu_row(tab_row_to_global(cur_tab, selected));
         const bool confirm_selected = &r == &rows[kQuitRow] || &r == &rows[kRestartRow];
         // (Restart and Quit armed only while the window has the focus; the Co-op tab's Accept and Leave without it too: the
         // menu script's test runs have none)

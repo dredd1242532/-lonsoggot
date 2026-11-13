@@ -169,6 +169,14 @@ static int demo_command(int cmd, const char *text, uint32_t number) {
 }
 
 /* ---- the interface ---- */
+int hos_coop_menu_feature(int index, MkwVkCoopFeature *out) {
+    _Static_assert((int)COOP_FEATURE_MAX == (int)HOS_COOP_FEATURES, "the menu can hold every registered feature");
+    const CoopFeatureRule *d = coop_feature_at(index);
+    if (!d || !out) return 0;
+    *out = (MkwVkCoopFeature){d->id, d->lo, d->hi, d->def, d->key, d->name, d->help};
+    return 1;
+}
+
 void hos_coop_menu_view(MkwVkCoopView *out) {
     memset(out, 0, sizeof *out);
     if (demo_on()) {

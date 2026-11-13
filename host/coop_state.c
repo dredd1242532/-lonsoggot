@@ -6,20 +6,21 @@
 // the charter change what counts.
 //
 // Wire format (little-endian), after the peer message's kind byte (coop_proto.h):
-//   DIGEST   u8 version (4), u32 schema, identity, u8 has charter, [charter], u8 nsec, nsec x u32 sum
+//   DIGEST   u8 version (5), u32 schema, identity, u8 has charter, [charter], u8 nsec, nsec x u32 sum
 //   identity u8[32] key, u64 the session before (0 none), u8 name length, name, u8[64] signature
 //   charter  u32 epoch, u8 ncat, ncat x u8 mode, u32 pools' epoch, u8 nadmit, nadmit x u64 key id, u8 nremoved,
-//            nremoved x u64 key id, u8[32] maker's key, u8[64] signature
+//            nremoved x u64 key id, u8[32] maker's key, features, u8[64] signature
+//   features u8 count (<=64), count x (u8 ID, i16 value), ascending unique IDs (1..255)
 //   SECTION  u8 version, u32 schema, u8 n, n x entry, u64 counter, u8[64] signature
 //   flag     u8 1, u8 category, u32 hash, u32 value
 //   record   u8 5, u8 category, u32 hash, u8[32] key, u32 pools' epoch, u32 seq, u32 base (top bit flipped), u32 gain,
 //            u32 spend, u8[64] signature
-// Signed messages begin with "longshot-coop/4 member", "longshot-coop/4 section", "longshot-coop/3 rules" or
+// Signed messages begin with "longshot-coop/4 member", "longshot-coop/4 section", "longshot-coop/5 rules" or
 // "longshot-coop/3 pool" and the room's 16-byte context (BLAKE2b keyed with the room's secret), so a signature means
 // nothing in another room or in another role:
 //   member   context, u8 member id, u64 session, u64 the session before, key, u8 name length, name
 //   section  context, u8 sender's member id, u64 its session, the SECTION's bytes up to its signature (its counter last)
-//   rules    context, the charter's fields up to the maker's key, the maker's key
+//   rules    context, all charter fields through features (including unknown IDs, unchanged)
 //   pool     context, u8 category, u32 hash, u32 pools' epoch, u32 seq, u32 base, u32 gain, u32 spend
 // A key id is the first 8 bytes of BLAKE2b-256 of the key, little-endian.
 #include <stdarg.h>
@@ -64,13 +65,16 @@ enum {
     REC_SIZE = 2 + 4 + COOP_PK_LEN + 4 * 5 + COOP_SIG_LEN,
     NAME_CAP = COOP_NAME_MAX + 1,
     CTX_LEN = 16,
+    CHARTER_FIELDS_MAX = 4 + 1 + COOP_CAT_N + 4 + 1 + 8 * MAX_ADMIT + 1 + 8 * MAX_REMOVED + COOP_PK_LEN + COOP_FEATURE_BYTES,
 };
 
 static const char *const cat_names[COOP_CAT_N] = {"progress", "items", "songs", "quest", "keys", "rupees", "ammo"};
 // wire-protocol constants: a later rename of the project must not change these
-static const char SIG_MEMBER[] = "longshot-coop/4 member", SIG_SECTION[] = "longshot-coop/4 section", SIG_RULES[] = "longshot-coop/3 rules",
+static const char SIG_MEMBER[] = "longshot-coop/4 member", SIG_SECTION[] = "longshot-coop/4 section", SIG_RULES[] = "longshot-coop/5 rules",
                   SIG_POOL[] = "longshot-coop/3 pool";
 _Static_assert(sizeof SIG_SECTION - 1 + 16 + 1 + 8 == SEC_PRE, "SEC_PRE is the section role's length and its fields");
+_Static_assert(5 + COOP_PK_LEN + 8 + 1 + COOP_NAME_MAX + COOP_SIG_LEN + 1 + CHARTER_FIELDS_MAX + COOP_SIG_LEN +
+               1 + 4 * COOP_SYNC_SECTIONS <= COOP_MAX_MESSAGE, "a full charter fits one digest");
 
 typedef struct {
     uint32_t hash, s, l, applied;   // s merged, l local, applied: the value last handed to the game
@@ -124,6 +128,7 @@ typedef struct {
     uint64_t admit[MAX_ADMIT], removed[MAX_REMOVED];
     uint8_t pk[COOP_PK_LEN], sig[COOP_SIG_LEN];
     uint64_t kid;
+    CoopFeatures features;
 } Charter;
 
 typedef struct {
@@ -213,6 +218,7 @@ struct CoopSync {
     char acc_name[MAX_ACCEPTED][NAME_CAP];   // the name each key signed when this player accepted it (as signed)
     uint8_t acc_id[MAX_ACCEPTED];            // the member number each key was last identified as
     uint8_t acc_mode[COOP_CAT_N];
+    CoopFeatures acc_features;
     uint64_t pin_kid;
     uint32_t save_gen, acc_save_gen, copy_gen;
     int bound_once, copy, copy_wanted;
@@ -318,10 +324,91 @@ const char *coop_cat_name(int cat) { return cat >= 0 && cat < COOP_CAT_N ? cat_n
 const char *coop_mode_name(int mode) { return mode == COOP_MODE_SHARED ? "shared" : mode == COOP_MODE_POOL ? "pool" : "own"; }
 int coop_cat_is_pool(int cat) { return cat == COOP_CAT_KEYS || cat == COOP_CAT_RUPEES || cat == COOP_CAT_AMMO; }
 
+// Add each lane's definitions at the end, in its own block. The first row is not a rule: it keeps an empty registry
+// valid C (zero-length arrays are not portable). Unknown values are retained, never replaced by this table's defaults.
+// Trailing display metadata is optional: existing five-field lane entries intentionally leave it zero and hidden.
+// Keep that source-compatible form under the fixtures' -Wextra -Werror too; only this table permits omitted fields.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+static const CoopFeatureRule feature_rules[] = {
+    {0, NULL, 0, 0, 0},
+};
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
+const CoopFeatureRule *coop_feature_at(int index) {
+    return index >= 0 && (size_t)index + 1 < sizeof feature_rules / sizeof *feature_rules ? &feature_rules[index + 1] : NULL;
+}
+
+const CoopFeatureRule *coop_feature_definition(int id) {
+    for (size_t i = 1; i < sizeof feature_rules / sizeof *feature_rules; i++)
+        if (feature_rules[i].id == id) return &feature_rules[i];
+    return NULL;
+}
+
+static int feature_value(const uint8_t *p) {
+    const unsigned v = (unsigned)p[1] | (unsigned)p[2] << 8;
+    return v >= 32768 ? (int)v - 65536 : (int)v;
+}
+
+static int feature_valid(int id, int value) {
+    const CoopFeatureRule *d = coop_feature_definition(id);
+    return id > 0 && id <= 255 && value >= -32768 && value <= 32767 && (!d || (value >= d->lo && value <= d->hi));
+}
+
+static int features_valid(const CoopFeatures *f) {
+    if (f->count > COOP_FEATURE_MAX) return 0;
+    int previous = 0;
+    for (unsigned i = 0; i < f->count; i++) {
+        const uint8_t *p = f->bytes + 3 * i;
+        if (p[0] <= previous || !feature_valid(p[0], feature_value(p))) return 0;
+        previous = p[0];
+    }
+    return 1;
+}
+
+static int features_equal(const CoopFeatures *a, const CoopFeatures *b) {
+    return a->count == b->count && !memcmp(a->bytes, b->bytes, 3u * a->count);
+}
+
+int coop_feature_rule(const CoopRules *r, int id) {
+    for (unsigned i = 0; i < r->features.count && i < COOP_FEATURE_MAX; i++)
+        if (r->features.bytes[3 * i] == id) return feature_value(r->features.bytes + 3 * i);
+    const CoopFeatureRule *d = coop_feature_definition(id);
+    return d ? d->def : 0;
+}
+
+static int feature_set(CoopFeatures *f, int id, int value) {
+    if (!feature_valid(id, value) || !features_valid(f)) return 0;
+    unsigned at = 0;
+    while (at < f->count && f->bytes[3 * at] < id) at++;
+    if (at == f->count || f->bytes[3 * at] != id) {
+        if (f->count == COOP_FEATURE_MAX) return 0;
+        memmove(f->bytes + 3 * (at + 1), f->bytes + 3 * at, 3u * (f->count - at));
+        f->count++;
+    }
+    f->bytes[3 * at] = (uint8_t)id;
+    f->bytes[3 * at + 1] = (uint8_t)(unsigned)value;
+    f->bytes[3 * at + 2] = (uint8_t)((unsigned)value >> 8);
+    return 1;
+}
+
+int coop_feature_set(CoopRules *r, int id, int value) { return feature_set(&r->features, id, value); }
+
+static void features_write(uint8_t **out, const CoopFeatures *f) {
+    put8(out, f->count);
+    putn(out, f->bytes, 3u * f->count);
+}
+
 void coop_rules_default(CoopRules *r) {
     memset(r, 0, sizeof *r);
     for (int c = 0; c < COOP_CAT_N; c++) r->mode[c] = coop_cat_is_pool(c) ? COOP_MODE_OWN : COOP_MODE_SHARED;
     r->mode[COOP_CAT_KEYS] = COOP_MODE_POOL;
+    for (const CoopFeatureRule *d = feature_rules + 1; d < feature_rules + sizeof feature_rules / sizeof *feature_rules; d++)
+        coop_feature_set(r, d->id, d->def);
 }
 
 unsigned coop_rules_normalize(CoopRules *r) {
@@ -348,6 +435,14 @@ void coop_rules_text(const CoopRules *r, char *out, size_t cap) {
     if (cap) out[0] = 0;
     for (int c = 0; c < COOP_CAT_N && at < cap; c++) {
         int k = snprintf(out + at, cap - at, "%s%s %s", c ? ", " : "", cat_names[c], coop_mode_name(r->mode[c]));
+        if (k < 0) break;
+        at += (size_t)k;
+    }
+    for (unsigned i = 0; i < r->features.count && i < COOP_FEATURE_MAX && at < cap; i++) {
+        const uint8_t *p = r->features.bytes + 3 * i;
+        const CoopFeatureRule *d = coop_feature_definition(p[0]);
+        int k = d ? snprintf(out + at, cap - at, ", %s %d", d->key, feature_value(p))
+                  : snprintf(out + at, cap - at, ", rule %u %d (unknown)", p[0], feature_value(p));
         if (k < 0) break;
         at += (size_t)k;
     }
@@ -787,6 +882,7 @@ static size_t charter_fields(const Charter *c, uint8_t *m) {
     put8(&at, c->nremoved);
     for (int i = 0; i < c->nremoved; i++) put64(&at, c->removed[i]);
     putn(&at, c->pk, COOP_PK_LEN);
+    features_write(&at, &c->features);
     return (size_t)(at - m);
 }
 
@@ -811,9 +907,15 @@ static size_t charter_parse(const uint8_t *b, size_t n, Charter *c) {
     if (c->nadmit > MAX_ADMIT || at + 8u * c->nadmit + 1 > n) return 0;
     for (int i = 0; i < c->nadmit; i++) c->admit[i] = get64(b + at), at += 8;
     c->nremoved = b[at++];
-    if (c->nremoved > MAX_REMOVED || at + 8u * c->nremoved + COOP_PK_LEN + COOP_SIG_LEN > n) return 0;
+    if (c->nremoved > MAX_REMOVED || at + 8u * c->nremoved + COOP_PK_LEN + 1 + COOP_SIG_LEN > n) return 0;
     for (int i = 0; i < c->nremoved; i++) c->removed[i] = get64(b + at), at += 8;
     memcpy(c->pk, b + at, COOP_PK_LEN), at += COOP_PK_LEN;
+    c->features.count = b[at++];
+    if (c->features.count > COOP_FEATURE_MAX || at + 3u * c->features.count + COOP_SIG_LEN > n) return 0;
+    memcpy(c->features.bytes, b + at, 3u * c->features.count), at += 3u * c->features.count;
+    // Do not normalize or discard unknown fields: reconstructing exactly these bytes verifies and relays the signature
+    // even in a build whose registry has no entry for a rule. Known out-of-range values reject the whole charter.
+    if (!features_valid(&c->features)) return 0;
     memcpy(c->sig, b + at, COOP_SIG_LEN), at += COOP_SIG_LEN;
     c->kid = kid_of(c->pk);
     return at;
@@ -855,6 +957,7 @@ static void adopt_charter(CoopSync *s, const Charter *c) {
     s->ch = *c;
     s->have_room = 1;
     memcpy(s->room.mode, c->mode, COOP_CAT_N);
+    s->room.features = c->features;
     coop_rules_normalize(&s->room);
     s->room.epoch = c->epoch;
     s->rules_ver++;
@@ -1005,7 +1108,7 @@ static int sig_check(CoopSync *s, Peer *p, const uint8_t sig[COOP_SIG_LEN], cons
 static void consider_charter(CoopSync *s, int from, const Charter *c) {
     if (s->have_room && c->kid == s->ch.kid && c->epoch <= s->ch.epoch) return;   // nothing newer
     if (c->kid != trusted_signer(s)) return;
-    uint8_t m[640];
+    uint8_t m[sizeof SIG_RULES - 1 + CTX_LEN + CHARTER_FIELDS_MAX];
     int ok = sig_check(s, &s->peer[from], c->sig, c->pk, m, charter_message(s, c, m));
     if (!ok) s->st.forged++;
     if (ok == 1) adopt_charter(s, c);
@@ -1031,6 +1134,18 @@ static unsigned admit_wanted(const CoopSync *s, const Charter *c) {
     return m;
 }
 
+// A maker with fewer features than the build that last signed the room retains its unknown fields when re-signing.
+// Its explicit settings override matching IDs; an omitted unknown setting is not a request to delete that rule.
+static int maker_features(const CoopSync *s, CoopFeatures *out) {
+    memset(out, 0, sizeof *out);
+    if (s->have_room && s->ch.kid == s->kid) *out = s->ch.features;
+    for (unsigned i = 0; i < s->mine.features.count; i++) {
+        const uint8_t *p = s->mine.features.bytes + 3 * i;
+        if (!feature_set(out, p[0], feature_value(p))) return 0;
+    }
+    return 1;
+}
+
 // The maker's game signs a new charter: its settings, the pools' admissions (itself, and the members its player
 // accepted), a removal or a pool reset it was asked for, one epoch later (saturating: only the maker raises it).
 static void originate(CoopSync *s) {
@@ -1040,6 +1155,7 @@ static void originate(CoopSync *s) {
     CoopRules r = s->mine;
     coop_rules_normalize(&r);
     memcpy(c.mode, r.mode, COOP_CAT_N);
+    if (!maker_features(s, &c.features)) return;
     if (s->want_reset) c.pool_epoch++, c.nadmit = 0;
     if (s->want_remove) {
         if (!in_list(c.removed, c.nremoved, s->want_remove)) {   // the charter carries the latest; every game keeps all
@@ -1063,7 +1179,7 @@ static void originate(CoopSync *s) {
     c.epoch = c.epoch == UINT32_MAX ? UINT32_MAX : c.epoch + 1;
     memcpy(c.pk, s->pk, COOP_PK_LEN);
     c.kid = s->kid;
-    uint8_t m[640];
+    uint8_t m[sizeof SIG_RULES - 1 + CTX_LEN + CHARTER_FIELDS_MAX];
     coop_sign(c.sig, s->sk, m, charter_message(s, &c, m));
     adopt_charter(s, &c);
 }
@@ -1073,6 +1189,9 @@ static int charter_stale(const CoopSync *s) {
     if (!s->have_room || s->ch.kid != s->kid) return 1;
     CoopRules r = s->mine;
     coop_rules_normalize(&r);
+    CoopFeatures features;
+    if (!maker_features(s, &features)) return 0;   // no truncated charter when an older room filled the bounded list
+    if (!features_equal(&s->ch.features, &features)) return 1;
     return memcmp(s->ch.mode, r.mode, COOP_CAT_N) || s->want_reset || s->want_remove || !in_list(s->ch.admit, s->ch.nadmit, s->kid) ||
            (admit_wanted(s, &s->ch) && s->ch.nadmit < MAX_ADMIT);
 }
@@ -1088,6 +1207,7 @@ unsigned coop_sync_rules(const CoopSync *s, CoopRules *out) {
 int coop_sync_caught_up(const CoopSync *s) { return s->caught_up; }
 
 void coop_sync_settings(CoopSync *s, const CoopRules *mine, int made_room) {
+    if (!features_valid(&mine->features)) return;
     s->mine = *mine;
     coop_rules_normalize(&s->mine);
     s->have_mine = 1;
@@ -1209,7 +1329,7 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
             const Peer *t = who[j];
             who[j] = who[j - 1], who[j - 1] = t;
         }
-    uint8_t m[COOP_SECRET_TEXT + (9 + COOP_NAME_MAX) * COOP_MAX_MEMBERS + 8 + COOP_CAT_N + 4], *at = m;
+    uint8_t m[COOP_SECRET_TEXT + (9 + COOP_NAME_MAX) * COOP_MAX_MEMBERS + 8 + COOP_CAT_N + 4 + COOP_FEATURE_BYTES], *at = m;
     putn(&at, s->code, strlen(s->code));
     for (int i = 0; i < nw; i++) {
         size_t nl = strlen(who[i]->raw);
@@ -1220,10 +1340,11 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     put64(&at, s->ch.kid);
     putn(&at, s->room.mode, COOP_CAT_N);
     put32(&at, s->save_gen);
+    features_write(&at, &s->room.features);
     uint64_t h = coop_siphash24(s->offer_k0, s->offer_k1, m, (size_t)(at - m));
     o->token = (uint32_t)(h ^ h >> 32) | 1;
     int ok = s->accepted && s->have_pin && s->pin_kid == s->ch.kid && !memcmp(s->acc_mode, s->room.mode, COOP_CAT_N) &&
-             s->acc_save_gen == s->save_gen && !o->unidentified;
+             features_equal(&s->acc_features, &s->room.features) && s->acc_save_gen == s->save_gen && !o->unidentified;
     for (int i = 0; i < nw && ok; i++) {
         int a = acc_index(s, who[i]->kid);
         ok = a >= 0 && !strcmp(s->acc_name[a], who[i]->raw);
@@ -1256,6 +1377,7 @@ int coop_sync_accept(CoopSync *s, uint32_t token) {
         s->acc_id[a] = (uint8_t)id;
     }
     memcpy(s->acc_mode, s->room.mode, COOP_CAT_N);
+    s->acc_features = s->room.features;
     s->pin_kid = s->ch.kid, s->have_pin = 1;
     s->acc_save_gen = s->save_gen;
     s->accepted = 1;

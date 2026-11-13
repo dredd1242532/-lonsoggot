@@ -69,6 +69,7 @@ Row rows[] = {
 @@ROWS@@
 };
 constexpr int kRows = sizeof rows / sizeof rows[0];
+constexpr int coop_feature_count = 0;   // (this fixture isolates room actions; the registry rows have their own compiled test)
 const Row* pending = nullptr;
 int tab_selected[TAB_RULES + 1] = {};
 static int saves = 0;
@@ -295,6 +296,7 @@ static void set_env(const char *name, const char *value) {
 }
 void hos_coop_menu_view(MkwVkCoopView *out);
 int hos_coop_menu_command(int cmd, const char *text, uint32_t number);
+const CoopFeatureRule *coop_feature_at(int index) { (void)index; return NULL; }   /* no registry rows in this fixture */
 static int64_t clock_ms;
 int64_t hos_now_ns(void) { return clock_ms * 1000000; }
 void hos_log(const char *fmt, ...) { (void)fmt; }
@@ -542,13 +544,15 @@ def main():
     version = int(re.search(r"#define MKWVK_API_VERSION (\d+)", api).group(1))
     host_struct = between(api, "typedef struct MkwVkHost {", "} MkwVkHost;")
     members = [l.strip() for l in host_struct.splitlines() if l.strip().endswith(");") and "(*" in l]
-    if members[-3:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
-                        "int (*coop_command)(int cmd, const char *text, uint32_t number);"]:
-        raise SystemExit("FAIL: vk_api.h: coop_view and coop_command are not MkwVkHost's last members, after take_text "
+    if members[-4:] != ["int (*take_text)(int focus, uint32_t *out, int max);", "void (*coop_view)(MkwVkCoopView *out);",
+                        "int (*coop_command)(int cmd, const char *text, uint32_t number);",
+                        "int (*coop_feature)(int index, MkwVkCoopFeature *out);"]:
+        raise SystemExit("FAIL: vk_api.h: the Co-op calls are not after take_text in MkwVkHost's appended order "
                          "(host/rx_backend.c fills it by position)")
-    if version < 23:
+    if version < 24:
         raise SystemExit("FAIL: vk_api.h: MkwVkHost grew without an MKWVK_API_VERSION bump")
-    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command,\s*\};", "rx_backend.c: vk_host does not end with the Co-op tab's two")
+    need(backend, r"host_take_text, hos_coop_menu_view, hos_coop_menu_command, hos_coop_menu_feature,\s*\};",
+         "rx_backend.c: vk_host does not end with the Co-op tab's calls")
     need(menu, r"TAB_DEBUG = 4,[^\n]*\n\s*TAB_COOP = 5,[^\n]*\n\s*TAB_COUNT = 6,", "vk_menu.cpp: the Co-op tab is not the strip's last")
     need(menu, r'tab_titles\[TAB_COUNT\] = \{"Graphics", "Audio", "Gameplay", "Controls", "Debug", "Co-op"\}', "vk_menu.cpp: no Co-op title")
     slots = re.search(r"int scrolled_to\[TAB_RULES \+ 1\] = \{([^}]*)\}", menu).group(1)
@@ -564,7 +568,7 @@ def main():
          "coop_option_line: a Room rules row's value is not taken from its key's line")
     # (the control bridge, docs/control.md, finds and names a setting by its key in the options file: a Room rules row's too)
     if 'snprintf(out->key, sizeof out->key, "%s", row_key(r, ini_key(r)));' not in block(menu, "void bridge_fill(") or \
-            "!strcmp(row_key(rows[i], ini_key(rows[i])), key)" not in block(menu, "int menu_setting_set("):
+            "!strcmp(row_key(menu_row(i), ini_key(menu_row(i))), key)" not in block(menu, "int menu_setting_set("):
         raise SystemExit("FAIL: the control bridge does not name and find a Room rules row by its key (coop_keys, ...)")
     need(block(menu, "void bridge_fill("), r"static_assert\(sizeof tabs / sizeof tabs\[0\] == TAB_RULES \+ 1",
          "bridge_fill: the control bridge has no tab name for the Co-op tab and the Room rules page")
@@ -575,7 +579,7 @@ def main():
                r'\{"Join a room", &coop_join_field, coop_join_apply\}\};', "vk_menu.cpp: the Co-op tab's fields are not text fields")
     tick = block(menu, "void menu_tick() {")
     need(tick, r"if \(open_now\.load\(\)\) coop_refresh\(&changed\);", "menu_tick: the room is not read while the menu is open")
-    need(tick, r'!strcmp\(key, "ROW"\) && next\[n\] == \':\'.*?if \(want == rows\[i\]\.name\) tab_selected\[cur_tab\] = k',
+    need(tick, r'!strcmp\(key, "ROW"\) && next\[n\] == \':\'.*?if \(want == menu_row\(i\)\.name\) tab_selected\[cur_tab\] = k',
          "menu_tick: RX_VK_MENU_SCRIPT has no ROW:<name> (a scripted session must choose Accept by name, not by counting rows)")
     if tick.index("else if (press[7] && coop_kind(r) >= 0) coop_press(r)") > tick.index("else if (press[7] && !r.value && can_bind())"):
         raise SystemExit("FAIL: menu_tick: the Co-op tab's rows would open the Controls page")

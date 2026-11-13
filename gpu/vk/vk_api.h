@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 23
+#define MKWVK_API_VERSION 24
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -155,6 +155,15 @@ typedef struct MkwVkCoopView {
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
        HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS };
 
+/* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
+   registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most
+   63 bytes of name and 255 bytes of help. key is the exact options-file key, never the display label. */
+enum { HOS_COOP_FEATURES = 64 };
+typedef struct MkwVkCoopFeature {
+    int32_t id, lo, hi, def;
+    const char *key, *name, *help;
+} MkwVkCoopFeature;
+
 /* what the executable gives the back end */
 typedef struct MkwVkHost {
     uint32_t version;   /* MKWVK_API_VERSION */
@@ -260,6 +269,8 @@ typedef struct MkwVkHost {
        host:port, an offer that is not the current one, co-op that could not start) */
     void (*coop_view)(MkwVkCoopView *out);
     int (*coop_command)(int cmd, const char *text, uint32_t number);
+    /* (version 24) one registered rule, including rules without a menu label; 0 past the end. No session is started. */
+    int (*coop_feature)(int index, MkwVkCoopFeature *out);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

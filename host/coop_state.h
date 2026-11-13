@@ -74,11 +74,37 @@ enum {
 };
 enum { COOP_MODE_OWN = 0, COOP_MODE_SHARED = 1, COOP_MODE_POOL = 2 };
 
+// Numbered feature rules are separate from flag categories. Keep IDs stable: an older implementation of this
+// wire format preserves rules it does not know, including their signed bytes. Values fit a signed 16-bit integer.
+enum { COOP_FEATURE_MAX = 64, COOP_FEATURE_BYTES = 1 + 3 * COOP_FEATURE_MAX };
+typedef struct {
+    int id;
+    const char *key;     // longshot_options.ini
+    int lo, hi, def;
+    // Optional presentation metadata, owned by this static entry for the process lifetime. An absent/empty name keeps
+    // the rule off the menu; old five-field entries remain valid. The menu renders at most 63/255 bytes of name/help.
+    const char *name;
+    const char *help;
+} CoopFeatureRule;
+typedef struct {
+    uint8_t count;
+    uint8_t bytes[3 * COOP_FEATURE_MAX];   // ascending unique u8 ID, little-endian i16 value; ID 0 is reserved
+} CoopFeatures;
+
 typedef struct {
     uint32_t epoch;      // 0: no rules
     uint8_t maker;       // the member whose rules they are (this game's view: who sent them)
     uint8_t mode[COOP_CAT_N];
+    CoopFeatures features;
 } CoopRules;
+
+// The one registry (coop_state.c), by ID or zero-based row; NULL for an unknown ID or past its end.
+const CoopFeatureRule *coop_feature_definition(int id);
+const CoopFeatureRule *coop_feature_at(int index);
+// The explicit value, otherwise the registered default; 0 for an absent unknown rule.
+int coop_feature_rule(const CoopRules *r, int id);
+// Sets one value, preserving unknown rules. 0 for an invalid ID/value, malformed list, or a full list; unchanged.
+int coop_feature_set(CoopRules *r, int id, int value);
 
 const char *coop_cat_name(int cat);    // "progress", ... (the settings key without "coop_")
 const char *coop_mode_name(int mode);  // "own", "shared", "pool"
@@ -95,7 +121,7 @@ void coop_rules_text(const CoopRules *r, char *out, size_t cap);
 
 // Register kinds on the wire (2 to 4 were protocol 2's unsigned pool registers).
 enum { COOP_R_FLAG = 1, COOP_R_POOL = 5 };
-enum { COOP_SYNC_SECTIONS = 64, COOP_K_DIGEST_VER = 4 };   // 4: signed sections, identities that name the session before
+enum { COOP_SYNC_SECTIONS = 64, COOP_K_DIGEST_VER = 5 };   // 5: signed, numbered feature rules; 4: signed sections
 
 typedef struct CoopSync CoopSync;
 // self_id: random for this start of the game (contributor ids derive from it). schema: games merge only with the same

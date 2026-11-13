@@ -94,6 +94,9 @@ bool can_bind() { return host->binding != nullptr; }
 struct { int len; const char* text; } coop_name_field{0, ""}, coop_relay_field{0, ""};
 bool coop_relay_whole = true;
 const char* row_key(const Row&, const char* named) { return named; }
+// (no feature entries in this fixture; test_menu_feature_rules.py exercises these real helpers with a registry)
+bool coop_feature_saved_key(const char*) { return false; }
+void coop_feature_save(FILE*) {}
 /* SAVE */
 void env_part() {
 /* ENV */

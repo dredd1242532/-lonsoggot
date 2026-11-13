@@ -600,6 +600,38 @@ The menu and control bridge use these named `coop_*` settings; the runtime reads
 There is no separate numeric host-option interface for room rules, so adding unrelated menu options does not renumber
 them or require migrating a player's saved settings.
 
+Feature rules use a separate, stable number registry in `host/coop_state.c`: each entry names its options-file key,
+range and default. They are not flag categories or numeric menu-option IDs. The maker signs their values with the
+category modes, and changing any value (including one this build does not understand) requires accepting the room
+again. The registry starts empty; features add their definitions there.
+
+An entry may append `name` and `help`, borrowed pointers to immutable strings owned by that static registry entry.
+They are presentation metadata, not part of the signed bytes. A missing or empty name keeps the rule off the menu;
+old five-field entries remain valid and have no row. Help may be NULL. Display limits are 63 bytes for the label and
+255 for the help (printable ASCII, as the menu uses). Add both strings in the same entry when its feature is ready to
+show; no feature-specific menu code is needed. The registry alone permits omitted trailing fields under strict
+compiler warnings, so an older lane's five-field initializer remains source-compatible.
+
+The Room rules page enumerates the compiled registry through the host interface. Labelled entries become ordinary
+rows after the category modes, with the registry's bounds and default; 0..1 is shown as Off/On, other ranges as
+numbers. They use the normal keyboard, controller, mouse, scrolling and named control-bridge paths. The value is
+saved under the registry key, not the display label, and `read_rules` uses it for a room this game makes. No row is
+invented for a planned feature absent from the compiled registry.
+
+A visible registered key is owned and written once by the menu. Existing lines for unlabelled rules and keys this
+build does not recognize retain their contents; they are not rewritten with defaults. The same holds when an old
+options file is loaded/migrated at startup and next saved. `tests/test_menu_feature_rules.py` compiles the real
+registry, host metadata callback and menu persistence against empty and synthetic registries, including an unchanged
+five-field entry, a newly appended labelled entry and all three persistence cases.
+
+Progress-message format 5 appends a count and up to 64 `(u8 number, little-endian i16 value)` entries to the charter,
+before its signature. Numbers are nonzero, unique and increasing; values range from -32768 to 32767, with each
+known rule's narrower range checked too. Unknown entries are kept byte for byte, verified and passed on with the
+original signature, not discarded or replaced by defaults. Thus a format-5 build that predates a particular feature
+still carries its rules. A maker using such a build also preserves unknown entries when signing a later charter.
+Pre-format-5 builds do not exchange progress with this format; they must update. An absent known rule reads as its
+registered default. Invalid or overflowing settings are refused, never truncated into a different signed rule set.
+
 ### Progress sync's switches and log lines
 
 | Switch | What it does |

@@ -547,6 +547,13 @@ static void read_rules(CoopRules *r, int say) {
             hos_log("coop: sync: %s (or %s in the options file) is not %s; the default, %s, is used", envs[k], keys[k],
                     coop_cat_is_pool(k) ? "pool or own" : "shared or own", coop_mode_name(r->mode[k]));
     }
+    for (int i = 0; ; i++) {
+        const CoopFeatureRule *d = coop_feature_at(i);
+        if (!d) break;
+        const int value = hos_ini_option(d->key, d->def);
+        if (!coop_feature_set(r, d->id, value) && say)
+            hos_log("coop: sync: %s must be %d..%d; the default, %d, is used", d->key, d->lo, d->hi, d->def);
+    }
     CoopRules as_set = *r;
     if (coop_rules_normalize(r) && say) {
         char a[200], b[200];
