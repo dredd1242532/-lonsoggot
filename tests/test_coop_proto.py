@@ -56,15 +56,16 @@ def check_wire_domains():
         "host/coop_proto.c": {"room": "longshot-coop/2 room", "messages": "longshot-coop/2 messages"},
         "host/coop_state.c": {
             "SIG_MEMBER": "longshot-coop/4 member", "SIG_SECTION": "longshot-coop/4 section",
-            "SIG_RULES": "longshot-coop/3 rules", "SIG_POOL": "longshot-coop/3 pool",
+            "SIG_RULES": "longshot-coop/5 rules", "SIG_POOL": "longshot-coop/3 pool",
             "offer": "longshot-coop/3 offer", "sign": "longshot-coop/3 sign",
         },
         "tests/coop_sync_test.c": {
             "ROLE_SIGN": "longshot-coop/3 sign", "ROLE_POOL": "longshot-coop/3 pool",
-            "ROLE_MEMBER": "longshot-coop/4 member", "ROLE_RULES": "longshot-coop/3 rules",
+            "ROLE_MEMBER": "longshot-coop/4 member", "ROLE_RULES": "longshot-coop/5 rules",
         },
     }
     # wire-protocol constants: a later rename of the project must not change these
+    # The numbered charter deliberately advances its signing role to format5; the other roles stay unchanged.
     for path, constants in domains.items():
         source = (ROOT / path).read_text(encoding="utf-8")
         for name, value in constants.items():
