@@ -6,6 +6,9 @@
 #include <string.h>
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); exit(1); } } while (0)
 #include "input_constants.inc"
+#include "../host/hold_toggle.h"
+static int toggle_flags, toggle_reset;
+static int InterlockedExchange(int *p, int v) { int old = *p; *p = v; return old; }
 /* API spies must not collide with Windows SDK/import-library names. */
 #define GetCurrentProcessId fixture_GetCurrentProcessId
 #define InterlockedCompareExchange64 fixture_InterlockedCompareExchange64
@@ -17,7 +20,8 @@ typedef struct { uint64_t x[32]; } Ctx;
 enum { GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000,
        VK_MENU = 0x12, VK_RETURN = 0x0d, VK_LEFT = 0x25, VK_UP, VK_RIGHT, VK_DOWN,
        VK_LBUTTON = 1, VK_RBUTTON = 2, VK_MBUTTON = 4, VK_XBUTTON1 = 5, VK_XBUTTON2 = 6 };
-static int front, menu_background, bootstrap_polls, pad_merges, key_queries, mouse_queries, focus_queries, commands;
+static int front, menu_background, menu_open, bridge_active, bootstrap_polls, pad_merges, key_queries, mouse_queries, focus_queries, commands;
+static uint64_t bridge_buttons;
 typedef int64_t LONG64;
 volatile LONG64 hos_present_count = 1000;
 static int frame_reads;
@@ -46,7 +50,7 @@ static int origin_logs, script_logs;
 static long long logged_origin;
 volatile int64_t hos_hid_last_read;
 volatile int hos_nvn_sync_log_on;
-int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)buttons; (void)stick; return 0; }   /* (host/control.c: off) */
+int hos_control_input(uint64_t *buttons, int32_t stick[4]) { (void)stick; *buttons |= bridge_buttons; return bridge_active; }
 static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + address; }
 #define GP(a) at(a)
 #define G32(a) (*(uint32_t *)at(a))
@@ -54,7 +58,7 @@ static void *at(uint64_t address) { CHECK(address <= 512 - 8); return memory + a
 #define ARG(n) (c->x[n])
 #define RET(value) (c->x[0] = (uint64_t)(value))
 
-int rx_option(int id, int otherwise) { return id == 4 ? menu_background : id == 1 ? 0 : otherwise; }
+int rx_option(int id, int otherwise) { return id == HOS_OPT_HOLD_TOGGLE ? toggle_flags : id == 4 ? menu_background : id == 1 ? menu_open : otherwise; }
 int64_t hos_now_ns(void) { return now_ns; }
 void hos_prompts_live(void) {}   /* (host/prompts.c: the button prompts follow the controls) */
 volatile int hos_prompts_row = -1;   /* (host/prompts.c: "!prompts" in the live input) */
@@ -131,6 +135,40 @@ static void packet(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx) {
     CHECK(commands == 0);
 }
 
+/* The real Npad writer, with the control socket boundary providing exclusive logical presses. */
+static void hold_toggle_case(void) {
+    const uint64_t r = 1ULL << B_R, plus = 1ULL << B_PLUS;
+    front = bridge_active = 1;
+    bridge_buttons = r; packet(r, 0, 0, 0);   /* Off: ordinary hold/release */
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    toggle_flags = 1 << B_R;
+    bridge_buttons = r; packet(r, 0, 0, 0);
+    packet(r, 0, 0, 0);   /* repeat */
+    bridge_buttons = 0; packet(r, 0, 0, 0);
+    bridge_buttons = r; packet(0, 0, 0, 0);
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    bridge_buttons = r; packet(r, 0, 0, 0);
+    menu_open = 1; packet(0, 0, 0, 0);
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    bridge_buttons = r; packet(0, 0, 0, 0);   /* never latches within Insert */
+    menu_open = 0; packet(0, 0, 0, 0);   /* must release after it closes */
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    bridge_buttons = r; packet(r, 0, 0, 0);
+    bridge_buttons = 0; packet(r, 0, 0, 0);
+    toggle_reset = 1; packet(0, 0, 0, 0);   /* display event during a polling gap, or rebinding */
+    packet(0, 0, 0, 0);
+    bridge_buttons = r; packet(r, 0, 0, 0);
+    front = 0; packet(0, 0, 0, 0);
+    front = 1; packet(0, 0, 0, 0);
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    bridge_buttons = r; packet(r, 0, 0, 0);
+    bridge_buttons = plus; packet(plus, 0, 0, 0);   /* pause opens and drops the latch */
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+    toggle_flags |= 1 << B_PLUS;
+    bridge_buttons = plus; packet(plus, 0, 0, 0);   /* pause itself remains usable */
+    bridge_buttons = 0; packet(0, 0, 0, 0);
+}
+
 static void append_live(const char *text) {
     const char *path = getenv("HOS_INPUT_LIVE"); CHECK(path);
     FILE *file = fopen(path, "ab"); CHECK(file);
@@ -203,6 +241,12 @@ int main(int argc, char **argv) {
     CHECK(!pads_in_background("0", 1));    /* HOS_INPUT_BACKGROUND=0 wins over the menu */
     memory = calloc(512, 1); CHECK(memory);
     const char *name = argv[1];
+    if (!strcmp(name, "hold-toggle")) {
+        hold_toggle_case();
+        puts("PASS: actual Npad hold-to-toggle, menu, focus, binding reset and pause");
+        free(memory);
+        return 0;
+    }
     if (!strcmp(name, "frame-hold") || !strcmp(name, "live-frame") || !strcmp(name, "reuse-frame") ||
         !strcmp(name, "wall") || !strcmp(name, "zero") || !strcmp(name, "empty")) {
         frame_clock_case(name);
