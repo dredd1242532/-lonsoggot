@@ -39,7 +39,7 @@ def check_source():
                                # (save() keeps the lines it does not write: each auto_ key must be one it writes, or the old
                                # line, kept after the new one, wins at the next start)
                                '|| key == "memory_budget" || key == "auto_for" ||',
-                               'key == "auto_tuned" || key == "auto_output" || key == "auto_steps";',
+                               'key == "auto_tuned" || key == "auto_output" || key == "auto_steps" ||',
                                # (the measured tuning in play: from the replay's windows, finished once for this PC, its steps
                                # kept across restarts)
                                "::auto_settings::tune(tuning,", 'fprintf(f, "auto_tuned=%016llx\\n"', 'fprintf(f, "auto_steps=%d,%d\\n"',
