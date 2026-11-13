@@ -22,7 +22,9 @@ Checked:
   report in the same second gets a folder of its own; a folder that cannot be made is reported with the system's reason;
   a report.txt a full disk cuts off at its close is not shown as saved (where /dev/full is there);
 - the wiring: the Gameplay tab's row and its help, the press, the picture asked of shot_ask (its own image, copied from the
-  game's frame without the menu), the host's map line.
+  game's frame without the menu), the host's map line, Windows' reason for a folder that cannot be made asked for as wide
+  text and turned into UTF-8 (FormatMessageA's text follows the process's code page, which only the game's manifest makes
+  UTF-8).
 
 python -I -B tests/test_bug_report.py [--cxx g++]
 """
@@ -157,11 +159,17 @@ def check(ok, why):
 
 
 def run(exe, mode, game, current, home, user, windows):
-    out = subprocess.run([str(exe), mode, game, current, home, user, "1" if windows else "0"], capture_output=True,
-                         text=True, encoding="utf-8", timeout=60)
+    out = subprocess.run([str(exe), mode, game, current, home, user, "1" if windows else "0"], capture_output=True, timeout=60)
+    # (what the driver says is what the menu would log and show: UTF-8, the system's own words in it too. Read as bytes, so
+    # that a line in another encoding is named here instead of failing in subprocess's reader thread)
+    try:
+        said, errors = out.stdout.decode("utf-8"), out.stderr.decode("utf-8", errors="replace")
+    except UnicodeDecodeError as e:
+        bad = out.stdout[:e.start].count(b"\n")
+        raise SystemExit("bug report: the driver (%s) said a line that is not UTF-8: %r" % (mode, out.stdout.splitlines()[bad]))
     if out.returncode:
-        raise SystemExit("bug report driver (%s) failed:\n%s%s" % (mode, out.stdout, out.stderr))
-    lines = out.stdout.splitlines()
+        raise SystemExit("bug report driver (%s) failed:\n%s%s" % (mode, said, errors))
+    lines = said.splitlines()
     return [ln[7:] for ln in lines if ln.startswith("FOLDER ")], lines
 
 
@@ -214,6 +222,13 @@ def wiring():
     report = (ROOT / "gpu" / "vk" / "vk_bug_report.cpp").read_text(encoding="utf-8")
     listed = re.search(r"prefixes\[\] = \{([^}]*)\}", report[report.index("std::string switches("):]).group(1)
     check(listed == allowed, "the report lists switches by %s, longshot_env.txt takes %s" % (listed, allowed))
+    # (Windows' reason for a folder that cannot be made is in the system's language: asked for wide and turned into UTF-8,
+    # never the process's code page's bytes (FormatMessageA's). The game's manifest makes that code page UTF-8; step 7's
+    # driver is built without it, and sees the difference only on a Windows whose message is not ASCII)
+    made = report[report.index("bool make_dir("):]
+    made = re.sub(r"//[^\n]*", "", made[:made.index("\n}\n")])
+    check("FormatMessageW(" in made and "WideCharToMultiByte(CP_UTF8," in made and "FormatMessageA" not in made,
+          "make_dir's reason on Windows is not Windows' wide text turned into UTF-8")
     form = (ROOT / ".forgejo" / "ISSUE_TEMPLATE" / "1-game-problem.yml").read_text(encoding="utf-8")
     check(not (ROOT / ".github" / "ISSUE_TEMPLATE").exists(), "the GitHub issue forms are back beside Forgejo's")
     for label in ("Longshot version", "Where in the game", "Graphics card and driver version", "CPU, RAM and operating system",
@@ -395,6 +410,7 @@ def main():
         check(hw.section(report, "Where in the game").startswith("LostWoods_Child (child)"), "the map after a NUL is lost")
 
         # 7. a report's folder that cannot be made (bug-reports is a file here): the system's reason, GetLastError's on Windows
+        # (in the system's language there: run() has read it as UTF-8)
         blocked = tmp / "blocked" / "Longshot"
         blocked.mkdir(parents=True)
         (blocked / "bug-reports").write_text("a file where the folder would go", encoding="utf-8")
