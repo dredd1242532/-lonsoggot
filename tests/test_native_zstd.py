@@ -55,6 +55,8 @@ BROKEN_F = ("ZSTD_decompress_usingDDict(z, GP(dst), room, GP(src), n, d->dd)",  
 F_LOG = 'hos_log("zstd: the game\'s whole-buffer decode on the host\'s libzstd %s (HOS_NATIVE_ZSTD_FRAMES)", ZSTD_versionString());'
 BROKEN_ONCE = ("if (zs_publish(&mode, m) && m) " + F_LOG + "\n",
                "if (m) " + F_LOG + "\n        zs_publish(&mode, m);\n")   # (the old way: logged, then published)
+BROKEN_STORE = ("    int unset = -1;\n    return __atomic_compare_exchange_n(mode, &unset, m, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED);\n",
+                "    __atomic_store_n(mode, m, __ATOMIC_RELAXED);\n    return 1;\n")   # (every first caller publishes and logs)
 BROKEN_NOTE = ("    zs_unlock();\n    if (first) hos_log(", "    if (first) hos_log(")   # (logged under zs_lock...)
 BROKEN_NOTE2 = ('hos_log("zstd: a decode runs lifted: %s", why);\n}', 'hos_log("zstd: a decode runs lifted: %s", why);\n'
                 "    zs_unlock();\n}")   # (...and released after)
@@ -157,8 +159,11 @@ int main(int argc, char **argv) {
 }
 ''' % (SIZE, S0)
 
-# first calls from two threads at once: the second runs start to end while the first is in its first log line (a stand-in
-# hos_log holds it there), so a switch published after its log line, or a log line written under zs_lock, shows every time
+# first calls from two threads at once. Held in the log: the second runs start to end while the first is in its first log
+# line (a stand-in hos_log holds it there), so a switch published after its log line, or a log line written under zs_lock,
+# shows every time. Cold ("cold" argument): a stand-in env_on holds each caller that reads a switch unset until two have, so
+# both go on to publish it and only one may log. (The fallback table's lock itself is not shown by either: no probe holds a
+# thread between its read and its write.)
 CONC = r'''
 #include <pthread.h>
 #include <sched.h>
@@ -187,7 +192,33 @@ void hos_log(const char *fmt, ...) {
     while (!__atomic_load_n(&b_done, __ATOMIC_SEQ_CST) && time(NULL) - t0 < 3) sched_yield();
     stuck = !__atomic_load_n(&b_done, __ATOMIC_SEQ_CST);
 }
+static int meet, met;
+static int cold_env_on(const char *name) {
+    if (__atomic_load_n(&meet, __ATOMIC_SEQ_CST)) {
+        __atomic_fetch_add(&met, 1, __ATOMIC_SEQ_CST);
+        const time_t t0 = time(NULL);
+        while (__atomic_load_n(&met, __ATOMIC_SEQ_CST) < 2 && time(NULL) - t0 < 10) sched_yield();
+    }
+    return env_on(name);
+}
+#define env_on cold_env_on
 #include "hos_zstd.c"
+#undef env_on
+static void *call(void *p) {
+    fn((Ctx *)p);
+    return NULL;
+}
+static void cold(const char *name, int (*f)(Ctx *), Ctx a) {
+    Ctx b = a;
+    pthread_t t1, t2;
+    fn = f, n_on = n_note = met = 0, meet = 1;
+    pthread_create(&t1, NULL, call, &a);
+    pthread_create(&t2, NULL, call, &b);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+    meet = 0;
+    printf("%s %d %d %d 0\n", name, met, n_on, n_note);
+}
 static void phase(const char *name, int (*f)(Ctx *), Ctx a) {
     fn = f, cb = a, n_on = n_note = b_done = stuck = 0, armed = 1;
     f(&a);
@@ -195,12 +226,17 @@ static void phase(const char *name, int (*f)(Ctx *), Ctx a) {
     if (started) pthread_join(tb, NULL);
     printf("%s %d %d %d %d\n", name, started, n_on, n_note, stuck);
 }
-int main(void) {
+int main(int argc, char **argv) {
     zs_mem = calloc(1, 0x10000);
     Ctx s = {{0}}, raw = {{0}}, fmt = {{0}};
     s.x[0] = ZS_BASE + 0x100;                                     /* a stream the host has no entry for */
     raw.x[0] = ZS_BASE, raw.x[5] = ZS_BASE + 0x400, raw.x[6] = 16;   /* a raw dictionary */
     fmt.x[0] = ZS_BASE + 0x8000, G32(ZS_BASE + 0x8000 + 0x7110) = 1;  /* another frame format */
+    if (argc > 1 && argv[1][0]) {   /* cold: two first callers that both read the switch unset */
+        cold("cold-stream", hos_zstd_stream, s);
+        cold("cold-raw", hos_zstd_frames, raw);
+        return 0;
+    }
     phase("stream", hos_zstd_stream, s);
     phase("raw", hos_zstd_frames, raw);
     phase("format", hos_zstd_frames, fmt);
@@ -210,12 +246,16 @@ int main(void) {
 
 
 def conc_checks(exe, tmp, quick=False):
-    r = subprocess.run([str(exe)], env=dict(os.environ, HOS_NATIVE_ZSTD="1", HOS_NATIVE_ZSTD_FRAMES="1"),
-                       capture_output=True, text=True, timeout=60)
-    got = {ln.split()[0]: tuple(map(int, ln.split()[1:])) for ln in r.stdout.splitlines() if ln.strip()}
-    want = {"stream": (1, 1, 0, 0), "raw": (1, 1, 1, 0), "format": (1, 0, 1, 0)}
-    return ["first calls at once, %s: (second call made, switch lines, fallback lines, second call held) %s, not %s"
-            % (k, got.get(k), v) for k, v in want.items() if got.get(k) != v] + (["exit %d" % r.returncode] if r.returncode else [])
+    got, bad = {}, []
+    for arg in ([], ["cold"]):
+        r = subprocess.run([str(exe)] + arg, env=dict(os.environ, HOS_NATIVE_ZSTD="1", HOS_NATIVE_ZSTD_FRAMES="1"),
+                           capture_output=True, text=True, timeout=60)
+        got.update((ln.split()[0], tuple(map(int, ln.split()[1:]))) for ln in r.stdout.splitlines() if ln.strip())
+        bad += ["exit %d %s" % (r.returncode, arg)] if r.returncode else []
+    want = {"stream": (1, 1, 0, 0), "raw": (1, 1, 1, 0), "format": (1, 0, 1, 0),   # (held in the log)
+            "cold-stream": (2, 1, 0, 0), "cold-raw": (2, 1, 1, 0)}                  # (both read the switch unset)
+    return ["first calls at once, %s: (second call made or switch read unset by, switch lines, fallback lines, second call "
+            "held) %s, not %s" % (k, got.get(k), v) for k, v in want.items() if got.get(k) != v] + bad
 
 
 # ---------------------------------------------------------------- content (made here)
@@ -619,10 +659,12 @@ def main():
         failed = conc_checks(build(a.cxx, tmp, conc=True), tmp)
         if failed:
             raise SystemExit("FAIL:\n  " + "\n  ".join(failed))
-        print("PASS: first calls from two threads at once log the switch and each fallback once, outside zs_lock")
+        print("PASS: first calls from two threads at once (one held in its log line, or both reading the switch unset) log "
+              "the switch and each fallback once, outside zs_lock")
         for what, fault, run_checks in (("staging fill never stored", BROKEN, checks),
                                         ("whole-buffer DDict not passed", BROKEN_F, frames_checks),
                                         ("switch published after its log line", BROKEN_ONCE, conc_checks),
+                                        ("switch always stored, every first caller logs", BROKEN_STORE, conc_checks),
                                         ("fallback logged under zs_lock", [BROKEN_NOTE, BROKEN_NOTE2], conc_checks)):
             try:
                 broken = run_checks(build(a.cxx, tmp, broken=fault, conc=run_checks is conc_checks), tmp, quick=True)
