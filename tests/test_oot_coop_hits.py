@@ -366,7 +366,7 @@ def main():
                'store32(c->x[0]+352,103);store32(c->x[0]+360,104);\n'
                'goto L_82ec66f0;\nL_82ec66f0:;\nreturn;\n}\n'
                'void f_808f56f0(Ctx *__restrict A64_NOESC c) {\n'
-               'goto L_808f575c;\nL_808f575c:;\nreturn;\n}\n')
+               '(void)c;goto L_808f575c;\nL_808f575c:;\nreturn;\n}\n')
     if hasattr(patch, "patch_attacks"):
         attacks, _ = patch.patch_attacks(attacks)
     with tempfile.TemporaryDirectory(prefix="hookshot-hits-") as temp:
