@@ -9,10 +9,13 @@
   <br>
 </h1>
 
-<h4 align="center">The Legend of Zelda: Ocarina of Time (Nintendo Switch 2) running natively on Windows & Linux, without emulation.
+<h4 align="center">A supported console game running natively on Windows & Linux, without emulation.
 </h4>
 
 <p align="center">
+  <a href="https://longshot.magicbean.dev/"><b>Website</b></a> |
+  <a href="https://longshot.magicbean.dev/download"><b>Download</b></a> |
+  <a href="https://discord.gg/KX99srmQTe"><b>Discord</b></a> |
   <a href="#project-status">Status</a> |
   <a href="#install-and-play">Install and play</a> |
   <a href="#build-from-source">Build from source</a> |
@@ -21,7 +24,9 @@
   <a href="#license">License + Credits</a>
 </p>
 
-Longshot is a static recompilation of Ocarina of Time for the Switch 2. The game's code is translated to C and compiled into a Windows or Linux program, rebuilding the graphics on Vulkan, with the console's system software reimplemented. All of this happens **on your PC, from your own copy of the game**.
+<p align="center">This website is our Git hosting, similar to GitHub.</p>
+
+Longshot is a static recompilation of a supported console game. The game's code is translated to C and compiled into a Windows or Linux program, rebuilding the graphics on Vulkan, with the console's system software reimplemented. All of this happens **on your PC, from your own copy of the game**.
 
 Longshot is a continuation of [Hookshot](https://github.com/NotRexed/Hookshot). The top maintainers have moved to this project.
 
@@ -53,228 +58,285 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 | NVIDIA cards | ✅ Works. The most tested |
 | AMD cards | ⚠️ Many tested: reports from the RX 6600, RX 6800 XT, RX 7800 XT, RX 7900 XTX and RX 9070 XT. On Windows, the RX 6000 cards (Navi 21 and 22) draw task and mesh shaders through the compute fallback by default, as the driver lost the GPU with them ([#1747](https://github.com/NotRexed/Hookshot/pull/1747), [#1992](https://github.com/NotRexed/Hookshot/pull/1992), [#2215](https://github.com/NotRexed/Hookshot/pull/2215)). Driver crashes and device lost are still reported ([#996](https://github.com/NotRexed/Hookshot/issues/996)) |
 | Intel cards | ❓ Few reports, many of them black screens or crashes ([#999](https://github.com/NotRexed/Hookshot/issues/999)) |
-| Cards without mesh shaders (such as AMD RX 5000 and older) | ❌ Not supported: parts of the picture are missing. Since v2.0.6 a fallback runs the mesh programs as compute shaders on cards with buffer device addresses ([#640](https://github.com/NotRexed/Hookshot/issues/640)); it leaves out the mesh draws that take their count from a buffer |
+| Cards without mesh shaders (such as NVIDIA GTX 10 and AMD RX 5000) | ⚠️ Run through the compute fallback (since v2.0.6), which runs the mesh programs as compute shaders on cards with buffer device addresses: slower, and it leaves out the mesh draws that take their count from a buffer ([#640](https://github.com/NotRexed/Hookshot/issues/640)) |
 | Linux | ✅ Works with the AppImage. Tested on several distributions (CachyOS, Fedora, Bazzite, SteamOS) and cards, with open problems on some AMD cards ([#1000](https://github.com/NotRexed/Hookshot/issues/1000)) |
 
 ## Install and play
 
-The game does not come ready-made: it is built on your PC from your copy. The **[Longshot Launcher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)** does it
-for you: it installs this version's Longshot Builder (checked against the release's signed checksums), builds the game, starts
-it, and keeps it and itself up to date. Longshot's first version will be **v3.0.0**; the launcher's first will be
-**v1.0.0** (its numbers are its own).
+### [🪟 &nbsp;Download for Windows](https://longshot.magicbean.dev/download/launcher/windows)
 
-> [!WARNING]
-> Windows may detect this as a Trojan, it is not. We are working on resolving this. Feel free to run it through any antivirus software.
+### [🐧 &nbsp;Download for Linux (AppImage)](https://longshot.magicbean.dev/download/launcher/linux)
+
+Windows without installing: [portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable) · Not sure?
+[longshot.magicbean.dev/download](https://longshot.magicbean.dev/download) picks for your computer. These links give the
+newest launcher (stable, or until there is one, the release candidate); for each channel's own, see
+[release channels](#release-channels).
+
+**Download the launcher, not the builder.** The files on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases)
+(`LongshotBuilder-…-windows-x64.zip`, `Longshot-…-x86_64.AppImage`, `tools.lock`) are what the launcher installs for
+you. Windows may flag the launcher as a Trojan: it isn't, it's just not code-signed yet. See
+[antivirus warnings](https://longshot.magicbean.dev/help/antivirus/).
+
+Longshot doesn't come ready to play: it is built on your PC, from your own copy of the game. The
+**[Longshot Launcher](https://longshot.magicbean.dev/download)** does all of it for you:
+
+1. Check that your PC and your copy of the game match [what you need](#what-you-need).
+2. Download the launcher for [Windows](#on-windows) or [Linux](#on-linux) and start it.
+3. Point it at your game and press **Build**. It downloads this version's Longshot Builder, checks it against the
+   release's signed checksums, and builds the game: about 15 minutes on a 12-core desktop, longer on a slower PC
+   ([build times](docs/development.md#build-times)).
+4. Press **Play**. From then on the launcher keeps the game, and itself, [up to date](#updating).
+
+Longshot's first version will be **v3.0.0**; the launcher's first will be **v1.0.0** (its numbers are its own).
 
 ### What you need
 
-- **Your copy of the game at the supported version:** program `0400486024DEC000`, update v131072, build `e0f3ccfa`.
-  Other versions do not work. A `.nup` file, or the `romfs` and `exefs` folders.
-- 64-bit Windows 10 or 11, or 64-bit Linux with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora, Arch,
-  SteamOS ...) and a CPU with AVX2. The Linux AppImage needs AVX2; on Windows, and in a build from source, a CPU
-  without it gets a game built for what it has, a little slower.
-- A graphics card with Vulkan 1.3 and mesh shaders, with an up-to-date driver: NVIDIA GeForce RTX 20 series or newer,
-  AMD Radeon RX 6000 series or newer, or Intel Arc. On Linux, Mesa or NVIDIA's driver. Cards without mesh shaders are
-  not supported.
-- 8 GB of video memory (VRAM) or more is recommended. Cards with less can use the in-game menu's lower Quality presets.
-- 16 GB of RAM or more. A run uses about 10 GB.
-- About 60 GB free while building, on an SSD if you can: a hard drive makes the build much slower. You can build on one
-  anyway; the builder says so first.
-- An internet connection for the download. Nothing else to install: the builder the launcher installs brings its own
-  compiler and tools.
+<!-- website/src/content/docs/requirements.mdx copies this section: when one changes, change the other to match. -->
+
+**Your game copy:** program `0400486024DEC000` · update **v131072** · build `e0f3ccfa`.
+Use a `.nup` file, or the `romfs` and `exefs` folders. Other game versions are not supported.
+
+These are estimates from the [tested configurations](docs/tested-configurations.md), not a promise of a particular
+frame rate: the game runs on more than this, and performance depends on the resolution and settings you choose.
+
+| Component | Minimum | Recommended |
+|---|---|---|
+| **Operating system** | **64-bit Windows 10 / 11**, or **64-bit Linux** with glibc 2.35 or newer. | Same. |
+| **Processor** | A 6-core x86-64 CPU, such as an AMD Ryzen 5 2600 or Intel Core i5-8400. **AVX2 is required for the Linux AppImage**; Windows and source builds also run without it, more slowly. | AMD Ryzen 5 5600 or Intel Core i5-12400 or newer. For a steady 60 fps in demanding outdoor areas, a Ryzen 7 5700X3D or Core i5-13600K. |
+| **Graphics card** | **Vulkan 1.3.** NVIDIA GeForce GTX 1060 6 GB or GTX 1650, AMD Radeon RX 5500 XT, or Intel Arc A380. | **Vulkan 1.3 with mesh shaders.** NVIDIA GeForce RTX 3060 or RTX 4060, AMD Radeon RX 6600 XT or RX 6700 XT, or Intel Arc A750. Check the [project status](#project-status) for each maker's known issues. |
+| **Mesh shaders** | Not required: without them, Longshot draws through a slower compute fallback. | **Strongly recommended:** NVIDIA RTX 20 series and newer, AMD RX 6000 series and newer, Intel Arc. |
+| **Video memory (VRAM)** | **4 GB**, with the in-game Minimum (4GB) or Low (6GB) quality preset. | **8 GB or more.** |
+| **System memory (RAM)** | **16 GB.** A run uses about 10 GB. | **16 GB or more.** |
+| **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
+
+**Drivers:** use an up-to-date graphics driver with Vulkan 1.3. On Linux, use Mesa or NVIDIA's driver. Linux examples
+include Ubuntu 22.04, Debian 12, Fedora, Arch and SteamOS.
+
+**Download:** an internet connection is required. The launcher installs the builder, which brings its own compiler and tools;
+there is nothing else to install.
 
 ### On Windows
 
-1. Download `LongshotLauncher-<version>-windows-x64.exe` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and run it. It is one
-   program; nothing else to install.
-2. Press **Build the game** and pick the channel: **Stable** for playing.
-3. Pick your game. The launcher looks for `.nup` files in your Downloads, Desktop and Documents folders; not listed? Point
-   it at the file or at the `romfs` and `exefs` folders. It checks that it is the right version, while that version's
-   builder downloads.
-4. Choose where the game goes (`Games\Longshot` in your user folder by default), the language and the options.
-5. Press **Build**. It takes about 10 to 45 minutes, depending on your CPU and memory.
-6. Press **Play**. The launcher can also make desktop and Start menu shortcuts.
+1. [Download the launcher for Windows](https://longshot.magicbean.dev/download/launcher/windows)
+   (`LongshotLauncher-<version>-windows-x64-setup.exe`) and run it. It asks once: **Install** (for you, no administrator
+   rights, with a Start menu shortcut) or **Run portable**. To skip the question, take
+   [the portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable), unzip it and run
+   `LongshotLauncher.exe`.
+2. Press **Build the game** and choose the **Stable** channel.
+3. Pick your game. The launcher finds `.nup` files in your Downloads, Desktop and Documents folders; if yours isn't
+   listed, point it at the file, or at the `romfs` and `exefs` folders. It checks the version while the builder downloads.
+4. Choose where the game goes (`Games\Longshot` in your user folder by default), its language and the options.
+5. Press **Build**, then **Play**. The launcher can also add desktop and Start menu shortcuts.
 
-The first start prepares the game's shaders, which takes a while. Later starts are faster.
+The build prepares the game's shaders at its end, which takes a while; later starts are faster. To keep everything on an
+external SSD, run [the launcher's portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable) from
+there: its data stays in `LongshotLauncher-data` beside it.
 
-For a portable install on an external SSD, see [Portable Longshot Builder](docs/windows-portable-builder.md).
+#### Compile shaders
+
+**Compile shaders** (in the launcher's settings, or `make_game.py --compile-shaders`) chooses what that
+preparation builds:
+
+- **Most** (recommended, the default): every shader and the pipelines the game is known to use (the shipped list and
+  what your own play noted).
+- **All**: the predicted pipelines too, about 50,000 guesses at pipelines no list names. The preparation takes about 40%
+  longer (415 s against 292 s on an RTX 3090 with a 12-core CPU), and play almost never uses them.
+
+A preparation the game runs at a launch (after "Prepare shaders now" was unticked, or after an update or a new GPU driver
+changed what the shaders are translated for) follows the same choice, kept as `compile_shaders` in
+`longshot_options.ini` (0 Most, 1 All). `--compile-shaders all` or `most` on the game's command line, or
+`RX_VK_COMPILE_SHADERS=all` or `most`, sets it for one run.
 
 ### On Linux
 
-1. Download `LongshotLauncher-<version>-x86_64.AppImage` from the [launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases).
-2. Allow it to run as a program. In most file managers: right-click it, open **Properties**, and turn on
-   "Allow executing file as program" (the words differ between desktops). Or in a terminal:
-   `chmod +x LongshotLauncher-*-x86_64.AppImage`.
-3. Double-click it, and build the game as on Windows above (the game goes to `~/Games/Longshot` by default).
+1. [Download the launcher for Linux](https://longshot.magicbean.dev/download/launcher/linux)
+   (`LongshotLauncher-<version>-x86_64.AppImage`).
+2. Let it run as a program: in your file manager, open its **Properties** and turn on "Allow executing file as program"
+   (the wording differs between desktops), or run `chmod +x LongshotLauncher-*-x86_64.AppImage`.
+3. Start it and build the game as [on Windows](#on-windows). The game goes to `~/Games/Longshot` by default, and the
+   launcher can add it to your applications menu as "Longshot".
 
-The launcher can add the game to your applications menu as "Longshot". Each Longshot version's builder is also released
-alone, as `Longshot-<version>-x86_64.AppImage` on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases), for building without the
-launcher: Longshot Builder alone (about 95 MB). At its first start it downloads its build tools (the compiler, the C
-library it links against, FFmpeg, SDL2: about 170 MB) into `~/.local/share/longshot/builder/toolchains`, and later
-versions take the ones that did not change from there. The launcher downloads the same tools itself.
+Each version's builder is also released on its own, as `Longshot-<version>-x86_64.AppImage` (about 95 MB) on
+[Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases). It has no window: it is what the
+launcher builds with, and it builds and starts the game from the command line, over SSH or from a script (see
+[Linux, the AppImage from the command line](#build-from-source)). Its first `--cli` downloads its build tools (the
+compiler, the C library it links against, FFmpeg and SDL2: about 170 MB) into `~/.local/share/longshot/builder/toolchains`,
+and later versions reuse the ones that didn't change; the launcher downloads the same tools itself.
 
-When the desktop gives the launcher its own systemd service, **Play** waits up to two seconds for the game's
-separate scope before closing the window. If that hand-off fails, it cancels that attempt before starting the
-game directly, and records the fallback in `longshot_startup.log` after the game exits. A direct start still
-follows the desktop's original service lifetime; this fallback cannot bypass a desktop that stops its children.
+#### Advanced Linux setup
 
-The same AppImage also builds and starts the game without opening the window, for a machine you reach over SSH or for a
-script: see [Linux, the AppImage from the command line](#build-from-source).
+**Faster GPU memory on AMD and Intel (`/dev/udmabuf`).** Longshot imports GPU memory fastest through the kernel's
+`udmabuf` device. Without access to it, it falls back to host-pointer imports, which can be much slower on AMD (RADV),
+and warns about it on stderr and in `longshot_log.txt`. On NVIDIA's own driver you can ignore that warning: NVIDIA refuses
+these imports, and host-pointer imports are not slow there (the check runs at start, before the game knows its GPU).
 
-For fast GPU memory imports on Linux, the game user needs read/write access to `/dev/udmabuf` (the kernel's
-`udmabuf` module). Without it, Longshot falls back to host-pointer imports, which can be much slower on AMD/RADV
-(NVIDIA's driver refuses these dma-bufs, so on NVIDIA the game uses host-pointer imports, which are not slow there);
-permission errors produce a warning on stderr and in `longshot_log.txt`. With an NVIDIA card on NVIDIA's own driver
-you do not need this access and can ignore that warning: the check runs at the start, before the game knows which
-GPU it has. Otherwise, check `ls -l /dev/udmabuf` and `id`.
-An administrator can add you to the device's owning group, then you must log out and back in. Only use that group
-if access to its other devices is intended: `kvm` also grants virtualization access. For an active local desktop
-session using systemd-logind, prefer a device-specific rule in `/etc/udev/rules.d/70-longshot-udmabuf.rules`:
-`SUBSYSTEM=="misc", KERNEL=="udmabuf", TAG+="uaccess"` (before `73-seat-late.rules`). This grants access to the active
-local user, not SSH or service users. For those, an administrator can instead create a dedicated `udmabuf` group,
-add only the game user, and use `SUBSYSTEM=="misc", KERNEL=="udmabuf", GROUP="udmabuf", MODE="0660"` in that file.
-Reload with `sudo udevadm control --reload-rules` and apply with
-`sudo udevadm trigger --action=add /sys/class/misc/udmabuf`; restart the session/service after a group change.
-If the device is absent, the distribution must provide/load the module first (`sudo modprobe udmabuf`).
-Do not run the game as root or make the device world-writable.
+Check with `ls -l /dev/udmabuf` and `id`. If the device is missing, load the module first (`sudo modprobe udmabuf`).
+Then give the game's user access, in one of these ways:
+
+1. **On a desktop (systemd-logind):** a rule that grants it to the active local user. Put
+   `SUBSYSTEM=="misc", KERNEL=="udmabuf", TAG+="uaccess"` in `/etc/udev/rules.d/70-longshot-udmabuf.rules` (it must come
+   before `73-seat-late.rules`).
+2. **Over SSH or as a service:** create a dedicated `udmabuf` group, add only the game's user, and use
+   `SUBSYSTEM=="misc", KERNEL=="udmabuf", GROUP="udmabuf", MODE="0660"` in that file instead.
+3. **The device's owning group:** add yourself to it, only if its other devices should be yours too (`kvm`, for one,
+   also grants virtualization).
+
+Apply a rule with `sudo udevadm control --reload-rules` and `sudo udevadm trigger --action=add /sys/class/misc/udmabuf`,
+and log out and back in (or restart the service) after a group change. Never run the game as root or make the device
+world-writable.
+
+**How Play starts the game.** When the desktop gives the launcher its own systemd service, **Play** waits up to two
+seconds for the game's separate scope before closing its window. If that hand-off fails, it starts the game directly and
+records the fallback in `longshot_startup.log` once the game exits. A direct start still ends with the desktop's
+service: a desktop that stops its children stops the game too.
 
 ### Updating
 
-The launcher checks for updates when it starts. When a newer version is out on a build's channel, it offers **Update**:
-it installs that version's builder (only the parts that changed are downloaded) and builds the game again from the game
-files the build kept. It updates itself the same way, from its own releases. The builders and the game no longer look
-for updates themselves. What changed is on [Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
+The launcher checks for updates when it starts. When a newer version is out on your channel, press **Update**: it
+downloads the new builder (only the parts that changed) and builds the game again from the game files the first build
+kept, so you don't need your `.nup` again. It updates itself the same way. What changed is on
+[Longshot's releases](https://git.magicbean.dev/MagicBeanDev/Longshot/releases).
 
-<details>
-<summary>What an update keeps and replaces, and updating from the command line</summary>
-
-To be safe, copy your saves somewhere first: the `user` folder in the game folder on Windows, or
+Before updating, copy your saves somewhere safe: the `user` folder in the game folder on Windows,
 `~/.local/share/longshot` on Linux.
 
-| Kept | Replaced |
+| An update keeps | An update replaces |
 |---|---|
-| Your saves (`user`, or `~/.local/share/longshot` on Linux) | The game in `bin` and its files |
-| `longshot_options.ini`, the in-game menu's choices and your controls | `image.bin` and the shader list |
+| Your saves | The game in `bin` and its files |
+| `longshot_options.ini`: the menu's choices and your controls | `image.bin` and the shader list |
 | `longshot_env.txt` | `language.txt`, written again with the game's language |
 | `mods` | |
 
-The game files the first build read are kept in the game folder, so an update does not need your `.nup` again.
+Without the launcher: from a clone, `git pull`, then `python -I nx2/make_game.py --update <game folder>`; a builder
+does the same with `--cli --update <game folder>`.
 
-From a clone: `git pull`, then `python -I nx2/make_game.py --update <game folder>`. A builder does the same with
-`--update <game folder>` (with its own version).
+### Release channels
 
-</details>
+The launcher builds from one of three channels:
 
-### Latest development build
+| Channel | What it is | The launcher |
+|---|---|---|
+| **Stable** | The released version. Choose this to play. | [Windows](https://longshot.magicbean.dev/download/launcher/stable/windows) · [portable](https://longshot.magicbean.dev/download/launcher/stable/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/stable/linux) |
+| **Release candidate** | The next version, before it is released. | [Windows](https://longshot.magicbean.dev/download/launcher/rc/windows) · [portable](https://longshot.magicbean.dev/download/launcher/rc/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/rc/linux) |
+| **Nightly** | Built from `main` after every change; the newest five stay on the releases page. Untested: it may break your saves or settings, so copy them first. | [Windows](https://longshot.magicbean.dev/download/launcher/nightly/windows) · [portable](https://longshot.magicbean.dev/download/launcher/nightly/windows-portable) · [Linux](https://longshot.magicbean.dev/download/launcher/nightly/linux) |
 
-Want a fix before it is in a release? Choose the **Nightly** channel in the launcher: it is built from `main` after every
-change, and the newest five stay on the releases page. It is untested and may break your saves or settings: copy them
-first (see above). **Release candidate** is the next version, before it is released. To go back, build a version
-from the **Stable** channel.
+A nightly launcher builds Longshot's nightlies by default; any launcher can build from any channel. To go back, build a
+version from the **Stable** channel.
 
 ### Another way: RecompLauncher
 
 Each version also ships the files [RecompLauncher](https://recomplauncher.com) installs (`recomplauncher.json`, in
-`LongshotBuilder-<version>-windows-x64.zip` and in the Linux AppImage). RecompLauncher finds releases on GitHub only, and
+`LongshotBuilder-<version>-windows-x64.zip` and in the Linux AppImage). RecompLauncher only finds releases on GitHub, and
 Longshot's are on git.magicbean.dev, so for now add a downloaded file to it by hand
-([docs/releases.md](docs/releases.md#recomplauncher)).
+([docs/releases.md](docs/releases.md#recomplauncher-longshot)).
 
 ### Where the files go
 
-- The build reads your game and never changes it. It writes to the folder you choose and to the builder's own folder:
-  `%LOCALAPPDATA%\LongshotBuilder` on Windows, `~/.cache/longshot-builder` on Linux.
-- The romfs is hard-linked instead of copied where the disk allows it.
-- The build files (about 4 GB: the translated code and the compiled objects) are deleted once the game is ready. None
-  of them are needed to play. To keep them, so that an update compiles only what changed, set the environment variable
-  `LONGSHOT_KEEP_BUILD_FILES=1` for the builder; on Windows, **Free up space** on the "Your game is ready" page then
-  deletes them when you want. The build files folder can be moved before a build (**Change**, **Default**).
-- Saves: the `user` folder in the game folder on Windows, `~/.local/share/longshot` on Linux (a `user` folder from an
-  earlier Linux build is moved there once). `--user <folder>` puts them somewhere else ([command line
-  arguments](#running-the-game-from-the-command-line)).
-  To carry on with a save from Hookshot, an emulator (Lichii, Eglantine, Orchid, ...) or NX2navi, or to take yours
-  there, see the [saves guide](docs/saves.md).
-- To uninstall, delete the game folder, the builder's folder and the shortcuts.
+The build reads your game and never changes it.
+
+| What | Windows | Linux |
+|---|---|---|
+| The game | The folder you chose (`Games\Longshot` by default) | The folder you chose (`~/Games/Longshot` by default) |
+| Your saves | `user` in the game folder | `~/.local/share/longshot` |
+| The launcher, each version's builder and its tools (`toolchains`), the build files (`work`) | `%LOCALAPPDATA%\LongshotLauncher` (the installed program in `%LOCALAPPDATA%\Programs\LongshotLauncher`; the portable one's data in `LongshotLauncher-data` beside it) | `~/.local/share/longshot/launcher` (the portable AppImage's in `<AppImage>.home` beside it) |
+| A builder without the launcher (`--cli`) and its tools | `%LOCALAPPDATA%\LongshotBuilder` | `~/.local/share/longshot/builder` and `~/.cache/longshot-builder` |
+| The in-game menu's choices | `longshot_options.ini` in the game folder | `longshot_options.ini` in the game folder |
+
+- **Saves elsewhere:** start the game with `--user <folder>` ([command line arguments](#running-the-game-from-the-command-line)).
+  A `user` folder from an earlier Linux build is moved to `~/.local/share/longshot` once. To carry on with a save from
+  Hookshot, an emulator (Lichii, Eglantine, Orchid, ...) or NX2navi, or to take yours there, see the
+  [saves guide](docs/saves.md).
+- **Build files:** the translated code and compiled objects (about 4 GB) are deleted once the game is ready; none are
+  needed to play. To keep them, so that an update compiles only what changed, set `LONGSHOT_KEEP_BUILD_FILES=1` for the
+  build; **Free up space** in the launcher's settings deletes them later. Their folder can be moved there before a build
+  (**Change**, **Default**). The romfs is hard-linked instead of copied where the disk allows it.
+- **Uninstall:** uninstall the launcher (Windows: *Apps & features*), then delete its folder, the game folder and the
+  shortcuts.
 
 ### What Longshot connects to
 
-Longshot uploads nothing about you or your PC. It reads no browser data, passwords or session keys. Everything it does on
-the network or with other programs:
+Longshot uploads nothing about you or your PC, and reads no browser data, passwords or session keys. This is
+everything it does on the network or with other programs:
 
-- **Downloads from git.magicbean.dev.** The Longshot Launcher reads the release lists of Longshot and of the launcher on
-  git.magicbean.dev, downloads a version's files from its release, and checks every file against the SHA-256 the
-  release's signed `SHA256SUMS` gives. The Windows builder's tools come from the links `tools.lock` gives (their makers'
-  releases, or Longshot's packages on git.magicbean.dev), checked the same way; the Linux builder's too. With **DLSS** on, NVIDIA's DLSS library comes from `github.com/NVIDIA/DLSS`; the
-  builder's own compiler and tools come from their makers' releases (llvm-mingw, Python), checked by SHA-256 too. The game
-  itself checks for nothing at start.
-- **Your Discord status, through the Discord app on this PC.** While Discord runs, the game shows "Playing Longshot" with
-  the time played. It does this the way every game does: through the Discord app's own local connection, a named pipe on
-  Windows and the socket `discord-ipc-0` in `$XDG_RUNTIME_DIR` (or `$TMPDIR`, or `/tmp`) on Linux. What it sends is
-  "Ocarina of Time", the Longshot version, the start time and the icon's name. The Discord app then shows it through
-  Discord's servers. Turn it off with **Gameplay → Discord status** in the Insert menu.
-- **Files it writes outside the game folder:** the builder's own folder (above), its settings (`~/.config/longshot` on
-  Linux), the saves (above), and shortcuts if you ask for them. **Bug report** (Gameplay tab) only writes a folder in
-  `bug-reports` in the game folder, with your home folder and user name taken out of its logs, and **Save my pipeline
-  list** only saves a zip in your Downloads folder: you choose whether to attach them anywhere.
-- On Linux the game starts through a small script (`play-diagnostics.sh`). It keeps the game's first error messages in
-  `longshot_startup.log` in the game folder, using a private temporary folder there that it removes when the game exits.
+- **Downloads, from git.magicbean.dev.** The launcher reads the release lists of Longshot and of the launcher, downloads a
+  version's files, and checks each one against the SHA-256 in the release's signed `SHA256SUMS`. The Windows builder's
+  tools come from the links in `tools.lock` (their makers' releases, or Longshot's `tools` release), and its compiler
+  from its makers' releases (llvm-mingw, Python), all checked by SHA-256. With **DLSS** on, NVIDIA's DLSS library comes
+  from `github.com/NVIDIA/DLSS`. The game itself checks for nothing when it starts.
+- **Your Discord status, through the Discord app on this PC.** While Discord runs, it shows "Playing Longshot" with the
+  time played, through the Discord app's own local connection (a named pipe on Windows; the socket `discord-ipc-0` in
+  `$XDG_RUNTIME_DIR`, `$TMPDIR` or `/tmp` on Linux). It sends "Longshot", the Longshot version, the start time and
+  the icon's name. Turn it off with **Gameplay → Discord status** in the in-game menu.
+- **Files outside the game folder:** the builder's folder, the settings and the saves (above), and shortcuts if you ask
+  for them. **Bug report** (Gameplay tab) writes a folder in `bug-reports` in the game folder, with your home folder and
+  user name taken out of its logs, and **Save my pipeline list** saves a zip in your Downloads folder: you decide whether
+  to send them anywhere.
 
-Only download Longshot from [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases) and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev. Each version's
-files are named, with their SHA-256, in its `SHA256SUMS`, signed by the release key, which the launcher checks. A copy from
+Only download Longshot from [the launcher's releases](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher/releases)
+and [Longshot's](https://git.magicbean.dev/MagicBeanDev/Longshot/releases) on git.magicbean.dev, or through
+[longshot.magicbean.dev/download](https://longshot.magicbean.dev/download), which sends you there. Each version's files
+are listed with their SHA-256 in its `SHA256SUMS`, signed by the release key, which the launcher checks. A copy from
 anywhere else may not be ours.
 
 ### If something goes wrong
 
+**Start with the log:** `longshot_log.txt` in the game folder holds the last run, and `longshot_log.1.txt` to `.4.txt`
+the four before it (started from a terminal, the game prints there instead). Every 600 frames it writes a `vk: status:`
+line with the video memory in use against what the driver allows, and DLSS's details while it draws;
+`vk: over the driver's video-memory allowance` says when the game went past it.
+
 | Problem | What to do |
 |---|---|
-| Where is the log? | `longshot_log.txt` in the game folder holds the last run. The four runs before are `longshot_log.1.txt` (the last) to `.4.txt`. Started from a terminal, the game prints there instead. Every 600 frames it has a `vk: status:` line: the video memory in use of what the driver allows, and DLSS's details while it draws; `vk: over the driver's video-memory allowance` says when the game passed it |
-| A place has a wrong texture, or a floor or wall is missing | Look for `longshot_damaged_files.txt` in the game folder. The build writes it when your game dump is incomplete (about 23.3 GB, a complete one is about 23.8 GB): it lists each damaged game file and the file put in its place. Dump the game again and build from the new dump; the file is then removed |
-| Linux Builder Play closed before the game log appeared | After the game exits, check `longshot_startup.log` in the game folder for up to 64 KiB of startup stderr and its exit status. |
-| "Longshot supports build e0f3ccfa" or "This version isn't supported" | Check that you chose the right game with its update installed |
-| The game opens and closes, or the log says "device lost" | Update your graphics driver. On AMD cards there are known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)) |
-| Parts of the picture are missing, or a message says your card has no mesh shader support | The card or its driver has no mesh shaders. Update the driver; older cards are not supported ([#640](https://github.com/NotRexed/Hookshot/issues/640)) |
-| AMD: blocky textures, solid rectangles in the sky or unusually dark courtyard surfaces | Try the [RGBA8 texture workaround](#amd-texture-workaround). It uses more graphics memory |
-| Linux: the game does not start or the picture is broken | The game needs a Vulkan 1.3 driver with mesh shaders. Check with `vulkaninfo \| grep mesh`: it should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver |
-| Steam Deck: the game freezes and closes in Kokiri Forest or the Great Deku Tree (`gfx_0.0.0 timeout` in `journalctl -k`) | `RX_VK_MESH_NOCULL=2c56dc1006942f74` in `longshot_env.txt` gets past it with every model drawn (the culling pass that runs for seconds is turned off). `RX_VK_SKIP_CODE=2c56dc1006942f74` also gets past it, but the models those draws make go missing (see the [development guide](docs/development.md#switches-for-testing-and-debugging), [#817](https://github.com/NotRexed/Hookshot/issues/817)) |
-| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, or add `%LOCALAPPDATA%\LongshotBuilder` to its exclusions, then press **Repair** |
-| Stutter the first time you see something | Normal for now: shaders are being prepared. It gets better when you pass through the same place again. You can help remove it for everyone: [send your pipeline list](#send-your-pipeline-list) |
-| Windows, NVIDIA: stutter every start in places you have seen, after the shaders were prepared | The driver's shader cache is too small to keep them all (the first start builds about 2 GB of pipelines into it). In the NVIDIA Control Panel, Manage 3D settings, set **Shader Cache Size** to **Unlimited** (or 10 GB). On Linux the game raises the driver's limit itself |
-| The game is in the wrong language | Change the code in `language.txt` in the game folder. The file lists them all, and an update keeps the one you set there |
+| **Building** | |
+| "Longshot supports build e0f3ccfa" or "This version isn't supported" | Check that you chose the right game, with its update installed. |
+| "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, and add `%LOCALAPPDATA%\LongshotLauncher` and `%LOCALAPPDATA%\Programs\LongshotLauncher` to its exclusions, then build again ([common problems](docs/common-issues.md#your-antivirus-removed-part-of-the-build-tools)). |
+| **Starting** | |
+| The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
+| Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
+| **Graphics** | |
+| Parts of the picture are missing, or a message says your card has no mesh shader support | The card or its driver has no mesh shaders, so Longshot draws through its compute fallback, which leaves some draws out. Update the driver; a card with mesh shaders draws everything ([#640](https://github.com/NotRexed/Hookshot/issues/640)). |
+| A place has a wrong texture, or a floor or wall is missing | Look for `longshot_damaged_files.txt` in the game folder. The build writes it when your dump is incomplete (about 23.3 GB instead of 23.8 GB), listing each damaged file and what was put in its place. Dump the game again and build from the new dump; the file is then removed. |
+| AMD: blocky textures, solid rectangles in the sky or unusually dark courtyard surfaces | Try the [AMD texture workaround](#amd-texture-workaround). It uses more graphics memory. |
+| **Performance** | |
+| Stutter the first time you see something | Normal for now: shaders are being prepared, and it is smooth the next time you pass. You can help remove it for everyone: [send your pipeline list](#send-your-pipeline-list). |
+| Windows, NVIDIA: stutter on every start, in places you have seen | The driver's shader cache is too small to keep them all (the first start builds about 2 GB of pipelines). In the NVIDIA Control Panel, under Manage 3D settings, set **Shader Cache Size** to **Unlimited** (or 10 GB). On Linux the game raises the driver's limit itself. |
+| Low FPS | See [Low FPS or stutter](#low-fps-or-stutter) below. |
+| Steam Deck: the game freezes and closes in Kokiri Forest or the Great Deku Tree (`gfx_0.0.0 timeout` in `journalctl -k`) | Add `RX_VK_MESH_NOCULL=2c56dc1006942f74` to `longshot_env.txt`: it gets past it with every model drawn, by turning off the culling pass that runs for seconds. `RX_VK_SKIP_CODE=2c56dc1006942f74` also gets past it, but the models those draws make go missing ([development guide](docs/development.md#switches-for-testing-and-debugging), [#817](https://github.com/NotRexed/Hookshot/issues/817)). |
+| **Other** | |
+| The game is in the wrong language | Change the code in `language.txt` in the game folder. The file lists them all, and an update keeps the one you set. |
 
-If the problem continues, [report it](https://github.com/NotRexed/Hookshot/issues/new/choose) with the version, where
-you were in the game, your graphics card, `longshot_log.txt` and a screenshot or video. Never send game files. The
-in-game menu's **Gameplay → Bug report** gathers all of it in one press ([In-game menu](#in-game-menu)).
+Still stuck? [Report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with the version, where you were in
+the game, your graphics card, `longshot_log.txt` and a screenshot or video, and never game files. **Gameplay → Bug
+report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
 
 #### Low FPS or stutter
 
-Walk through the same spot twice after shader preparation finishes. Note whether the slowdown clears on the
-second pass or lasts until you restart the game. For a slowdown after an update, compare the same spot and
-settings on both versions if you still have the earlier build. Turn off **Frame generation** for both runs so the
-FPS reflects game frames, and keep the resolution, upscaler and frame rate cap the same.
-
-Attach the log from the slow run and, if available, the one from the earlier build. Say where the FPS dropped and
-keep the lines around the drop that show `presents`, `GPU time`, `waits for shaders or pipelines`, `VRAM:` and
-`memory heaps`. Compare total and per-heap memory use with the driver's allowances. The texture cache has a
-separate budget on the `VRAM:` line.
-
-If the GPU time stays high, a separate run with `RX_VK_PASS_TIMING=1` in `longshot_env.txt` reports which GPU
-passes take the time every 600 presents. Keep the unprofiled log for the FPS comparison since the timing itself
-adds work. Remove the switch after collecting the log. The [development guide](docs/development.md#time-and-profiles)
-has more switches.
+1. After the shaders are prepared, walk through the same spot twice. Note whether the slowdown clears the second time,
+   or lasts until you restart the game.
+2. Turn off **Frame generation**, so the FPS counts the game's own frames, and keep the resolution, upscaler and frame
+   rate cap the same between runs. For a slowdown after an update, compare the same spot and settings on both versions
+   if you still have the earlier build.
+3. Attach the log from the slow run (and from the earlier build, if you have it). Say where the FPS dropped, and keep the
+   lines around the drop that show `presents`, `GPU time`, `waits for shaders or pipelines`, `VRAM:` and `memory heaps`.
+   Compare the total and per-heap memory with the driver's allowances; the texture cache has its own budget on the
+   `VRAM:` line.
+4. If the GPU time stays high, run once more with `RX_VK_PASS_TIMING=1` in `longshot_env.txt`: every 600 presents it
+   reports which GPU passes take the time. That timing adds work itself, so keep the first log for the FPS comparison,
+   and remove the switch afterwards. The [development guide](docs/development.md#time-and-profiles) has more switches.
 
 #### AMD texture workaround
 
-For these AMD texture artifacts, try keeping decoded ASTC textures as RGBA8 instead of re-encoding them to BC3
-([#57](https://github.com/NotRexed/Hookshot/issues/57), [#1006](https://github.com/NotRexed/Hookshot/issues/1006)).
-Turn on **ASTC as RGBA8** in the menu's Debug tab, under Developer, and restart the game. (`RX_VK_ASTC_RGBA8=1` in
-`longshot_env.txt` does the same, as earlier versions of this readme said; while that line is there the row shows its
-value and cannot be changed, so remove the line to choose in the menu.)
+Some AMD texture artifacts go away when decoded ASTC textures are kept as RGBA8 instead of being re-encoded to BC3
+([#57](https://github.com/NotRexed/Hookshot/issues/57), [#1006](https://github.com/NotRexed/Hookshot/issues/1006)):
+turn on **ASTC as RGBA8** in the menu's Debug tab, under Developer, and restart the game. It is a workaround for these
+artifacts, not a lighting fix, and it can use much more graphics memory, causing stalls when the card runs out. To undo
+it, turn the row off and restart.
 
-This is a workaround for some artifacts, not a general lighting fix. It can substantially increase graphics-memory
-use and cause stalls when the card runs out of headroom. To undo it, turn the row off (and remove any `RX_VK_ASTC_RGBA8` line from `longshot_env.txt`) and restart the game.
-
-`RX_VK_ASTC_BC7=1` keeps those big ASTC textures as BC7 instead of BC3. Both are 8 bits a texel, so the graphics memory
-is the same; BC7's mode 6 keeps the colours' gradients and alpha much better, and the textures look cleaner where BC3
-shows bands or blocks. Off unless set; `RX_VK_ASTC_RGBA8=1` above still wins when both are set.
+`RX_VK_ASTC_RGBA8=1` in `longshot_env.txt` does the same, as earlier versions of this readme said; while that line is
+there, the menu row shows its value and can't be changed, so remove the line to choose in the menu.
+`RX_VK_ASTC_BC7=1` keeps those textures as BC7 instead of BC3: the same memory (8 bits a texel), but BC7's mode 6 keeps
+gradients and alpha much better, so textures look cleaner where BC3 shows bands or blocks. It is off unless set, and
+`RX_VK_ASTC_RGBA8=1` wins when both are.
 
 ## In-game menu
 
@@ -307,7 +369,7 @@ choices and starts the game again, so progress since your last save is lost.
 
 A row for something this PC cannot use is not shown: NVIDIA Reflex and AMD Anti-Lag 2 without a GPU and driver that
 have them, the DLSS model where DLSS does not run. HDR paper white and
-HDR peak brightness show only while HDR is on, the HDR tone mapper only with HDR set to Native.
+HDR peak brightness and HDR contrast show only while HDR is on, the HDR tone mapper only with HDR set to Native.
 
 The Graphics tab groups its rows under section titles: Resolution and upscaling, Frame generation and latency, Screen,
 HDR, Detail, and GPU and memory (last: the rows to change when something is wrong). The table lists them in that order.
@@ -316,27 +378,27 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 |---|---|---|---|
 | Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+), Auto (this PC) | Auto (this PC) on a first start; Custom in an options file from before it |
 | | Aspect ratio | The shapes your screen's resolutions have, narrowest first (5:4, 4:3, 16:10, 16:9, 21:9, 32:9, ...), your monitor's own marked "(monitor's)", or Window to fill the actual window (after a restart) | Your monitor's |
-| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own) at 16:9 (after a restart) | 2048x1152 |
-| | Profile | Docked, Handheld (after a restart) | Docked |
-| | Upscaler | Game's own, NVIDIA DLSS, NVIDIA DLAA (only in builds with NVIDIA's DLSS SDK, below; DLSS and DLAA on RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4, AMD FSR 4 Native AA (only in builds with FSR 4, below), Off (no upscaling) | Game's own |
+| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own) at 16:9; your screen's own size is marked "(native)" (after a restart) | 2048x1152, or your screen's size where it is smaller (a Steam Deck's 1280x800, a 1080p monitor); Auto (this PC) leaves it as it is |
+| | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
+| | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, below, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4 (only in builds with FSR 4, below, on GPUs AMD's files cover), Off (no upscaling). NVIDIA DLAA and AMD FSR 4 Native AA are DLSS's and FSR 4's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run |
 | | DLSS model | Transformer (K), Transformer 2 (M), Transformer 2 (L), NVIDIA default (shown where DLSS runs; used by DLSS and DLAA) | Transformer (K) |
-| | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS, FSR 3.1 or FSR 4: Auto, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With DLAA or FSR 4 Native AA: Native. With Off: Auto, 100%, 75%, 67%, 50%, 33% | Auto |
-| | Sharpness | 0 to 100%, in steps of 10 | 0% |
+| | Render resolution | Auto (the game's own dynamic resolution), 100%, 75%, 67%, 50% (each with its size). With DLSS or FSR 4: Auto, Native (DLAA or FSR 4 Native AA: the 3D at full size), 92%, 83%, 75%, Quality (67%), Balanced (58%), Performance (50%), Ultra Performance (33%). With FSR 3.1: Auto, 100% (its native AA), then the same as DLSS from 92%. With Off: Auto, 100%, 75%, 67%, 50%, 33% | Auto; a quality preset sets it |
+| | Sharpness | 0 to 100%, in steps of 10 | 0%; a quality preset sets it |
 | | Frame generation | Off, Auto, 2x to 8x | Off |
-| | Frame generation by | Auto (NVIDIA DLSS Frame Generation where it runs: RTX 40 and newer, with a temporal Upscaler; else the built-in one; with frame generation on, the row shows who makes the frames, as Auto: DLSS FG, and why not DLSS FG when another does), Built-in FG (changes at once) | Auto |
-| | Frame pacing | Off, On | Off |
-| | Game frame rate cap | 60, 90, 120, 144, 165, 240 FPS, Uncapped (after a restart) | 60 FPS |
+| | Frame generation by | Auto (NVIDIA DLSS Frame Generation where it runs: RTX 40 and newer, with a temporal Upscaler; else the built-in one; with frame generation on, the row shows who makes the frames, as Auto: DLSS FG, and why not DLSS FG when another does), Built-in FG. Changes at once | Auto |
+| | Frame pacing | Off, On | Off; a quality preset turns it on |
+| | Game frame rate cap | 60 (the console's), 90, 120, 144, 165, 240, Uncapped (changes at once) | 60 |
 | | NVIDIA Reflex | Off, On, On + Boost (shown only on NVIDIA GPUs with `VK_NV_low_latency2`) | Off |
 | | AMD Anti-Lag 2 | Off, On (shown only on AMD GPUs with `VK_AMD_anti_lag`) | Off |
 | | Fullscreen | Off, On (the same as <kbd>F11</kbd>) | Off |
 | | V-Sync | Auto, On, Off | Auto |
-| | Window scaling filter | Off, Catmull-Rom, Lanczos | Off |
+| | Window scaling filter | Off, Catmull-Rom, Lanczos (shows "Not needed (window = output)" while the window is the Output resolution's size) | Off; a quality preset sets it |
 | | Ultrawide menus | Full width; Centred, blurred sides; Centred, black bars (with the Aspect ratio at the monitor's shape) | Centred, blurred sides |
 | | HDR | Off, Expanded, Native (the game's) | Off |
-| | HDR paper white | 80 to 400 nits (while HDR is on) | 200 nits |
-| | HDR peak brightness | 400 to 4000 nits (while HDR is on) | 1000 nits |
-| | HDR contrast | 50% to 200% around mid grey (while HDR is on) | 100% |
-| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS, FSR and TAAU do not take its scene yet: the game's own upscale runs) | Vanilla |
+| | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
+| | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
+| | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
+| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's: DLSS, FSR and TAAU do not take its scene yet, so the game's own upscale runs) (shown only with HDR set to Native) | Vanilla |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
@@ -351,30 +413,31 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Microphone | Off, Default, or each microphone by name | Default |
-| | Game language | The game's 16 languages, each by its own name (after a restart) | The one built with |
+| | Game language | The game's 16 languages, each by its own name (after a restart) | `language.txt`'s, else English (US) |
 | | Menu language | Auto (the game's language), or English, Português (Brasil), Español (Latinoamérica), Español (España), Français, Deutsch, Italiano, Nederlands, Polski, Русский, 日本語, 한국어, 简体中文, 繁體中文 | Auto |
 | | Discord status | Off, On ("Playing Longshot" and the time played in your Discord status, while Discord runs on this PC) | On |
 | | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
 | Controls | Controller in background | Off, On | Off |
-| | Mouse camera | As the stick, Native | As the stick |
+| | Mouse camera | As the stick, Native, Off | As the stick |
 | | Disable camera centering | Off, On | Off |
-| | Mouse sensitivity | 0.10 to 5.00 | 1.00 |
+| | Mouse sensitivity | 0.10 to 5.00, in steps of 0.10 | 1.00 |
 | | Invert mouse vertical | Off, On | Off |
 | | Invert camera X | Off, On | Off |
 | | Invert camera Y | Off, On | Off |
 | | Camera speed | 50% to 400%, in steps of 25 | 100% |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
 | | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
-| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face, Custom (on the Controls page) | Nintendo (Def) |
-| | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck (on the Controls page) | Auto |
-| | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
+| | Layout preset | Nintendo (Def), Xbox / PC, Swap Face; Custom once you bind a button yourself (on the Controls page) | Nintendo (Def) |
+| | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck, Keyboard (on the Controls page; changes at once where the game allows it, else after a restart) | Auto |
+| | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
-| Debug | Debug tools | Off, On (the tools below it while on) | Off |
-| | Developer: Descriptor reuse | Off, On (after a restart) | On |
-| | Developer: Sampler cache | Off, On (after a restart) | Off |
+| Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed) | Off |
+| | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
+| | Developer: Descriptor reuse | Off, On (changes at once) | On |
+| | Developer: Sampler cache | Off, On (changes at once) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
 
@@ -384,8 +447,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   rows yourself sets it back to Custom.
 - **Auto (this PC)**, which a first start begins on, chooses for the PC it runs on: the memory tier from the card's
   video memory (an integrated GPU, a Steam Deck or a card without mesh shaders at Minimum), DLSS on an NVIDIA RTX card
-  or FSR 4 on an AMD RX 9000 where the build has them (else the game's own upscaler), and the screen's size as the
-  Output resolution where the tier has the memory for it. In the first minute of play it then measures the GPU: while
+  or FSR 4 on an AMD RX 9000 where the build has them (else the game's own upscaler). It leaves the Output resolution as
+  it is: on a first start the game's own 2048x1152, or the screen's size where that is smaller. In the first minute of play it then measures the GPU: while
   frames are missed with the GPU over 90% busy it lowers the Render resolution a step, and while the frame rate cap holds
   with the GPU under half busy it raises it a step, up to the best mode that still upscales (DLSS or FSR Quality, or 100%
   with the game's own; never DLAA or native AA). At most two steps; a PC that holds its cap keeps its picture. It chooses again when the card or the screen changes. `longshot_log.txt`'s
@@ -548,7 +611,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Mouse camera:** Native turns the camera with the mouse one to one, as in a PC game. As the stick uses the mouse in
   place of the right stick. The <kbd>-</kbd> and <kbd>=</kbd> keys change the sensitivity in game too.
   When another camera takes over, Native leaves it alone; on returning, mouse look starts from the game's current
-  pitch and yaw rather than restoring the old view.
+  pitch and yaw rather than restoring the old view. Off leaves the mouse out of play: a click in the window doesn't
+  capture it, so it neither turns the camera nor presses buttons. Play with a controller or the keyboard.
 - **Disable camera centering:** On stops the game gradually turning the camera toward your movement, so it does not fight
   native mouse look. Off keeps the game's standard behavior. Changes apply immediately with either Mouse camera mode.
   Manual controls, explicit recentering and scripted camera headings still work; automatic pitch adjustment is unchanged.
@@ -654,7 +718,7 @@ not the first table found in the mod. Other versions' tables do not change the p
 
 ## Build from source
 
-For developers, and for players who prefer the command line. The builder windows run the same script,
+For developers, and for players who prefer the command line. The launcher and the builders run the same script,
 `nx2/make_game.py`. [CONTRIBUTING.md](CONTRIBUTING.md) has more.
 
 <details>
@@ -679,7 +743,8 @@ You need:
   clone or with `LONGSHOT_MINGW` set to its folder. Without it the build uses the clang from
   [emsdk](https://github.com/emscripten-core/emsdk) at `C:\emsdk` with Visual Studio's C++ tools and the Windows SDK
   (`LONGSHOT_MSVC=1` forces that route).
-- What the builder's `tools` folder carries and a clone does not. Run `LongshotBuilder.exe` once: the folder is
+- What the builder's `tools` folder carries and a clone does not. From an unpacked release zip, run
+  `LongshotBuilder.exe --cli --help` once (it installs the tools, then runs `make_game.py --help`): the folder is
   `%LOCALAPPDATA%\LongshotBuilder\versions\<version>\LongshotBuilder\tools`. The builder sets the variables itself;
   from the command line, set them before you run `make_game.py`:
   - `tools\cpm`: the Vulkan headers and FFmpeg. Set `RX_CPM` to this folder. Without it (and without system
@@ -690,7 +755,7 @@ You need:
     `.exe`, `.lib` and `.sha1` files to the same places under `third_party\`.
   - `tools\work`: copy it to `work\`. It holds the hot-function list, the link order, the profile and the icon;
     without them the game builds but runs slower.
-- Visual Studio 2022 with .NET 8, only if you want to change the builder itself.
+- .NET 8, only if you want to change the builder's `--cli` program itself (`builder/LongshotBuilder`).
 
 </details>
 
@@ -699,17 +764,16 @@ You need:
 
 ```sh
 ./Longshot-<version>-x86_64.AppImage --cli --nup ~/your-game.nup --out ~/Games/Longshot   # make_game.py's options
-./Longshot-<version>-x86_64.AppImage --play                    # the game the builder built last, without the window
 ./Longshot-<version>-x86_64.AppImage --play ~/Games/Longshot   # the game in that folder
-./Longshot-<version>-x86_64.AppImage --update ~/Games/Longshot # the new release, and that folder built again
+./Longshot-<version>-x86_64.AppImage --cli --update ~/Games/Longshot # that folder built again with this release
 ```
 
 `LONGSHOT_JOBS=<n>` (or `--jobs <n>` with `--cli`) limits how many files compile at once.
 `LONGSHOT_MEM_LIMIT_GB=<n>` lets the compilers take that many GB together, whatever is free now. Linux stops a compiler
 that does not fit; it is then compiled again alone at the end.
 
-In a game folder, `longshot` is the launcher and the game itself is `bin/longshot`. The builder's settings are in
-`~/.config/longshot/builder.ini`.
+In a game folder, `longshot` is the launcher and the game itself is `bin/longshot`. Started with no arguments, the
+AppImage only says to get the Longshot Launcher.
 
 </details>
 
@@ -749,6 +813,7 @@ use them.
 | `--user <folder>` | Where the game keeps per-user data: saves, caches and temp files (and `mouse_sens.txt` when `HOS_MOUSE_SENS` is set; the menu keeps the sensitivity otherwise). Default: `user` in the game folder on Windows, `~/.local/share/longshot` on Linux; with an explicit image path, `user` in the current folder |
 | `--trace` | Log every Horizon OS call (the same as `HOS_TRACE=1`) |
 | `--prepare-shaders` | Prepare the shaders as the first start does, then exit without starting the game (no build step runs it) |
+| `--compile-shaders all` or `most` | What a preparation of this run builds, over `compile_shaders` in `longshot_options.ini` (the same as `RX_VK_COMPILE_SHADERS`): `all` the predicted pipelines too, `most` without them. See [Compile shaders](#compile-shaders) |
 
 For example, keep saves somewhere else:
 
@@ -792,10 +857,12 @@ every build). NVIDIA's files are NVIDIA's, under its own license, the
 Longshot never includes or redistributes them: each build downloads them for itself, and only after you accept that
 license. Never share a game folder built with them, and do not post builds made with them.
 
-- **Windows, the Longshot Builder:** tick **NVIDIA DLSS (downloads NVIDIA's SDK under NVIDIA's license)** before you
-  build. It is off by default and shows NVIDIA's license when you tick it. The build downloads the SDK into
-  `%LOCALAPPDATA%\LongshotBuilder\ngx-sdk` and puts DLSS's runtime, `nvngx_dlss.dll`, and DLSS Frame Generation's,
-  `nvngx_dlssg.dll`, in the game folder's `ngx` folder.
+- **The Longshot Launcher, Windows and Linux:** turn on **DLSS** in the build's settings. It is off by default and shows
+  NVIDIA's license when you turn it on. The build downloads the SDK into the launcher's folder and puts DLSS's runtime
+  (`nvngx_dlss.dll`, `libnvidia-ngx-dlss.so.<version>` on Linux) and DLSS Frame Generation's (`nvngx_dlssg.dll`,
+  `libnvidia-ngx-dlssg.so.<version>`) in the game folder's `ngx` folder. An update of that folder keeps DLSS.
+- **A builder from the command line:** `--cli` with make_game.py's `--fetch-ngx-sdk --accept-nvidia-license`
+  (below: what they do).
 - **Windows, the command line:** `python -I scripts/ngx_sdk.py --platform windows <sdk folder>` asks you to accept
   NVIDIA's license (or pass `--accept-nvidia-license`) and fetches the headers, `nvsdk_ngx_s.lib`, `nvngx_dlss.dll` and
   `nvngx_dlssg.dll`, each checked against its SHA-256. Then build with `LONGSHOT_NGX_SDK=<sdk folder>`: `make_game.py`
@@ -804,13 +871,6 @@ license. Never share a game folder built with them, and do not post builds made 
   other folder has a newer one). Without `nvngx_dlssg.dll` there, frame generation takes the driver's own copy, which
   may be older: one that makes 1 frame at most, or refuses every set. Never copy NGX's core, `_nvngx.dll`, beside
   the game: it comes with NVIDIA's driver.
-- **Linux, the Longshot Builder (the AppImage):** the same tick as on Windows, and nothing else to do: no variable is
-  passed to the AppImage and no file is copied by hand. The build downloads the SDK into the builder's cache folder,
-  `$XDG_CACHE_HOME/longshot-builder/ngx-sdk` (`~/.cache/longshot-builder/ngx-sdk`), builds the game with it and puts
-  DLSS's runtime, `libnvidia-ngx-dlss.so.<version>`, and frame generation's, `libnvidia-ngx-dlssg.so.<version>`, in
-  the game folder's `ngx` folder. The builder's settings
-  (`~/.config/longshot/builder.ini`) remember that you accepted NVIDIA's license, so an update keeps DLSS even after the
-  cache was emptied: it downloads the SDK again.
 - **Linux, a build from source:** `scripts/linux/ngx-sdk.sh <sdk folder>` (it runs `scripts/ngx_sdk.py --platform
   linux`) asks you to accept NVIDIA's license and fetches `libnvsdk_ngx.a` for the build,
   `libnvidia-ngx-dlss.so.<version>`, DLSS's runtime, and `libnvidia-ngx-dlssg.so.<version>`, frame generation's. Then
@@ -860,9 +920,9 @@ With HDR on **Native**, it takes the game's HDR colour as linear light, so highl
 Unlike FSR 3.1 (above), it runs AMD's own DLLs, so it needs them beside the game. Choose it in the menu (`dlss=4` or `5`
 in `longshot_options.ini`, `RX_VK_FSR4=1` or `2` for one run, `RX_VK_FSR4=0` to leave it out).
 
-- **Windows, the Longshot Builder:** tick **AMD FSR 4** before you build. It shows AMD's license first and stays ticked
-  only if you accept; the build then fetches AMD's DLLs for you (below), into the builder's `ffx-sdk` folder and the
-  game folder.
+- **Windows, the Longshot Launcher:** turn on **FSR 4** in the build's settings. It shows AMD's license first and stays
+  on only if you accept; the build then fetches AMD's DLLs for you (below), into the launcher's folder and the game
+  folder.
 - **The command line:** `make_game.py --fsr` (or `LONGSHOT_FSR=1` for `nx2/build.py`). Rebuilding a folder built with
   it (`--update`) keeps it; `--no-fsr` takes it out.
 - **AMD's files:** Longshot includes only AMD's MIT-licensed API headers (`third_party/fidelityfx`). Put
@@ -871,7 +931,9 @@ in `longshot_options.ini`, `RX_VK_FSR4=1` or `2` for one run, `RX_VK_FSR4=0` to 
   beside the game's exe (`bin\longshot.exe`) or in the game folder. (`RX_VK_FSR_DIR` names another folder, for testing:
   set it in the environment or a `HOS_ENV_FILE` file; `longshot_env.txt` takes no paths.) Without them the Upscaler row
   says so and offers the rest. On Linux, a Vulkan FSR 4 library (`amd_fidelityfx_upscaler_vk.so`, such as fsr4-vk's)
-  takes their place.
+  takes their place: AMD publishes none for Linux, so you put it beside the game yourself. A Linux build with FSR 4
+  (`--fsr`) compiles its own Vulkan back end, as with DLSS, since the AppImage's prebuilt one has no FSR 4: a few
+  minutes longer.
 - **Or fetched for you (Windows):** `make_game.py --fsr --fetch-fsr-runtime --accept-amd-license` downloads those two
   DLLs and AMD's license from AMD's FidelityFX SDK repository at the v2.4.0 tag, checks each against its SHA-256, and
   puts them in the game folder (`LONGSHOT_FFX_SDK=<folder>` keeps them between builds, default `workfx-sdk`).
@@ -989,8 +1051,8 @@ game than anyone has yet.
 The first time the game meets a pipeline it builds it on the spot, which stutters. Releases build a list of known
 pipelines before the title, and every player's play adds to it. To send yours:
 
-1. In the game, open the menu (Insert or F1), go to the **Debug** tab and choose **Save my pipeline list** (under Developer). Or, in
-   Longshot Builder's launcher page for the game folder, press **Save my pipeline list**.
+1. In the game, open the menu (Insert or F1), go to the **Debug** tab and choose **Save my pipeline list** (under Developer). Or,
+   from a clone, run `python -I nx2/pipeline_share.py <game folder>`.
 2. It saves `longshot-pipelines-<date>.zip` in your Downloads folder, copies a filled-in report to the clipboard and
    opens the [Submit your pipelines](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/14) issue in your browser.
 3. Attach the zip to a comment there, paste the report and fill in where you played.

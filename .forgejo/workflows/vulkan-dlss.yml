@@ -35,26 +35,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Check out pinned Vulkan headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/Vulkan-Headers
-          ref: 74d8a6cb930c68ef617b202c3ff3c59d919e086b # v1.4.345
-          path: _deps/cpm/vulkanheaders/v1.4.345
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/cpm/vulkanheaders/v1.4.345   # v1.4.345
       - name: Check out pinned SPIR-V headers
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: KhronosGroup/SPIRV-Headers
-          ref: 04f10f650d514df88b76d25e83db360142c7b174 # vulkan-sdk-1.4.341.0
-          path: _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0   # vulkan-sdk-1.4.341.0
       - name: Check out pinned VulkanMemoryAllocator
-        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
-          ref: 1d8f600fd424278486eade7ed3e877c99f0846b1 # v3.3.0
-          path: _deps/cpm/vulkanmemoryallocator/v3.3.0
-          persist-credentials: false
+        run: scripts/fetch_commit.sh https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator 1d8f600fd424278486eade7ed3e877c99f0846b1 _deps/cpm/vulkanmemoryallocator/v3.3.0   # v3.3.0
       - name: Set up Python
         uses: https://github.com/actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:

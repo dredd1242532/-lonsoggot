@@ -22,7 +22,10 @@ class RecompLauncherJsonTests(unittest.TestCase):
         rows |= set(re.findall(r'return "([a-z_0-9]+)";', ini_key))
         keys = {key for setting in manifest["settings"] for choice in setting["choices"] for key in choice["set"]}
         self.assertTrue(keys)
-        self.assertEqual(keys - rows, set())
+        # (keys the game reads that are no menu row: Compile shaders, which the preparation reads, vk_draw.cpp compile_all)
+        draw = (ROOT / "gpu" / "vk" / "vk_draw.cpp").read_text(encoding="utf-8")
+        read_elsewhere = {"compile_shaders"} if '"compile_shaders="' in draw else set()
+        self.assertEqual(keys - rows - read_elsewhere, set())
 
     def test_appimage_carries_it(self):
         self.assertIn('cp recomplauncher.json "$APPDIR/recomplauncher.json"',
@@ -46,10 +49,13 @@ class RecompLauncherJsonTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 bp.make_zip(str(package), "v3.0.0", str(setup), str(out))
             with zipfile.ZipFile(out) as z:
-                self.assertEqual(sorted(z.namelist()), ["LongshotBuilder.exe", "LongshotBuilder/LongshotBuilder.exe", "VERSION",
+                self.assertEqual(sorted(z.namelist()), ["LongshotBuilder.exe", "LongshotBuilder/LongshotBuilder.exe",
+                                                        "LongshotBuilder/tools/version.txt", "VERSION",
                                                         "recomplauncher.json", "tools.lock"])
                 self.assertEqual(z.read("LongshotBuilder.exe"), b"MZ setup")
                 self.assertEqual(z.read("VERSION"), b"v3.0.0\n")
+                # (and where the builder and the game read it: without it a release's game logged "longshot unknown")
+                self.assertEqual(z.read("LongshotBuilder/tools/version.txt"), b"v3.0.0\n")
         manifest = json.loads((ROOT / "recomplauncher.json").read_text(encoding="utf-8"))
         self.assertIn("LongshotBuilder.exe", manifest["start"]["program"])
         self.assertIn("LongshotBuilder.exe", manifest["prepare"]["program"])
