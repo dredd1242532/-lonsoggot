@@ -4,13 +4,15 @@
 in-game checks. It starts a built Longshot, sends frame-timed controller input, reads state and options, and captures
 PNG files. It is a separate stdio process, not part of the game. It opens no network listener.
 
-This guide and the protocol-test approach come from Nicholas Gower's [#1025](https://github.com/NotRexed/Hookshot/pull/1025).
-His guide and checks are retained in the import history. The adapter now calls the standard-library
+This guide and the protocol-test approach come from Nicholas Gower's
+[original work](https://github.com/NotRexed/Hookshot/issues/1025).
+His guide and checks are retained in the import history, changed only by the project's rename. The adapter now calls the standard-library
 [control client and sessions](control.md#sessions); it adds no game-side command, file transport or log parser.
-The command-line client works without MCP. The scenario runner and contributor-process proposals from #1025 are
-separate work, not requirements of this server.
-This server is part 2 of 3, stacked on [#2904](https://github.com/NotRexed/Hookshot/pull/2904);
-review only the commits above it. The third part is the separate scenario runner.
+The command-line client works without MCP. The scenario runner and contributor-process proposals from that original work
+are separate, not requirements of this server.
+This server is part 2 of 3, stacked on [Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47);
+review only commits after `9f5f6dd292efd5727b3dc6503d8c8003acb98333`. It becomes reviewable on its own once 47 is merged.
+The third part is the separate scenario runner.
 
 ## Install
 
@@ -239,5 +241,6 @@ subprocess checks initialize, list, call, resource, error and end of input. The 
 authored tiny PNG, following Nicholas's test idea, and keeps option state. Tests cover frame conversion, concurrent
 calls, cancellation, output bounds, failed launch cleanup and explicit force. General docs checks need no SDK.
 `RUN_ALL_MODULES = ["fastmcp"]` lets the runner skip only the SDK checks without the package; `--strict` fails a
-missing dependency. CI installs this optional dependency in a separate step on Linux and Windows. Game-free checks
-are not proof of Windows gameplay, a visible window, WebGPU capture or save-safe shutdown.
+missing dependency. The retained GitHub workflow installs it separately on Linux and Windows; Forgejo has no CI runner,
+so install the optional environment and run the checks locally. Game-free checks are not proof of Windows gameplay,
+a visible window, WebGPU capture or save-safe shutdown. The dependency exception is still a proposal for maintainer review.
