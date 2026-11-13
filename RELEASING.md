@@ -157,7 +157,7 @@ its line:
 - **An upstream archive** (e.g. a new llvm-mingw):
   1. Edit the line: version, `sha256` and `size` (from the upstream release page, or download it and run `sha256sum`),
      `prefix` (the folder in the archive), and the upstream URL.
-  2. `RELEASE_TOKEN=<token> python -I scripts/tools.py mirror llvm-mingw`: it downloads the archive, checks it against the
+  2. `FORGEJO_TOKEN=<your token> python -I scripts/tools.py mirror llvm-mingw`: it downloads the archive, checks it against the
      line, uploads the copy to the `tools` release, and makes its URL the line's first (the upstream URL stays as the
      fallback).
   3. `python -I scripts/tools.py check --require`, and open the pull request (`build(windows): llvm-mingw 20261201`).
@@ -168,7 +168,7 @@ its line:
   python -I scripts/tools.py assemble cpm --add <dav1d-cpm folder from build-windows.yml's dav1d artifact> --out cpm.zip
   python -I scripts/tools.py assemble third-party --from <an archive with tools/third_party> --out third-party.zip
   python -I scripts/tools.py assemble profile --work work --out profile.zip
-  RELEASE_TOKEN=<token> python -I scripts/tools.py add python 3.14.2-1 python.zip --dest LongshotBuilder/tools/python --prefix python
+  FORGEJO_TOKEN=<your token> python -I scripts/tools.py add python 3.14.2-1 python.zip --dest LongshotBuilder/tools/python --prefix python
   ```
   `add` uploads the archive as `<sha256>-<name>.zip` to the `tools` release and writes the line. Check that nothing made
   from the game is in it (CONTRIBUTING.md): the profile is addresses and counts, never game code.
@@ -195,15 +195,16 @@ anything.
 
 ## One-time setup
 
-None of this is done yet. In order (the org secrets are shared by both repositories):
+None of this is done yet. In order (the org secret is shared by both repositories):
 
 1. **The key.** On a PC you trust: `python -I scripts/release.py keygen <safe folder>`. Put the printed line in the launcher's
    `Core/ReleaseTrust.cs` and in Longshot's `scripts/release_keys.json` (a pull request to each). Keep `release.pem` backed
    up offline. Losing it means a launcher with a new key that every player downloads by hand.
-2. **The secrets** (MagicBeanDev > *Settings* > *Actions* > *Secrets*):
-   - `RELEASE_SIGNING_KEY`: the text of `release.pem`.
-   - `RELEASE_TOKEN`: a token of a bot account with write access to both repositories (scope `write:repository`), to make
-     releases, upload files and delete nightly tags.
+2. **The secret** (MagicBeanDev > *Settings* > *Actions* > *Secrets*): `RELEASE_SIGNING_KEY`, the text of `release.pem`.
+   No token and no bot account: `release.yml` makes the release with the job's own token (`secrets.GITHUB_TOKEN`), which
+   Forgejo gives write access to its own repository on a push (never on a pull request from a fork). Don't protect
+   `nightly-*` tags (*Settings* > *Tags*): that token can't delete a protected tag, so the prune would fail. `tools.py`
+   run by hand (`mirror`, `add`) takes your own token as `FORGEJO_TOKEN`.
 3. **The upload address.** Uploads through Cloudflare are cut at 100 MB, and the builders are larger. Set the variable
    `FORGEJO_UPLOAD_API` (organization *Actions* > *Variables*) to the API without Cloudflare, e.g.
    `http://forgejo:3000/api/v1` as the runners reach it on the server's network. Unset, uploads go to
@@ -233,7 +234,7 @@ None of this is done yet. In order (the org secrets are shared by both repositor
 | ... "not signed by a trusted key" at `verify` | the secret's key is not the one in `ReleaseTrust.cs` / `release_keys.json` | put the matching key in the secret, or rotate (above) |
 | *Publish* fails with HTTP 413 or a cut connection | an upload over Cloudflare's 100 MB limit | set `FORGEJO_UPLOAD_API` (One-time setup, step 3) |
 | *Publish* fails with HTTP 400/422 on an upload | the attachment size or type limits | One-time setup, step 4 |
-| *Publish* fails with HTTP 401/403 | `RELEASE_TOKEN` missing, expired, or without write access | a new token for the bot (step 2) |
+| *Publish* fails with HTTP 401/403 | the job's token is read-only: the run is not a push to this repository (a pull request from a fork, or another repository's workflow) | release from a push or a tag here only |
 | "is already published" | a run for a version that is out (a re-run of an old run) | nothing: a version's files never change |
 | *The version* fails: "the tools release is missing: …" | `tools.lock` lacks a tool the builder needs | One-time setup, step 6 |
 | A draft is left after a failed run | the run stopped before *Publish* | re-run it (the draft is reused), or delete the draft |
@@ -242,4 +243,4 @@ None of this is done yet. In order (the org secrets are shared by both repositor
 | A launcher does not see a new release | it checks at start and on Retry; a draft is not seen | publish finished? Retry in the launcher |
 | `next` or `notes`: "git-cliff is needed" | git-cliff is not on PATH | `export GIT_CLIFF=$(python -I scripts/release.py git-cliff <folder>)` |
 | A Windows install fails at a tool | its upstream URL is gone and it has no mirror, or the archive changed | `tools.py mirror <name>` (the copy in the tools release), or bump it |
-| Too many nightlies | the prune step failed (token cannot delete tags) | give the bot delete rights, or `release.py prune` by hand |
+| Too many nightlies | the prune step failed (HTTP 422: a protected `nightly-*` tag) | unprotect `nightly-*` (step 2), or `FORGEJO_TOKEN=<your token> python -I scripts/release.py prune` by hand |

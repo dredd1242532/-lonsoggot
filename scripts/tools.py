@@ -11,7 +11,7 @@ tool"). Python's standard library only.
         archive becomes <dest>
     python -I scripts/tools.py mirror <name>
         puts the tool's archive, fetched from its URLs, in Longshot's "tools" release as <sha256>-<name>.zip, and makes
-        that copy its line's first URL, the others the fallback ($RELEASE_TOKEN)
+        that copy its line's first URL, the others the fallback ($FORGEJO_TOKEN: a maintainer's token)
     python -I scripts/tools.py add <name> <version> <archive> --dest <folder> [--prefix <folder in the archive>]
         an archive Longshot made, uploaded to the "tools" release and written into tools.lock in place of the tool's line
     python -I scripts/tools.py assemble python --requirements nx2/prompt_requirements.txt --out <zip>
@@ -306,7 +306,7 @@ def assemble_profile(work, out):
 def api(method, path, data=None, content_type=None):
     base = os.environ.get("FORGEJO_UPLOAD_API") if data and content_type and content_type.startswith("multipart") else None
     base = base or os.environ.get("FORGEJO_API") or SERVER + "/api/v1"
-    token = os.environ.get("RELEASE_TOKEN") or fail("RELEASE_TOKEN is needed (a token that may write MagicBeanDev/Longshot's releases)")
+    token = os.environ.get("FORGEJO_TOKEN") or fail("FORGEJO_TOKEN is needed (your token, with write access to MagicBeanDev/Longshot)")
     headers = {"Authorization": "token " + token, "User-Agent": "longshot-tools", "Accept": "application/json"}
     if content_type:
         headers["Content-Type"] = content_type

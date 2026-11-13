@@ -31,7 +31,8 @@ Files and signatures:
         for the launcher's Core/ReleaseTrust.cs and Longshot's scripts/release_keys.json
     python -I scripts/release.py key-id <.pem>
 
-The release on Forgejo ($RELEASE_TOKEN; $GITHUB_REPOSITORY or the repository this is; $FORGEJO_API, $FORGEJO_UPLOAD_API):
+The release on Forgejo ($FORGEJO_TOKEN: in CI the job's own token, secrets.GITHUB_TOKEN; $GITHUB_REPOSITORY or the
+repository this is; $FORGEJO_API, $FORGEJO_UPLOAD_API):
     python -I scripts/release.py publish <tag> --target <commit> --notes <file> <file>...
         a draft release (pre-release unless a stable), every file uploaded and checked, then published: until that last step
         no launcher sees it. A draft left by a failed run of the same tag is reused
@@ -388,7 +389,7 @@ def repo_of(product):
 def api(method, path, body=None, data=None, content_type=None, upload=False, missing_ok=False):
     base = (os.environ.get("FORGEJO_UPLOAD_API") if upload else None) or os.environ.get("FORGEJO_API") or SERVER + "/api/v1"
     headers = {"User-Agent": "longshot-release", "Accept": "application/json"}
-    token = os.environ.get("RELEASE_TOKEN")
+    token = os.environ.get("FORGEJO_TOKEN")
     if token:
         headers["Authorization"] = "token " + token
     if body is not None:

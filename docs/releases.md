@@ -39,6 +39,13 @@ Release files are Forgejo attachments: `[attachment] MAX_SIZE` (2048 MB on git.m
 site is behind Cloudflare, which refuses uploads over 100 MB: CI uploads to `FORGEJO_UPLOAD_API`, the instance's address
 without Cloudflare in front, when it is set (RELEASING.md, One-time setup). Downloads are not limited.
 
+CI makes each release with the job's own token (`secrets.GITHUB_TOKEN`), not a bot's: on a push or a tag in the
+repository, Forgejo 17 gives it write access to that repository's every unit and to no other repository
+(`routers/api/v1/permissions/repo_access.go`; read-only for a pull request from a fork). That covers every call
+`release.py` makes: create a release, upload its files, edit and publish the draft, delete a nightly's release and its tag
+(a tag that isn't protected). Each repository releases into itself only, so nothing else is needed. The token ends with
+the job. Forgejo 17 ignores a workflow's `permissions:` key, so the workflows have none.
+
 ## The channels
 
 The channels are read from the repository's release list (`GET /api/v1/repos/<repo>/releases`), by the same rules in the
