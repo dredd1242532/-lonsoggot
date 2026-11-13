@@ -3022,7 +3022,7 @@ void coop_press(const Row& r) {
     else if (k == kCoopLeave) host->coop_command(HOS_COOP_CMD_LEAVE, nullptr, 0);
     else if (k == kCoopTemp && host->coop_command(HOS_COOP_CMD_TEMP_SAVE, nullptr, 0)) {
         save();
-        pipeline_cache_save();
+        pipeline_cache_save(true);
         open_now = false;
         PostMessageA(app_window(), WM_APP + 9, 0, 0);
     }

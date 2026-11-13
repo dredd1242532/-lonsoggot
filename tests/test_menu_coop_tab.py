@@ -59,6 +59,7 @@ MENU_FIXTURE = r'''#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <type_traits>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); std::exit(1); } } while (0)
 enum { VK_BACK = 8, VK_RETURN = 0x0d, VK_ESCAPE = 0x1b, VK_END = 0x23, VK_HOME = 0x24, VK_LEFT = 0x25,
        VK_UP = 0x26, VK_RIGHT = 0x27, VK_DOWN = 0x28, VK_INSERT = 0x2d, VK_DELETE = 0x2e };
@@ -88,7 +89,9 @@ static int window_token = 1;
 static int app_window() { return window_token; }
 enum { WM_APP = 100 };
 static void PostMessageA(int, int msg, int, int) { CHECK(msg == WM_APP + 9); restarts++; }
-static void pipeline_cache_save() { pipeline_saves++; }
+@@PIPELINE_CACHE_API@@
+static_assert(std::is_same_v<decltype(&pipeline_cache_save), void (*)(bool)>);
+void pipeline_cache_save(bool force) { CHECK(force); pipeline_saves++; }
 struct Asked { int cmd; char text[64]; uint32_t number; } asked[32];
 static int n_asked = 0, answer = 1;
 static MkwVkCoopView room;
@@ -900,6 +903,11 @@ def main():
     menu = (root / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     api = (root / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     backend = (root / "host/rx_backend.c").read_text(encoding="utf-8")
+    draw = (root / "gpu/vk/vk_draw.h").read_text(encoding="utf-8")
+    cache_api = re.search(r"^void pipeline_cache_save\([^;
+]*\);", draw, re.M)
+    if not cache_api:
+        raise SystemExit("FAIL: vk_draw.h: missing pipeline-cache save declaration")
     if "HOS_COOP_STATE_OFF" not in api:
         raise SystemExit("FAIL: vk_api.h: no Co-op tab's view (MkwVkCoopView)")
     api_cut = between(api, "enum { HOS_TEXT_KEY", "\n") + "\n" + between(api, "enum { HOS_COOP_STATE_OFF", "/* what the executable gives")
@@ -911,6 +919,7 @@ def main():
         raise SystemExit("FAIL: expected the narrow and wide help boxes in draw_options")
     cut = {
         "@@API@@": api_cut,
+        "@@PIPELINE_CACHE_API@@": cache_api.group(0),
         "@@TABS@@": re.search(r"enum MenuTab \{.*?\};", menu, re.S).group(0),
         "@@ROW@@": block(menu, "struct Row {"),
         "@@TEXT@@": "\n".join([block(menu, "struct TextField {"), between(menu, "enum { kTextGoOn", "\n") + "\n",
