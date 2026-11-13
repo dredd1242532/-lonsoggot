@@ -28,7 +28,12 @@ struct {
             float timestampPeriod = 1.0f;
         } limits;
     } props;
+    struct {
+        bool hostQueryReset = true;
+    } vk12;
 } dev;
+static int logs, resets;
+static void logf(const char*, ...) { logs++; }
 
 // the fake pool: two queries a slot, each with a value and whether the GPU has written it
 static uint64_t values[2 * kRecordings];
@@ -52,6 +57,7 @@ static VkResult vkGetQueryPoolResults(VkDevice, VkQueryPool, uint32_t first, uin
 }
 static void vkResetQueryPool(VkDevice, VkQueryPool, uint32_t first, uint32_t count) {
     if (first + count > 2 * kRecordings) throw std::runtime_error("reset past the pool");
+    resets++;
     for (uint32_t q = first; q < first + count; q++) available[q] = false;
 }
 static bool run_switch = true;   // (RX_VK_TS_RUN=1, all cases but "each")
@@ -67,7 +73,7 @@ static void require(bool c, const char* what) {
 }
 static void reset() {
     std::memset(values, 0, sizeof values), std::memset(available, 0, sizeof available), std::memset(ts_pending, 0, sizeof ts_pending);
-    calls = 0, st_gpu_ns = 0, st_gpu_max_ns = 0;
+    calls = 0, logs = 0, resets = 0, st_gpu_ns = 0, st_gpu_max_ns = 0;
 }
 // slot i timed for ns nanoseconds, its queries written (done) or not yet
 static void timed(int i, uint64_t ns, bool done) {
@@ -130,6 +136,12 @@ static void run(const std::string& c) {
         for (int i = 0; i < 6; i++) timed(i, 5, true);
         for (int i = 0; i < 6; i++) reuse(i);
         require(st_gpu_ns == 30 && calls == 6, "one slot a call");
+    } else if (c == "no_host_reset") {   // RX_VK_TS_RUN=1 on a device without hostQueryReset: one slot a call, no host resets
+        dev.vk12.hostQueryReset = false;
+        for (int i = 0; i < 6; i++) timed(i, 5, true);
+        for (int i = 0; i < 6; i++) reuse(i);
+        require(st_gpu_ns == 30 && calls == 6 && resets == 0, "one slot a call, no host reset");
+        require(logs == 1, "said once");
     } else {
         throw std::runtime_error("unknown case");
     }

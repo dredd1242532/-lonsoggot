@@ -332,10 +332,15 @@ int64_t st_gpu_ns, st_gpu_max_ns;
 // A query's availability can still show a slot's previous use until the reset recorded in its next command buffer runs, so each
 // slot's queries are also reset on the host when its slot comes round (its last submit done, before it is recorded again; the pool
 // once when made): an available result is then the current use's. One not available yet stays pending for its own turn.
-// Opt-in, RX_VK_TS_RUN=1; the default still reads one slot a call
+// Opt-in, RX_VK_TS_RUN=1; the default still reads one slot a call, and so does a device without hostQueryReset
 constexpr int kTsRun = 16;
 bool ts_run() {
-    static const bool v = env_on("RX_VK_TS_RUN");
+    static const bool v = [] {
+        if (!env_on("RX_VK_TS_RUN")) return false;
+        if (dev.vk12.hostQueryReset) return true;
+        logf("vk: RX_VK_TS_RUN=1 needs hostQueryReset, which this device lacks: GPU times read one slot a call");
+        return false;
+    }();
     return v;
 }
 void gpu_time_add(uint64_t t0, uint64_t t1) {
