@@ -200,6 +200,10 @@ typedef struct MkwVkHost {
     /* (version 20, longshot) the main screen's size in pixels, as host/hos_main.c takes its shape at the start (Windows: the
        primary's; Linux: SDL's primary desktop), for the Insert menu's Aspect ratio and Output resolution rows: 0 when not known */
     int (*screen_size)(int *width, int *height);
+    /* (version 22, longshot) ultrawide: how far the loading cover between two areas is closed, 0 (not shown) to 1 (black),
+       while the game draws it in the middle 16:9 with the menus (wide_menus's keep_mask) and so leaves the sides open
+       (host/hos_main.c hos_wide_cover); 0 when it covers the whole picture itself. Asked at each present */
+    float (*wide_cover)(void);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */
