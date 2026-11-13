@@ -171,6 +171,7 @@ static struct {
     Puppet puppet[COOP_MAX_MEMBERS + 1];
     int was_playing, was_in_room, shown_now;
     unsigned made, deleted, taken_away, failed;   /* actors made; removed here; found gone (the game removed them); requests that failed */
+    int storage_failed;     /* retain startup allocation failure; never retry an allocation every frame */
     char own_map[COOP_POS_TEXT + 1];
     struct { int any; uint8_t flags; char area[COOP_POS_TEXT + 1]; } heard[COOP_MAX_MEMBERS + 1];   /* (HOS_COOP_TRACE: last said) */
 
@@ -513,10 +514,15 @@ typedef struct { int member; uint64_t now; const CoopPos *pose; } BodyWrite;
 
 static int body_write(void *game, const void *payload) {
     const BodyWrite *body = payload;
+    if (P.storage_failed) return 0;
     if (body->member < 1 || body->member > COOP_MAX_MEMBERS || !body->pose || (body->pose->flags & COOP_POS_ADULT)) return 0;
     if (!P.blocks) {
         P.blocks = hos_sys_alloc((uint64_t)B_SIZE * (COOP_MAX_MEMBERS + 1) + SCRATCH_SIZE, 16);
-        if (!P.blocks) return 0;
+        if (!P.blocks) {
+            P.storage_failed = 1;
+            hos_log("coop: players: body request storage could not be allocated; no bodies are created this start");
+            return 0;
+        }
         P.scratch = P.blocks + (uint64_t)B_SIZE * (COOP_MAX_MEMBERS + 1);
         for (int id = 0; id <= COOP_MAX_MEMBERS; id++) P.puppet[id].block = P.blocks + (uint64_t)B_SIZE * (unsigned)id;
     }

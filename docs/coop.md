@@ -746,3 +746,6 @@ No pose authorizes a saved change or a hit. The game-free fixtures exercise code
 revocation, missing components and private asset generation. Current-head two-game body/pose quality remains a
 separate required proof before readiness.
 
+Interpolation clamps its weight, normalizes received rotations and keeps finite animation frames finite even at
+the floating-point limits. A refused request-storage allocation is retained for this start, not retried every frame.
+

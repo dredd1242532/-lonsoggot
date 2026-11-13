@@ -6,6 +6,7 @@
 #ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -257,6 +258,32 @@ static void clock_bounds(void) {
     CHECK(coop_players_receive(&p, 2, bytes, n, 1000) && p.r[2].offset == INT32_MAX - 1);
 }
 
+static void interpolation_bounds(void) {
+    CoopPlayers p = {0};
+    const int ids[] = {1, 2};
+    const uint64_t sessions[] = {11, 22};
+    coop_players_roster(&p, 1, ids, sessions, 2);
+    uint8_t bytes[COOP_MAX_MESSAGE];
+    CoopPos a = {.pseq = 1, .t_ms = 1000, .flags = COOP_POS_IN_WORLD, .nslots = 1, .area = "Bounds",
+                 .pos = {-100000, 0, 0}, .yaw = -FLT_MAX, .slot = {{"Pose", -FLT_MAX}}}, b = a, shown;
+    CHECK(coop_players_receive(&p, 2, bytes, coop_pos_pack(bytes, sizeof bytes, &a), 2000));
+    b.pseq = 2, b.t_ms = 1200, b.pos[0] = 100000, b.yaw = FLT_MAX, b.slot[0].frame = FLT_MAX;
+    CHECK(coop_players_receive(&p, 2, bytes, coop_pos_pack(bytes, sizeof bytes, &b), 2200));
+    CHECK(coop_players_show(&p, 2, 1u << 2, "Bounds", 2200, &shown) == COOP_PLAYER_SHOWN);
+    CHECK(isfinite(shown.yaw) && fabsf(shown.yaw) < 7 && isfinite(shown.slot[0].frame));
+    CHECK(fabsf(shown.pos[0]) <= COOP_PLAYERS_FAR);
+    memset(&p, 0, sizeof p);
+    coop_players_roster(&p, 1, ids, sessions, 2);
+    const uint32_t times[] = {0x70000000u, 0, 0xe0000000u};
+    const float positions[] = {0, -100000, 100000};
+    for (unsigned i = 0; i < 3; i++) {
+        const size_t n = pos_bytes(bytes, i + 1, times[i], "Bounds", positions[i], 0, 0, 0, COOP_POS_IN_WORLD);
+        CHECK(coop_players_receive(&p, 2, bytes, n, 2000 + 10 * i));
+    }
+    CHECK(coop_players_show(&p, 2, 1u << 2, "Bounds", 2120, &shown) == COOP_PLAYER_SHOWN);
+    CHECK(isfinite(shown.pos[0]) && fabsf(shown.pos[0]) <= COOP_PLAYERS_FAR);
+}
+
 /* ---- part 2: the fake guest */
 typedef struct { uint64_t x[32]; uint64_t pc; uint64_t vreg[32][2]; } Ctx;
 typedef void (*A64Fn)(Ctx *);
@@ -315,7 +342,10 @@ static uint64_t gtext(const char *s) {
     memcpy(gp(a), s, strlen(s) + 1);
     return a;
 }
-static uint64_t hos_sys_alloc(uint64_t size, uint64_t align) { (void)align; return galloc(size); }
+static int allocations, refuse_alloc;
+static uint64_t hos_sys_alloc(uint64_t size, uint64_t align) {
+    (void)align; allocations++; return refuse_alloc ? 0 : galloc(size);
+}
 
 static char logbuf[1 << 16];
 static size_t logat;
@@ -538,6 +568,7 @@ static void frame(uint64_t ms) {
 static void fresh(void) {
     memset(&P, 0, sizeof P), P.lock = 7;   /* (7: the store's lock, for store_busy) */
     memset(&gameplay, 0, sizeof gameplay), presence = 1;
+    allocations = refuse_alloc = 0;
     memset(calls, 0, sizeof calls);
     log_clear();
     sends = 0, sent_n = 0, playing = 1, accepted = 0, store_busy = 0, missing_fn = -1, refuse_create = 0, pos_fn = NULL, view_fn = NULL;
@@ -1049,6 +1080,15 @@ static void game_side(const char *steps_path) {
     st(link_actor + A_PARTS, parts, 8);
     made_has_anim = 0;
     st(link_actor + 0x270, 0, 8);
+    /* Deferring storage until permission must not turn startup OOM into a per-frame allocation retry. */
+    fresh();
+    setenv("HOS_COOP_PLAYERS", "1", 1);
+    room(1), accepted = 1u << 2;
+    hos_oot_coop_players_start();
+    refuse_alloc = 1;
+    they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
+    for (int i = 0; i < 5; i++) frame(16);
+    CHECK(allocations == 1 && !P.blocks && !calls[FN_CREATE] && P.storage_failed && logged("no bodies are created this start"));
     printf("coop players: the game's side: asked for, taken, placed, deleted; nothing while not played or in an event; counts say what was made and deleted\n");
 }
 
@@ -1056,6 +1096,7 @@ int main(int argc, char **argv) {
     messages();
     slow();
     clock_bounds();
+    interpolation_bounds();
     if (argc < 2) { fprintf(stderr, "usage: %s <steps file>\n", argv[0]); return 2; }
     game_side(argv[1]);
     if (failures) { fprintf(stderr, "%d checks failed\n", failures); return 1; }

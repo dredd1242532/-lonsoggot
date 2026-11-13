@@ -30,6 +30,8 @@ int coop_players_receive(CoopPlayers *p, int from, const uint8_t *bytes, size_t 
         p->refused++;
         return 0;
     }
+    // Honest senders use atan2. Normalize other finite rotations before subtraction can overflow in interpolation.
+    if (fabsf(pos.yaw) > 3.14159265f) pos.yaw = remainderf(pos.yaw, 6.28318531f);
     CoopPlayerTrack *r = &p->r[from];
     const int fresh = coop_pos_fresh(&r->seen, p->session[from], pos.pseq, now_ms);
     if (!fresh) {   // sent again, or older than the last one taken
@@ -85,7 +87,8 @@ static void place_at(const CoopPlayerTrack *r, uint32_t now, CoopPos *out) {
             *out = *a;
             continue;
         }
-        const float f = b->t_ms == a->t_ms ? 1.0f : (float)(int32_t)(t - a->t_ms) / (float)(int32_t)(b->t_ms - a->t_ms);
+        const int32_t span = (int32_t)(b->t_ms - a->t_ms);
+        const float f = span > 0 ? fminf(1.0f, fmaxf(0.0f, (float)(int32_t)(t - a->t_ms) / (float)span)) : 1.0f;
         *out = f < 0.5f ? *a : *b;
         // a map change between the two, or one of them in no map (it carries no place): no place between them
         if (strcmp(a->area, b->area) || !(a->flags & b->flags & COOP_POS_IN_WORLD)) return;
@@ -93,7 +96,7 @@ static void place_at(const CoopPlayerTrack *r, uint32_t now, CoopPos *out) {
         out->yaw = turn_between(a->yaw, b->yaw, f);
         for (int i = 0; i < out->nslots && i < a->nslots && i < b->nslots; i++)
             if (!strcmp(a->slot[i].node, b->slot[i].node) && b->slot[i].frame >= a->slot[i].frame)
-                out->slot[i].frame = a->slot[i].frame + (b->slot[i].frame - a->slot[i].frame) * f;
+                out->slot[i].frame = (float)((double)a->slot[i].frame + ((double)b->slot[i].frame - a->slot[i].frame) * f);
         return;
     }
 }
