@@ -111,7 +111,7 @@ def say(*words):
 # (longshot) what this builder writes at the top of a game folder (and in its bin): a link at one of these names, which a folder
 # from elsewhere can hold (an update builds into the folder as it is), was written through, and the file or folder it named
 # rewritten. tests/test_game_folder_links.py checks the list against the names this file joins to the folder
-FOLDER_WRITES = ["bin", "image.bin", "longshot_version.txt", "language.txt", "longshot.png", "longshot_pipelines.bin",
+FOLDER_WRITES = ["bin", "image.bin", "longshot_version.txt", "longshot_options.ini", "language.txt", "longshot.png", "longshot_pipelines.bin",
                  "longshot_pipeline_states_shipped.bin", "longshot_shaders.bin", "prompts", "ngx", "ffx", "romfs", ".game",
                  ".longshot_exefs", ".longshot_romfs", ".longshot_romfs_checked", ".longshot_romfs_heads",
                  ".longshot_write_check"]
