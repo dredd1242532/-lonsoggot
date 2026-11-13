@@ -403,7 +403,6 @@ static void check_menu_case(const char* name) {
     std::printf("PASS: Co-op menu %s\n", name);
 }
 int main(int argc, char** argv) {
-    check_presence_accept();
     if (argc == 2) { check_menu_case(argv[1]); return 0; }
     const unsigned text_prompts = (1u << ui::kLeftRight) | (1u << ui::kPaste) | (1u << ui::kConfirm) | (1u << ui::kBack);
     CHECK(edit_prompts(coop_name_field, false) == text_prompts);
@@ -675,7 +674,7 @@ int main(int argc, char** argv) {
     room.duel_diagnostic = 0;
     CHECK(!coop_row_shown(row(kCoopDuel), room));
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
-    for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
+    for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer", "presence"}) check_menu_case(name);
 #ifdef COOP_MENU_REAL_ENGINE
     for (const char* name : {"admission", "removal", "pools", "charter-rules", "admission-rules", "admission-pools"}) check_menu_case(name);
 #endif
