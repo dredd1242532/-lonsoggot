@@ -368,24 +368,44 @@ static int part_folder(const Part *p, wchar_t *rel, int n) {
    is moved over from it instead of downloaded: that version is deleted after the install anyway) */
 /* Portable updates keep the old installation usable until publication; copied parts belong only to staging. */
 static int copy_part_tree(const wchar_t *from, const wchar_t *to) {
-    const DWORD attributes = GetFileAttributesW(from);
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
-    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) return CopyFileW(from, to, TRUE) != 0;
-    if (!CreateDirectoryW(to, NULL)) return 0;
-    wchar_t pattern[MAX_PATH];
-    if (!hb_home_join(pattern, MAX_PATH, from, L"*")) return 0;
-    WIN32_FIND_DATAW entry;
-    HANDLE find = FindFirstFileW(pattern, &entry);
-    if (find == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND;
+    /* (paths past MAX_PATH: the builder zip's deepest file is 163 characters below its folder, so a zip unpacked a little
+       deep failed here with "Could not copy the Longshot Builder". An absolute path gets the \\?\ form (\\?\UNC\ for a
+       share), which Windows' file calls take up to 32767 characters, in heap buffers; a path already in it is kept) */
+    enum { CAP = 32768 };
+    wchar_t *buf = malloc(4 * CAP * sizeof *buf);
+    if (!buf) return 0;
+    wchar_t *src = buf, *dst = buf + CAP, *source = buf + 2 * CAP, *target = buf + 3 * CAP;
+    const wchar_t *in[2] = {from, to};
+    wchar_t *out[2] = {src, dst};
     int ok = 1;
-    do {
-        if (!wcscmp(entry.cFileName, L".") || !wcscmp(entry.cFileName, L"..")) continue;
-        wchar_t source[MAX_PATH], target[MAX_PATH];
-        if (!hb_home_join(source, MAX_PATH, from, entry.cFileName) ||
-            !hb_home_join(target, MAX_PATH, to, entry.cFileName) || !copy_part_tree(source, target)) { ok = 0; break; }
-    } while (FindNextFileW(find, &entry));
-    if (ok && GetLastError() != ERROR_NO_MORE_FILES) ok = 0;
-    FindClose(find);
+    for (int i = 0; i < 2 && ok; i++) {
+        const wchar_t *p = in[i], *prefix = L"", *rest = p;
+        if (wcsncmp(p, L"\\\\?\\", 4)) {
+            if (p[0] && p[1] == L':' && p[2] == L'\\') prefix = L"\\\\?\\";
+            else if (p[0] == L'\\' && p[1] == L'\\') prefix = L"\\\\?\\UNC", rest = p + 1;
+        }
+        ok = wcslen(prefix) + wcslen(rest) < CAP;
+        if (ok) wcscpy(out[i], prefix), wcscat(out[i], rest);
+    }
+    const DWORD attributes = ok ? GetFileAttributesW(src) : INVALID_FILE_ATTRIBUTES;
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) ok = 0;
+    else if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) ok = CopyFileW(src, dst, TRUE) != 0;
+    else if (!CreateDirectoryW(dst, NULL) || !hb_home_join(source, CAP, src, L"*")) ok = 0;
+    else {
+        WIN32_FIND_DATAW entry;
+        HANDLE find = FindFirstFileW(source, &entry);
+        if (find == INVALID_HANDLE_VALUE) ok = GetLastError() == ERROR_FILE_NOT_FOUND;
+        else {
+            do {
+                if (!wcscmp(entry.cFileName, L".") || !wcscmp(entry.cFileName, L"..")) continue;
+                if (!hb_home_join(source, CAP, src, entry.cFileName) ||
+                    !hb_home_join(target, CAP, dst, entry.cFileName) || !copy_part_tree(source, target)) { ok = 0; break; }
+            } while (FindNextFileW(find, &entry));
+            if (ok && GetLastError() != ERROR_NO_MORE_FILES) ok = 0;
+            FindClose(find);
+        }
+    }
+    free(buf);
     return ok;
 }
 
