@@ -298,6 +298,10 @@ and changes back between scans of that slice is not reported. With continuously 
 full pass takes `ceil(total table slots / 4096)` presents, which bounds detection delay; delivery also waits for the
 subscriber's cadence and any pending sample (the fixture's four 2049-slot tables take three presents, and real table
 sizes and cost have not been measured).
+Read `control: oot changes scan:` in `longshot_log.txt` after the first complete set of change baselines.
+The line gives the Bool, Int, Enum and UInt slot counts, their sum, the slice size and presents per full pass.
+It is written once, then again only after a table size changes and its new baseline is complete. This makes the
+real-table delay visible in an ordinary run; it is not a frame-time cost measurement.
 
 A `flags` or `changes` subscription can read any GameDataMgr value, the save's whole flag state, without
 `HOS_CONTROL_MEM`. This is part of what a same-user client can see when the control bridge is enabled.

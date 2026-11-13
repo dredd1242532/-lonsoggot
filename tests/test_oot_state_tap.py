@@ -108,6 +108,17 @@ static void *hos_guest_range(uint64_t a, uint64_t n) {
     return NULL;
 }
 static void scan_probe(void);
+static unsigned scan_log_count;
+static char scan_log[256];
+static void hos_log(const char *fmt, ...) {
+    CHECK(!snapshot_depth);
+    va_list args;
+    va_start(args, fmt);
+    const int n = vsnprintf(scan_log, sizeof scan_log, fmt, args);
+    va_end(args);
+    CHECK(n >= 0 && (size_t)n < sizeof scan_log);
+    scan_log_count++;
+}
 '''
 
 FIXTURE_MAIN = r'''
@@ -338,6 +349,9 @@ static void shared_scan_cases(void) {
         measuring_tap = 0;
         CHECK(scan_calls == 1 && scan_visits <= STATE_SCAN_SLOTS);
         CHECK(scan_visits == (f % 3 ? 4096u : 4u));
+        CHECK(scan_log_count == (f < 3 ? 0u : 1u));
+        if (f >= 3)
+            CHECK(!strcmp(scan_log, "control: oot changes scan: Bool=2049 Int=2049 Enum=2049 UInt=2049 slots=8196 slice=4096 presents=3"));
         if (f == 3) allocations = tap_allocations;
         if (f > 3) CHECK(tap_allocations == allocations);
         char first[HOS_CONTROL_OOT_JSON], next[HOS_CONTROL_OOT_JSON];
@@ -347,6 +361,27 @@ static void shared_scan_cases(void) {
             CHECK(!strcmp(first, next));
         }
     }
+    /* Re-establishing the same sizes must not repeat the line; a completed resized baseline must. */
+    for (int t = 0; t < STATE_TRACKED; t++) state_seen[t].valid = 0;
+    for (int i = 0; i < 3; i++) {
+        StateChanges discard = {0};
+        state_scan(large, &discard);
+        CHECK(scan_log_count == 1);
+    }
+    const uint64_t size_at = large + state_kind[KIND_BOOL].at + 36;
+    w32(size_at, size - 1);
+    for (int i = 0; i < 6; i++) {
+        StateChanges discard = {0};
+        state_scan(large, &discard);
+        CHECK(scan_log_count == (i < 2 ? 1u : 2u));
+    }
+    CHECK(!strcmp(scan_log, "control: oot changes scan: Bool=2048 Int=2049 Enum=2049 UInt=2049 slots=8195 slice=4096 presents=3"));
+    w32(size_at, size);
+    for (int i = 0; i < 3; i++) {
+        StateChanges discard = {0};
+        state_scan(large, &discard);
+    }
+    CHECK(scan_log_count == 3);
     /* A mid-slice size change discards the diff; the next pass resets its baseline. */
     w8(values[0], 1);
     tear_at = 1000, tear_target = large + state_kind[KIND_BOOL].at + 36, tear_value = size - 1;
@@ -554,7 +589,7 @@ MUTATIONS = tuple("drop-" + field for field in CORE_FIELDS) + (
     "resized-table", "replace", "unsubscribe", "disconnect", "pending", "retained", "json-cap", "flag-validation",
     "changes-validation", "hook", "demand-guard", "due-guard", "status-demand", "status-fresh", "status-cancel",
     "scan-budget", "scan-sharing", "scan-lock", "scan-recheck", "scan-allocation", "watch-generation",
-    "status-types", "utf8")
+    "status-types", "utf8", "scan-log", "scan-log-repeat", "scan-log-size", "scan-log-round")
 
 
 def mutate_sources(tap, control, mode):
@@ -644,6 +679,15 @@ def mutate_sources(tap, control, mode):
                    "(void)ticket; /* answer with an old snapshot before demand is fulfilled */")
     elif mode == "status-cancel":
         tap = once(tap, "state_waiters--;", "(void)ticket; /* unanswered demand leaked */")
+    elif mode == "scan-log":
+        tap = within(tap, "static void state_log_scan(", 'hos_log("control:', 'if (0) hos_log("control:')
+    elif mode == "scan-log-repeat":
+        tap = once(tap, "if (!memcmp(reported, sizes, sizeof sizes)) return;", "/* mutation: repeat each pass */")
+    elif mode == "scan-log-size":
+        tap = once(tap, "if (!memcmp(reported, sizes, sizeof sizes)) return;",
+                   "if (reported[0]) return; /* mutation: ignore changed table sizes */")
+    elif mode == "scan-log-round":
+        tap = once(tap, "(total + STATE_SCAN_SLOTS - 1) / STATE_SCAN_SLOTS", "total / STATE_SCAN_SLOTS")
     elif mode == "scan-budget":
         tap = once(tap, "unsigned budget = STATE_SCAN_SLOTS;", "unsigned budget = STATE_SCAN_SLOTS * 8;")
     elif mode == "scan-sharing":
@@ -1190,6 +1234,7 @@ def main():
             fixture = None
             try:
                 fixture = Fixture(exe, address, env, errors)
+                print("PASS: scan log reports ceil(8196 / 4096) = 3 presents once, then only after a size change")
                 socket_cases(fixture, client_module, address)
                 demand_cases(fixture, client_module, address)
             except BaseException:

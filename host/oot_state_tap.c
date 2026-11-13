@@ -216,6 +216,8 @@ static int state_camera(double *yaw) {
 
 static const int state_tracked[] = {KIND_BOOL, KIND_INT, KIND_ENUM, KIND_UINT};
 #define STATE_TRACKED (int)(sizeof state_tracked / sizeof state_tracked[0])
+/* Smaller slices reduce work per present but delay detection. Judge changes by measured frame cost and the
+   full-pass delay reported below, not the slot budget alone. */
 #define STATE_SCAN_SLOTS 4096u
 typedef struct { uint32_t key, value; int kind; } StateChange;
 typedef struct { StateChange item[32]; unsigned n, more; } StateChanges;
@@ -229,6 +231,21 @@ typedef struct {
 } StateSeen;
 static StateSeen state_seen[STATE_TRACKED];
 static int state_scan_kind;
+
+static void state_log_scan(void) {
+    static uint32_t reported[STATE_TRACKED];
+    uint32_t sizes[STATE_TRACKED], total = 0;
+    for (int t = 0; t < STATE_TRACKED; t++) {
+        if (!state_seen[t].valid) return;
+        sizes[t] = state_seen[t].table.size;
+        total += sizes[t];
+    }
+    if (!memcmp(reported, sizes, sizeof sizes)) return;
+    memcpy(reported, sizes, sizeof sizes);
+    hos_log("control: oot changes scan: Bool=%u Int=%u Enum=%u UInt=%u slots=%u slice=%u presents=%u",
+            sizes[0], sizes[1], sizes[2], sizes[3], total, STATE_SCAN_SLOTS,
+            (total + STATE_SCAN_SLOTS - 1) / STATE_SCAN_SLOTS);
+}
 
 static void state_change(StateChanges *to, StateChange value) {
     for (unsigned i = 0; i < to->n; i++)
@@ -306,6 +323,7 @@ static int state_scan(uint64_t mgr, StateChanges *out) {
     }
     if (state_scan_kind < STATE_TRACKED) return 1;
     state_scan_kind = 0;
+    state_log_scan();
     return 0;
 }
 
