@@ -1262,6 +1262,9 @@ Row rows[] = {
      "during gameplay. Cutscenes keep their own view.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
+    {TAB_GAMEPLAY, "Skip cutscenes (Experimental)", &opts.allow_cutscene_skip, 0, 1, 1, tx_onoff,
+     "Experimental and unfinished. Can skip the opening movie. Use the normal dialogue-skip shortcut to show the skip prompt, then the displayed button "
+     "to confirm. It may overlap dialogue; some conversations and chest sequences remain unsupported.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text size", &opts.text_size, 0, 4, 1, tx_text_size,
      "How large the text of dialogue, Navi and signs is drawn.", hn_text_size, false, true},
     {TAB_GAMEPLAY, "Microphone", &opts.mic, 0, 2 + kMaxMics, 1, tx_mic,
@@ -1679,6 +1682,7 @@ int tab_row_to_global(int t, int local_idx) {
     return 0;
 }
 
+std::atomic<int> cutscene_skip_now{0};
 std::atomic<bool> open_now{false};
 bool tune_mode = false;
 bool menu_refresh = false;
@@ -1750,6 +1754,7 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.vsync) return "vsync";
     // (rows renamed since their values were first saved keep their keys: an options file from before still loads)
     if (r.value == &opts.resolution) return "resolution";
+    if (r.value == &opts.allow_cutscene_skip) return "skip_unskippable_cutscenes";
     if (r.value == &opts.fps_cap) return "frame_rate_cap";   // (host/nn_vi.c reads it at the start, then HOS_OPT_FPS_CAP)
     if (r.value == &opts.upscale) return "upscaling";
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
@@ -2367,6 +2372,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         temporal_reset_failure();
     if (r.value == &opts.descriptor_reuse || r.value == &opts.sampler_cache)   // (longshot: in play, vk_draw.cpp)
         menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);
+    cutscene_skip_now.store(opts.allow_cutscene_skip, std::memory_order_relaxed);
     prompts_at_once(r);   // (longshot)
     {   // (a row that takes a restart, or a preset that sets one: asked again at the next close)
         int now[mr::kMax];
@@ -4147,6 +4153,7 @@ void menu_init() {
     if (!has_vram_budget) opts.vram_budget = preset_vram_budget(opts.budget);   // (a file from before the row)
     vram_budget_sync();
     menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);   // (the Debug rows that apply in play: what was loaded)
+    cutscene_skip_now.store(opts.allow_cutscene_skip, std::memory_order_relaxed);
     fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
     // (the environment over the saved rows, for this run only: env_override, save)
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
@@ -4231,6 +4238,7 @@ void menu_set_gpu_count(int count) {
 }
 
 bool menu_is_open() { return open_now.load(std::memory_order_relaxed); }
+int menu_allow_cutscene_skip() { return cutscene_skip_now.load(std::memory_order_relaxed); }
 bool scene_tonemap_on() { return dev.hdr && opts.hdr == 2 && opts.hdr_tonemap == 1; }
 // (the tools off on the Debug tab: flight, the free camera and heart protection put away; -1, heart protection never set, is the
 // host's own HOS_OOT_PROTECT_HEARTS)

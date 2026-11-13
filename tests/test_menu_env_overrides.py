@@ -37,6 +37,7 @@ def definition(text, name):
 
 FIXTURE = r"""
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -65,6 +66,7 @@ static int setenv(const char* name, const char* value, int) { return _putenv_s(n
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); return 1; } } while (0)
 /* OPTIONS */
 Options opts;
+std::atomic<int> cutscene_skip_now{0};
 /* TABS */
 /* ROW */
 /* OUTPUTS */

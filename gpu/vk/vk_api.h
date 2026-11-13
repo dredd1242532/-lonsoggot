@@ -56,6 +56,8 @@ enum { HOS_OPT_SKIP_OPENING = 52 };
 enum { HOS_OPT_FPS_CAP = 53 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* Gameplay's authored cutscene skip override: 0 preserves the native permission. */
+enum { HOS_OPT_ALLOW_CUTSCENE_SKIP = 56 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
