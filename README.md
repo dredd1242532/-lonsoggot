@@ -452,6 +452,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
+| | Developer: Intel shader compiles | One at a time, Side by side (after a restart; Intel graphics on Windows only) | One at a time |
 
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile
   and the video memory limits for a card with that much memory. It leaves the Upscaler and Frame generation as
@@ -1003,7 +1004,8 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 in `longshot_options.ini`). It applies only while Debug tools is on: off, Link takes Normal damage, and the saved
 choice returns when the tools do. Heart protection takes priority while enabled. Half scales the full hit before life
 is clamped to zero: with two quarter hearts left, a four-quarter hit still kills. The tab's Developer section, always
-shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows.
+shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows, and on Intel graphics on
+Windows the Intel shader compiles row.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then
@@ -1042,8 +1044,13 @@ behind the sound. `HOS_VIDEO_NO_CATCHUP=1` skips nothing. `HOS_VIDEO_ACQUIRE_TRI
 of the clock. After a movie stops or is flushed, and nothing new has been submitted, there is no wait.
 
 On Windows, Intel's compiler (UHD and Arc) is entered by one thread. A fault inside it leaves that shader out instead
-of closing the game. The first scene can still pause while shaders compile, especially when they were not prepared at
-the build. `RX_VK_NO_INTEL_SERIAL=1` builds them side by side again. NVIDIA, AMD, and Intel on other systems are unchanged.
+of closing the game. This covers the game's shaders and the renderer's own (texture decoding, upscaling, frame
+generation). The first scene can still pause while shaders compile, especially when they were not prepared at the build.
+The Debug tab's **Intel shader compiles** row (Developer section, shown on Intel graphics on Windows) chooses: **One at
+a time**, the default and the safe choice on a CPU with 4 cores or fewer, or **Side by side**, faster builds on a CPU
+with many cores, but Intel's driver can crash the game while building them. It applies after a restart.
+`RX_VK_NO_INTEL_SERIAL=1` is Side by side for a run, whatever the row says. NVIDIA, AMD, and Intel on other systems are
+unchanged.
 
 `RX_VK_SKIP_CODE=<prefix,...>` leaves out the draws of every program with a stage whose native code key starts with one
 of the prefixes (the keys the log prints after "its code:"). On a Steam Deck, `RX_VK_SKIP_CODE=2c56dc1006942f74`

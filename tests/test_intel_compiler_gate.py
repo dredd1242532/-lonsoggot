@@ -4,7 +4,10 @@ Intel UHD on Windows (igvk64) read address 0x170 during the first scene and the 
 in longshot_vk.dll and then the thread start, and the log had no "driver faulted compiling" line, so the call was not
 inside guarded_graphics or guarded_compute. vkCreateShaderModule (translation, the movie and upscale helpers, a masked
 clear) and gpl_link's vkCreateGraphicsPipelines were not guarded, and graphics pipelines were still built side by side.
-NVIDIA, AMD, and Intel on other systems are not held. RX_VK_NO_INTEL_SERIAL leaves them side by side.
+NVIDIA, AMD, and Intel on other systems are not held. The Debug tab's Intel shader compiles row (Intel graphics on
+Windows only), or RX_VK_NO_INTEL_SERIAL over it, leaves them side by side. The renderer's own compute pipelines (ASTC, BC
+and unswizzle, write-back diff, reactive mask, FSR 3.1 and its inputs and interpolation, frame generation, the
+cooperative-matrix check) are guarded and held too: one of them built beside a worker's is the same two threads in it.
 
 python -I -B tests/test_intel_compiler_gate.py
 """
@@ -42,7 +45,20 @@ def main():
     internal = (ROOT / "gpu/vk/vk_internal.h").read_text(encoding="utf-8")
     gate = block(internal, "struct IntelDriverGate {")
     need("#ifdef _WIN32" in gate, "the lock is not limited to Windows")
-    need('env_on("RX_VK_NO_INTEL_SERIAL")' in gate, "RX_VK_NO_INTEL_SERIAL does not turn the lock off")
+    need("static const bool off = intel_compiles_side_by_side();" in gate, "the Intel shader compiles row does not turn the lock off")
+    menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
+    need("bool intel_compiles_side_by_side() { return opts.intel_compiles != 0; }" in menu,
+         "the lock does not read the Intel shader compiles row")
+    need('if (const char* e = getenv("RX_VK_NO_INTEL_SERIAL")) env_override(&opts.intel_compiles, !env_value_off(e));'
+         in block(menu, "void menu_init() {"), "RX_VK_NO_INTEL_SERIAL does not turn the lock off")
+    need('{TAB_DEBUG, "Intel shader compiles", &opts.intel_compiles, 0, 1, 1, tx_intel_compiles,' in menu,
+         "no Intel shader compiles row")
+    shown = block(menu, "bool intel_compiler_row() {")
+    need("#ifdef _WIN32" in shown and "dev.props.vendorID == 0x8086" in shown, "the row shows where the lock never holds")
+    need("(v != &opts.intel_compiles || intel_compiler_row())" in block(menu, "bool row_shown(int i) {"),
+         "the row is not limited to Intel graphics on Windows")
+    need('(value == &opts.intel_compiles && getenv("RX_VK_NO_INTEL_SERIAL"))' in block(menu, "bool row_fixed(const int* value) {"),
+         "the row can be changed while RX_VK_NO_INTEL_SERIAL holds it")
     need("dev.props.vendorID != 0x8086" in gate, "a vendor other than Intel takes the lock")
     need("std::unique_lock<std::mutex>" in gate, "the compiler is not entered by one thread")
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
@@ -76,6 +92,16 @@ def main():
     need("guarded_shader_module" in actor and "guarded_graphics" in actor, "the actor-motion pipeline is unguarded")
     need("vkCreateShaderModule" not in pipe and "vkCreateComputePipelines" not in pipe, "make_pipeline still calls the driver raw")
     need("vkCreateGraphicsPipelines" not in actor, "make_actor_pipeline still calls the driver raw")
+    for name in ("vk_texture", "vk_memory", "vk_reactive", "vk_fsr3", "vk_fsr3_inputs", "vk_fsr3fi", "vk_framegen",
+                 "vk_coopmat"):
+        src = (ROOT / "gpu/vk" / (name + ".cpp")).read_text(encoding="utf-8")
+        need("vkCreateShaderModule(" not in src and "vkCreateComputePipelines(" not in src,
+             name + ".cpp still calls the compiler with no guard")
+        need("IntelDriverGate gate;" in src, name + ".cpp does not take the lock")
+    fsr3 = (ROOT / "gpu/vk/vk_fsr3.cpp").read_text(encoding="utf-8")
+    for at in [i for i in range(len(fsr3)) if fsr3.startswith("IntelDriverGate gate;", i)]:
+        held = brace_block(fsr3, fsr3.rindex("{", 0, at))
+        need("shared_compute_pipeline(" not in held, "FSR 3.1 holds the lock across shared_compute_pipeline (it takes it too)")
     print("Intel's compiler on Windows is entered by one thread, and a fault leaves that shader out: ok")
 
 

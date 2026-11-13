@@ -123,17 +123,19 @@ extern Device dev;
 /// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
 /// during the first scene's compiles (two frames in longshot_vk.dll, and no "driver faulted compiling" line, so the
 /// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
-/// Other vendors, and Intel on other systems, are not held. RX_VK_NO_INTEL_SERIAL: side by side, as before.
+/// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, or
+/// RX_VK_NO_INTEL_SERIAL=1 over it: side by side, as before.
+bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
 struct IntelDriverGate {
     std::unique_lock<std::mutex> hold;
     IntelDriverGate() {
 #ifdef _WIN32
-        static const bool off = env_on("RX_VK_NO_INTEL_SERIAL");
+        static const bool off = intel_compiles_side_by_side();
         if (off || dev.props.vendorID != 0x8086) return;
         static std::mutex mu;
         static std::once_flag once;
         std::call_once(once, [] {
-            logf("vk: Intel's compiler is entered by one thread (RX_VK_NO_INTEL_SERIAL: side by side)");
+            logf("vk: Intel's compiler is entered by one thread (Intel shader compiles row, RX_VK_NO_INTEL_SERIAL: side by side)");
         });
         hold = std::unique_lock<std::mutex>(mu);
 #endif
