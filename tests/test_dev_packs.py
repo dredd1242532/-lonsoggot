@@ -427,6 +427,43 @@ def test_predict_budget(d):
               len(envs) == 1 and envs[0].get("RX_VK_PREDICT_S") == "45")
 
 
+def test_outputs_before_prepare(d):
+    """The base's outputs are what make_game.py made, recorded before the preparation: a file the preparation writes beside the
+    game (here one no list names) is never an output, so no pack can delete it; the preparation gets the Compile shaders level"""
+    calls = []
+
+    def fake_make_game(tree, b, work, game, env):
+        calls.append(("make_game", env.get("LONGSHOT_NO_PREPARE")))
+        for m in packs.MODULES:
+            write(Path(game) / m[0], b"built")
+            if m[1]:
+                write(Path(work) / "sa" / "build" / m[1], b"map")
+        write(Path(game) / "longshot_shaders.bin", b"seed")
+
+    def fake_run(argv, **kw):
+        calls.append(("prepare", list(argv[1:])))
+        game = Path(kw["cwd"])
+        write(game / "mkw_vk_pipelines.stamp", b"stamp")
+        write(game / "longshot_some_future_cache.dat", b"a file a later renderer writes")
+        return packs.subprocess.CompletedProcess(argv, 0)
+    saved = packs.make_game, packs.changed_files, packs.git, packs.subprocess.run
+    packs.make_game, packs.changed_files, packs.git = fake_make_game, (lambda tree, commit: set()), (lambda tree, *a: "c" * 40)
+    packs.subprocess.run = fake_run
+    try:
+        packs.main(["base", str(d / "b"), "--romfs", "r", "--exefs", "e", "--tree", str(ROOT)])
+    finally:
+        packs.make_game, packs.changed_files, packs.git, packs.subprocess.run = saved
+    outputs = json.loads((d / "b" / "base.json").read_text())["outputs"]
+    check("make_game.py builds without preparing (%s)" % calls, calls and calls[0] == ("make_game", "1"))
+    if not packs.CROSS:
+        prep = [c for c in calls if c[0] == "prepare"]
+        check("the preparation runs once, after the build, with the Compile shaders level (%s)" % prep,
+              len(prep) == 1 and prep[0][1][:1] == ["--prepare-shaders"] and "--compile-shaders" in prep[0][1])
+        check("what the preparation wrote is not an output (%s)" % outputs,
+              "mkw_vk_pipelines.stamp" not in outputs and "longshot_some_future_cache.dat" not in outputs)
+    check("what make_game.py made is (%s)" % outputs, "longshot_shaders.bin" in outputs)
+
+
 def test_seed(d):
     """--seed copies every cache the seed folder holds, the play files too (recent pipelines can live only there), and
     nothing else"""
@@ -525,7 +562,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="longshot-dev-packs-") as d:
         d = Path(d)
         for name, t in (("mc", test_module_changed), ("pf", test_pack_folders), ("rt", test_generated_and_runtime),
-                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy)):
+                        ("guard", test_guards), ("inside", test_resolves_inside), ("predict", test_predict_budget), ("outputs", test_outputs_before_prepare), ("seed", test_seed), ("warm", test_warm), ("busy", test_busy)):
             (d / name).mkdir()
             t(d / name)
     print("test_dev_packs: ok")

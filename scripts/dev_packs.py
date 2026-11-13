@@ -298,9 +298,13 @@ def prepare(game, b):
     if CROSS:
         print("the shaders were not prepared now (a Windows game built on Linux): the game prepares them at its first start", flush=True)
         return
-    print("+ %s --prepare-shaders%s" % (GAME, " (RX_VK_PREDICT_S=%d)" % b["predict_s"] if b.get("predict_s") else ""), flush=True)
-    subprocess.run([os.path.join(game, GAME), "--prepare-shaders"], cwd=game, check=True,
-                   env=dict(load_make_game().game_env(), **base_env(b.get("predict_s", 0))))
+    mg = load_make_game()
+    # (make_game.py's Compile shaders level, as its own preparation passes it: the folder's choice, else Most; none on a tree
+    # from before the levels)
+    level = (getattr(mg, "folder_compile_level", lambda g: None)(game) or "most") if hasattr(mg, "COMPILE_LEVELS") else None
+    cmd = [os.path.join(game, GAME), "--prepare-shaders"] + (["--compile-shaders", level] if level else [])
+    print("+ %s%s" % (" ".join([GAME] + cmd[1:]), " (RX_VK_PREDICT_S=%d)" % b["predict_s"] if b.get("predict_s") else ""), flush=True)
+    subprocess.run(cmd, cwd=game, check=True, env=dict(mg.game_env(), **base_env(b.get("predict_s", 0))))
 
 
 def make_game(tree, b, work, game, env):
@@ -396,12 +400,13 @@ def cmd_base(a):
     b = {"commit": git(tree, "rev-parse", "HEAD"), "work": work, "game": game, "romfs": os.path.abspath(a.romfs),
          "exefs": os.path.abspath(a.exefs), "seeded_from": a.seed, "language": a.language, "predict_s": a.predict_s}
     t = time.time()
-    # (a budget: make_game.py builds without preparing, then the preparation runs here with it, so it never reaches the lift key)
-    make_game(tree, b, work, game, {"LONGSHOT_NO_PREPARE": "1"} if a.predict_s > 0 else {})
-    if a.predict_s > 0:
-        prepare(game, b)
-    b["build_s"] = round(time.time() - t)
+    # (make_game.py builds without preparing; the outputs are recorded then, before the preparation, so nothing it writes beside
+    # the game (caches, markers, files the renderer adds later) is ever taken for a build's output; then the preparation runs
+    # here, with the budget if one is set, which so never reaches make_game.py's lift key)
+    make_game(tree, b, work, game, {"LONGSHOT_NO_PREPARE": "1"})
     b["outputs"] = build_outputs(game)
+    prepare(game, b)
+    b["build_s"] = round(time.time() - t)
     for m in MODULES:   # (the maps beside the modules, for profilers)
         if m[1]:
             shutil.copy2(os.path.join(work, "sa", "build", m[1]), os.path.join(game, m[1]))

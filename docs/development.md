@@ -377,7 +377,8 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   copied (the game writes its caches), and the packs' files over them. Two packs that bring the same file are
   refused (merge the branches and build one pack); a pack built on another base is refused too, so the game and
   the renderer always come from one base (`MKWVK_API_VERSION`).
-- **`warm`** plays a runtime with no pack once per `--run` command (`{runtime}` in it is the runtime's folder),
+- **`warm`** plays a runtime with no pack once per `--run` command (`{runtime}` in it is the runtime's folder; the command
+  is split as a POSIX shell would, so on Windows write its paths with forward slashes, `C:/Games/...`),
   copies the caches play made or grew (pipelines, play files, programs) back into the base's game folder, and
   deletes the runtime, so every later runtime starts warm for those scenes. Only cache files are copied.
 - **One job at a time per base:** `base`, `pack`, `rt` and `warm` hold `<base>/dev_packs.busy` while they run.
