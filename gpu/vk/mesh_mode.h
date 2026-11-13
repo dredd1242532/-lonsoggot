@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // (longshot, #1001, #1971) How the game's task and mesh programs run: 0 Automatic (the GPU's own mesh shaders where it has
-// them, the compute fallback where not, and for the task + mesh draws of the GPUs vk_main.cpp names), 1 Native (no fallback
-// where there are mesh shaders), 2 Compute (the fallback on every GPU). A launch switch, RX_VK_MESH_SHADERS: the Graphics
-// tab's Mesh shaders row is gone, as changing it translated every shader again and dropped the pipeline caches for no gain a
-// player could see. Its old line in longshot_options.ini, mesh_shaders=, no longer chooses. Nothing of Vulkan here:
-// tests/test_mesh_mode_switch.py.
+// them, the compute fallback where not, and for the task + mesh draws of the GPUs task_mesh_fallback_default names on
+// Windows), 1 Native (no fallback where there are mesh shaders), 2 Compute (the fallback on every GPU). A launch switch,
+// RX_VK_MESH_SHADERS: the Graphics tab's Mesh shaders row is gone, as changing it translated every shader again and
+// dropped the pipeline caches for no gain a player could see. Its old line in longshot_options.ini, mesh_shaders=, no
+// longer chooses. Nothing of Vulkan here: tests/test_mesh_mode_switch.py, tests/test_task_mesh_fallback_devices.py.
 #pragma once
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -39,6 +40,30 @@ inline bool old_ini_choice(const char* line, int* value) {
     if (std::strncmp(line, "mesh_shaders=", 13)) return false;
     *value = std::atoi(line + 13);
     return *value == 1 || *value == 2;   // (what the row read: 0 to 2, anything else Automatic)
+}
+
+/// (longshot, issue 996) The GPUs whose task + mesh draws take the compute fallback by default; vk_main.cpp asks only on
+/// Windows, where AMD's driver timed out on the native task + mesh path of RDNA 2. Navi 22 first, then Navi 21: on an RX
+/// 6800 XT (driver 0x800161) the native path lost the device within minutes at Hyrule Castle's entrance, while the
+/// fallback played 25 minutes there with none. Navi 23: an RX 6600 (driver 0x800161) lost the device on the session's
+/// first task + mesh draws (reported in Mako by sharkiix). Navi 24 has the same RDNA 2 mesh path, not tested on its own
+inline bool task_mesh_fallback_default(uint32_t vendor, uint32_t device) {
+    if (vendor != 0x1002) return false;
+    switch (device) {
+    case 0x73bf:   // Navi 21: RX 6800, 6800 XT, 6900 XT
+    case 0x73af:   // Navi 21: RX 6900 XT (XTXH boards)
+    case 0x73a5:   // Navi 21: RX 6950 XT
+    case 0x73df:   // Navi 22: RX 6700, 6700 XT, 6750 XT, 6750 GRE 12GB
+    case 0x73e0:   // Navi 23: RX 6600M
+    case 0x73e1:   // Navi 23: Radeon Pro W6600M
+    case 0x73e3:   // Navi 23: Radeon Pro W6600
+    case 0x73ef:   // Navi 23: RX 6650 XT
+    case 0x73ff:   // Navi 23: RX 6600, 6600 XT, 6600 LE
+    case 0x743f:   // Navi 24: RX 6400, 6500 XT
+        return true;
+    default:
+        return false;
+    }
 }
 
 }  // namespace mesh_rule
