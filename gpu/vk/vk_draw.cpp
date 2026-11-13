@@ -8378,6 +8378,14 @@ bool precompile_wanted() {
     if (const char* e = getenv("RX_VK_PRECOMPILE")) on = atoi(e) != 0;
     return on;
 }
+/// (longshot) RX_VK_PRECOMPILE_GRAPHICS=none: the precompile keeps no graphics pipeline ready before the title (precompile_run);
+/// =all, as before. Unset: none with the Steam Deck profile (vk_main.cpp deck_profile_on), else all. Never in a preparation's own
+/// process (LONGSHOT_PREPARE_ONLY), whose work is filling the driver's cache with them
+bool precompile_graphics_none() {
+    if (env_on("LONGSHOT_PREPARE_ONLY")) return false;
+    if (const char* e = getenv("RX_VK_PRECOMPILE_GRAPHICS")) return !strcmp(e, "none");
+    return deck_profile_on();
+}
 namespace {
 std::atomic<bool> prepare_halt{false};
 }
@@ -9083,6 +9091,17 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         std::lock_guard lk(state_mu);
         if (!state_file) state_open_locked();
     }
+    // (longshot, RX_VK_PRECOMPILE_GRAPHICS=none, the Steam Deck profile's: no graphics pipeline kept ready before the title, nor a
+    // program only they would read in; the compute programs and the mesh fallback's are, as before. The ~25,000 noted, kept
+    // ready, pushed a Steam Deck's 16 GB into earlyoom's kills; https://github.com/NotRexed/Hookshot/pull/2814 halved its memory
+    // there (7.5 to 3.8 GB) and its hitches (99 to 12). Each is made at its first draw in play instead, from the driver's own
+    // cache where it has it. The notes stay noted (notes_open_locked, above): play notes none twice)
+    const bool graphics_none = precompile_graphics_none();
+    if (graphics_none) {
+        logf("vk: precompile: graphics pipelines: none kept ready before the title (%zu noted; RX_VK_PRECOMPILE_GRAPHICS=none%s)",
+             notes.size(), getenv("RX_VK_PRECOMPILE_GRAPHICS") ? "" : ", the Steam Deck profile's");
+        notes.clear();
+    }
     std::unordered_set<uint64_t> wanted;
     for (const auto& n : notes) wanted.insert(n->prog);
     // (the compute programs: those this install's play dispatched (longshot_computes.bin) and those the shipped state list names,
@@ -9224,7 +9243,8 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     logf("vk: precompile: compute pipelines: %zu kept ready (%zu from the pipeline caches, %zu compiled now), %zu not made",
          cs_cached + cs_compiled, cs_cached, cs_compiled, cs_failed);
     // (every note built, by a run that got to its end: RX_VK_LOAD=create may load them from the caches from the next start on)
-    if (!gone_on && !prepare_stopped()) precompile_built_write(graphics_n);
+    // (none built, RX_VK_PRECOMPILE_GRAPHICS=none: no marker, which would tell RX_VK_LOAD=create they are in the caches)
+    if (!gone_on && !prepare_stopped() && !graphics_none) precompile_built_write(graphics_n);
     predicted_check();
 }
 

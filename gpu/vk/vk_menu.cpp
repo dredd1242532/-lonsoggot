@@ -946,11 +946,15 @@ void apply_auto(bool keep_own) {
     if (c.tier == 1) opts.upscale = 0, opts.sharpness = 0;   // (the plain scale, as RX_VK_LOW_SPEC: the lightest)
     opts.handheld = 0;   // (docked: the handheld profile gave a GTX 1050 a black picture; the Render resolution lightens the card)
     if (c.resolution) opts.resolution = ur::snap_render(c.upscaler, c.resolution);
-    if (own_budget) {
+    // (the Steam Deck profile: the VRAM budget row at Auto, the integrated GPU's own rule, not Minimum's cap; a budget the player
+    // set stays theirs)
+    if (own_budget || c.vram_auto) {
         opts.budget = 0;
-        opts.vram_budget = vram_budget;
+        opts.vram_budget = own_budget ? vram_budget : 0;
         vram_budget_sync();
     }
+    // (Frame generation is the player's, as with every preset, but for the Steam Deck profile's 2x; RX_VK_FRAMEGEN_MULT still wins)
+    if (c.framegen >= 0 && !getenv("RX_VK_FRAMEGEN_MULT")) opts.framegen = c.framegen;
     auto_tuned = 0;   // (chosen again: measured again in play)
     auto_tuning = {};
     opts.preset = kAutoPreset;   // (apply_preset set the tier's number)
@@ -4118,6 +4122,8 @@ void startup_screen(const StartupView* view) {
 }
 
 static bool first_start = false;   // (menu_init: no options file yet. menu_first_start_for_gpu picks the preset for the card)
+static int steam_deck_saved = -1;   // (steam_deck= in the options file: the Steam Deck profile, auto_settings.h deck_mode)
+int menu_steam_deck() { return steam_deck_saved; }
 void menu_init() {
     static bool done;
     if (done) return;
@@ -4166,6 +4172,7 @@ void menu_init() {
             if (!strcmp(line, "menu_size") && atoi(eq + 1) == 0) menu_auto = true;
             if (!strcmp(line, "auto_for")) auto_for = strtoull(eq + 1, nullptr, 16);
             if (!strcmp(line, "auto_tuned")) auto_tuned = strtoull(eq + 1, nullptr, 16);
+            if (!strcmp(line, "steam_deck")) steam_deck_saved = env_value_off(eq + 1) ? 0 : 1;
             if (!strcmp(line, "auto_steps")) {
                 int steps = 0, down = 0;
                 if (sscanf(eq + 1, "%d,%d", &steps, &down) == 2)

@@ -5584,4 +5584,8 @@ int64_t par_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+/// (longshot) The Steam Deck profile (vk_main.cpp deck_profile_decide): the command recorder on a thread of its own while
+/// RX_VK_RECORDER is unset. false: too late, the recorder's mode was read already
+bool recorder_profile_thread() { return ::mkwvk::rec::set_unset_mode(::mkwvk::rec::THREAD); }
+
 } // namespace mkwvk

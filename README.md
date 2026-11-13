@@ -346,6 +346,21 @@ report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
    reports which GPU passes take the time. That timing adds work itself, so keep the first log for the FPS comparison,
    and remove the switch afterwards. The [development guide](docs/development.md#time-and-profiles) has more switches.
 
+#### Steam Deck
+
+On a Steam Deck the game turns on its Steam Deck profile by itself: the settings that ran fastest there. With the
+Quality preset on **Auto (this PC)** it sets Minimum's scaling, **Frame generation** 2x and the **VRAM budget** Auto
+(2.5 GB with the Deck's 16 GB, not Minimum's 2.2 GB cap); whatever the preset, the renderer runs its commands on a thread
+of its own and keeps no graphics pipelines ready before the title, which ran the Deck out of memory. `RX_VK_STEAM_DECK=0`
+in `longshot_env.txt` (or a line `steam_deck=0` in `longshot_options.ini`) turns it off, and `=1` turns it on elsewhere.
+The log's `vk: Steam Deck profile:` and `Auto (this PC)` lines say what it did.
+
+The largest gain on the Deck is its GPU clock, which the game cannot set itself. In Gaming Mode, open the Quick Access
+menu (the **...** button), then **Performance**: turn on **Use per-game profile** and **Manual GPU clock control**, and
+set **GPU clock frequency** to 1600 MHz. In Kokiri Forest the game went from about 15 to about 20 frames a second (about
+28 to 39 shown with Frame generation 2x), and its slowest frames from about 81 to 46 ms. It draws about 19 W instead of
+about 8 W and ran up to 68 °C, so it suits the Deck docked or plugged in.
+
 #### Intel laptops
 
 What [#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252) changes was made from the logs of a laptop with
@@ -493,7 +508,8 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   rows yourself sets it back to Custom.
 - **Auto (this PC)**, which a first start begins on, chooses for the PC it runs on: the memory tier from the card's
   video memory (an integrated GPU, a Steam Deck or a card without mesh shaders at Minimum), DLSS on an NVIDIA RTX card
-  or FSR 4 on an AMD RX 9000 where the build has them (else the game's own upscaler). It leaves the Output resolution as
+  or FSR 4 on an AMD RX 9000 where the build has them (else the game's own upscaler), and on a Steam Deck the
+  [Steam Deck](#steam-deck) profile. It leaves the Output resolution as
   it is: on a first start the game's own 2560x1440, or the screen's size where that is smaller. In the first minute of play it then measures the GPU: while
   frames are missed with the GPU over 90% busy it lowers the Render resolution a step, and while the frame rate cap holds
   with the GPU under half busy it raises it a step, up to the best mode that still upscales (DLSS or FSR Quality, or 100%
