@@ -1717,8 +1717,21 @@ static int vc_free_for(HosThread *t) {
         if ((m >> c & 1) && !vc_owner[c]) return c;
     return -1;
 }
+/* the guest's TLS core cell follows the core the thread actually holds; a multi-bit mask has none */
+static void vc_sync_tls(HosThread *t, int c) {
+    const uint32_t mask = (uint32_t)(t->core_mask & ((1u << vc_cores()) - 1));
+    uint32_t wm = 0;
+    if (hos_thread_wrapper_mask(t, &wm) && core_tls_slot >= 0 && core_tls_slot < HOS_TLS_SLOTS &&
+        !core_tls_alias_now()) {
+        if (mask == 0 || (mask & (mask - 1)) == 0)
+            t->tls_slots[core_tls_slot] = (uint64_t)c + 1;
+        else
+            t->tls_slots[core_tls_slot] = 0;
+    }
+}
+
 /* A post-start mask change can leave the holder on a core the new mask excludes. Ask it to yield at its next
-   checkpoint; the reacquisition uses the new mask. */
+   checkpoint; the reacquisition uses the new mask. A change that keeps the same core syncs the cell now. */
 static void vc_note_mask_change(HosThread *t) {
     if (!hos_vcores_on() || !t) return;
     AcquireSRWLockExclusive(&vc_lock);
@@ -1728,6 +1741,7 @@ static void vc_note_mask_change(HosThread *t) {
         const int c = t->vc_held - 1;
         const int move = mask == 0 ? (c != vc_pref_core(t)) : !((mask >> c) & 1);
         if (move) t->vc_kick = 2;
+        else vc_sync_tls(t, c);
     }
     ReleaseSRWLockExclusive(&vc_lock);
 }
@@ -1737,6 +1751,7 @@ static void vc_take(HosThread *t, int c) {
     t->vc_last = c + 1;
     t->vc_kick = 0;
     t->vc_remask = 0;
+    vc_sync_tls(t, c);
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
