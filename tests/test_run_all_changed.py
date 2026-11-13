@@ -57,6 +57,20 @@ class ChangedTests(unittest.TestCase):
         with mock.patch.object(run_all.subprocess, "run", git):
             self.assertEqual(run_all.changed_files("origin/main"), ["nx2/a.py", "nx2/b.py", "tests/test_new.py"])
 
+    def test_the_base_is_main_on_the_remote_that_points_at_longshot(self):
+        # (forge.py adds forge for it unless a remote points there already; a GitHub-era clone's origin is GitHub)
+        cases = (("forge\thttps://git.magicbean.dev/MagicBeanDev/Longshot.git (fetch)\n"
+                  "origin\thttps://github.com/NotRexed/Hookshot.git (fetch)\n", "forge/main"),
+                 ("longshot\thttps://git.magicbean.dev/MagicBeanDev/Longshot.git (fetch)\n"
+                  "forge-fork\thttps://git.magicbean.dev/someone/Longshot.git (fetch)\n", "longshot/main"),
+                 ("origin\thttps://git.magicbean.dev/someone/Longshot.git (fetch)\n", "origin/main"))
+        for out, want in cases:
+            def git(cmd, **kw):
+                self.assertEqual(cmd[3:], ["remote", "-v"])
+                return subprocess.CompletedProcess(cmd, 0, out, "")
+            with mock.patch.object(run_all.subprocess, "run", git):
+                self.assertEqual(run_all.default_base(), want, out)
+
 
 if __name__ == "__main__":
     raise SystemExit(unittest.main(verbosity=1))
