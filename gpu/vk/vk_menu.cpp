@@ -731,6 +731,10 @@ const char* tx_text_size(int v) {
     if ((unsigned)v >= sizeof t / sizeof t[0]) return t[0];
     return t[v];
 }
+const char* tx_damage_taken(int v) {
+    static const char* const names[] = {"Half", "Normal", "Double", "Quadruple"};
+    return names[v >= 0 && v < 4 ? v : 1];
+}
 const char* tx_fov(int v) { return v == 100 ? "100% (original)" : tx_percent(v); }
 const char* tx_prompts(int v) {
     static const char* t[HOS_PROMPT_N + 1] = {"Auto", "Switch", "Xbox", "PlayStation 4", "PlayStation 5", "Steam Deck",
@@ -1275,6 +1279,9 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Field of view", &opts.fov, 50, 150, 5, tx_fov,
      "How much of the world you see: 100% is the original view. Higher is wider, lower is closer. Changes apply at once "
      "during gameplay. Cutscenes keep their own view.", nullptr, false, true},
+    {TAB_GAMEPLAY, "Damage taken", &opts.damage_taken, 0, 3, 1, tx_damage_taken,
+     "How much health Link loses from a hit. Normal is unchanged. Half rounds up to the next quarter heart. "
+     "Changes apply at once; healing is unchanged. Heart protection takes priority.", nullptr, false, true},
     {TAB_GAMEPLAY, "Text speed", &opts.text_speed, 0, 3, 1, tx_text_speed,
      "How fast the letters of dialogue and other messages appear.", hn_text_speed, false, true},
     {TAB_GAMEPLAY, "Text size", &opts.text_size, 0, 4, 1, tx_text_size,

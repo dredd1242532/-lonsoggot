@@ -348,6 +348,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Menu size | Small, Medium, Large | Medium |
 | | Game speed | Per frame, Real time | Real time |
 | | Field of view | 50% to 150%, in steps of 5; applies immediately during gameplay | 100% (original) |
+| | Damage taken | Half, Normal, Double, Quadruple (live; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Text speed | Normal, 2x, 4x, Instant | Normal |
 | | Text size | Original, 110%, 125%, 150%, 175% (dialogue, Navi and signs) | Original |
 | | Microphone | Off, Default, or each microphone by name | Default |
