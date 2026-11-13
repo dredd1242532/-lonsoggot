@@ -17,6 +17,9 @@ FIXTURE = r'''
 #include <cstring>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 bool enabled;
 int env_reads, host_reads, life_reads, logs;
 std::vector<int> order;
@@ -39,9 +42,18 @@ void logf(const char* fmt, ...) {
 }
 @BODY@
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+#endif
     if (argc != 2) return 2;
-    enabled = std::strcmp(argv[1], "on") == 0;
-    host = enabled ? &value : nullptr; // Disabled logging must not touch the host clock.
+    const bool before_init = std::strcmp(argv[1], "before-init") == 0;
+    enabled = before_init || std::strcmp(argv[1], "on") == 0;
+    host = before_init ? nullptr : &value;
+    if (before_init) {
+        for (int i = 0; i < 8; i++)
+            if (programs_life_on() || programs_life_flag || env_reads || host_reads || life_reads || logs) return 7;
+        host = &value; // A premature census must not cache logging off for a later valid initialization.
+    }
     for (int i = 0; i < 8; i++)
         if (programs_life_on() != enabled || programs_life_flag != enabled) return 3;
     if (env_reads != 1 || host_reads != (enabled ? 2 : 0) || life_reads != (enabled ? 1 : 0) || logs != (enabled ? 1 : 0)) {
@@ -52,7 +64,7 @@ int main(int argc, char** argv) {
         std::fputs("clock anchor: wrong bracket order or integer timestamps\n", stderr); return 5;
     }
     if (!enabled && (!order.empty() || !line.empty())) return 6;
-    std::printf("PASS clock anchor %s\n", enabled ? "on" : "off");
+    std::printf("PASS clock anchor %s\n", argv[1]);
 }
 '''
 
@@ -69,7 +81,7 @@ def main():
         cpp.write_text(FIXTURE.replace("@BODY@", body), encoding="utf-8")
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(exe)],
                        check=True, timeout=120)
-        for mode in ("off", "on"):
+        for mode in ("off", "on", "before-init"):
             result = subprocess.run([str(exe), mode], capture_output=True, text=True, timeout=10)
             if result.returncode or f"PASS clock anchor {mode}" not in result.stdout:
                 raise SystemExit(result.stderr or result.stdout or "clock fixture failed")

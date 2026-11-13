@@ -529,6 +529,7 @@ void load_at_create(const nvn_prog& prog, const CreatedProgram& made) {
 } // namespace
 
 bool programs_life_on() {
+    if (!host) return false; // Initialization can fail before the host is bound; close still asks for the census.
     static const bool on = [] {
         if (!env_on("RX_VK_LOG_PROGRAM_LIFE")) return false;
         const int64_t before = host->now_ns();
