@@ -68,6 +68,11 @@ class MenuI18nTests(unittest.TestCase):
                 "Those of the first controller, from its name (SDL's). With none, the keyboard's (the Switch's with XInput "
                 "alone)."
             ),
+            "go to friend": "Go to friend",
+            "confirmed travel": (
+                "Choose an accepted friend with Left and Right, then press twice. Travel needs a fresh shared position and a safe place. "
+                "After a map change starts, cancellation leaves you at its entrance."
+            ),
         }
         for name, hint in hints.items():
             self.assertTrue(hint in self.menu, "%s: expected complete hint is no text of vk_menu.cpp" % name)

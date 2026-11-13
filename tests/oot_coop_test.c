@@ -135,6 +135,7 @@ int hos_oot_current_map(char *out, size_t cap) { (void)out; (void)cap; return 0;
 void hos_oot_coop_players_start(void) { hooks.players++; }   /* (host/oot_coop_players.c: the other players' layer) */
 /* (the same layer's tick: each present that read the flags, with the gate's answer) */
 void hos_oot_coop_players_tick(int loaded, int open) { hooks.players_ticks++, hooks.tick_loaded = loaded, hooks.tick_open = open; }
+void hos_oot_coop_warp_present(Ctx *c) { (void)c; }
 static int rules_said, views, scans, applies, probes;
 static void read_rules(CoopRules *r, int say) { coop_rules_default(r); rules_said += say; }
 static void read_test_aid(void) {}

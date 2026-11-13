@@ -584,6 +584,32 @@ int main(int argc, char** argv) {
     CHECK(pending == &row(kCoopTemp) && !restarts);
     coop_press(row(kCoopTemp));
     CHECK(restarts == 1 && pipeline_saves == 1 && !open_now && asked[1].cmd == HOS_COOP_CMD_TEMP_SAVE);
+    // Go to friend uses only accepted rows and binds both presses to the same identity and signed offer.
+    room = MkwVkCoopView{};
+    room.state = HOS_COOP_STATE_JOINED, room.accepted = 1, room.offer = 44, room.rules_epoch = 3, room.n = 3;
+    room.member[0].self = 1;
+    room.member[1].id = 2, room.member[1].accepted = 1;
+    std::snprintf(room.member[1].name, sizeof room.member[1].name, "Friend");
+    std::snprintf(room.member[1].key, sizeof room.member[1].key, "1111-2222-3333-4444");
+    room.member[2].id = 3;
+    std::snprintf(room.member[2].key, sizeof room.member[2].key, "5555-6666-7777-8888");
+    coop_refresh(&changed);
+    const MkwVkCoopMember* friend_row = nullptr;
+    CHECK(coop_friends(coop_now, &friend_row) == 1 && friend_row->id == 2);
+    CHECK(coop_row_shown(row(kCoopWarp), coop_now));
+    n_asked = 0;
+    coop_press(row(kCoopWarp)); CHECK(pending && !n_asked);
+    tick_pending(row(kCoopWarp)); CHECK(pending && !n_asked);
+    coop_press(row(kCoopWarp));
+    CHECK(!pending && n_asked == 1 && asked[0].cmd == HOS_COOP_CMD_GO_FRIEND && asked[0].number == 2 &&
+          !std::strcmp(asked[0].text, "1111-2222-3333-4444"));
+    coop_press(row(kCoopWarp)); room.rules_epoch++; coop_press(row(kCoopWarp)); CHECK(!pending && n_asked == 1);
+    coop_refresh(&changed);
+    coop_press(row(kCoopWarp)); room.member[1].accepted = 0; coop_refresh(&changed);
+    CHECK(!pending && !coop_row_shown(row(kCoopWarp), coop_now) && n_asked == 1);
+    room.member[1].accepted = 1; coop_refresh(&changed);
+    coop_press(row(kCoopWarp)); tick_closed(); CHECK(!pending);
+    coop_press(row(kCoopWarp)); tick_pending(row(kCoopLeave)); CHECK(!pending && n_asked == 1);
     std::puts("PASS: the Co-op tab's rows by the room's state, its presses, its fields and its selection; the rules' words");
     for (const char* name : {"members", "identity", "rules", "combined", "other", "rejected", "help", "footer"}) check_menu_case(name);
 #ifdef COOP_MENU_REAL_ENGINE
@@ -678,6 +704,14 @@ int hos_oot_coop_is_maker(void) {
 int hos_oot_coop_reset_pools(void) { resets++; return sync_maker; }
 int hos_oot_coop_remove_key(const char *key) { snprintf(removed_key, sizeof removed_key, "%s", key); return sync_maker; }
 int hos_oot_coop_rules_changed(void) { return sync_maker; }
+static int travel_asks, travel_member;
+static char travel_key[24];
+int hos_oot_coop_warp_ask(int member, const char *key) {
+    travel_asks++, travel_member = member;
+    snprintf(travel_key, sizeof travel_key, "%s", key ? key : "");
+    return member == 2 && key && *key;
+}
+void hos_oot_coop_warp_note(char *out, size_t cap) { snprintf(out, cap, "Travel refused"); }
 int hos_oot_coop_contributors(CoopContributor *out, int max) {
 #ifdef COOP_MENU_REAL_ENGINE
     if (view_engine) return coop_sync_contributors(view_engine, out, max);
@@ -822,6 +856,11 @@ static void real(void) {
     CHECK(v.temporary_save && !strcmp(v.save_note, "Temporary copy"));
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_TEMP_SAVE, NULL, 0) && profile_asks == 1 && session.state == COOP_OFF);
     temporary = 0;
+    CHECK(hos_coop_menu_command(HOS_COOP_CMD_GO_FRIEND, "1111-2222-3333-4444", 2));
+    CHECK(travel_asks == 1 && travel_member == 2 && !strcmp(travel_key, "1111-2222-3333-4444"));
+    CHECK(!hos_coop_menu_command(HOS_COOP_CMD_GO_FRIEND, "x", 0) &&
+          !hos_coop_menu_command(HOS_COOP_CMD_GO_FRIEND, "x", 9) && travel_asks == 1);
+    hos_coop_menu_view(&v); CHECK(!strcmp(v.travel_note, "Travel refused"));
     puts("PASS: the tab's commands reach the session and progress sync; its view of the room");
 }
 static void demo(void) {

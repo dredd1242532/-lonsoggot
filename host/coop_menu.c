@@ -39,6 +39,8 @@ int hos_oot_coop_contributors(CoopContributor *out, int max);
 int hos_oot_coop_rules_changed(void);
 int hos_oot_coop_players_snapshot(int id, CoopPos *out, uint64_t *age_ms);
 int hos_oot_destination(int index, const char **child, const char **adult);
+int hos_oot_coop_warp_ask(int member, const char *key);
+void hos_oot_coop_warp_note(char *out, size_t cap);
 
 static char g_name[64], g_server[64];   /* as the tab's fields have them */
 _Static_assert(HOS_COOP_STATE_OFF == (int)COOP_OFF && HOS_COOP_STATE_LEFT == (int)COOP_LEFT &&
@@ -223,6 +225,7 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
     out->ping_ms = v.ping_ms;
     out->temporary_save = coop_profile_active();
     copy_text(out->save_note, sizeof out->save_note, coop_profile_note());
+    hos_oot_coop_warp_note(out->travel_note, sizeof out->travel_note);
     for (int i = 0; i < v.n && i < COOP_MAX_MEMBERS && out->n < HOS_COOP_MEMBERS; i++) {
         MkwVkCoopMember *m = &out->member[out->n++];
         m->id = v.member[i].id;
@@ -313,6 +316,8 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return hos_oot_coop_reset_pools();
     case HOS_COOP_CMD_RULES_CHANGED:
         return hos_oot_coop_rules_changed();
+    case HOS_COOP_CMD_GO_FRIEND:
+        return number >= 1 && number <= COOP_MAX_MEMBERS && hos_oot_coop_warp_ask((int)number, text);
     case HOS_COOP_CMD_TEMP_SAVE: {
         CoopView v;
         coop_view_get(&v);

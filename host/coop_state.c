@@ -348,6 +348,8 @@ static const CoopFeatureRule feature_rules[] = {
      "Show accepted friends' names over their bodies. Each player may hide these locally."},
     {COOP_RULE_PRESENCE, "coop_presence_permissions", 0, COOP_PRESENCE_SUPPORTED, 0, "Friend information",
      "Add permissions: 1 child bodies, 2 adult bodies, 4 health, 8 arrows, 16 gear, 64 place. Missing bits stay private."},
+    {COOP_RULE_WARP, "coop_warp", 0, 1, 0, "Go to friend",
+     "Allow confirmed travel to an accepted friend's shared position. Unsupported places refuse; no forced travel."},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop

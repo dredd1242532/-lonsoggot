@@ -41,8 +41,11 @@ int coop_sync_offer(CoopSync *engine, CoopOffer *out, uint64_t now) { (void)engi
 int coop_sync_open(CoopSync *engine) { (void)engine; return current.accepted; }
 int coop_sync_member_accepted(const CoopSync *engine, int id, uint64_t session) { (void)engine; return id == 2 && session == 202 && current.accepted; }
 static int presence_rule_present, presence_rule_value;
+static int warp_rule_present, warp_rule_value;
 int coop_feature_present(const CoopRules *rules, int id, int *value) {
-    (void)rules; assert(id == 99); *value = presence_rule_value; return presence_rule_present;
+    (void)rules;
+    if (id == COOP_RULE_WARP) { *value = warp_rule_value; return warp_rule_present; }
+    assert(id == 99); *value = presence_rule_value; return presence_rule_present;
 }
 int coop_sync_take(CoopSync *engine, CoopApply *out, int max) {
     (void)engine; assert(locked && max > 0); takes++;
@@ -83,6 +86,15 @@ int main(void) {
     presence_rule_value = COOP_PRESENCE_EQUIPMENT;
     gameplay_context_locked(); assert(!G.presence); // gear alone grants no position/body capability
     presence_rule_value = COOP_PRESENCE_SUPPORTED;
+    gameplay_context_locked(); assert(G.presence);
+    assert(!(G.gameplay.context.capabilities & COOP_GAMEPLAY_TEMPORARY));
+    warp_rule_present = 1;
+    gameplay_context_locked(); assert(!(G.gameplay.context.capabilities & COOP_GAMEPLAY_TEMPORARY));
+    warp_rule_value = 1;
+    gameplay_context_locked(); assert(G.gameplay.context.capabilities & COOP_GAMEPLAY_TEMPORARY);
+    warp_rule_value = 2;
+    gameplay_context_locked(); assert(!(G.gameplay.context.capabilities & COOP_GAMEPLAY_TEMPORARY));
+    warp_rule_present = warp_rule_value = 0;
     G.save_generation = 0;
     gameplay_context_locked(); assert(!G.presence);   // invalid native context fails closed
     G.save_generation = 1, presence_rule_value = 0;

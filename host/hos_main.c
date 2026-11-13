@@ -17,6 +17,7 @@
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
+#include "oot_coop_warp.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1255,6 +1256,83 @@ static uint64_t oot_player_controller(Ctx *c, uint64_t components) {
     return recomp_load64(c, controller) == 0x84c54f10ULL ? controller : 0;
 }
 
+/* Go to friend reuses the reviewed controller operation, with checked links and no debug overrides. */
+static uint64_t oot_warp_controller(Ctx *c, uint64_t components) {
+    const unsigned offsets[] = {80, 32, 16, 8};
+    uint64_t controller = components;
+    for (unsigned i = 0; i < sizeof offsets / sizeof offsets[0]; i++) {
+        if (!controller || controller > UINT64_MAX - offsets[i] || !hos_guest_range(controller + offsets[i], 8)) return 0;
+        controller = recomp_load64(c, controller + offsets[i]);
+    }
+    return controller && hos_guest_range(controller, 8) && recomp_load64(c, controller) == 0x84c54f10ULL ? controller : 0;
+}
+
+int hos_oot_coop_warp_destination(const char *map, int child) {
+    /* Only the two open overworld entrances exercised by the earlier travel proof. Dungeons, boss rooms,
+       castle/story variants and other unreviewed streaming/entrance routes refuse before requesting a map. */
+    for (int i = 0; map && i < 2; i++) {
+        const char *name = child ? oot_destinations[i].child_banc : oot_destinations[i].adult_banc;
+        if (name && !strcmp(name, map)) return i;
+    }
+    return -1;
+}
+
+int hos_oot_coop_warp_event(Ctx *c) {
+    const uint64_t slot = OOT_EVENTMGR_SLOT;
+    const uint64_t holder = hos_guest_range(slot, 8) ? recomp_load64(c, slot) : 0;
+    const uint64_t manager = holder && hos_guest_range(holder, 8) ? recomp_load64(c, holder) : 0;
+    if (!manager || manager > UINT64_MAX - 104 || !hos_guest_range(manager + 104, 8)) return 1;
+    return recomp_load64(c, manager + 104) != 0;
+}
+
+int hos_oot_coop_warp_local(Ctx *c, uint64_t actor, uint64_t components, OotCoopWarpLocal *out) {
+    memset(out, 0, sizeof *out);
+    if (strcmp(hos_main_build_id, "e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348") ||
+        !actor || actor > UINT64_MAX - 808 || !hos_guest_range(actor + 796, 12)) return 0;
+    if (!oot_gamedata_string(c, 0x1d6189dau, out->map, sizeof out->map) ||
+        !oot_gamedata_bool(c, 0xef2b60c2u, &out->loading) || !oot_gamedata_bool(c, 0xcea220d3u, &out->child)) return 0;
+    out->event = hos_oot_coop_warp_event(c);
+    int rx_option(int id, int otherwise);
+    out->safe = oot_warp_controller(c, components) && !rx_option(HOS_OPT_CHEAT_FLIGHT, 0);
+    const int64_t now = hos_now_ns();
+    out->travelling = (teleport.requested_at && now - teleport.requested_at < 8000000000LL) ||
+                     __atomic_load_n(&oot_bridge_tp.asked, __ATOMIC_RELAXED);
+    for (unsigned i = 0; i < 3; i++) {
+        out->pos[i] = oot_load_float(c, actor + 796 + i * 4);
+        if (!isfinite(out->pos[i])) return 0;
+    }
+    return out->map[0] != 0;
+}
+
+int hos_oot_coop_warp_travel(Ctx *c, uint64_t actor, int destination) {
+    /* A co-op action never inherits experimental event/starter overrides from debug travel. */
+    const char *event = getenv("HOS_OOT_TELEPORT_EVENT"), *starter = getenv("HOS_OOT_TELEPORT_STARTER");
+    if (destination < 0 || destination >= 2 || (event && *event) || (starter && *starter)) return 0;
+    return oot_teleport(c, actor, (unsigned)destination) && teleport.result != 0;
+}
+
+int hos_oot_coop_warp_place(Ctx *c, uint64_t components, const float pos[3]) {
+    const uint64_t controller = oot_warp_controller(c, components);
+    if (!controller || !hos_guest_range(0x84c54f10ULL + 0xe8, 8) ||
+        recomp_load64(c, 0x84c54f10ULL + 0xe8) != 0x806d2530ULL || c->x[31] < 16) return 0;
+    A64Fn change_position = a64_lookup(0x806d2530ULL);
+    const uint64_t arg = c->x[31] - 16;
+    if (!change_position || !hos_guest_range(arg, 16)) return 0;
+    for (unsigned i = 0; i < 3; i++)
+        if (!isfinite(pos[i]) || fabsf(pos[i]) > 100000.0f) return 0;
+    const Ctx saved = *c;
+    for (unsigned i = 0; i < 3; i++) {
+        uint32_t bits;
+        memcpy(&bits, &pos[i], sizeof bits);
+        recomp_store32_sp(c, arg + i * 4, bits);
+    }
+    recomp_store32_sp(c, arg + 12, 0);
+    c->x[31] = arg, c->x[0] = controller, c->x[1] = arg;
+    change_position(c);
+    *c = saved;
+    return 1;
+}
+
 /* Movement speed (the Debug tab's row, HOS_OPT_CHEAT_SPEED in percent): Link's controller and the percent for
    hos_oot_cct_speed, which scales the forward speed the game sets on it. (The controller's speed rate beside it, +476, is no
    use: the game sets it again before each step.) */
@@ -1569,6 +1647,7 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     oot_update_player_cheats(c, actor, components);
     void hos_oot_state_tap(uint64_t actor);   /* the control bridge's copied snapshot and per-connection samples */
     hos_oot_state_tap(actor);
+    hos_oot_coop_warp_update(c, actor, components);   /* same game-thread serialization as debug travel */
     ReleaseSRWLockExclusive(&cheats_lock);
 #else
     (void)c;

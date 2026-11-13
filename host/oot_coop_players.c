@@ -985,7 +985,6 @@ int hos_coop_overlay_snapshot(MkwVkCoopOverlay *out, int labels) {
     if (!hos_oot_coop_presence() || !hos_oot_coop_playing()) out->nmarks = 0;
     return out->nmarks != 0;
 }
-
 void hos_oot_coop_players_start(void) {
     if (__atomic_load_n(&P.on, __ATOMIC_ACQUIRE)) return;
     const char *e = getenv("HOS_COOP_PLAYERS"), *names = getenv("HOS_COOP_PLAYERS_ACTOR"), *test = getenv("HOS_COOP_PLAYERS_TEST");

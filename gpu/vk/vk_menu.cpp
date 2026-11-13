@@ -1571,6 +1571,9 @@ Row rows[] = {
     {TAB_COOP, "Reset the pools", nullptr, 0, 0, 0, nullptr,
      "The maker's remedy after a drain: the shared keys, rupees and ammunition start again from what each player in the room "
      "holds now. Press twice."},
+    {TAB_COOP, "Go to friend", nullptr, 0, 0, 0, nullptr,
+     "Choose an accepted friend with Left and Right, then press twice. Travel needs a fresh shared position and a safe place. "
+     "After a map change starts, cancellation leaves you at its entrance."},
     {TAB_COOP, "Leave the room", nullptr, 0, 0, 0, nullptr, "Leaves the room; the others play on in it. Press twice."},
     {TAB_COOP, "Room rules", nullptr, 0, 0, 0, nullptr,
      "What a room you make shares: progress, items, songs and quest items shared or per player; small keys, rupees and "
@@ -1884,10 +1887,10 @@ const char* const coop_pvp_accept_help =
     "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
     "fingerprints aloud to each other before: a name can be anyone's. Press twice.";
 const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
-enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopRows };
+enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
                                                "Room secret",     "Accept the room", "Remove a player", "Reset the pools",
-                                               "Leave the room",  "Room rules", "Temporary save"};
+                                               "Leave the room",  "Room rules", "Temporary save", "Go to friend"};
 int coop_remove_at = 0;   // (Remove a player: which of the others with a key, Left and Right choose)
 /// The other members with a key (those the maker can remove): their count, and the one coop_remove_at chooses (*chosen)
 int coop_removable(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
@@ -1897,6 +1900,26 @@ int coop_removable(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
     for (int i = 0, k = 0; n && i < v.n && i < HOS_COOP_MEMBERS; i++)
         if (!v.member[i].self && v.member[i].key[0] && k++ == ((coop_remove_at % n) + n) % n) *chosen = &v.member[i];
     return n;
+}
+
+int coop_friend_at = 0, coop_friend_pending = 0;
+char coop_friend_key[24] = "";
+uint32_t coop_friend_offer = 0, coop_friend_epoch = 0;
+int coop_friends(const MkwVkCoopView& v, const MkwVkCoopMember** chosen) {
+    int n = 0;
+    *chosen = nullptr;
+    if (v.state != HOS_COOP_STATE_JOINED || !v.accepted) return 0;
+    for (int i = 0; i < v.n && i < HOS_COOP_MEMBERS; i++)
+        n += !v.member[i].self && v.member[i].accepted && v.member[i].key[0];
+    for (int i = 0, k = 0; n && i < v.n && i < HOS_COOP_MEMBERS; i++)
+        if (!v.member[i].self && v.member[i].accepted && v.member[i].key[0] &&
+            k++ == ((coop_friend_at % n) + n) % n) *chosen = &v.member[i];
+    return n;
+}
+bool coop_friend_matches(const MkwVkCoopView& v) {
+    const MkwVkCoopMember* chosen = nullptr;
+    return coop_friends(v, &chosen) && chosen && !chosen->away && chosen->id == coop_friend_pending &&
+           !strcmp(chosen->key, coop_friend_key) && v.offer == coop_friend_offer && v.rules_epoch == coop_friend_epoch;
 }
 /// A Co-op row's kind (kCoop*); -1 any other row
 int coop_kind(const Row& r) {
@@ -1951,6 +1974,7 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopSecret: return coop_in_room(v) && v.code[0];
     case kCoopAccept: return v.state == HOS_COOP_STATE_JOINED && v.offer && !v.accepted;
     case kCoopRemove: return makers && coop_removable(v, &chosen) > 0;
+    case kCoopWarp: return coop_friends(v, &chosen) > 0;
     case kCoopReset: return makers;
     case kCoopLeave: return coop_in_room(v);
     case kCoopRules: return makers || v.rules_epoch || !coop_in_room(v);
@@ -2992,6 +3016,22 @@ void edit_end(bool done) {
 /// maker's remedies and Leave at their second press, the first arming them (pending, as Restart and Quit)
 void coop_press(const Row& r) {
     const int k = coop_kind(r);
+    if (k == kCoopWarp) {
+        const MkwVkCoopMember* friend_now = nullptr;
+        if (!coop_friends(coop_now, &friend_now) || !friend_now) { pending = nullptr; return; }
+        if (pending != &r || !coop_friend_matches(coop_now)) {
+            pending = &r, coop_friend_pending = friend_now->id;
+            snprintf(coop_friend_key, sizeof coop_friend_key, "%s", friend_now->key);
+            coop_friend_offer = coop_now.offer, coop_friend_epoch = coop_now.rules_epoch;
+            return;
+        }
+        MkwVkCoopView fresh{};
+        if (host && host->coop_view) host->coop_view(&fresh);
+        pending = nullptr;
+        if (coop_friend_matches(fresh) && host && host->coop_command)
+            host->coop_command(HOS_COOP_CMD_GO_FRIEND, coop_friend_key, (uint32_t)coop_friend_pending);
+        return;
+    }
     if (k == kCoopSecret) {
         coop_secret_shown = !coop_secret_shown;
         return;
@@ -3045,6 +3085,7 @@ void coop_refresh(bool* changed) {
         (now.offer != coop_accept_token || now.rules_epoch != coop_accept_epoch)) {
         pending = nullptr, coop_accept_notice = coop_accept_change(now);
     }
+    if (pending && coop_kind(*pending) == kCoopWarp && !coop_friend_matches(now)) pending = nullptr;
     coop_now = now;
     coop_preview_refresh();
     *changed = true;
@@ -3805,7 +3846,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     if (v.ping_ms && v.state == HOS_COOP_STATE_JOINED)
         ui::text_mid_right(c, c.f.body, 16 * s, right - 20 * s, top + 22 * s, ui::kSoft, (std::to_string(v.ping_ms) + " ms").c_str());
     if (const char* line = coop_accept_notice ? coop_accept_notice :
-                           v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
+                           v.travel_note[0] ? v.travel_note : v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 50 * s, ui::kSoft, fit(c, c.f.body, 16 * s, right - left - 40 * s, line, false).c_str());
     if (v.save_note[0])
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 74 * s, ui::kSoft,
@@ -3828,9 +3869,9 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
                       k == kCoopName ? "Random" : k == kCoopRelay ? "None" : "Type or paste the secret");
         } else if (k == kCoopSecret) {   // (masked until Enter shows it: a stream or a screenshot would give the room away)
             choice_cell(c, va, vb, coop_secret_shown ? v.code : "******-******-******", selected, false, false);
-        } else if (k == kCoopRemove) {   // (the player chosen, by name and key: Left and Right choose)
+        } else if (k == kCoopRemove || k == kCoopWarp) {   // accepted friend, or the maker's removal target
             const MkwVkCoopMember* chosen = nullptr;
-            const int n = coop_removable(v, &chosen);
+            const int n = k == kCoopWarp ? coop_friends(v, &chosen) : coop_removable(v, &chosen);
             const std::string who = chosen ? std::string(chosen->name) + "  " + chosen->key : "";
             choice_cell(c, va, vb, pending == &r ? "Press again to confirm" : who, selected, n > 1, n > 1);
         } else if (k == kCoopRules) {   // (opens its page, as the tabs' page rows)
@@ -3934,6 +3975,7 @@ void draw_options(ui::Ctx& c) {
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : field && editing == field->field ? edit_why : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
+    if (cur_tab == TAB_COOP && coop_now.travel_note[0]) hint = coop_now.travel_note;   // full wrapped refusal, not only the status preview
     const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
@@ -3962,8 +4004,8 @@ void draw_options(ui::Ctx& c) {
         } else if (const int k = coop_kind(selr); k >= 0 && k != kCoopRules) {
             prompt_list[prompts_n++] = {ui::kConfirm, k == kCoopMake ? "Make" : k == kCoopSecret ? (coop_secret_shown ? "Hide" : "Show")
                                                     : pending == &selr ? "Confirm" : k == kCoopAccept ? "Accept" : k == kCoopRemove ? "Remove"
-                                                    : k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
-            if (k == kCoopRemove) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
+                                                    : k == kCoopWarp ? "Go to friend" : k == kCoopTemp ? "Restart" : k == kCoopReset ? "Reset" : "Leave"};
+            if (k == kCoopRemove || k == kCoopWarp) prompt_list[prompts_n++] = {ui::kLeftRight, "Player"};
         } else if (selr.value || (selr.cheat >= 0 && (selr.cheat <= 1 || selr.cheat == 7 || cheat_chooses(selr.cheat) || age_shown(selr.cheat)))) {
             if (!(cur_tab == TAB_RULES && coop_rules_readonly)) prompt_list[prompts_n++] = {ui::kLeftRight, "Change"};
             if (selr.cheat >= 0) if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
@@ -6122,6 +6164,8 @@ void menu_tick() {
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
         if ((press[3] || press[4]) && coop_kind(r) == kCoopRemove)   // (longshot: Remove a player: Left and Right choose whom)
             coop_remove_at += press[4] ? 1 : -1, pending = nullptr, changed = true;
+        if ((press[3] || press[4]) && coop_kind(r) == kCoopWarp)
+            coop_friend_at += press[4] ? 1 : -1, pending = nullptr, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;
             set_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);

@@ -95,6 +95,7 @@ enum {
     COOP_PRESENCE_SUPPORTED = COOP_PRESENCE_BODIES | COOP_PRESENCE_EQUIPMENT | COOP_PRESENCE_HEALTH |
                               COOP_PRESENCE_ARROWS | COOP_PRESENCE_PLACE
 };
+enum { COOP_RULE_WARP = 64 };
 typedef struct {
     uint8_t count;
     uint8_t bytes[3 * COOP_FEATURE_MAX];   // ascending unique u8 ID, little-endian i16 value; ID 0 is reserved

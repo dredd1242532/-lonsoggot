@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { COOP_GAMEPLAY_VERSION = 1, COOP_GAMEPLAY_MEMBERS = 8, COOP_GAMEPLAY_WRITERS = 4 };
-enum { COOP_GAMEPLAY_PROGRESS, COOP_GAMEPLAY_BODIES, COOP_GAMEPLAY_WORLD, COOP_GAMEPLAY_CLOCK };
+enum { COOP_GAMEPLAY_VERSION = 2, COOP_GAMEPLAY_MEMBERS = 8, COOP_GAMEPLAY_WRITERS = 5 };
+enum { COOP_GAMEPLAY_PROGRESS, COOP_GAMEPLAY_BODIES, COOP_GAMEPLAY_WORLD, COOP_GAMEPLAY_CLOCK, COOP_GAMEPLAY_TRAVEL };
 enum { COOP_GAMEPLAY_PRESENTATION = 1, COOP_GAMEPLAY_TEMPORARY = 2, COOP_GAMEPLAY_DURABLE = 4,
        COOP_GAMEPLAY_CAPS = 7 };
 typedef struct {
@@ -23,7 +23,7 @@ typedef struct {
 typedef struct {
     CoopGameplayContext context;
     CoopGameplayWriter writer[COOP_GAMEPLAY_WRITERS];
-    uint64_t generation;
+    uint64_t generation, travel_generation;
 } CoopGameplay;
 typedef struct {
     uint32_t version, size, slot, member;
@@ -46,6 +46,12 @@ static inline void coop_gameplay_publish(CoopGameplay *owner, const CoopGameplay
         context->reserved || (context->capabilities & ~COOP_GAMEPLAY_CAPS) || !context->room_session ||
         !context->save_generation || !context->area_generation || !context->offer || !context->rules_epoch) context = &closed;
     if (memcmp(&owner->context, context, sizeof *context)) {
+        // A locally confirmed journey crosses one area boundary. Only its ticket survives area-only changes;
+        // consent, capabilities, save, room and accepted sessions still cancel it, including revoke/reaccept.
+        CoopGameplayContext same_area = owner->context;
+        same_area.area_generation = context->area_generation;
+        if (memcmp(&same_area, context, sizeof *context) && owner->travel_generation != UINT64_MAX)
+            owner->travel_generation++;
         owner->context = *context;
         owner->generation++;
         // Exhausted epochs never wrap and revive ancient queued work.
@@ -54,7 +60,8 @@ static inline void coop_gameplay_publish(CoopGameplay *owner, const CoopGameplay
 }
 
 static inline int coop_gameplay_permitted(const CoopGameplay *owner, unsigned slot, unsigned member, uint64_t session) {
-    if (!owner || owner->generation == UINT64_MAX || slot >= COOP_GAMEPLAY_WRITERS || member > COOP_GAMEPLAY_MEMBERS) return 0;
+    if (!owner || owner->generation == UINT64_MAX || slot >= COOP_GAMEPLAY_WRITERS || member > COOP_GAMEPLAY_MEMBERS ||
+        (slot == COOP_GAMEPLAY_TRAVEL && owner->travel_generation == UINT64_MAX)) return 0;
     const CoopGameplayWriter *writer = &owner->writer[slot];
     if (!writer->write || !(owner->context.capabilities & writer->capability)) return 0;
     return member ? session && owner->context.accepted_session[member] == session : session == owner->context.room_session;
@@ -65,14 +72,16 @@ static inline int coop_gameplay_ticket(const CoopGameplay *owner, unsigned slot,
     if (!ticket) return 0;
     memset(ticket, 0, sizeof *ticket);
     if (!coop_gameplay_permitted(owner, slot, member, session)) return 0;
-    *ticket = (CoopGameplayTicket){COOP_GAMEPLAY_VERSION, sizeof *ticket, slot, member, owner->generation, session, owner};
+    const uint64_t generation = slot == COOP_GAMEPLAY_TRAVEL ? owner->travel_generation : owner->generation;
+    *ticket = (CoopGameplayTicket){COOP_GAMEPLAY_VERSION, sizeof *ticket, slot, member, generation, session, owner};
     return 1;
 }
 
 static inline int coop_gameplay_dispatch(const CoopGameplay *owner, const CoopGameplayTicket *ticket,
                                         const void *payload, size_t size, void *game) {
     if (!owner || !ticket || !payload || ticket->version != COOP_GAMEPLAY_VERSION || ticket->size != sizeof *ticket ||
-        ticket->owner != owner || ticket->generation != owner->generation ||
+        ticket->owner != owner || ticket->generation !=
+            (ticket->slot == COOP_GAMEPLAY_TRAVEL ? owner->travel_generation : owner->generation) ||
         !coop_gameplay_permitted(owner, ticket->slot, ticket->member, ticket->session)) return 0;
     const CoopGameplayWriter *writer = &owner->writer[ticket->slot];
     if (size != writer->payload_size) return 0;

@@ -1007,3 +1007,41 @@ This is not recipient-private encryption: everyone who holds the room secret can
 front/behind-camera projection, all four edges at16:9 and21:9, text bounds and the off path without a game.
 Current-build two-game pictures, physical controls, Windows and multi-player readability still need playtest evidence.
 
+
+## Go to friend
+
+In the Co-op tab, choose **Go to friend**, select an accepted friend with Left/Right, and press Enter/A twice.
+The maker must enable **Go to friend** (`coop_warp=1`, signed rule64, default0) in Room rules and everybody must
+accept the changed terms. This does not pull another player or change anybody's age, equipment or inventory.
+It uses the precise position already shared by the accepted presence feature and the friend's local body-display
+choice; it does not enable extra position disclosure. Both builds must support the same pose format.
+
+The supported arrival maps are **Kokiri Forest and Hyrule Field**, in your own age's variant. Other maps,
+dungeons, boss rooms, arenas and unknown/story variants refuse before travel: arbitrary streamed-room placement and
+their entrance/progression safety are not established. No age is silently changed. A stale position (3 seconds),
+title screen, event, missing controller, loading, another journey or disabled/missing permission gives a readable
+reason in the tab. The help panel wraps the complete reason even when the status preview is short.
+
+In the same map, only placement is requested. Across maps, Link's verified game-thread movement hook requests the
+game's own map-change event once, waits for the loaded entrance and a new position, then places Link beside the
+friend once through the character controller. Event acceptance is not arrival: a later local position read checks
+whether Link stayed near the requested point. It never follows a friend automatically into another map.
+
+Cancellation before the native map change says **“Travel cancelled, you stayed.”** After acceptance it says
+**“Travel cancelled after the map had started loading: you are at its entrance.”** This includes a friend leaving
+or changing map, revoked acceptance, changed rules, a new save and timeout. There is no rollback journey and no
+late placement from cancelled work. The native map change, once accepted, still finishes at its own entrance.
+Use the game's own exits, or choose Go to friend again once the target is fresh and you can move safely.
+Local experimental teleport event/starter overrides refuse this action instead of altering its native request.
+
+The single travel writer uses the gameplay owner's temporary capability. Only this writer's ticket survives an
+area-only boundary; changes to consent, room/session, rules, save or capabilities retire it permanently, even if
+the same terms are immediately accepted again. Other writers' tickets still expire on every area generation.
+No network packet requests travel or chooses a native entrance, event, actor or memory address.
+An accepted secret holder can still lie about a pose: invite trusted friends. A valid coordinate is not proof of
+safe ground; collision, environmental hazards and the current-head first arrival remain two-game proof requirements.
+
+`tests/test_oot_coop_warp.py` runs the real state machine, POS store, ownership boundary and native helper fixtures.
+It includes all refusal gates, each cancellation phase, stale/moved targets, same-map placement, first cross-map
+arrival and deliberately broken copies. The menu fixture exercises the two presses and changed-identity/terms
+fences. These are game-free checks, not evidence of a running two-player journey.

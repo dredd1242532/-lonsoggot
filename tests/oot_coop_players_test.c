@@ -706,6 +706,11 @@ static void game_side(const char *steps_path) {
     CHECK(logged("coop: players: member 2 says: Field, in the world, child Link\n"));   /* (HOS_COOP_TRACE: once, at a change) */
     CHECK(hos_oot_coop_players_last(2, area, &flags, &age) == 1 && !strcmp(area, "Field") && flags == (COOP_POS_IN_WORLD | COOP_POS_LOADED) && age == 32);
     CHECK(hos_oot_coop_players_last(2, NULL, NULL, NULL) == 1 && !hos_oot_coop_players_last(1, area, &flags, &age) && !hos_oot_coop_players_last(3, NULL, NULL, NULL));
+    CoopPos snapshot;
+    CHECK(hos_oot_coop_players_snapshot(2, &snapshot, &age) && !strcmp(snapshot.area, "Field"));
+    P.ticket[2].generation++;
+    CHECK(!hos_oot_coop_players_snapshot(2, &snapshot, &age));   /* old acceptance/area generation cannot feed travel */
+    P.ticket[2].generation--;
     log_clear();
     they_are_at("Field", 12, 5, 25, 1.0f, COOP_POS_IN_WORLD | COOP_POS_LOADED);
     they_are_at("Field", 0, 0, 0, 0, COOP_POS_LOADED | COOP_POS_SLOW);

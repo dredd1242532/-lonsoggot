@@ -160,13 +160,15 @@ typedef struct MkwVkCoopView {
     uint32_t pool_epoch;            /* signed pool reset, not a member or category/feature edit */
     int32_t temporary_save;   /* (version 28 combined view) native save mounts point to a local copy until exit */
     char save_note[160];
+    char travel_note[160];   /* (version 27) local confirmed journey, including refusal/cancellation */
 } MkwVkCoopView;
 /* what the tab asks (coop_command's cmd): make a room, join one (text: its secret as typed), leave it, accept the offer
    (number: its offer), the player's name and the relay ("host[:port]") as the fields set them (text; number 1: the field's
    Enter, applied at once to a session that runs, 0: the saved value at the start, kept for the next Make or Join); the
    maker's remedies: remove the player of that key (text: its fingerprint), reset the pools */
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
-       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED, HOS_COOP_CMD_TEMP_SAVE = 10 };
+       HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED, HOS_COOP_CMD_TEMP_SAVE = 10,
+       HOS_COOP_CMD_GO_FRIEND = 11 };   /* text: accepted key; number: member id; local confirmation only */
 
 /* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
    registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most

@@ -287,6 +287,11 @@ even the dedicated worker can fail or stall after heap/loader corruption.
 | `coop_labels=0/1/2` in `longshot_options.ini` | Co-op tab's local Friend labels: Off / Names (default) / Names and arrows. Live; no environment override. Signed presence/privacy rules still apply. See [finding friends](coop.md#finding-your-friends) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |
 
+Go to friend uses the maker's named `coop_warp` setting (0 off, 1 allowed; default0), not a debug travel switch.
+No `HOS_COOP_WARP` environment override is added. For an owned scripted proof,
+`RX_VK_MENU_SCRIPT` can select `ROW:Go to friend`, use Left/Right, then Enter twice.
+See [Go to friend](coop.md#go-to-friend) for supported places, consent and cancellation at the native map boundary.
+
 The presses are `<seconds>:<button>[+<button>...][/<ms>]`, separated by commas, for example `2:A,5.5:LUP/1500,9:ZL+R`.
 The buttons are `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`, and the sticks pushed to their edge `LUP
 LDOWN LLEFT LRIGHT RUP RDOWN RLEFT RRIGHT`. A press is held for 200 ms unless `/<ms>` says otherwise. The names are

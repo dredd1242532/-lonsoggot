@@ -65,6 +65,7 @@
 #include "coop_gameplay.h"
 #include "oot_coop.h"
 #include "oot_coop_hits.h"
+#include "oot_coop_warp.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -1385,6 +1386,9 @@ static void gameplay_context_locked(void) {
         context.capabilities = COOP_GAMEPLAY_DURABLE;
         if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && presence)
             context.capabilities |= COOP_GAMEPLAY_PRESENTATION;
+        int warp = 0;
+        if (coop_feature_present(&offer.rules, COOP_RULE_WARP, &warp) && warp == 1)
+            context.capabilities |= COOP_GAMEPLAY_TEMPORARY;
         context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
         context.room_session = view.session;
         context.save_generation = G.save_generation, context.area_generation = G.area_generation;
@@ -1583,6 +1587,7 @@ void hos_oot_coop_present(Ctx *c) {
         unbind("the game made its flags anew");
     const int open = gate(c, mgr);
     hos_oot_coop_players_tick(G.loaded, open);   /* the other players' layer: this game's map and state outside play */
+    hos_oot_coop_warp_present(c);   /* pending travel only; no native effect from the present */
     if (__atomic_load_n(&hos_oot_hits_active, __ATOMIC_RELAXED)) {
         char area[COOP_POS_TEXT + 1] = {0};
         int hos_oot_current_map(char *out, size_t cap);

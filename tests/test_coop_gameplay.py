@@ -72,6 +72,32 @@ int main(void) {
     c = context(); c.capabilities = 8; coop_gameplay_publish(&owner, &c);
     assert(!coop_gameplay_ticket(&owner, COOP_GAMEPLAY_BODIES, 2, 202, &ticket));
     assert(calls == 1 && !other_calls);
+    CoopGameplay travel = {0};
+    writer.slot = COOP_GAMEPLAY_TRAVEL, writer.capability = COOP_GAMEPLAY_TEMPORARY;
+    assert(coop_gameplay_register(&travel, &writer));
+    c = context(); c.capabilities |= COOP_GAMEPLAY_TEMPORARY; coop_gameplay_publish(&travel, &c);
+    assert(coop_gameplay_ticket(&travel, COOP_GAMEPLAY_TRAVEL, 2, 202, &ticket));
+    c.area_generation++; coop_gameplay_publish(&travel, &c);
+    assert(coop_gameplay_dispatch(&travel, &ticket, &payload, sizeof payload, &value));
+    for (int change = 0; change < 6; change++) {
+        c = context(); c.capabilities |= COOP_GAMEPLAY_TEMPORARY; coop_gameplay_publish(&travel, &c);
+        assert(coop_gameplay_ticket(&travel, COOP_GAMEPLAY_TRAVEL, 2, 202, &ticket));
+        CoopGameplayContext altered = c;
+        switch (change) {
+        case 0: altered.accepted_session[2]++; break;
+        case 1: altered.room_session++; break;
+        case 2: altered.rules_epoch++; break;
+        case 3: altered.save_generation++; break;
+        case 4: altered.offer++; break;
+        default: altered.capabilities = 0; break;
+        }
+        coop_gameplay_publish(&travel, &altered);
+        coop_gameplay_publish(&travel, &c);
+        assert(!coop_gameplay_dispatch(&travel, &ticket, &payload, sizeof payload, &value));
+    }
+    assert(calls == 2);
+    travel.travel_generation = UINT64_MAX;
+    assert(!coop_gameplay_ticket(&travel, COOP_GAMEPLAY_TRAVEL, 2, 202, &ticket));
     puts("PASS: owner off makes no guest calls; identity/room/rules/save/area revoke queued work; version/size fail closed; exactly one writer");
 }
 '''
