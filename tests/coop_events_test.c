@@ -385,6 +385,44 @@ static void test_save_scope(void) {
     puts("PASS events: isolated download scope, chunk quota, deadline, scoped cancellation and surviving FIFO");
 }
 
+static void test_presence_scope(void) {
+    CoopView av, bv;
+    coop_sess_view(a, &av); coop_sess_view(b, &bv);
+    grant(a, 0); grant(b, 0);
+    coop_sess_download_members(b, &bv, 1u << 1);
+    assert(!coop_sess_member_present(b, 1)); // download consent alone never opens chat
+    assert(coop_sess_on_event(b, COOP_K_CHAT, receive_event, NULL));
+    coop_sess_presence_members(a, &av, 1u << 2);
+    assert(coop_sess_send_event(a, 2, COOP_K_CHAT, NULL, 0) == COOP_EVENT_QUEUED);
+    pump(512, 0, 0);
+    assert(!received && !b->event_in[1].parts); // refused on arrival, not hidden after storing text
+    coop_sess_presence_members(b, &bv, 1u << 1);
+    pump(512, 0, 0);
+    assert(received == 1 && coop_sess_member_present(b, 1) && !coop_sess_member_accepted(b, 1));
+    for (unsigned kind = 1; kind < COOP_K_TEST; kind++) {
+        if (!coop_event_kind((uint8_t)kind) || save_kind((uint8_t)kind) || presentation_kind((uint8_t)kind)) continue;
+        assert(coop_sess_send_event(a, 2, (uint8_t)kind, NULL, 0) == COOP_EVENT_UNAVAILABLE);
+    }
+    uint8_t transfer[16] = {1};
+    assert(coop_sess_send_save_event(a, 2, COOP_K_SAVE_OFFER, transfer, clock_ms + 1000, NULL, 0) == COOP_EVENT_UNAVAILABLE);
+    // A partial chat cannot survive revoke/reaccept between socket steps.
+    expected_n = sizeof expected; expect_pattern = 1;
+    assert(coop_sess_send_event(a, 2, COOP_K_CHAT, expected, sizeof expected) == COOP_EVENT_QUEUED);
+    pump(80, 0, 0);
+    assert(received == 1 && b->event_in[1].parts);
+    coop_sess_presence_members(b, NULL, 0);
+    coop_sess_presence_members(b, &bv, 1u << 1);
+    events_tick(b, clock_ms);
+    assert(!b->event_in[1].parts && received == 1);
+    coop_sess_presence_members(a, NULL, 0);
+    assert(!queued() && !coop_sess_member_present(a, 2));
+    // Download consent remains its own scope; presentation never grants or revokes it.
+    assert(bound_locked(b, 1, COOP_K_SAVE_OFFER));
+    set_state(b, COOP_LEFT); publish(b);
+    assert(!coop_sess_member_present(b, 1));
+    puts("PASS events: presence-only chat, unaccepted arrival drop, every non-presentation kind closed, independent downloads, partial revoke and leave");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     setup();
@@ -403,6 +441,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[1], "delayed-ack")) test_receiver_reset(1);
     else if (!strcmp(argv[1], "reaccept-step")) test_reaccept_between_steps();
     else if (!strcmp(argv[1], "save-scope")) test_save_scope();
+    else if (!strcmp(argv[1], "presence-scope")) test_presence_scope();
     else assert(0);
     coop_sess_free(a), coop_sess_free(b), coop_udp_close(relay);
     return 0;

@@ -117,6 +117,10 @@ class MenuI18nTests(unittest.TestCase):
             "The room changed. Review its members and Room rules before accepting.",
             "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
             "fingerprints aloud to each other before: a name can be anyone's. Press twice.",
+            "Accept to see and talk",
+            "You are playing a temporary copy. Accepts the named players below to see and talk, under the room rules. "
+            "No progress, items, pools or saves are shared. Read your key fingerprints aloud to each other before: "
+            "a name can be anyone's. Press twice.",
         )
         for text in texts:
             with self.subTest(menu_text=text):

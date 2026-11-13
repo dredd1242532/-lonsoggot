@@ -126,6 +126,7 @@ void coop_accept_members(const CoopView *v, uint32_t members) {
     accepted_members = members;
 }
 void coop_download_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
+void coop_presence_members(const CoopView *v, uint32_t members) { (void)v; (void)members; }
 static int temporary_profile;
 static volatile int hos_oot_coop_kit_active;
 int coop_profile_active(void) { return temporary_profile; }

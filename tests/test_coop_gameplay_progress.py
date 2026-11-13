@@ -26,6 +26,7 @@ static void ReleaseSRWLockExclusive(int *lock) { (void)lock; assert(locked); loc
 static struct {
     int lock, open, bound, gate, loaded, presence;
     CoopSync *eng;
+    CoopView view;
     CoopGameplay gameplay;
     uint64_t save_generation, area_generation, applied_log_at;
     unsigned applied[COOP_CAT_N], applied_total;
@@ -40,6 +41,8 @@ void coop_view_get(CoopView *out) { *out = room; }
 int coop_sync_offer(CoopSync *engine, CoopOffer *out, uint64_t now) { (void)engine; (void)now; *out = current; return current.token != 0; }
 int coop_sync_open(CoopSync *engine) { (void)engine; return current.accepted; }
 int coop_sync_member_accepted(const CoopSync *engine, int id, uint64_t session) { (void)engine; return id == 2 && session == 202 && current.accepted; }
+void coop_sync_temporary(CoopSync *engine, int active) { (void)engine; (void)active; }
+uint32_t coop_sync_presence_members(CoopSync *engine) { (void)engine; return 0; }
 static int presence_rule_present, presence_rule_value;
 static int warp_rule_present, warp_rule_value;
 int coop_feature_present(const CoopRules *rules, int id, int *value) {
@@ -72,6 +75,7 @@ int main(void) {
     G.save_generation = 1; G.area_generation = 1;
     room.state = COOP_JOINED; room.session = 101; room.n = 1;
     room.member[0].id = 2; room.member[0].session = 202;
+    G.view = room;
     current.token = 9; current.accepted = 1; current.rules.epoch = 3;
     apply(&ctx, 1234); assert(takes == 1 && writes == 1 && !locked);
     assert(!G.presence);   // missing permission is not the registry default
@@ -125,7 +129,7 @@ def main():
     spec.loader.exec_module(module)
     source = (args.source_root / "host/oot_coop.c").read_text()
     markers = ["typedef struct { Ctx *ctx; uint64_t mgr; } ProgressWrite;", "static int progress_write(",
-               "static void gameplay_context_locked(", "static void apply("]
+               "static int presentation_locked(", "static void gameplay_context_locked(", "static void apply("]
     production = "\n".join(module.piece(source, marker) for marker in markers)
     with tempfile.TemporaryDirectory(prefix="coop-progress-owner-") as name:
         folder = Path(name)

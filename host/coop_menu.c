@@ -33,6 +33,7 @@ int hos_ini_text(const char *key, char *out, size_t size);   /* host/nn_applet.c
 /* host/oot_coop.h's calls for the menu (declared here: that header needs the lifted code's a64.h) */
 int hos_oot_coop_offer(CoopOffer *out);
 int hos_oot_coop_accept(uint32_t token);
+int hos_oot_coop_presence_accept(uint32_t token);
 int hos_oot_coop_is_maker(void);
 int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
@@ -262,12 +263,16 @@ void hos_coop_menu_view(MkwVkCoopView *out) {
         }
     }
     if (has) {
-        out->offer = offer.token, out->accepted = offer.accepted, out->unidentified = offer.unidentified;
+        out->offer = offer.token, out->accepted = out->temporary_save ? offer.presence_accepted : offer.accepted;
+        out->unidentified = offer.unidentified;
         for (int j = 0; j < offer.n && j < COOP_MAX_MEMBERS; j++)
             for (int k = 0; k < out->n; k++)
                 if (out->member[k].id == offer.member[j].id && !out->member[k].self) {
                     copy_text(out->member[k].key, sizeof out->member[k].key, offer.member[j].key);
-                    out->member[k].accepted = (uint8_t)(offer.accepted && offer.member[j].key[0] && !offer.member[j].accepted_as[0]);
+                    if (out->temporary_save && offer.member[j].heard && offer.member[j].name[0])
+                        copy_text(out->member[k].name, sizeof out->member[k].name, offer.member[j].name);
+                    out->member[k].accepted = (uint8_t)(out->accepted && offer.member[j].key[0] &&
+                                                       !offer.member[j].removed && !offer.member[j].accepted_as[0]);
                 }
     }
     for (int k = 0; k < out->n; k++) friend_information(&out->member[k], &offer.rules);
@@ -312,6 +317,8 @@ int hos_coop_menu_command(int cmd, const char *text, uint32_t number) {
         return coop_command(COOP_CMD_LEAVE, NULL);
     case HOS_COOP_CMD_ACCEPT:   /* (progress sync copies the save first, then takes the room's values) */
         return hos_oot_coop_accept(number);
+    case HOS_COOP_CMD_PRESENCE_ACCEPT:
+        return hos_oot_coop_presence_accept(number);
     case HOS_COOP_CMD_REMOVE:
         return text && *text && hos_oot_coop_remove_key(text);
     case HOS_COOP_CMD_RESET_POOLS:

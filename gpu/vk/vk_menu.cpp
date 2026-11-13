@@ -1914,10 +1914,15 @@ bool coop_secret_shown = false;   // (Room secret: masked until Enter shows it; 
 uint32_t coop_accept_token = 0, coop_accept_epoch = 0;
 char coop_duel_armed[65]{};
 uint32_t coop_duel_epoch = 0;
+bool coop_accept_temporary = false;
 const char* coop_accept_notice = nullptr;
 const char* const coop_pvp_accept_help =
     "Accepts only the PvP setup with the players below. No progress is shared and no fight can start. Read your key "
     "fingerprints aloud to each other before: a name can be anyone's. Press twice.";
+const char* const coop_presence_accept_help =
+    "You are playing a temporary copy. Accepts the named players below to see and talk, under the room rules. "
+    "No progress, items, pools or saves are shared. Read your key fingerprints aloud to each other before: "
+    "a name can be anyone's. Press twice.";
 const char* const coop_accept_unknown = "The room changed. Review its members and Room rules before accepting.";
 enum { kCoopName, kCoopRelay, kCoopMake, kCoopJoin, kCoopSecret, kCoopAccept, kCoopRemove, kCoopReset, kCoopLeave, kCoopRules, kCoopTemp, kCoopWarp, kCoopChat, kCoopMute, kCoopDuel, kCoopRows };
 const char* const coop_row_names[kCoopRows] = {"Your name",       "Relay",           "Make a room",     "Join a room",
@@ -1959,7 +1964,11 @@ int coop_kind(const Row& r) {
         if (!strcmp(r.name, coop_row_names[k])) return k;
     return -1;
 }
+const char* coop_row_label(const Row& r) {
+    return coop_kind(r) == kCoopAccept && coop_now.temporary_save ? "Accept to see and talk" : r.name;
+}
 const char* coop_row_help(const Row& r) {
+    if (coop_kind(r) == kCoopAccept && coop_now.temporary_save) return coop_presence_accept_help;
     if (coop_kind(r) == kCoopAccept && coop_now.rules_epoch)
         for (int i = 0; i < std::min<int>(coop_now.feature_count, HOS_COOP_FEATURES); i++)
             if (coop_now.feature_id[i] == 80 && coop_now.feature_value[i] == 1) return coop_pvp_accept_help;
@@ -2006,8 +2015,8 @@ bool coop_row_shown(const Row& r, const MkwVkCoopView& v) {
     case kCoopSecret: return coop_in_room(v) && v.code[0];
     case kCoopAccept: return v.state == HOS_COOP_STATE_JOINED && v.offer && !v.accepted;
     case kCoopRemove: return makers && coop_removable(v, &chosen) > 0;
-    case kCoopWarp: return coop_friends(v, &chosen) > 0;
-    case kCoopReset: return makers;
+    case kCoopWarp: return !v.temporary_save && coop_friends(v, &chosen) > 0;
+    case kCoopReset: return makers && !v.temporary_save;
     case kCoopLeave: return coop_in_room(v);
     case kCoopRules: return makers || v.rules_epoch || !coop_in_room(v);
     case kCoopTemp: return v.temporary_save || !coop_in_room(v);
@@ -3138,6 +3147,7 @@ void coop_press(const Row& r) {
         }
         if (k == kCoopAccept) {
             coop_accept_token = coop_now.offer, coop_accept_epoch = coop_now.rules_epoch;
+            coop_accept_temporary = coop_now.temporary_save != 0;
             coop_accept_notice = nullptr;
             cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;   // read the signed terms before the confirming press
         }
@@ -3150,14 +3160,15 @@ void coop_press(const Row& r) {
     else if (k == kCoopAccept) {
         MkwVkCoopView fresh{};
         if (host->coop_view) host->coop_view(&fresh);
-        if (fresh.offer != coop_accept_token || fresh.rules_epoch != coop_accept_epoch) {
+        if (fresh.state != HOS_COOP_STATE_JOINED || (fresh.temporary_save != 0) != coop_accept_temporary ||
+            fresh.offer != coop_accept_token || fresh.rules_epoch != coop_accept_epoch) {
             coop_accept_notice = coop_accept_change(fresh);
             coop_now = fresh;
             coop_preview_refresh();
             cur_tab = TAB_RULES, tab_selected[TAB_RULES] = 0;
             return;
         }
-        if (!host->coop_command(HOS_COOP_CMD_ACCEPT, nullptr, coop_accept_token))
+        if (!host->coop_command(coop_accept_temporary ? HOS_COOP_CMD_PRESENCE_ACCEPT : HOS_COOP_CMD_ACCEPT, nullptr, coop_accept_token))
             coop_accept_notice = coop_accept_unknown;
     }
     else if (k == kCoopRemove && coop_removable(coop_now, &chosen) && chosen) host->coop_command(HOS_COOP_CMD_REMOVE, chosen->key, 0);
@@ -3181,7 +3192,8 @@ void coop_refresh(bool* changed) {
     host->coop_view(&now);
     if (!memcmp(&now, &coop_now, sizeof now)) return;
     if (pending && coop_kind(*pending) == kCoopAccept &&
-        (now.offer != coop_accept_token || now.rules_epoch != coop_accept_epoch)) {
+        (now.state != HOS_COOP_STATE_JOINED || (now.temporary_save != 0) != coop_accept_temporary ||
+         now.offer != coop_accept_token || now.rules_epoch != coop_accept_epoch)) {
         pending = nullptr, coop_accept_notice = coop_accept_change(now);
     }
     if (pending && coop_kind(*pending) == kCoopWarp && !coop_friend_matches(now)) pending = nullptr;
@@ -3391,8 +3403,10 @@ float measure_help(ui::Ctx& c, float width) {
                             width - 18 * c.s, false);
         if (r.help) {
             float tall = ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, r.help, width, false);
-            if (coop_kind(r) == kCoopAccept)
+            if (coop_kind(r) == kCoopAccept) {
                 tall = std::max(tall, ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, coop_pvp_accept_help, width, false));
+                tall = std::max(tall, ui::para(c, c.f.body, 18 * c.s, ImVec2(), 0, coop_presence_accept_help, width, false));
+            }
             most = std::max(most, tall + (hint ? 14 * c.s + hint : 0));
         }
     }
@@ -4007,7 +4021,7 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
         const Row& r = menu_row(tab_row_to_global(TAB_COOP, i));
         const bool selected = i == sel;
         const int k = coop_kind(r);
-        name_cell(c, ImVec2(left, y), ImVec2(split, y + rh), r.name, selected);
+        name_cell(c, ImVec2(left, y), ImVec2(split, y + rh), coop_row_label(r), selected);
         const ImVec2 va(split, y), vb(right, y + rh);
         if (const FieldRow* f = field_row(r)) {
             text_cell(c, va, vb, *f->field, selected, editing == f->field,

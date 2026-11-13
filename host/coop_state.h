@@ -204,6 +204,7 @@ typedef struct {
 typedef struct {
     uint32_t token;     // the offer's number, random for each start of the game; 0: none
     int accepted;       // the player accepted this offer (values are applied once the copy is made: copy)
+    int presence_accepted; // temporary-copy see/talk consent only; never ordinary acceptance or a completed backup
     int n;              // the other members
     CoopOfferMember member[COOP_MAX_MEMBERS];
     CoopRules rules;
@@ -229,6 +230,13 @@ int coop_sync_accept(CoopSync *s, uint32_t token);
 // False outside the room, before acceptance, for another session, or after a different save needs acceptance.
 // This is identity consent, not a feature-rule/authority check and not permission to write a save.
 int coop_sync_member_accepted(const CoopSync *s, int member, uint64_t session);
+// Mount-domain boundary, set locally before the engine is used. Both transitions discard every consent and merged
+// value. Temporary engines exchange identities/charters only; ordinary acceptance and durable APIs stay closed.
+void coop_sync_temporary(CoopSync *s, int active);
+// Separate local see/talk acceptance, only in that temporary domain. Binds the exact offer, charter and sessions.
+int coop_sync_presence_accept(CoopSync *s, uint32_t token);
+void coop_sync_presence_revoke(CoopSync *s);
+uint32_t coop_sync_presence_members(CoopSync *s);
 // A separate local choice for downloading a checkpoint. Never grants progress,
 // pool membership, save application or another event kind. Any offer, charter or
 // session change invalidates it; callers must ask again.

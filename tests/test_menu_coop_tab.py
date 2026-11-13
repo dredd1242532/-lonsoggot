@@ -300,6 +300,41 @@ static void check_accept_help() {
         }
     }
 }
+static void check_presence_accept() {
+    for (int mode : {0, 1}) {
+        prepare_offer();
+        room.temporary_save = 1;
+        room.feature_value[0] = (int16_t)mode;
+        bool changed = false;
+        coop_refresh(&changed);
+        CHECK(!std::strcmp(coop_row_label(row(kCoopAccept)), "Accept to see and talk"));
+        for (bool narrow : {false, true}) {
+            const char* text = accept_help(row(kCoopAccept), narrow);
+            CHECK(std::strstr(text, "temporary copy") && std::strstr(text, "named players") &&
+                  std::strstr(text, "No progress, items, pools or saves are shared") &&
+                  std::strstr(text, "fingerprints aloud") && std::strstr(text, "Press twice") &&
+                  !std::strstr(text, "Shares your progress"));
+        }
+        coop_press(row(kCoopAccept));
+        CHECK(!n_asked && pending && cur_tab == TAB_RULES);
+        tick_pending(coop_feature_rows[0].row);
+        back_from_rules();
+        coop_press(row(kCoopAccept));
+        CHECK(n_asked == 1 && asked[0].cmd == HOS_COOP_CMD_PRESENCE_ACCEPT && asked[0].number == room.offer);
+        for (int change = 0; change < 4; change++) for (int refresh = 0; refresh < 2; refresh++) {
+            prepare_offer(); room.temporary_save = 1; coop_refresh(&changed);
+            coop_press(row(kCoopAccept)); back_from_rules();
+            if (change == 0) room.temporary_save = 0;
+            if (change == 1) room.state = HOS_COOP_STATE_LEFT;
+            if (change == 2) room.offer++;
+            if (change == 3) room.rules_epoch++;
+            if (refresh) { coop_refresh(&changed); CHECK(!pending && !n_asked); }
+            else { coop_press(row(kCoopAccept)); CHECK(!pending && !n_asked); }
+        }
+    }
+    prepare_offer();
+    CHECK(!std::strcmp(coop_row_label(row(kCoopAccept)), "Accept the room"));
+}
 static void check_rules_footer() {
     prepare_offer();
     cur_tab = TAB_RULES;
@@ -357,6 +392,7 @@ static void check_charter_notice(const char* name) {
 #endif
 static void check_menu_case(const char* name) {
     if (!std::strcmp(name, "help")) check_accept_help();
+    else if (!std::strcmp(name, "presence")) check_presence_accept();
     else if (!std::strcmp(name, "footer")) check_rules_footer();
 #ifdef COOP_MENU_REAL_ENGINE
     else if (!std::strcmp(name, "admission") || !std::strcmp(name, "removal") || !std::strcmp(name, "pools") ||
@@ -367,6 +403,7 @@ static void check_menu_case(const char* name) {
     std::printf("PASS: Co-op menu %s\n", name);
 }
 int main(int argc, char** argv) {
+    check_presence_accept();
     if (argc == 2) { check_menu_case(argv[1]); return 0; }
     const unsigned text_prompts = (1u << ui::kLeftRight) | (1u << ui::kPaste) | (1u << ui::kConfirm) | (1u << ui::kBack);
     CHECK(edit_prompts(coop_name_field, false) == text_prompts);
@@ -719,6 +756,9 @@ int hos_oot_coop_offer(CoopOffer *out) {
     return sync_has;
 }
 int hos_oot_coop_accept(uint32_t token) { accepted_token = token; return sync_has && token == sync_offer.token; }
+int hos_oot_coop_presence_accept(uint32_t token) {
+    accepted_token = token; return temporary && sync_has && token == sync_offer.token;
+}
 int hos_oot_coop_is_maker(void) {
 #ifdef COOP_MENU_REAL_ENGINE
     if (view_engine) return coop_sync_is_maker(view_engine);
@@ -864,6 +904,14 @@ static void real(void) {
     sync_offer.accepted = 1, sync_maker = 1;
     hos_coop_menu_view(&v);
     CHECK(v.accepted && v.member[0].accepted && !v.member[1].accepted && v.remedies);
+    temporary = 1;
+    hos_coop_menu_view(&v);
+    CHECK(v.temporary_save && !v.accepted && !v.member[0].accepted);
+    sync_offer.presence_accepted = 1;
+    hos_coop_menu_view(&v);
+    CHECK(v.accepted && v.member[0].accepted);
+    CHECK(hos_coop_menu_command(HOS_COOP_CMD_PRESENCE_ACCEPT, NULL, 77) && accepted_token == 77);
+    temporary = 0; sync_offer.presence_accepted = 0;
     CHECK(hos_coop_menu_command(HOS_COOP_CMD_REMOVE, "a9e0-31c7-6d58-f2b4", 0) && !strcmp(removed_key, "a9e0-31c7-6d58-f2b4"));
     CHECK(!hos_coop_menu_command(HOS_COOP_CMD_REMOVE, "", 0) && hos_coop_menu_command(HOS_COOP_CMD_RESET_POOLS, NULL, 0) && resets == 1);
     session.state = COOP_LEFT, session.n = 0;   /* (out of the room: progress sync is not asked) */
@@ -977,7 +1025,7 @@ def main():
     p.add_argument("--source-root", type=Path, default=ROOT,
                    help="production checkout; the fixture always comes from this test driver")
     charter_cases = ("admission", "removal", "pools", "charter-rules", "admission-rules", "admission-pools")
-    p.add_argument("--menu-case", choices=("all", "members", "identity", "rules", "combined", "other", "rejected", "help", "footer") + charter_cases,
+    p.add_argument("--menu-case", choices=("all", "members", "identity", "rules", "combined", "other", "rejected", "help", "footer", "presence") + charter_cases,
                    default="all", help="run one menu regression; charter cases include the actual signed engine and host view")
     a = p.parse_args()
     root = a.source_root.resolve()

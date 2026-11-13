@@ -330,6 +330,16 @@ removal, roster, acceptance and save changes refresh them; the session invokes n
 receive an event. A layer must still check its signed feature rule and its own authority/context. This call is not
 the save-backup gate; progress continues to use `coop_sync_open` before handing anything to the game.
 
+Presentation adapters use `hos_oot_coop_presentation(&rules, &members)`: a live, fail-closed snapshot of the
+current see-and-talk permission, its signed rules and member mask. They must still require their own explicitly
+present feature rule. On normal saves this uses the existing accepted offer and completed backup; on a temporary
+copy it uses only the separate presence acceptance below. Native body effects also retain the existing
+`hos_oot_coop_gameplay_ticket` / dispatch boundary, including signed body permission and native play context.
+`coop_member_present(id)` is the session-bound identity check, not a substitute for that feature/context check.
+Only HIT8, COMBAT_CONTROL9, ATTACK10 and CHAT15 reliable events can use the presence-only mask. Unknown/world/clock
+events still require ordinary acceptance, and save events still require their independent download consent.
+Revocation cancels pending presentation events, including a partial event revoked and reaccepted between socket steps.
+
 ## Adding a layer
 
 Keep gameplay in its own file; the session knows bytes, members and consent, not actors. Allocate a kind in the shared
@@ -512,6 +522,9 @@ Read this before you join a room.
   player who wants to can send such flags without playing for them; with small keys in a pool they can spend the keys
   you share (at most what entered the pool). Flags stay set when a player is removed. Inside the game none of this can
   be undone: go back to the copy of your save. Invite only people you trust with your save.
+- **On a temporary copy, acceptance means see and talk only.** The row says **Accept to see and talk**, names the
+  members and their signed fingerprints, and takes two presses around the same signed-terms preview. Nothing
+  durable is shared by that acceptance; see [temporary local saves](#temporary-local-saves).
 
 ### Going back to your save from before a session
 
@@ -698,7 +711,8 @@ The existing progress adapter is the sole durable writer. It checks the current 
 then dispatches a bounded batch through that writer under the existing engine lock. No receive-only check can race
 revocation against a setter. A failed setter is not recorded as an applied value. Co-op off, including switching it
 off after use, returns before guest reads/calls (the separately requested read-only debug probe remains separate).
-PvP setup grants no gameplay capability. The native game still owns ordinary single-player state.
+PvP setup on a normal save grants no gameplay capability. A temporary copy can separately grant presentation,
+never durable or general temporary-effect writers. The native game still owns ordinary single-player state.
 
 ## Temporary local saves
 
@@ -712,6 +726,29 @@ suspended there until a separately consented progress-return policy is available
 The capability owner refuses durable writers for this domain as well as stopping the
 native progress scan. Renderer API 28 combines the signed received terms and membership/pool revisions (API 27)
 with temporary-save status; rules-changed command 9 and copy/return command 10 stay distinct.
+
+In a room on a copy, choose **Accept to see and talk**. Read the named members and compare their fingerprints,
+review the signed Room rules, then press again. This permits bodies/gear, names/HUD, chat/notices, hit observations
+and a separate duel ledger only where the corresponding feature is implemented and its signed rule allows it.
+It is not duel readiness, native damage, inventory permission, travel, shared items, pools, progress in either
+direction, a save download or a save upload. Reset pools is unavailable on a copy.
+
+This presence acceptance lasts only on the mounted copy. Entry and return discard both kinds of acceptance;
+returning cannot restore an earlier normal-save grant. Leave, revoke, a changed charter, identity, session or
+member list closes presentation and cancels pending confirmation. Changing the terms back never revives the old
+grant. Download consent, a packet and `HOS_COOP_ACCEPT=always` cannot grant copy presence; the explicit local
+command is 13, distinct from ordinary Accept4 and copy/return10.
+
+The copy's engine exchanges signed identities and room rules but refuses progress sections, local values,
+pool contributions and durable dispatch. Its frame path reuses the read-only play/area gate and classifies the
+flag schema once for compatible identity exchange; it never binds or runs the progress scanner or apply path.
+Co-op off still returns before guest reads. The normal save and temporary filesystem/restart safeguards are unchanged.
+
+`tests/test_coop_copy_presence.py` exercises the real signed engine, extracted host capability owner and POS
+arrival gate. Its deliberately broken copies cover consent leakage, lost revocation and durable grants.
+The existing event fixture additionally checks unaccepted chat arrival, isolated scopes and revoked fragments;
+the menu fixture checks both two-press flows and copy-specific text in all thirteen translated catalogues
+(English fallback until translated). These are game-free tests, not a two-game visual or Windows runtime proof.
 
 Copies stay under the selected user folder's `coop-sessions`, using random local
 IDs, an immutable starting copy and a separate working `user/save`. Only local
@@ -750,6 +787,8 @@ whose-save picker. Any member whose verified identity was explicitly accepted
 for downloading may offer a locally selected saved slot. Neither role requires
 being the maker. Download consent has its own session-bound mask; it cannot
 open progress, pools, hits or any other event handler.
+Presence acceptance on a temporary copy cannot fill that download mask, and downloading cannot fill the
+presence mask. Explicit checkpoint-transfer actions retain their existing separate consent and refusal rules.
 
 Only `progress.sav` and `caption.sav` leave the owner's captured checkpoint.
 The owner signature binds both identities and sessions, the room context and

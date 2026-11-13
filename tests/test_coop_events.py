@@ -15,7 +15,7 @@ import tempfile
 RUN_ALL_ARGS = ["--cc", "gcc"]
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ("no-loss", "loss", "reorder", "parts", "duplicate", "queue", "acceptance", "codec", "threads",
-         "cancel", "cancel-accept", "reset-ack", "delayed-ack", "reaccept-step", "save-scope")
+         "cancel", "cancel-accept", "reset-ack", "delayed-ack", "reaccept-step", "save-scope", "presence-scope")
 
 
 def compile_fixture(cc, source, folder, tsan=False, mutation=None):
@@ -31,7 +31,8 @@ def compile_fixture(cc, source, folder, tsan=False, mutation=None):
         if mutation == "deadline":
             text = text.replace("if (e->deadline && now >= e->deadline)", "if (0 && e->deadline && now >= e->deadline)")
         elif mutation == "scope":
-            text = text.replace("if (!save_kind(kind)) return accepted_locked(s, member);", "(void)kind; return accepted_locked(s, member);")
+            text = text.replace("if (!save_kind(kind)) return accepted_locked(s, member) || (presentation_kind(kind) && presence_locked(s, member));",
+                                "(void)kind; return accepted_locked(s, member);")
         elif mutation == "cancel":
             text = text.replace("if (e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) e->id = 0;",
                                 "if (0 && e->id && save_kind(e->kind) && !memcmp(e->transfer, transfer, 16)) e->id = 0;")

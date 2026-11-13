@@ -23,6 +23,7 @@ void hos_oot_coop_rom_open(const char *guest_path);
    (1 when this game is the maker and the request was queued) and the pools' contributors (their count, at most max). */
 int hos_oot_coop_offer(CoopOffer *out);
 int hos_oot_coop_accept(uint32_t token);
+int hos_oot_coop_presence_accept(uint32_t token);
 int hos_oot_coop_is_maker(void);
 int hos_oot_coop_reset_pools(void);
 int hos_oot_coop_remove_key(const char *fingerprint);
@@ -34,6 +35,9 @@ int hos_oot_coop_contributors(CoopContributor *out, int max);
 int hos_oot_coop_playing(void);
 uint32_t hos_oot_coop_shown(void);
 int hos_oot_coop_presence(void);   /* accepted signed COOP_PRESENCE_* mask; 0 when context is closed */
+/* Live presentation consent and its signed rules/member mask. No durable or download permission. Every adapter
+   checks its own explicitly present rule; native effects additionally use owner tickets below. NULL outputs allowed. */
+int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members);
 int hos_oot_coop_gameplay_register(const CoopGameplayWriter *writer);
 int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTicket *ticket);
 int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game);

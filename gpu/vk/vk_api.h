@@ -173,7 +173,7 @@ typedef struct MkwVkCoopView {
    maker's remedies: remove the player of that key (text: its fingerprint), reset the pools */
 enum { HOS_COOP_CMD_MAKE = 1, HOS_COOP_CMD_JOIN, HOS_COOP_CMD_LEAVE, HOS_COOP_CMD_ACCEPT, HOS_COOP_CMD_NAME, HOS_COOP_CMD_SERVER,
        HOS_COOP_CMD_REMOVE, HOS_COOP_CMD_RESET_POOLS, HOS_COOP_CMD_RULES_CHANGED, HOS_COOP_CMD_TEMP_SAVE = 10,
-       HOS_COOP_CMD_GO_FRIEND = 11, HOS_COOP_CMD_DUEL_READY = 12 };
+       HOS_COOP_CMD_GO_FRIEND = 11, HOS_COOP_CMD_DUEL_READY = 12, HOS_COOP_CMD_PRESENCE_ACCEPT = 13 };
 
 /* (version 24) compiled feature-rule metadata, indexed in registry order. Strings belong to the host's immutable
    registry for its lifetime. name NULL/empty: no menu row; help NULL: generic rule help. The menu renders at most

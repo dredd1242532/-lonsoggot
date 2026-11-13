@@ -396,7 +396,7 @@ static void hit_on_view(const CoopView *v, void *user) {
 static void hit_on_message(int from, uint64_t session, uint64_t event, const uint8_t *bytes, size_t n, void *user) {
     (void)user; (void)event;
     OotCoopHit hit;
-    if (from < 1 || from > COOP_MAX_MEMBERS || !coop_member_accepted(from) ||
+    if (from < 1 || from > COOP_MAX_MEMBERS || !coop_member_present(from) ||
         !oot_coop_hit_parse(bytes, n, &hit) || hit.target_member != from || hit.origin_session != session) return;
     const uint64_t now = coop_now_ms();
     AcquireSRWLockExclusive(&H.lock);
@@ -498,7 +498,7 @@ void hos_oot_hits_frame(const char *area, int playing) {
     const uint64_t now = coop_now_ms();
     hit_trace_frame(now);
     unsigned accepted = 0;
-    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) if (coop_member_accepted(id)) accepted |= 1u << id;
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) if (coop_member_present(id)) accepted |= 1u << id;
     HitPending batch[HIT_BATCH];
     unsigned n = 0;
     if (!TryAcquireSRWLockExclusive(&H.lock)) return;

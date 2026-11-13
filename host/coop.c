@@ -135,6 +135,7 @@ struct CoopSess {
     int pub_joined;
     uint64_t accepted_self, accepted[COOP_MAX_MEMBERS + 1];
     uint64_t accepted_epoch[COOP_MAX_MEMBERS + 1]; // revocations remembered even across revoke/reaccept between steps
+    uint64_t presence_self, presence[COOP_MAX_MEMBERS + 1];
     uint64_t download_self, download[COOP_MAX_MEMBERS + 1], download_epoch[COOP_MAX_MEMBERS + 1];
     uint64_t save_next_send;
     EventHandler event_handler[256];
@@ -506,9 +507,20 @@ static const CoopMemberInfo *member_of(const CoopSess *s, int id) {
 
 // ---- reliable events and the consent owner's session-bound bindings
 static int save_kind(uint8_t kind) { return kind >= COOP_K_SAVE_OFFER && kind <= COOP_K_SAVE_CHUNK; }
+static int presentation_kind(uint8_t kind) {
+    return kind == COOP_K_HIT || kind == COOP_K_COMBAT_CONTROL || kind == COOP_K_ATTACK || kind == COOP_K_CHAT;
+}
+static int presence_locked(const CoopSess *s, int member) {
+    if (member < 1 || member > COOP_MAX_MEMBERS || member == s->view.self ||
+        !__atomic_load_n(&s->pub_joined, __ATOMIC_ACQUIRE) || s->presence_self != s->view.session) return 0;
+    for (int i = 0; i < s->view.n; i++)
+        if (s->view.member[i].id == member)
+            return s->presence[member] && s->presence[member] == s->view.member[i].session;
+    return 0;
+}
 static int accepted_locked(const CoopSess *s, int member);
 static int bound_locked(const CoopSess *s, int member, uint8_t kind) {
-    if (!save_kind(kind)) return accepted_locked(s, member);
+    if (!save_kind(kind)) return accepted_locked(s, member) || (presentation_kind(kind) && presence_locked(s, member));
     if (member < 1 || member > COOP_MAX_MEMBERS || member == s->view.self ||
         !__atomic_load_n(&s->pub_joined, __ATOMIC_ACQUIRE) || s->download_self != s->view.session) return 0;
     for (int i = 0; i < s->view.n; i++)
@@ -531,6 +543,44 @@ int coop_sess_member_accepted(CoopSess *s, int member) {
     int ok = accepted_locked(s, member);
     coop_unlock(&s->lock);
     return ok;
+}
+
+int coop_sess_member_present(CoopSess *s, int member) {
+    coop_lock(&s->lock);
+    int ok = accepted_locked(s, member) || presence_locked(s, member);
+    coop_unlock(&s->lock);
+    return ok;
+}
+
+void coop_sess_presence_members(CoopSess *s, const CoopView *view, uint32_t members) {
+    coop_lock(&s->lock);
+    if (view && (view->version != s->view.version || view->session != s->view.session)) {
+        coop_unlock(&s->lock); return;
+    }
+    uint64_t self = view && view->state == COOP_JOINED ? view->session : 0;
+    uint64_t next[COOP_MAX_MEMBERS + 1] = {0};
+    for (int i = 0; view && self && i < view->n; i++) {
+        const CoopPeer *p = &view->member[i];
+        if (p->id >= 1 && p->id <= COOP_MAX_MEMBERS && p->id != view->self && (members & (1u << p->id)))
+            next[p->id] = p->session;
+    }
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
+        if (s->presence[id] && (s->presence_self != self || s->presence[id] != next[id]) &&
+            s->accepted_epoch[id] != UINT64_MAX) s->accepted_epoch[id]++;
+        s->presence[id] = s->accepted_epoch[id] == UINT64_MAX ? 0 : next[id];
+    }
+    s->presence_self = self;
+    for (int i = 0; i < COOP_EVENT_SLOTS; i++) {
+        EventOut *e = &s->event_out[i];
+        if (!presentation_kind(e->kind)) continue;
+        int any = 0;
+        for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
+            if (!bound_locked(s, id, e->kind)) e->target[id].session = 0;
+            any |= e->target[id].session != 0;
+        }
+        if (!any) e->id = 0;
+    }
+    coop_unlock(&s->lock);
 }
 
 void coop_sess_accept_members(CoopSess *s, const CoopView *view, uint32_t members) {
@@ -559,7 +609,7 @@ void coop_sess_accept_members(CoopSess *s, const CoopView *view, uint32_t member
         if (save_kind(e->kind)) continue;
         int any = 0;
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
-            if (!s->accepted_self || e->target[id].session != s->accepted[id]) e->target[id].session = 0;
+            if (!bound_locked(s, id, e->kind)) e->target[id].session = 0;
             any |= e->target[id].session != 0;
         }
         if (!any) e->id = 0;
@@ -602,6 +652,8 @@ static void events_reset(CoopSess *s) {
     s->accepted_self = s->event_id = 0;
     memset(s->accepted, 0, sizeof s->accepted);
     memset(s->accepted_epoch, 0, sizeof s->accepted_epoch);
+    s->presence_self = 0;
+    memset(s->presence, 0, sizeof s->presence);
     s->download_self = s->save_next_send = 0;
     memset(s->download, 0, sizeof s->download);
     memset(s->download_epoch, 0, sizeof s->download_epoch);
@@ -657,7 +709,7 @@ static int enqueue_event(CoopSess *s, int member, uint8_t kind, const uint8_t tr
     int any = 0;
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
         if ((!member || member == COOP_DST_ALL || member == id) && bound_locked(s, id, kind))
-            recipients[id] = save_kind(kind) ? s->download[id] : s->accepted[id], any = 1;
+            recipients[id] = save_kind(kind) ? s->download[id] : accepted_locked(s, id) ? s->accepted[id] : s->presence[id], any = 1;
     int result = COOP_EVENT_UNAVAILABLE;
     if (any) {
         result = s->event_id == UINT64_MAX ? COOP_EVENT_INVALID : COOP_EVENT_FULL;
@@ -2025,6 +2077,15 @@ int coop_member_accepted(int member) {
 void coop_accept_members(const CoopView *view, uint32_t members) {
     CoopSess *s = process_session();
     if (s) coop_sess_accept_members(s, view, members);
+}
+
+int coop_member_present(int member) {
+    CoopSess *s = process_session();
+    return s && coop_sess_member_present(s, member);
+}
+void coop_presence_members(const CoopView *view, uint32_t members) {
+    CoopSess *s = process_session();
+    if (s) coop_sess_presence_members(s, view, members);
 }
 
 void coop_download_members(const CoopView *v, uint32_t members) {

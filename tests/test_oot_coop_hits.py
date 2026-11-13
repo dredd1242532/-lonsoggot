@@ -73,7 +73,7 @@ static uint64_t now=1000;
 static char hos_main_build_id[48]="e0f3ccfaf50065ae4ea01eb5aeb13b1a45da3348";
 static int env_on(const char *name) {return !strcmp(name,"HOS_COOP_HITS_TRACE") && trace_on;}
 uint64_t coop_now_ms(void) {clock_reads++;return now;}
-int coop_member_accepted(int id) {member_reads++;return id>=1 && id<=COOP_MAX_MEMBERS && !!(accepted&(1u<<id));}
+int coop_member_present(int id) {member_reads++;return id>=1 && id<=COOP_MAX_MEMBERS && !!(accepted&(1u<<id));}
 int hos_oot_hearts_enabled(void) {return protect;}
 int hos_oot_is_player(Ctx*c,uint64_t a) {(void)c;return classify_player && a==LIFE;}
 static unsigned local_logs,remote_logs,attack_logs,activation_logs,drop_logs;

@@ -229,6 +229,9 @@ struct CoopSync {
     int bound_once, copy, copy_wanted;
     uint32_t download_token, download_epoch;
     uint64_t download_self, download_session[COOP_MAX_MEMBERS + 1];
+    int temporary;
+    uint32_t presence_token, presence_epoch;
+    uint64_t presence_revision, presence_self, presence_session[COOP_MAX_MEMBERS + 1];
 
     Push push[PUSH_SLOTS];
     unsigned push_head, push_tail;
@@ -1033,7 +1036,26 @@ static int charter_members_changed(const Charter *a, const Charter *b) {
     return 0;
 }
 
+void coop_sync_presence_revoke(CoopSync *s) {
+    s->presence_token = 0;
+    if (s->presence_revision != UINT64_MAX) s->presence_revision++;
+}
+
+void coop_sync_temporary(CoopSync *s, int active) {
+    if (!s || s->temporary == !!active) return;
+    s->temporary = !!active;
+    coop_sync_presence_revoke(s);
+    s->accepted = s->have_pin = s->nacc = s->copy = s->copy_wanted = 0;
+    s->copy_gen = UINT32_MAX;
+    s->download_token = 0;
+    s->save_gen++;
+    drop_state(s, 0);
+    s->caught_up = 0;
+    s->digest_to |= 1;
+}
+
 static void adopt_charter(CoopSync *s, const Charter *c) {
+    if (s->temporary) coop_sync_presence_revoke(s);
     int had = s->have_room;
     uint32_t old_pool_epoch = s->ch.pool_epoch;
     CoopRules old = s->room;
@@ -1330,6 +1352,7 @@ int coop_sync_remove(CoopSync *s, int member) {
 }
 
 int coop_sync_reset_pools(CoopSync *s) {
+    if (s->temporary) return 0;
     if (!is_maker(s)) return 0;
     s->want_reset = 1;
     originate(s);
@@ -1367,6 +1390,22 @@ int coop_sync_contributors(const CoopSync *s, CoopContributor *out, int max) {
 }
 
 // ---- the offer
+// Sticky cancellation: changing the offer and changing it back cannot restore an old local acceptance.
+static int presence_matches(CoopSync *s, const CoopOffer *o) {
+    if (!s->temporary || !s->presence_token) return 0;
+    int valid = s->presence_revision != UINT64_MAX && o->token == s->presence_token &&
+                o->rules.epoch == s->presence_epoch && !o->unidentified && !o->disagree &&
+                s->self_session == s->presence_self;
+    for (int id = 1; valid && id <= COOP_MAX_MEMBERS; id++) {
+        const Peer *p = &s->peer[id];
+        const uint64_t session = p->present && !removed(s, p->kid) ? p->session : 0;
+        if (session != s->presence_session[id] ||
+            (session && (!p->ident || disputed(s, p) || p->ignored))) valid = 0;
+    }
+    if (!valid) coop_sync_presence_revoke(s);
+    return valid;
+}
+
 
 int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     memset(o, 0, sizeof *o);
@@ -1428,7 +1467,7 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
             const Peer *t = who[j];
             who[j] = who[j - 1], who[j - 1] = t;
         }
-    uint8_t m[COOP_SECRET_TEXT + (9 + COOP_NAME_MAX) * COOP_MAX_MEMBERS + 8 + COOP_CAT_N + 4 + COOP_FEATURE_BYTES], *at = m;
+    uint8_t m[COOP_SECRET_TEXT + (9 + COOP_NAME_MAX) * COOP_MAX_MEMBERS + 8 + COOP_CAT_N + 4 + COOP_FEATURE_BYTES + 16], *at = m;
     putn(&at, s->code, strlen(s->code));
     for (int i = 0; i < nw; i++) {
         size_t nl = strlen(who[i]->raw);
@@ -1440,6 +1479,10 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
     putn(&at, s->room.mode, COOP_CAT_N);
     put32(&at, s->save_gen);
     features_write(&at, &s->room.features);
+    if (s->temporary) {
+        put64(&at, s->presence_revision);
+        put64(&at, s->self_session);
+    }
     uint64_t h = coop_siphash24(s->offer_k0, s->offer_k1, m, (size_t)(at - m));
     o->token = (uint32_t)(h ^ h >> 32) | 1;
     int ok = s->accepted && s->have_pin && s->pin_kid == s->ch.kid && !memcmp(s->acc_mode, s->room.mode, COOP_CAT_N) &&
@@ -1449,12 +1492,14 @@ int coop_sync_offer(CoopSync *s, CoopOffer *o, uint64_t now) {
         ok = a >= 0 && !strcmp(s->acc_name[a], who[i]->raw);
     }
     o->accepted = ok;
+    o->presence_accepted = presence_matches(s, o);
     return 1;
 }
 
 static void keep_ended_of(CoopSync *s, uint64_t kid);
 
 int coop_sync_accept(CoopSync *s, uint32_t token) {
+    if (s->temporary) return 0;
     CoopOffer o;
     if (!token || !coop_sync_offer(s, &o, s->now) || o.token != token || o.unidentified) return 0;
     if (!s->accepted) s->nacc = 0;
@@ -1487,12 +1532,38 @@ int coop_sync_accept(CoopSync *s, uint32_t token) {
 }
 
 int coop_sync_member_accepted(const CoopSync *s, int member, uint64_t session) {
+    if (s && s->temporary) return 0;
     if (!s || !s->in_room || !s->accepted || s->acc_save_gen != s->save_gen ||
         member < 1 || member > COOP_MAX_MEMBERS || member == s->self || !session) return 0;
     const Peer *p = &s->peer[member];
     if (p->session != session || !peer_counts(s, p)) return 0;
     int accepted = acc_index(s, p->kid);
     return accepted >= 0 && !strcmp(s->acc_name[accepted], p->raw);
+}
+
+int coop_sync_presence_accept(CoopSync *s, uint32_t token) {
+    CoopOffer o;
+    if (!s || !s->temporary || s->presence_revision == UINT64_MAX || !token ||
+        !coop_sync_offer(s, &o, s->now) || o.token != token || o.unidentified || o.disagree) return 0;
+    s->presence_token = token;
+    s->presence_epoch = o.rules.epoch;
+    s->presence_self = s->self_session;
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
+        s->presence_session[id] = s->peer[id].present && !removed(s, s->peer[id].kid) ? s->peer[id].session : 0;
+    s->pin_kid = s->ch.kid, s->have_pin = 1;
+    return 1;
+}
+
+uint32_t coop_sync_presence_members(CoopSync *s) {
+    CoopOffer o;
+    if (!s || !coop_sync_offer(s, &o, s->now) || !o.presence_accepted) {
+        if (s && s->presence_token) coop_sync_presence_revoke(s);
+        return 0;
+    }
+    uint32_t mask = 0;
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
+        if (id != s->self && peer_counts(s, &s->peer[id])) mask |= 1u << id;
+    return mask;
 }
 
 int coop_sync_download_accept(CoopSync *s, uint32_t token) {
@@ -1524,12 +1595,14 @@ int coop_sync_save_binding(CoopSync *s, int member, struct CoopSaveBinding *out)
 int coop_sync_copy_wanted(const CoopSync *s) { return s->copy_wanted; }
 
 void coop_sync_copied(CoopSync *s, int ok) {
+    if (s->temporary) return;
     s->copy_wanted = 0;
     s->copy = ok ? 1 : -1;
     s->copy_gen = s->save_gen;
 }
 
 int coop_sync_open(CoopSync *s) {
+    if (s->temporary) return 0;
     CoopOffer o;
     int mode;
     return coop_sync_offer(s, &o, s->now) && o.accepted &&
@@ -1597,6 +1670,7 @@ void coop_sync_room(CoopSync *s, const char *code, int self, const int *ids, con
     if (!code) code = "";
     if (now > s->now) s->now = now;
     if (strcmp(code, s->code)) {
+        if (s->temporary) coop_sync_presence_revoke(s);
         int same = code[0] && !strcmp(code, s->acc_code);
         snprintf(s->code, sizeof s->code, "%s", code);
         s->in_room = code[0] != 0;
@@ -1629,7 +1703,10 @@ void coop_sync_room(CoopSync *s, const char *code, int self, const int *ids, con
         if (ids[i] == self) {
             // this game's own session (the one it joined with); the one before it is named in its next identity, which
             // goes to everyone at once, so that the others take it and end that session
-            if (v != s->self_session) s->prev_session = s->self_session, s->self_session = v, s->id_valid = 0, s->digest_to |= 1;
+            if (v != s->self_session) {
+                if (s->temporary) coop_sync_presence_revoke(s);
+                s->prev_session = s->self_session, s->self_session = v, s->id_valid = 0, s->digest_to |= 1;
+            }
             continue;
         }
         seen[ids[i]] = 1, sess[ids[i]] = v;
@@ -1640,10 +1717,12 @@ void coop_sync_room(CoopSync *s, const char *code, int self, const int *ids, con
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
         Peer *p = &s->peer[id];
         if (seen[id] && (!p->present || p->session != sess[id])) {
+            if (s->temporary) coop_sync_presence_revoke(s);
             memset(p, 0, sizeof *p);
             p->present = 1, p->session = sess[id], p->seen_at = now;
             s->digest_to |= 1ull << id;   // a member who just joined hears this player's state at once
         } else if (!seen[id] && p->present) {
+            if (s->temporary) coop_sync_presence_revoke(s);
             memset(p, 0, sizeof *p);
         }
     }
@@ -2010,6 +2089,7 @@ static void on_section(CoopSync *s, int from, const uint8_t *b, size_t n) {
 }
 
 void coop_sync_receive(CoopSync *s, int from, uint8_t kind, const uint8_t *bytes, size_t n, uint64_t now) {
+    if (s->temporary && kind == COOP_K_SECTION) return;
     if (from < 1 || from > COOP_MAX_MEMBERS || from == s->self || !s->in_room) return;
     if (now > s->now) s->now = now;
     Peer *p = &s->peer[from];
@@ -2084,6 +2164,7 @@ void coop_sync_tick(CoopSync *s, uint64_t now, CoopSyncSendFn send, void *user) 
         for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
             if (s->digest_to >> id & 1 && s->peer[id].present) send_digest(s, id, send, user);
     s->digest_to = 0;
+    if (s->temporary) return;   // identity and signed charter only: no values or pool traffic, even after old acceptance
     if (!s->have_room) return;
 
     // a claim waiting to be made again (a removal, or the player accepting more keys) is made now, also while the game
@@ -2158,6 +2239,7 @@ void coop_sync_rebind(CoopSync *s) {
 }
 
 void coop_sync_local(CoopSync *s, int cat, uint32_t hash, uint32_t value, uint64_t now) {
+    if (s->temporary) return;
     if (cat < 0 || cat >= COOP_CAT_N || coop_cat_is_pool(cat)) return;
     if (now > s->now) s->now = now;
     int idx = find_reg(s, hash);
@@ -2206,6 +2288,7 @@ static void pool_recheck(CoopSync *s, Pool *p, uint64_t now) {
 }
 
 void coop_sync_pool_local(CoopSync *s, int cat, uint32_t hash, int32_t value, int32_t cap, uint64_t now) {
+    if (s->temporary) return;
     if (cat < 0 || cat >= COOP_CAT_N || !coop_cat_is_pool(cat)) return;
     if (now > s->now) s->now = now;
     Pool *p = pool_get(s, hash, cat, 1);

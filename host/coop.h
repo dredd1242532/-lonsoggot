@@ -135,6 +135,10 @@ int coop_member_accepted(int member);
 // Consent owner only: publish bindings for exactly this view (bit per member id). NULL clears them. Stale views
 // cannot grant acceptance, and a different member session never inherits a binding. No game code is called here.
 void coop_accept_members(const CoopView *view, uint32_t members);
+// Presentation-only bindings. They never grant ordinary accepted-play or download permission. Only HIT,
+// COMBAT_CONTROL, ATTACK and CHAT events use them; native/save effects still require their own owner capability.
+int coop_member_present(int member);
+void coop_presence_members(const CoopView *view, uint32_t members);
 
 // Download consent is a distinct binding, never progress/gameplay acceptance.
 // Only SAVE_OFFER/CONTROL/CHUNK use it. The identity owner supplies the exact
@@ -177,6 +181,8 @@ int coop_sess_send_event(CoopSess *s, int member, uint8_t kind, const void *byte
 int coop_sess_on_event(CoopSess *s, uint8_t kind, CoopEventFn fn, void *user);
 int coop_sess_member_accepted(CoopSess *s, int member);
 void coop_sess_accept_members(CoopSess *s, const CoopView *view, uint32_t members);
+int coop_sess_member_present(CoopSess *s, int member);
+void coop_sess_presence_members(CoopSess *s, const CoopView *view, uint32_t members);
 void coop_sess_download_members(CoopSess *s, const CoopView *view, uint32_t members);
 int coop_sess_on_save_event(CoopSess *s, uint8_t kind, CoopEventFn fn, void *user);
 int coop_sess_send_save_event(CoopSess *s, int member, uint8_t kind, const uint8_t transfer[16], uint64_t deadline_ms, const void *bytes, size_t n);
