@@ -144,7 +144,7 @@ def sources():
         raise SystemExit("display_sdl.c: no WM_APP + 9")
     relaunch = (ROOT / "host" / "hos_relaunch.c").read_text(encoding="utf-8")
     end = function(relaunch, "void hos_window_closed_exit(void) {")
-    if end.index("hos_log_flush();") > end.index("relaunch();") or end.index("relaunch();") > end.index("ExitProcess(0);"):
+    if end.index("hos_log_flush();") > end.index("relaunch()") or end.index("relaunch()") > end.index("ExitProcess(0);"):
         raise SystemExit("hos_relaunch.c: the restart is not the last step before the exit (after the log)")
     for need in ("GetModuleFileNameW(", "GetCommandLineW()", "CreateProcessW(", '"/proc/self/cmdline"', '"/proc/self/environ"',
                  'execve("/proc/self/exe"'):
@@ -152,7 +152,7 @@ def sources():
             raise SystemExit("hos_relaunch.c: no " + need)
     # (Windows: the new process gets the environment the game started with, not this one's with longshot_env.txt's lines in
     # it, or a restart takes each of the file's lines for the environment's and leaves the file's edits out)
-    windows = relaunch[relaunch.index("static void relaunch(void) {"):relaunch.index("#else")]
+    windows = relaunch[relaunch.index("static int relaunch(void) {"):relaunch.index("#else")]
     if not re.search(r"CreateProcessW\([^;]*CREATE_UNICODE_ENVIRONMENT[^;]*, env,", windows) or \
             "hos_relaunch_env_block(start_env, L\"HOS_RESTART_OF\"" not in windows:
         raise SystemExit("hos_relaunch.c: Windows' restart does not start the game with the environment it started with")

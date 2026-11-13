@@ -58,7 +58,7 @@ typedef struct {
 // ---- the process's session (the one the settings drive)
 
 // Starts the coop thread when HOS_COOP (or, without it, longshot_options.ini's coop=) is on: once, with the settings as
-// they are then (host/hos_main.c, beside the Discord status). Off, nothing runs: no socket, no thread.
+// they are then (host/hos_main.c, after native profile selection). Off, nothing runs: no socket, no thread.
 void coop_init(void);
 // Switches the process's session on or off and sets the player's name and the relay ("host[:port]") now, from any
 // thread (the menu's Co-op tab). On starts the coop thread when none runs (co-op was off at start, or was switched off;

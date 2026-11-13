@@ -161,15 +161,16 @@ def main():
         exe = tmp / "profile.exe"
         libs = ["-lws2_32", "-lbcrypt", "-liphlpapi"] if os.name == "nt" else ["-pthread"]
         subprocess.run([a.cc, "-std=c11", "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-O1", "-Wall", "-Wextra", "-Werror",
-                        "-I" + str(root / "host"), str(fixture), str(c), str(root / "host/coop_net.c"),
+                        "-Wno-unused-function", "-I" + str(root / "host"), str(fixture), str(c), str(root / "host/coop_net.c"),
                         str(root / "host/coop_proto.c"), str(root / "third_party/monocypher/monocypher.c"),
                         "-o", str(exe)] + libs, check=True)
-        user = tmp / "user-é"
+        user = tmp / "user"  # ASCII argv works even without a Windows UTF-8 process manifest.
         slot = user / "save/profile/slot_00"
         slot.mkdir(parents=True)
         (slot / "progress.sav").write_bytes(bytes(range(256)) * 720)
         (slot / "caption.sav").write_bytes(b"authored caption")
         (user / "save/profile/account.sav").write_bytes(b"local account")
+        (user / "save/profile/unicode-é.sav").write_bytes(b"UTF-8 filename")
         (user / "coop-keys").mkdir()
         (user / "coop-keys/private").write_bytes(b"must not copy")
         before = hashes(user / "save")

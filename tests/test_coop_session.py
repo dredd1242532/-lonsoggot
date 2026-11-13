@@ -16,7 +16,7 @@ and a second time with ThreadSanitizer, when the compiler has them). Eight runs 
               started from the settings by coop_init and, on Linux, a child process ended by SIGTERM, which says
               nothing (co-op installs no signal handler): the relay drops it for its silence, as its log must say
 
-Also checks the wiring: the game starts co-op beside the Discord status on both platforms (host/hos_main.c), says
+Also checks the wiring: co-op starts after profile selection on both platforms (host/hos_main.c), says
 goodbye when its window closes (host/hos_relaunch.c), and links Winsock and BCrypt on Windows (nx2/build.py).
 
 A compiled boundary fixture also checks the actual sender with the real encryption code: the last counter is sent
@@ -96,10 +96,9 @@ def check_wiring():
     starts = [i for i in range(len(main_c)) if main_c.startswith("hos_discord_start();", i)]
     if len(starts) != 2:
         raise SystemExit("FAIL: host/hos_main.c starts the Discord status %d times (two expected: Windows, Linux)" % len(starts))
-    for at in starts:
-        after = main_c[at:at + 200]
-        if "coop_init();" not in after or after.index("coop_init();") > after.index("}"):
-            raise SystemExit("FAIL: host/hos_main.c does not start co-op (coop_init) beside hos_discord_start at offset %d" % at)
+    calls = [i for i in range(len(main_c)) if main_c.startswith("coop_init();", i)]
+    if len(calls) != 1 or not main_c.index("if (!coop_profile_init(") < calls[0] < main_c.index("if (!reserve_guest())"):
+        raise SystemExit("FAIL: co-op must start once in the common Windows/Linux entry, after profile selection and before guest startup")
     goodbye = block((ROOT / "host" / "hos_relaunch.c").read_text(encoding="utf-8"), "void hos_window_closed_exit(void) {")
     if "coop_shutdown();" not in goodbye or goodbye.index("coop_shutdown();") > goodbye.index("hos_log_flush();"):
         raise SystemExit("FAIL: host/hos_relaunch.c hos_window_closed_exit does not say goodbye (coop_shutdown) before the log's flush")
