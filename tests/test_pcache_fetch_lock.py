@@ -123,6 +123,9 @@ def main():
     for name in ("void pipeline_cache_close() {", "void pipeline_cache_save_play() {", "void play_cache_save("):
         assert "PcacheFetch" not in cut(draw, name, "\n}\n"), name + " holds the fetch lock across play_cache_save"
     assert "play_cache_save(kFetchQueueMs)" in cut(draw, "void pipeline_cache_close() {", "\n}\n")
+    # (the users wait bounded only with the lock on, polled or queued: off, the close waits for the builds as before)
+    assert "const bool bounded = pcache_fetch_lock_on() && wait_ms >= 0;" in cut(draw, "void play_cache_save(", "\n}\n")
+    assert save.count("return put_off_now();") == 2, "a save whose data fetch was put off is lost without a log line"
     assert "create_cached(guarded_graphics_held, ci, pl)" in draw and "create_cached(guarded_compute_held, ci, pl)" in draw
     assert "guarded_compute(pcache," not in draw, "a build with pcache that does not hold it from a fetch"
     with tempfile.TemporaryDirectory(prefix="pcache-fetch-") as tmp:

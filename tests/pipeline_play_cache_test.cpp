@@ -359,6 +359,21 @@ int run(const std::string& name) {
         CHECK(file_keys(play_path(1)) == (std::set<uint64_t>{29, 30}));   // (the compile under way in its generation's file)
         play_cache_save();
         CHECK(file_keys(play_path(2)) == std::set<uint64_t>{31});
+        // (the fetch lock off: the window's close, play_cache_save with a bound, still waits for a build under way as before;
+        // on AMD's Windows driver one takes 5-13 s, and the play file is not given up for it)
+        CHECK(!pcache_fetch_lock_on());
+        blocked = false, release = false, block_key = 32;
+        std::thread maker2([] { make(32); });
+        CHECK(wait_for([] { return blocked.load(); }));
+        CHECK(make(33) == VK_SUCCESS);
+        std::atomic<bool> closed{false};
+        std::thread closer([&] { play_cache_save(100); closed = true; });
+        Sleep(400);
+        CHECK(!closed.load() && !exists(play_path(3)));
+        release = true;
+        maker2.join();
+        closer.join();
+        CHECK(file_keys(play_path(3)) == (std::set<uint64_t>{32, 33}));
     } else if (name == "lock-users") {
         // (the fetch lock on, https://github.com/NotRexed/Hookshot/issues/999: a save while a build is between two of
         // create_cached's builds, counted in the generation and holding no lock. A save that held the lock while it waited for the
