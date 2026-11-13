@@ -6,6 +6,7 @@ before it takes the next note, keeps no program, writes the marker only when it 
 in the bar's total. No game or GPU is needed.
 """
 import argparse
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -26,9 +27,10 @@ def check_source():
         if needle not in warm:
             raise SystemExit("precompile_warm no longer has: " + needle)
     # (the bar: the compute pipelines after the noted ones on one total, never progress(total, total) through them, which
-    # held the start-up screen at 100% for minutes)
-    if ("progress(done.load(), whole)" not in warm or "progress(total + computes_done.load(), whole)" not in warm
-            or "progress(total, total)" in warm):
+    # held the start-up screen at 100% for minutes; and what was done, never the noted step's whole: a stopped noted step
+    # has no compute step, whose one tick said every noted pipeline was done)
+    if ("progress(done.load(), whole)" not in warm or "progress(done.load() + computes_done.load(), whole)" not in warm
+            or re.search(r"progress\(\s*total\b", warm) or "whole = total + compute_keys.size()" not in warm):
         raise SystemExit("precompile_warm does not count its compute pipelines in the bar's total")
     for kept in ("pipelines.emplace", "pipeline_keep_ready(", "programs[", "program_cache_load_some("):
         if kept in warm:

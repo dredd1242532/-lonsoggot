@@ -8772,13 +8772,13 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     // (the compute pipelines too, every kept compute program's: a first start in start mode makes them all, and a load at a
     // create call only asks the caches, so on a new install a first dispatch found none (666 in one first session). Built
     // into the cache and let go, as the noted ones)
-    const std::vector<uint64_t> computes = done == total && !prepare_stopped() ? compute_keys : std::vector<uint64_t>{};
+    const size_t computes_n = done == total && !prepare_stopped() ? compute_keys.size() : 0;
     std::atomic<size_t> computes_done{0}, computes_built{0}, computes_failed{0};
     const auto c0 = std::chrono::steady_clock::now();
-    warm_bounded::run(computes.size(), threads, [&](size_t i) {
+    warm_bounded::run(computes_n, threads, [&](size_t i) {
         static thread_local bool off = (ub_thread_off(), true);
         (void)off;
-        program_cache_borrow(computes[i], [&](Program& p) {
+        program_cache_borrow(compute_keys[i], [&](Program& p) {
             if (!p.compute || p.failed || p.stages.empty() || !p.stages[0].module || prepare_stopped() || taau_key(p.key)) return;
             ensure_layout(p);
             const VkComputePipelineCreateInfo ci = compute_pipeline_info(p, true);   // (as a dispatch and a load ask for it)
@@ -8792,10 +8792,11 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         });
         computes_done++;
     }, [] { return prepare_stopped(); }, [&](size_t) {
-        if (progress) progress(total + computes_done.load(), whole);
-        prepare_progress_log("compute pipelines", computes_done.load(), computes.size(), c0, log_at);
+        // (what was done, not total: a noted step that was stopped leaves no compute step, and its last tick says so)
+        if (progress) progress(done.load() + computes_done.load(), whole);
+        prepare_progress_log("compute pipelines", computes_done.load(), computes_n, c0, log_at);
     });
-    const bool all = done == total && computes_done == computes.size();
+    const bool all = done == total && computes_done == computes_n;
     static const bool prepare_only = env_on("LONGSHOT_PREPARE_ONLY");   // (a --prepare-shaders run: vk_main.cpp)
     if (all && !prepare_stopped()) {
         pipeline_cache_save(true);   // (in the file before the marker says they are there)
@@ -8805,7 +8806,7 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
     }
     logf("vk: precompile: %zu noted pipelines of %zu programs and %zu compute pipelines of %zu compute programs built into the "
          "pipeline cache and let go (%zu and %zu not made, %zu whose program variant is not kept), on %u threads in %.1f s (the "
-         "compute ones %.1f s)%s", built.load(), progs.size(), computes_built.load(), computes.size(), failed.load(),
+         "compute ones %.1f s)%s", built.load(), progs.size(), computes_built.load(), computes_n, failed.load(),
          computes_failed.load(), no_program.load(), threads,
          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(),
          std::chrono::duration<double>(std::chrono::steady_clock::now() - c0).count(),
