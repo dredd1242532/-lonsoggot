@@ -404,7 +404,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | HDR paper white | 80 to 400 nits, in steps of 10 (while HDR is on) | 200 nits |
 | | HDR peak brightness | 400 to 4000 nits, in steps of 100 (while HDR is on) | 1000 nits |
 | | HDR contrast | 50% to 200% around mid grey, in steps of 5 (while HDR is on) | 100% |
-| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS/DLAA and their NVIDIA frame-generation inputs can be tried with `RX_VK_PSYCHOV35_DLSS=1`; FSR, TAAU and Upscaler Off still fall back to the game's network) | Vanilla |
+| | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS/DLAA with their NVIDIA frame-generation inputs, and AMD FSR 4, can be tried with `RX_VK_PSYCHOV35_DLSS=1`; FSR 3.1, TAAU and Upscaler Off still fall back to the game's network) | Vanilla |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
