@@ -2,7 +2,8 @@
 after a preparation with RX_VK_LOAD=create builds every noted pipeline into the pipeline cache and lets each go, instead of
 keeping them all ready as the precompile does (which a 16 GB PC cannot hold). Compile and run the rule: every item once, never
 more alive than threads, a stop honoured, progress reported. And the source: precompile_warm destroys each pipeline it builds
-before it takes the next note, keeps no program, and writes the marker only when it got through. No game or GPU is needed.
+before it takes the next note, keeps no program, writes the marker only when it got through, and counts its compute pipelines
+in the bar's total. No game or GPU is needed.
 """
 import argparse
 import subprocess
@@ -24,6 +25,11 @@ def check_source():
                    "program_cache_compute_keys()", "cached_compute(&ci, &made)"):
         if needle not in warm:
             raise SystemExit("precompile_warm no longer has: " + needle)
+    # (the bar: the compute pipelines after the noted ones on one total, never progress(total, total) through them, which
+    # held the start-up screen at 100% for minutes)
+    if ("progress(done.load(), whole)" not in warm or "progress(total + computes_done.load(), whole)" not in warm
+            or "progress(total, total)" in warm):
+        raise SystemExit("precompile_warm does not count its compute pipelines in the bar's total")
     for kept in ("pipelines.emplace", "pipeline_keep_ready(", "programs[", "program_cache_load_some("):
         if kept in warm:
             raise SystemExit("precompile_warm keeps what it builds: " + kept)
