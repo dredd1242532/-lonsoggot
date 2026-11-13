@@ -49,20 +49,28 @@ inline bool old_ini_choice(const char* line, int* value) {
 /// lost the device on the session's first task + mesh draws (reported in Mako by sharkiix, no log published); another RX 6600
 /// on the same driver played 15-20 minutes on the native path and lost the device only at the driver's VRAM limit
 /// (https://git.magicbean.dev/MagicBeanDev/Longshot/issues/130); the fallback costs VRAM of its own (fallback_buffers_of,
-/// vk_draw.cpp). Navi 24 (0x743f: RX 6400, 6500 XT; 0x7421 to 0x7424: RX 6300, Pro
-/// W6300 to W6500M) is not on by default: no report, 4 GB cards. RX_VK_TASK_MESH_FALLBACK=1 to try
+/// vk_draw.cpp). Navi 24 (0x743f: RX 6400, 6500 XT; 0x7421 to 0x7424: RX 6300, Pro W6300 to W6500M) is not on by default: no
+/// report, 4 GB cards. RX_VK_TASK_MESH_FALLBACK=1 to try.
+/// Which IDs a chip brings: all its IDs that the PCI ID database (pci-ids.ucw.cz) or libdrm's amdgpu.ids name a card for,
+/// consumer, mobile and Pro alike, as they share the chip and the driver's mesh path; not its USB or audio functions, nor
+/// IDs neither list names a card for (Navi 22's 0x73c3, its SR-IOV function 0x73ce). Untested ones go in with their chip
 inline bool task_mesh_fallback_default(uint32_t vendor, uint32_t device) {
     if (vendor != 0x1002) return false;
     switch (device) {
+    case 0x73a1:   // Navi 21: Radeon Pro V620
+    case 0x73a2:   // Navi 21: Radeon Pro W6900X
+    case 0x73a3:   // Navi 21: Radeon Pro W6800
+    case 0x73ab:   // Navi 21: Radeon Pro W6800X, W6800X Duo
+    case 0x73ae:   // Navi 21: Radeon Pro V620 MxGPU
     case 0x73bf:   // Navi 21: RX 6800, 6800 XT, 6900 XT
     case 0x73af:   // Navi 21: RX 6900 XT (XTXH boards)
     case 0x73a5:   // Navi 21: RX 6950 XT
-    case 0x73df:   // Navi 22: RX 6700, 6700 XT, 6750 XT, 6750 GRE 12GB
+    case 0x73df:   // Navi 22: RX 6700, 6700 XT, 6750 XT, 6750 GRE 12GB, 6700M, 6800M, 6850M XT
     case 0x73e0:   // Navi 23: RX 6600M
     case 0x73e1:   // Navi 23: Radeon Pro W6600M
     case 0x73e3:   // Navi 23: Radeon Pro W6600
-    case 0x73ef:   // Navi 23: RX 6650 XT
-    case 0x73ff:   // Navi 23: RX 6600, 6600 XT, 6600 LE
+    case 0x73ef:   // Navi 23: RX 6650 XT, 6650M, 6650M XT, 6700S, 6800S
+    case 0x73ff:   // Navi 23: RX 6600, 6600 XT, 6600 LE, 6600M, 6600S
         return true;
     default:
         return false;
