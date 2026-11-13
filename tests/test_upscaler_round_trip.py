@@ -49,6 +49,11 @@ FIXTURE = r'''
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 using namespace mkwvk;
 namespace ur = mkwvk::upscaler_rows;
 int failures = 0, checks = 0;
@@ -109,6 +114,7 @@ bool can_bind() { return false; }
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
+void logf(const char*, ...) {}
 /* SAVE */
 void restart() {
     opts = Options{};
@@ -135,7 +141,6 @@ void temporal_reset_failure() {}
 void prompts_at_once(const Row&) {}
 /* STOPS */
 void apply_auto(bool keep_own);
-void logf(const char*, ...) {}
 /* PRESET */
 /* APPLY_AUTO */
 /* SET_ROW */
