@@ -54,7 +54,7 @@ def main():
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     env = dict(os.environ)
     env["PATH"] = str(Path(cxx).parent) + os.pathsep + env.get("PATH", "")
-    with tempfile.TemporaryDirectory(prefix="hookshot-gpu-time-") as folder:
+    with tempfile.TemporaryDirectory(prefix="longshot-gpu-time-") as folder:
         tmp = Path(folder)
         (tmp / "gpu_time_actual.inc").write_text(block + "\n", encoding="utf-8")
         exe = tmp / ("gpu_time.exe" if os.name == "nt" else "gpu_time")

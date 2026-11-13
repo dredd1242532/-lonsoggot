@@ -326,9 +326,10 @@ int64_t st_wait_ns;   // (time the replay waited for a recording slot: the GPU b
 VkQueryPool ts_pool = VK_NULL_HANDLE;
 bool ts_pending[kRecordings];
 int64_t st_gpu_ns, st_gpu_max_ns;
-// (hookshot) With the slot's own times, the same call reads those of the slots after it that are still unread and that the GPU has
+// (longshot) With the slot's own times, the same call reads those of the slots after it that are still unread and that the GPU has
 // finished (each query's availability), up to kTsRun slots: one vkGetQueryPoolResults for a run of recordings, not one each. On an
-// RX 9070 XT (AMD's Windows driver) the per-slot calls were 0.16 ms a frame of the presentation thread in Hyrule Field, ~50 a frame.
+// RX 9070 XT (AMD's Windows driver) the per-slot calls, about 31 a frame, were 0.16 ms a frame of the presentation thread in
+// Hyrule Field (sampled).
 // The times read ahead are kept and counted when their own slot comes round, as one slot a call counts them, so the GPU time each
 // 120-present window sees (the Breakdown, the movie network check, Auto (this PC)'s tuning) is the same as without the switch.
 // A query's availability can still show a slot's previous use until the reset recorded in its next command buffer runs, so each
