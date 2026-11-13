@@ -18,6 +18,11 @@ Your choices are saved as you go, in `longshot_options.ini` in the game folder. 
 applies the next time the game starts: when you close the menu it asks whether to restart. **Later** keeps the change
 for next time; **Restart now** starts the game again, and you lose any progress since your last save.
 
+![Graphics tab with Quality preset selected, setting rows on the left, help on the right, and keyboard navigation along the bottom.](images/guide/settings-graphics.png)
+
+*UI-only example of the v3.0.0-rc.3 menu, rendered with a plain background and bundled fonts. Values are illustrative;
+available options vary with your graphics card and build. Use the starting points below for your settings.*
+
 ## Good starting points
 
 A first start uses the **Auto (this PC)** quality preset. It picks settings from your graphics card and its video memory,

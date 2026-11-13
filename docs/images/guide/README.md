@@ -108,3 +108,31 @@ then the website build/check commands in `website/README.md`. Inspect desktop/mo
 including image readability, alternative text and adjacent instructions. In the PR, state which UI release and
 commit were compared, what was recaptured or retained, the checker result (including external checks skipped),
 and the rendered pages inspected. A passing integrity check alone is not a visual review.
+
+## UI-only settings fixture
+
+`scripts/screenshots/menu.cpp` compiles the real `gpu/vk/vk_menu.cpp`, translation code and bundled ImGui. It calls
+its drawing function with deterministic illustrative settings and renders the resulting geometry through SDL2's
+software renderer. It uses bundled Libertinus fonts over a solid background. It does not initialize a game,
+Vulkan device, game-font loader, saved configuration or save workflow. Hardware-specific capabilities are disabled
+fixture inputs. The result is an explicitly captioned UI-only example, not a runtime screenshot or a configuration
+recommendation. Differences from a live Vulkan presentation have not been validated.
+
+On Linux, install a C++20 compiler, Python 3, pkg-config, SDL2/libpng development files and Vulkan headers, then run:
+
+```sh
+python -I scripts/screenshots/capture_menu.py \
+  --source /path/to/clean/Longshot-checkout \
+  --vulkan-headers /path/to/include \
+  --output /tmp/longshot-menu-capture
+```
+
+`--vulkan-headers` must contain `vulkan/vulkan.h`; no Vulkan runtime or private game files are needed. The source
+checkout must include bundled ImGui and Libertinus. This optional local capture build is separate from site builds
+and the lightweight CI guard. It outputs Graphics, Audio and Controls PNGs plus `menu-capture.json`; currently only
+the Graphics image is published. Inspect the output before copying a selected image into this directory.
+
+The helper derives repository input hashes from the compiler's dependency list and rejects dirty or untracked
+capture inputs. It records the source revision, fixture hashes, compiler/library versions and explicit display
+state. Preserve those records in the manifest when replacing an image. Recheck the dependency set when menu code
+changes: a successful old dependency hash check cannot detect an entirely new, unlisted dependency by itself.

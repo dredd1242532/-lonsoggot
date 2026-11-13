@@ -2,6 +2,7 @@
 // (ignored by Git) when Astro starts, for dev and build alike, unchanged.
 import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AstroIntegration } from 'astro';
 import guideManifest from '../../../docs/images/guide/manifest.json' with { type: 'json' };
 
@@ -24,7 +25,7 @@ export function repoAssets(): AstroIntegration {
     hooks: {
       'astro:config:setup': async ({ config }) => {
         for (const [from, to] of Object.entries(repositoryAssets)) {
-          const target = path.join(new URL(config.publicDir).pathname, to);
+          const target = path.join(fileURLToPath(config.publicDir), to);
           await mkdir(path.dirname(target), { recursive: true });
           await copyFile(path.join(repoRoot, from), target);
         }
