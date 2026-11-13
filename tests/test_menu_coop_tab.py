@@ -93,7 +93,7 @@ static void PostMessageA(int, int msg, int, int) { CHECK(msg == WM_APP + 9); res
 @@PIPELINE_CACHE_API@@
 static_assert(std::is_same_v<decltype(&pipeline_cache_save), void (*)(bool)>);
 void pipeline_cache_save(bool force) { CHECK(force); pipeline_saves++; }
-struct Asked { int cmd; char text[64]; uint32_t number; } asked[32];
+struct Asked { int cmd; char text[65]; uint32_t number; } asked[32];
 static int n_asked = 0, answer = 1;
 static MkwVkCoopView room;
 static void host_view(MkwVkCoopView* out) { *out = room; }
