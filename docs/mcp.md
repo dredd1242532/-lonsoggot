@@ -240,6 +240,8 @@ Use the venv interpreter for SDK checks. The real SDK client exercises tools/res
 subprocess checks initialize, list, call, resource, error and end of input. The shared control fixture publishes an
 authored tiny PNG, following Nicholas's test idea, and keeps option state. Tests cover frame conversion, concurrent
 calls, cancellation, output bounds, failed launch cleanup and explicit force. General docs checks need no SDK.
+The documentation checker excludes the dedicated `tests/pr_description/` data directory, whose sample PRs intentionally
+name fictional files. Ordinary Markdown guides, including guides under `tests/`, keep their link and command checks.
 `RUN_ALL_MODULES = ["fastmcp"]` lets the runner skip only the SDK checks without the package; `--strict` fails a
 missing dependency. The retained GitHub workflow installs it separately on Linux and Windows; Forgejo has no CI runner,
 so install the optional environment and run the checks locally. Game-free checks are not proof of Windows gameplay,

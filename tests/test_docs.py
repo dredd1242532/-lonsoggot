@@ -19,8 +19,10 @@ def tracked_markdown():
     result = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z", "--", "*.md"],
                             capture_output=True, check=True)
     files = []
+    # Description-check fixtures intentionally name made-up files, unlike project documentation.
+    data_only = ("third_party/", "tests/pr_description/")
     for item in result.stdout.decode("utf-8", "replace").split("\0"):
-        if item and not item.replace("\\", "/").startswith("third_party/"):   # (vendored upstream docs)
+        if item and not item.replace("\\", "/").startswith(data_only):
             files.append(ROOT / item)
     return files
 
