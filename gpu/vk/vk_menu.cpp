@@ -2638,7 +2638,9 @@ float title_banner(ui::Ctx& c, const char* title, const char* right) {
     return hh;
 }
 /// The help box from (x0, y0) to x1: a title, the help, a line set off by a bar, a gold line at its foot. min_h: its height at
-/// least (the tallest help the page can have, so it does not jump)
+/// least (the tallest help the page can have, so it does not jump). The restart note and the gold line stand in that height
+/// while the help leaves them the room, the gold line at the box's foot: the box grew by them, and moved up when it then
+/// passed y_max, each time a row that takes a restart was changed
 void help_box(ui::Ctx& c, float x0, float x1, float y0, const char* title, const char* help, const char* hint, const char* gold_line,
               float min_h = 0, int takes_restart = 0, float y_min = 0, float y_max = FLT_MAX) {
     // (y_max: the box ends above it, the prompt strip's top: moved up as far as y_min (under the banner) when it is taller than
@@ -2647,10 +2649,10 @@ void help_box(ui::Ctx& c, float x0, float x1, float y0, const char* title, const
     const float th = help ? ui::para(c, c.f.body, 18 * s, ImVec2(), 0, help, w, false) : 0,
                 hh = hint ? ui::para(c, c.f.body, 16 * s, ImVec2(), 0, hint, w - 18 * s, false) : 0;
     const float text_h = th + (hint ? 14 * s + hh : 0), note = takes_restart ? 30 * s : 0;
-    const float fixed = 22 * s + (title ? 32 * s : 0) + note + (gold_line ? 52 * s : 0) + 22 * s;
-    float body = std::max(min_h, text_h);
+    const float fixed = 22 * s + (title ? 32 * s : 0) + 22 * s, need = note + text_h + (gold_line ? 52 * s : 0);
+    float body = std::max(min_h, need);
     if (y0 + fixed + body > y_max) y0 = std::max(y_min, y_max - fixed - body);
-    if (y0 + fixed + body > y_max) body = std::max(text_h, y_max - y0 - fixed);
+    if (y0 + fixed + body > y_max) body = std::max(need, y_max - y0 - fixed);
     const float y1 = std::min(y0 + fixed + body, y_max);
     ui::box(c, ImVec2(x0, y0), ImVec2(x1, y1));
     c.d->PushClipRect(ImVec2(x0, y0), ImVec2(x1, y1), true);
@@ -2670,8 +2672,8 @@ void help_box(ui::Ctx& c, float x0, float x1, float y0, const char* title, const
         c.d->AddRectFilled(ImVec2(x0 + 24 * s, hy + 2 * s), ImVec2(x0 + 26.5f * s, hy + hh - 2 * s), ui::kAccent, s);
         ui::para(c, c.f.body, 16 * s, ImVec2(x0 + 40 * s, hy), ui::kSoft, hint, w - 18 * s);
     }
-    if (gold_line) {
-        y += body + 20 * s;
+    if (gold_line) {   // (at the box's foot, whatever the help's height)
+        y = y1 - 22 * s - 32 * s;
         c.d->AddLine(ImVec2(x0 + 24 * s, y), ImVec2(x1 - 24 * s, y), ui::alpha(ui::kEdge, 0.8f), std::max(1.0f, s));
         ui::diamond(c, ImVec2(x0 + 29 * s, y + 20 * s), 4 * s, ui::kGoldHi);
         ui::text_mid(c, c.f.strong, 16 * s, x0 + 42 * s, y + 20 * s, ui::kGoldHi, gold_line);
@@ -3111,8 +3113,7 @@ void draw_options(ui::Ctx& c) {
     float bottom = std::min(c.h - c.safe, bar_top) - 10 * s;   // (the rows end above the prompts)
     const int after = restart_note(selr);
     if (narrow) {   // (the help over the column's foot, the rows above it: at most half the room, the rows get the rest)
-        const float help_h = std::min(22 * s + 32 * s + help_tall + (after ? 30 * s : 0) + (pending_line.empty() ? 0 : 52 * s) + 22 * s,
-                                      (bottom - hh) * 0.5f);
+        const float help_h = std::min(22 * s + 32 * s + help_tall + 22 * s, (bottom - hh) * 0.5f);   // (the box's kept height)
         bottom = std::min(bar_top, c.h - c.safe) - help_h - 16 * s;
         help_box(c, hx0, hx1, bottom + 8 * s, selr.name, selr.help, hint, pending_line.empty() ? nullptr : pending_line.c_str(), help_tall,
                  after, bottom + 8 * s, bar_top - 10 * s);

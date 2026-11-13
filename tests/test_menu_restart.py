@@ -118,6 +118,12 @@ def sources():
     if "int restart_note(const Row& r) { return !(r.value && r.restart) ? 0 : restart_changed(r) ? 2 : 1; }" not in menu or \
             "const int after = restart_note(selr);" not in menu or "takes_restart == 2 ? ui::kGoldHi : ui::kAccent" not in menu:
         raise SystemExit("vk_menu.cpp: the help does not say that a row takes a restart before the row is changed")
+    # (the help box keeps its height when a row that takes a restart is selected or changed: the note and the Restart needed
+    # line stand in the height it keeps for the tallest help, the line at its foot)
+    box = function(menu, "void help_box(")
+    if "need = note + text_h + (gold_line ? 52 * s : 0)" not in box or "float body = std::max(min_h, need);" not in box or \
+            "y = y1 - 22 * s - 32 * s;" not in box:
+        raise SystemExit("vk_menu.cpp: the help box grows by the restart note and the Restart needed line again")
     if "restart_init();" not in function(menu, "void menu_init() {"):
         raise SystemExit("menu_init does not keep the start values")
     # (Auto (this PC) sets the Output resolution and the Profile once the device is known, after host/hos_main.c read them at
