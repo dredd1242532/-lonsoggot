@@ -48,22 +48,22 @@ def unhex(s):
 
 # ---- POS (player message kind 2, sealed as every player message): where a player is and what Link plays, for showing
 # the other players in the world. The relay forwards it unread, so its codec is here and in host/coop_proto.c only.
-# Little endian: u8 version (2), u32 pseq (the sender's counter), u32 t_ms (the sender's clock), u8 flags (POS_ADULT,
-# POS_IN_WORLD), u8 area length (< 48) and the area's name, f32 x y z, f32 yaw (radians), u8 slot count (<= 4), per AS
-# slot u8 node name length (< 48), the name, f32 frame. Names are printable ASCII and numbers finite, else the message
-# is refused. Version 1 had a u16 pseq.
-POS_VERSION = 2
+# Little endian: u8 version (3), u32 pseq, u32 t_ms, u8 flags, u8 area length and area,
+# f32 x/y/z/yaw, u8 slot count (<=4), per slot u8 name length, printable name, finite f32 frame.
+# The tail is u8 sword/shield/hands (only hand bits0..1 supported). Unknown item bytes draw nothing.
+# Version1 had u16 pseq; version2 had no equipment tail.
+POS_VERSION = 3
 POS_ADULT, POS_IN_WORLD = 1, 2
 POS_TEXT_MAX, POS_SLOTS = 47, 4
 POS_HEAD = 11
 
 
-def pack_pos(pseq, t_ms, flags, area, xyz, yaw, slots):
+def pack_pos(pseq, t_ms, flags, area, xyz, yaw, slots, gear=(0, 0, 0)):
     out = struct.pack('<BIIBB', POS_VERSION, pseq, t_ms, flags, len(area)) + area + struct.pack('<4f', *xyz, yaw)
     out += bytes([len(slots)])
     for node, frame in slots:
         out += bytes([len(node)]) + node + struct.pack('<f', frame)
-    return out
+    return out + bytes(gear)
 
 
 def _printable(b):
@@ -71,7 +71,7 @@ def _printable(b):
 
 
 def parse_pos(b):
-    """(pseq, t_ms, flags, area, (x, y, z), yaw, ((node, frame), ...)), or None unless b is exactly one POS of version 2."""
+    """(pseq, t_ms, flags, area, xyz, yaw, slots, gear), or None unless exactly one bounded version3 POS."""
     if len(b) < POS_HEAD or b[0] != POS_VERSION or b[10] > POS_TEXT_MAX or len(b) < POS_HEAD + b[10] + 17:
         return None
     pseq, t_ms, flags, alen = struct.unpack_from('<IIBB', b, 1)
@@ -90,14 +90,16 @@ def parse_pos(b):
             return None
         slots.append((node, frame))
         at += 1 + len(node) + 4
-    return (pseq, t_ms, flags, area, (x, y, z), yaw, tuple(slots)) if at == len(b) else None
+    if at + 3 != len(b) or b[at + 2] & ~3:
+        return None
+    return (pseq, t_ms, flags, area, (x, y, z), yaw, tuple(slots), tuple(b[at:]))
 
 
 def pos_tokens(name, p):
     """A pos vector line's tokens: name, the payload, then the fields (floats exact in f32, so repr reads back)."""
-    pseq, t_ms, flags, area, xyz, yaw, slots = parse_pos(p)
+    pseq, t_ms, flags, area, xyz, yaw, slots, gear = parse_pos(p)
     return ('pos', name, hx(p), pseq, t_ms, flags, hx(area), *[repr(v) for v in xyz], repr(yaw),
-            *[f'{hx(node)}:{frame!r}' for node, frame in slots])
+            *gear, *[f'{hx(node)}:{frame!r}' for node, frame in slots])
 
 
 # ---- the byte vectors
@@ -119,7 +121,7 @@ def build_vectors():
            '# connect|challenge|roster|joined|error|kick ...             one message payload: parse, check the fields, pack again',
            '# sealed <name> <secret> <src> <dst> <session> <counter> <kind> <message> <payload>   opens to kind and message, seals',
            '#                                                            to the same bytes',
-           '# pos <name> <payload> <pseq> <t_ms> <flags> <area> <x> <y> <z> <yaw> <node:frame>...   a POS (the message after its',
+           '# pos <name> <payload> <pseq> <t_ms> <flags> <area> <x> <y> <z> <yaw> <sword> <shield> <hands> <node:frame>... a POS',
            '#                                                            kind byte): parse, check the fields, pack again',
            '# reject <kind> <name> <bytes>                               parse must fail']
 
@@ -193,6 +195,10 @@ def build_vectors():
     line(*pos_tokens('loading', pack_pos(1, 2, 0, b'', (0.0, 0.0, 0.0), 0.0, [])))
     line(*pos_tokens('long-names', pack_pos(9, 9, POS_IN_WORLD, b'a' * POS_TEXT_MAX, (1.0, 2.0, 3.0), 0.25,
                                             [(b'n' * POS_TEXT_MAX, float(i)) for i in range(POS_SLOTS)])))
+    line(*pos_tokens('adult-gear', pack_pos(10, 10, POS_ADULT | POS_IN_WORLD, b'Fixture',
+                                           (1.0, 2.0, 3.0), 0.0, [], (2, 2, 3))))
+    line(*pos_tokens('unknown-gear', pack_pos(11, 11, POS_IN_WORLD, b'Fixture',
+                                             (1.0, 2.0, 3.0), 0.0, [], (255, 255, 0))))
 
     zeros = bytes(16)
     ping = cr.pack(cr.T_PING, 0, 0, 0, 1, b'abcd')
@@ -216,11 +222,13 @@ def build_vectors():
         ('sealed', 'short', bytes([1]) + bytes(28)),
         ('sealed', 'version', bytes([2]) + bytes(40)),
         ('pos', 'version-1', bytes([1]) + walk[1:]),
+        ('pos', 'version-2', bytes([2]) + walk[1:-3]),
+        ('pos', 'unsupported-hands', walk[:-1] + bytes([4])),
         ('pos', 'cut', walk[:-1]),
         ('pos', 'trailing', walk + b'x'),
         ('pos', 'area-48', struct.pack('<BIIBB', POS_VERSION, 0, 0, 0, 48) + bytes(48) + bytes(17)),
-        ('pos', 'slots-5', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-1] + bytes([5]) + bytes(25)),
-        ('pos', 'node-48', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-1] + bytes([1, 48]) + bytes(52)),
+        ('pos', 'slots-5', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-4] + bytes([5]) + bytes(28)),
+        ('pos', 'node-48', pack_pos(0, 0, 0, b'', (0.0, 0.0, 0.0), 0.0, [])[:-4] + bytes([1, 48]) + bytes(55)),
         ('pos', 'area-newline', pack_pos(1, 2, POS_IN_WORLD, b'Hyrule\nField', (0.0, 0.0, 0.0), 0.0, [])),
         ('pos', 'area-utf8', pack_pos(1, 2, POS_IN_WORLD, 'Zoë'.encode(), (0.0, 0.0, 0.0), 0.0, [])),
         ('pos', 'node-nul', pack_pos(1, 2, POS_IN_WORLD, b'HyruleField', (0.0, 0.0, 0.0), 0.0, [(b'Wa\0k', 1.0)])),
@@ -373,9 +381,9 @@ class CodecTest(unittest.TestCase):
                 name, payload = t[0], unhex(t[1])
                 pseq, t_ms, flags, area, x, y, z, yaw = t[2:10]
                 want = (int(pseq), int(t_ms), int(flags), unhex(area), (float(x), float(y), float(z)), float(yaw),
-                        tuple((unhex(s.split(':')[0]), float(s.split(':')[1])) for s in t[10:]))
+                        tuple((unhex(s.split(':')[0]), float(s.split(':')[1])) for s in t[13:]), tuple(map(int, t[10:13])))
                 self.assertEqual(parse_pos(payload), want, name)
-                self.assertEqual(pack_pos(*want[:6], list(want[6])), payload, name)
+                self.assertEqual(pack_pos(*want), payload, name)
             elif kind == 'reject':
                 what, data = t[0], unhex(t[2])
                 parsers = {'dgram': cr.parse, 'connect': cr.parse_connect, 'challenge': cr.parse_challenge, 'roster': cr.parse_roster,

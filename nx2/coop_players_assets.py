@@ -297,6 +297,28 @@ def generate(rom, out):
         components = doc.root['Components']
         def packed_ref(ref):
             return ref.lstrip('?').removeprefix('Work/').removesuffix('.gyml') + ('.bgyml' if ref.endswith('.gyml') else '')
+        # Keep the passive menu equipment user, not the world player's pouch-driven updater.
+        # Its local bone bindings and blackboard inheritance must all exist in this pack.
+        visiting, checked = set(), {}
+        def equipment_resource(ref):
+            path = packed_ref(ref)
+            if path in visiting:
+                raise ValueError('cyclic equipment resource: ' + path)
+            if path in checked:
+                return checked[path]
+            visiting.add(path)
+            resource = Byml(pack[path]).root
+            merged = dict(equipment_resource(resource['$parent'])) if resource.get('$parent') else {}
+            merged.update(resource)
+            if resource.get('BlackboardTableRef'):
+                equipment_resource(resource['BlackboardTableRef'])
+            visiting.remove(path)
+            checked[path] = merged
+            return merged
+        equipment = equipment_resource(components['EquipmentUserRef'])
+        pouch = equipment.get('IsPouchUser')
+        if not isinstance(pouch, Scalar) or pouch.kind != 0xd0 or pouch.word:
+            raise ValueError('co-op equipment must use the passive menu component, not the local pouch')
         # Follow inheritance in the user's file rather than carrying an extracted component table.
         def inherited(resource):
             merged = {}

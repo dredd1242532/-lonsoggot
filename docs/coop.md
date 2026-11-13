@@ -877,49 +877,59 @@ exact counters, delayed publication, concurrent producers, advertised minute/bac
 be recovered. Synthetic floods additionally inject a real-hook player loss in their middle. Mutation modes must
 compile then fail behaviorally, including silent overflow, shared-capacity regressions and disabled tracing.
 
-## Child bodies in the world
+## Player bodies, swords and shields
 
-This first body family is opt-in twice: the maker signs `coop_presence_permissions=1` (feature99, bit0), and each
-player chooses `coop_players=1` or `HOS_COOP_PLAYERS=1` locally. The signed rule defaults to0; absent is off. No map,
-position or animation is disclosed without the accepted presentation capability. This slice supports child Link
-only. Adult pose packets do not create an adult body, and an adult local player sends no body pose.
+The maker signs `coop_presence_permissions` (feature99) and each player chooses `coop_players=1` or
+`HOS_COOP_PLAYERS=1` locally. Add the supported permission values: **1 child bodies, 2 adult bodies,
+16 swords and shields**. Thus **3** shows both ages and **19** also shares their equipment. The signed default is0;
+absent is off, and unsupported bits refuse the charter. Equipment alone does not permit a body or position.
 
-With presentation permitted and local display on, the existing POS message sends the child's map, position, facing
-and up to four animation slots about15 times a second. Same-map accepted players are shown100ms behind the latest
-sample, interpolated between recent positions. A local display switched off may still share the map/state at the
-low rate, but only under that same signed permission. It never shares a precise position or creates a body.
+With the appropriate age permitted, POS sends map, position, facing and up to four animation slots about15 times
+a second. Child and adult bodies use their own locally generated actors; an age change drops old interpolation and
+retires the previous body rather than applying its pose to the other age. Same-map accepted players are shown100ms
+behind the latest sample. Local display off shares only low-rate map/state under the same signed age permission,
+never precise position, animation or gear. Co-op off performs no new per-frame guest work.
 Animation phase comes from each native slot's current frame, not its clip duration; the receiver interpolates
 that phase and applies it through the native animation setter. A successful node request alone does not prove
 visible skeletal motion or full-pose parity.
+
+The version3 POS payload adds three bytes after the animation slots: sword, shield and drawn-state bits.
+Sword IDs are0 none,1 Kokiri,2 Master,3 Biggoron's and4 Giant's Knife; shield IDs are0 none,1 Deku,2 Hylian and3 Mirror.
+Drawn-state bit0 is the sword, bit1 the shield; higher bits refuse the packet. Unknown or age-incompatible equipment
+draws nothing and removes the previous piece; a peer never chooses an actor name, pointer or file.
+The native reader follows live equipment handles and reads lasting hand state, not a transient request byte.
+The receiver requests only its own supported local assets, waits for the matching live piece, then changes hand state.
+Swords and shields are cosmetic: they grant no inventory, collision, shield protection or damage.
+Both games must use this POS version; version2 poses are refused rather than guessed.
 
 Receive-time admission captures a ticket from the central gameplay owner. Before any creation, placement or
 animation call, the body writer checks that ticket again under the owner's lock. Leaving, identity/rules/save/area
 changes and revocation invalidate old work, even if the same terms are later accepted again. Cleanup only retires
 this adapter's existing actors; another actor occupying a reused address is never deleted or moved. Registration
-refuses a second body writer. Request storage is allocated only at the first authorized child-body effect.
+refuses a second body writer. Request storage is allocated only at the first authorized body effect.
 
-The native adapter is build-guarded and range-checks guest pointers. Missing animation components, excessive slot
-counts, malformed strings, non-finite poses and stale actor identities are refused or left untouched. Loading,
-title screens and events do not create or move a body. This is cosmetic presence, not a collision body, equipment
-replication, full skeletal-pose replication, shared enemies or PvP.
+The native adapter is build-guarded and range-checks guest pointers. Missing animation/equipment components,
+excessive slot counts, malformed strings, non-finite poses and stale actor or equipment-holder generations are refused
+or left untouched. Loading, title screens and events do not create or move a body. This is not full skeletal-pose
+replication, masks, boots, tunic colours, other held items, companions, mounts, shared enemies or PvP.
 The receiver's clock offset saturates at the signed-integer limit rather than overflowing on a peer timestamp.
 
-`nx2/coop_players_assets.py` generates the child actor and registration/resource tables during the normal build,
+`nx2/coop_players_assets.py` generates separate child and adult actor packs and registration/resource tables during the normal build,
 only from that player's own game. No model, animation, extracted allocation value or table ships in the repository
 or over the network. Generated output under `coop-players/romfs` is private game data and must never be distributed.
-The animation switch loads it only with local player display enabled. The shared filename contract is
-`host/coop_players_assets.h`: the child actor pack, its private animation graph, ActorInfo, GameActorInfo and the
+With local display on, animation is enabled automatically when these assets are available. The shared filename contract is
+`host/coop_players_assets.h`: the actor packs, private animation graphs, ActorInfo, GameActorInfo and the
 resource size table. Its rows have the form `COOP_PLAYER_ASSET(kind, id, path)`. Every `actor` row generates the named
 `CoopPuppet_<id>` from that age's local source actors, paired with an `animation` row named `<id>_animation`.
 Both generator and loader consume every listed output; another age needs both rows, not a second age list or a
 literal file count. The generator resolves each versioned table name from the source RomFS and checks its output
 against that contract before writing. The loader requires each exact indexed output to be a nonempty file;
-another table version, a directory, or unrelated files cannot fill a missing slot. The child-only family does not
-generate or require an adult actor pack.
+another table version, a directory, or unrelated files cannot fill a missing slot.
 Unrelated extra files do not change readiness. User mods still win; replacing a generated file disables animated
-actors with a clear log line, while nonconflicting mods leave them enabled. Missing or incomplete output keeps
-animation unavailable. Without animation assets the explicitly non-animated standing menu model remains available;
-it is not described as a walking/full-pose body.
+actors with a clear log line. Missing output falls back to standing menu models **of the correct age** and says so
+once at startup, never silently showing a child for an adult. These are not walking/full-pose substitutes.
+The generated actors retain the passive menu equipment user and its local bindings, not the world player's
+pouch-driven equipment updater. Missing equipment or blackboard inheritance refuses generation before output is written.
 
 The private graph binds the primary locomotion slot to its source's existing full-body mask. The original graph
 binds that slot only to the lower body; the passive menu-derived actor has no native player controller to complete
@@ -937,10 +947,10 @@ starts no game. These checks cover the asset boundary, not animation quality in 
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `coop_presence_permissions` |0|Maker-signed permission; bit0 enables this child presence family. Unsupported higher bits refuse the charter.|
-| `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display and precise child pose sending; the environment overrides the saved local setting.|
-| `HOS_COOP_PLAYERS_ANIM` |0|Use the locally generated child actor and replay the existing four bounded animation slots. Other slots and equipment are not represented.|
-| `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic actor names; never chosen by a packet. Adult presentation remains unsupported.|
+| `coop_presence_permissions` |0|Maker-signed mask: 1 child, 2 adult, 16 sword/shield. 3 both ages; 19 both with gear. Other bits refuse.|
+| `coop_players` / `HOS_COOP_PLAYERS` |0|Local body display, animation when assets exist, and precise pose sending; environment overrides the saved setting.|
+| `HOS_COOP_PLAYERS_ANIM` |automatic|Diagnostic override: 0/off/false disables animation; 1 requests it but still requires generated assets. Only four bounded slots are replayed.|
+| `HOS_COOP_PLAYERS_ACTOR` |unset|Local diagnostic `child[,adult]` actor names, never a packet value. Custom actors animate only with explicit `HOS_COOP_PLAYERS_ANIM=1`.|
 | `HOS_COOP_PLAYERS_TEST` |unset|Diagnostic position feed for member8; it still needs that member's accepted presentation ticket, never synthetic consent.|
 | `HOS_COOP_TRACE` |0|Existing bounded position, creation, deletion and animation diagnostics.|
 

@@ -40,7 +40,7 @@ int coop_players_receive(CoopPlayers *p, int from, const uint8_t *bytes, size_t 
     }
     // another session's, or from before a silence; or the sender starts or stops showing the others (its slow places are
     // seconds apart): not places to move between now
-    if (fresh == 2 || (r->n && ((r->pose[r->head].flags ^ pos.flags) & COOP_POS_SLOW))) r->n = 0;
+    if (fresh == 2 || (r->n && ((r->pose[r->head].flags ^ pos.flags) & (COOP_POS_SLOW | COOP_POS_ADULT)))) r->n = 0;
     const int32_t off = (int32_t)((uint32_t)now_ms - pos.t_ms);
     r->offset = !r->n || off < r->offset ? off : r->offset == INT32_MAX ? INT32_MAX : r->offset + 1;
     r->head = (r->head + 1) % COOP_PLAYERS_HIST;
@@ -90,8 +90,8 @@ static void place_at(const CoopPlayerTrack *r, uint32_t now, CoopPos *out) {
         const int32_t span = (int32_t)(b->t_ms - a->t_ms);
         const float f = span > 0 ? fminf(1.0f, fmaxf(0.0f, (float)(int32_t)(t - a->t_ms) / (float)span)) : 1.0f;
         *out = f < 0.5f ? *a : *b;
-        // a map change between the two, or one of them in no map (it carries no place): no place between them
-        if (strcmp(a->area, b->area) || !(a->flags & b->flags & COOP_POS_IN_WORLD)) return;
+        // Never blend different ages/maps or a pose with no place. Gear remains discrete, not an interpolated ID.
+        if (strcmp(a->area, b->area) || ((a->flags ^ b->flags) & COOP_POS_ADULT) || !(a->flags & b->flags & COOP_POS_IN_WORLD)) return;
         for (int i = 0; i < 3; i++) out->pos[i] = a->pos[i] + (b->pos[i] - a->pos[i]) * f;
         out->yaw = turn_between(a->yaw, b->yaw, f);
         for (int i = 0; i < out->nslots && i < a->nslots && i < b->nslots; i++)

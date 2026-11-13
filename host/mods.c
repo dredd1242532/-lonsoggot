@@ -206,8 +206,8 @@ void hos_mods_init(const char *image_path) {
     char root[MAX_PATH];
     /* Generated locally by make_game.py, never shipped. Index first: user mods still win.
        A mod replacing one of these files disables animated actors rather than mixing actor tables. */
-    const char *show = getenv("HOS_COOP_PLAYERS");
-    if (env_on("HOS_COOP_PLAYERS_ANIM") && (show ? !env_value_off(show) : hos_ini_option("coop_players", 0))) {
+    const char *show = getenv("HOS_COOP_PLAYERS"), *animation = getenv("HOS_COOP_PLAYERS_ANIM");
+    if ((!animation || !env_value_off(animation)) && (show ? !env_value_off(show) : hos_ini_option("coop_players", 0))) {
         hos_game_path_a(coop_assets_root, sizeof coop_assets_root);
         char *slash = (char *)last_sep(coop_assets_root);
         if (slash) {

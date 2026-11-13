@@ -191,11 +191,10 @@ void coop_blake2b(uint8_t *out, size_t outlen, const void *key, size_t klen, con
 // (COOP_POS_VERSION), u32 pseq (the sender's counter: one more for each POS it sends), u32 t_ms (the sender's clock), u8
 // flags, u8 area length (<= COOP_POS_TEXT) and the area's name (the game's current-area text), f32 x y z, f32 yaw
 // (radians, 0 facing +z), u8 slot count (<= COOP_POS_SLOTS), per AS slot u8 node name length (<= COOP_POS_TEXT), the
-// node's name, f32 frame. A parser takes exactly one message of its version: another version is another format this
-// build cannot read (version 1 had a u16 pseq). The names come from another player's game and reach this one's log and
-// its animation lookup, so a name with a byte outside printable ASCII (0x20..0x7e) is refused, and so is a number that
-// is not finite.
-#define COOP_POS_VERSION 2
+// node's name, f32 frame; then u8 sword, u8 shield, u8 hands (bit0 sword drawn, bit1 shield drawn).
+// A parser takes exactly its version (v1 had a u16 pseq; v2 had no equipment). Names must be printable ASCII;
+// numbers must be finite. Unknown equipment IDs remain bounded bytes and resolve to nothing locally, never a path.
+#define COOP_POS_VERSION 3
 #define COOP_POS_TEXT 47
 #define COOP_POS_SLOTS 4
 // flags: ADULT, Link is the adult; IN_WORLD, he stands in the map named, at the place given (a game shows him only
@@ -204,10 +203,14 @@ void coop_blake2b(uint8_t *out, size_t outlen, const void *key, size_t klen, con
 // nobody and sends only every COOP_PLAYERS_SLOW_MS and at each change of map or state (host/coop_players.h), with no
 // place: never shown. A message without IN_WORLD, or with SLOW, carries no place (zeros) and no animation
 enum { COOP_POS_ADULT = 1, COOP_POS_IN_WORLD = 2, COOP_POS_LOADED = 4, COOP_POS_SLOW = 8 };
+enum { COOP_SWORD_NONE, COOP_SWORD_KOKIRI, COOP_SWORD_MASTER, COOP_SWORD_BIGGORON, COOP_SWORD_KNIFE, COOP_SWORD_COUNT };
+enum { COOP_SHIELD_NONE, COOP_SHIELD_DEKU, COOP_SHIELD_HYLIAN, COOP_SHIELD_MIRROR, COOP_SHIELD_COUNT };
+enum { COOP_HAND_SWORD = 1, COOP_HAND_SHIELD = 2, COOP_HAND_MASK = 3 };
 typedef struct {
     uint32_t pseq;
     uint32_t t_ms;
     uint8_t flags, nslots;
+    uint8_t sword, shield, hands;
     char area[COOP_POS_TEXT + 1];
     float pos[3], yaw;
     struct { char node[COOP_POS_TEXT + 1]; float frame; } slot[COOP_POS_SLOTS];

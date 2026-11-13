@@ -32,7 +32,7 @@ int hos_oot_coop_contributors(CoopContributor *out, int max);
    their key accepted), as the co-op thread last saw them. */
 int hos_oot_coop_playing(void);
 uint32_t hos_oot_coop_shown(void);
-int hos_oot_coop_presence(void);
+int hos_oot_coop_presence(void);   /* accepted signed COOP_PRESENCE_* mask; 0 when context is closed */
 int hos_oot_coop_gameplay_register(const CoopGameplayWriter *writer);
 int hos_oot_coop_gameplay_ticket(unsigned slot, unsigned member, CoopGameplayTicket *ticket);
 int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void *payload, size_t size, void *game);
@@ -40,7 +40,7 @@ int hos_oot_coop_gameplay_dispatch(const CoopGameplayTicket *ticket, const void 
 /* The other players in the world (host/oot_coop_players.c; docs/coop.md). _start: once, from co-op's start, whether
    co-op is on or not (the Co-op tab may switch it on later): registers the sole body writer on the supported build.
    The accepted signed presence permission gates all map/pose disclosure and native effects; no allocation happens
-   before an authorized child-body effect. _update: each update of Link (host/hos_main.c
+   before an authorized body effect. _update: each update of Link (host/hos_main.c
    hos_oot_lift_player), on the guest thread that runs it; until co-op is on and a save is played it reads two values
    and returns. _tick: each present of hos_oot_coop_present on the presenting thread, with whether a save was loaded
    since the title screen and whether the game is being played (gate): outside play, and in play while an event holds

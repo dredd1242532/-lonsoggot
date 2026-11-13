@@ -7,6 +7,7 @@
    exact name. No version, resource contents or allocation values are shipped. */
 COOP_PLAYER_ASSET(actor, Child, "Pack/Actor/CoopPuppet_Child.pack.zs")
 COOP_PLAYER_ASSET(animation, Child_animation, "AS/CoopPuppet_Child.root.asb.zs")
+COOP_PLAYER_ASSET(actor, Adult, "Pack/Actor/CoopPuppet_Adult.pack.zs")
 COOP_PLAYER_ASSET(table, actor_info, "RSDB/ActorInfo.Product.*.rstbl.byml.zs")
 COOP_PLAYER_ASSET(table, game_actor_info, "RSDB/GameActorInfo.Product.*.rstbl.byml.zs")
 COOP_PLAYER_ASSET(table, resource_sizes, "System/Resource/ResourceSizeTable.*.rsizetable.zs")

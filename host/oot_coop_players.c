@@ -1,9 +1,9 @@
 /* (longshot) Co-op, the other players in the world (oot_coop.h; docs/coop.md), for the supported build e0f3ccfa.
 
-   A child game with the accepted signed presentation permission says where its Link is (POS, coop_proto.h).
+   A game with accepted signed presentation permission says where its permitted-age Link is (POS, coop_proto.h).
    The local display switch chooses precise poses or low-rate map/state only (hos_oot_coop_players_last).
-   A game that shows others sends its map, child position and facing about 15 times a second while being played,
-   and shows each member whose child Link is in the same map as an actor at that place: made by the game's routine for
+   A game that shows others sends its map, position, facing and permitted sword/shield state about 15 times a second,
+   and shows each permitted member in the same map as an age-specific actor at that place: made by the game's routine for
    making an actor by its file name, moved every frame, and removed when the member leaves the map or the room, is not
    heard for 3 s, or is not a member the player accepted (coop_players.h has the rules; this file is the game's side).
    A permitted game that shows nobody (the local display switch off) sends no place: only its map and play state
@@ -48,8 +48,8 @@
    is off, gpu/vk/compat/longshot_env.h): the other players are shown. Off, a game on the known build still says its
    map and state only with signed permission and accepted context. Without that permission or with co-op off, a
    never-active update returns before guest reads; an active adapter only retires its own existing actors.
-   HOS_COOP_PLAYERS_ACTOR=<child> is a local diagnostic override for this child-only family.
-   Without animation assets it uses the standing PouchPlayer_Child model, not a walking/full-pose fallback.
+   HOS_COOP_PLAYERS_ACTOR=<child>[,<adult>] is a local diagnostic override, never a network-selected actor.
+   Animation uses generated assets by default; HOS_COOP_PLAYERS_ANIM=0 forces standing age-correct menu models.
    HOS_COOP_TRACE adds a line per request, take and removal. For
    tests from the environment only (longshot_env.txt sets no HOS_COOP name: host/hos_main.c env_line_allowed):
    HOS_COOP_PLAYERS_TEST=<file> supplies member8's positions through the same admission path. It still requires that
@@ -99,6 +99,10 @@ int hos_coop_players_assets(void);   /* mods.c: generated files indexed without 
 #define SET_MTX_FN 0x80c8fd60ULL
 #define AS_PLAY_FN 0x802222a0ULL       /* (a request block): a node by name on one of an actor's animation slots */
 #define AS_FRAME_SET_FN 0x837d5d70ULL  /* (animation control, slot, s0) */
+#define EQUIP_FN 0x82e17b20ULL        /* (EquipmentUser, kind, &name, state, variant, 1, 0): local cosmetic piece request */
+#define EQUIP_STATE_FN 0x80d07ab0ULL  /* (EquipmentUser, hand slot): lasting state, including after request bytes clear */
+#define EQUIP_HAND_FN 0x80e54c40ULL   /* (EquipmentUser, hand slot, 1 drawn / 2 sheathed) */
+#define EQUIP_REMOVE_FN 0x82e1d1b0ULL /* (EquipmentUser, hand slot, 1, 0, 0, 0, 0, 1): cancel pending and delete piece */
 static const uint64_t game_fns[] = {CREATE_FN, TAKE_FN, DROP_FN, QUEUE_FIND_FN, REQUEST_FREE_FN, REQUEST_DELETE_FN, ACTOR_DELETE_FN, SET_MTX_FN,
                                     AS_PLAY_FN, AS_FRAME_SET_FN};
 
@@ -120,7 +124,8 @@ enum {
     B_PLACE = 0x20,         /* 0xa0 bytes: the create's x2 */
     B_MATCHER = 0xc0,       /* {vtable, the request cell's address} */
     B_TEXT = 0xd0,          /* the name's bytes */
-    B_SIZE = 0x120,
+    B_GEAR = 0x120, B_GEAR_STRIDE = 0x50, /* two persistent name cells; native requests can outlive this frame */
+    B_SIZE = B_GEAR + 2 * B_GEAR_STRIDE,
     SCRATCH_MTX = 0x00, SCRATCH_PLAY = 0x40, SCRATCH_NODE = 0x80, SCRATCH_SIZE = 0xc0,
     NAME_MAX_LEN = 63,
     ASK_MS = 20000,         /* a request not made after this long is cancelled */
@@ -144,6 +149,8 @@ typedef struct {
     uint64_t said_ms;
     char node[COOP_POS_SLOTS][COOP_POS_TEXT + 1];   /* the node each animation slot was last asked to play */
     uint8_t plays[COOP_POS_SLOTS];                  /* the actor's animation set has that node */
+    uint8_t gear[2], gear_set[2];
+    uint64_t gear_at[2];             /* bound asynchronous equip requests to at most one per 2 seconds per piece */
 } Puppet;
 
 enum { T_ACTOR, T_AT, T_ABS, T_SHADOW, T_GONE };
@@ -153,8 +160,9 @@ static struct {
     int on;                 /* registered with the session: Link's update and the present's tick run (atomic) */
     int show;               /* the switch: the other players are shown, and this game's place is sent at the full rate */
     int trace;
-    int anim;               /* HOS_COOP_PLAYERS_ANIM: Link's animation is sent and played on the others' actors */
-    char actor_name[NAME_MAX_LEN + 1];   /* the supported child actor */
+    int anim;               /* generated animation by default; environment is a diagnostic override */
+    int gear;               /* native equipment routines available; still requires signed equipment permission */
+    char actor_name[2][NAME_MAX_LEN + 1];   /* child and adult; never substitute one age for the other */
 
     SRWLOCK lock;           /* around store, last_me and me_ms (the co-op thread takes positions; the game's threads only try it) */
     CoopPlayers store;
@@ -426,6 +434,108 @@ static void anim_play(Ctx *c, Puppet *p, const CoopPos *at) {
     }
 }
 
+/* ---- cosmetic sword/shield. Native kinds differ from hand slots; neither comes from the packet. */
+static const unsigned gear_slot[2] = {0, 4}, gear_kind[2] = {0, 6};
+static const char *const swords[COOP_SWORD_COUNT] = {
+    "", "Weapon_Sword_Kokiri", "Weapon_Sword_Master", "Weapon_Sword_Biggoron", "Weapon_Sword_Giant"
+};
+static const char *const shields[COOP_SHIELD_COUNT] = {
+    "", "Weapon_Shield_Deku", "Weapon_Shield_Hylian", "Weapon_Shield_Mirror"
+};
+
+static int age_permitted(uint8_t flags) {
+    const int bit = flags & COOP_POS_ADULT ? COOP_PRESENCE_ADULT_BODY : COOP_PRESENCE_CHILD_BODY;
+    return (hos_oot_coop_presence() & bit) != 0;
+}
+
+static uint8_t gear_id(unsigned piece, unsigned id, int adult) {
+    if (!piece) return id < COOP_SWORD_COUNT && (!id || (adult ? id != COOP_SWORD_KOKIRI : id == COOP_SWORD_KOKIRI)) ? (uint8_t)id : 0;
+    return id < COOP_SHIELD_COUNT && (!id || (adult ? id != COOP_SHIELD_DEKU : id != COOP_SHIELD_MIRROR)) ? (uint8_t)id : 0;
+}
+
+static const char *gear_name(unsigned piece, unsigned id) {
+    return piece ? (id < COOP_SHIELD_COUNT ? shields[id] : "") : (id < COOP_SWORD_COUNT ? swords[id] : "");
+}
+
+static uint64_t equipment_user(Ctx *c, uint64_t actor) {
+    const uint64_t eu = rd64(c, rd64(c, actor + A_PARTS) + 0x200);
+    return rd_ok(eu, 0x13c4) && rd64(c, eu + 0x18) == actor ? eu : 0;
+}
+
+/* The local native link, not a peer-chosen address. Generation belongs to the holder, not the actor ID. */
+static uint64_t equipment_actor(Ctx *c, uint64_t eu, unsigned piece) {
+    const uint64_t link = eu + 0x20 + 0x18 * gear_slot[piece], holder = rd64(c, link + 8);
+    const uint32_t generation = rd32(c, link + 16);
+    if (!holder || generation == UINT32_MAX || !rd_ok(holder, 0x50) || rd32(c, holder + 0x48) != generation) return 0;
+    const uint64_t actor = rd64(c, holder + 0x40);
+    if (!rd_ok(actor, A_SIZE)) return 0;
+    const unsigned state = rd32(c, actor + A_STATE);
+    return state >= 3 && state <= 6 ? actor : 0;
+}
+
+static void equipment_read(Ctx *c, uint64_t actor, CoopPos *me) {
+    const uint64_t eu = equipment_user(c, actor);
+    if (!eu) return;
+    for (unsigned piece = 0; piece < 2; piece++) {
+        const uint64_t item = equipment_actor(c, eu, piece);
+        char name[NAME_MAX_LEN + 1];
+        if (!item || !text_at(rd64(c, item + A_FILE), name, sizeof name)[0]) continue;
+        const unsigned count = piece ? COOP_SHIELD_COUNT : COOP_SWORD_COUNT;
+        for (unsigned id = 1; id < count; id++) {
+            if (strcmp(name, gear_name(piece, id))) continue;
+            const uint8_t value = gear_id(piece, id, (me->flags & COOP_POS_ADULT) != 0);
+            if (!value) break;
+            const Call state = {.x = {eu, gear_slot[piece]}};
+            const uint64_t hand = game_call(c, EQUIP_STATE_FN, &state, NULL);
+            if (hand != 1 && hand != 2) break;   /* inactive or unknown binding: draw nothing, not a guessed sheath */
+            if (piece) me->shield = value; else me->sword = value;
+            if (hand == 1) me->hands |= (uint8_t)(1u << piece);
+            break;
+        }
+    }
+}
+
+static void equipment_play(Ctx *c, Puppet *p, const CoopPos *at, uint64_t now) {
+    if (!P.gear) return;
+    const uint64_t eu = equipment_user(c, p->actor);
+    if (!eu) return;
+    const int permitted = (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT) != 0;
+    for (unsigned piece = 0; piece < 2; piece++) {
+        const uint8_t id = permitted ? gear_id(piece, piece ? at->shield : at->sword, (at->flags & COOP_POS_ADULT) != 0) : 0;
+        const uint64_t item = equipment_actor(c, eu, piece);
+        char name[NAME_MAX_LEN + 1] = {0};
+        if (item) text_at(rd64(c, item + A_FILE), name, sizeof name);
+        const char *wanted = gear_name(piece, id);
+        if (!id) {
+            /* Unknown, unsupported age or removed equipment never leaves the previous piece visible. */
+            if (item || (p->gear_set[piece] && p->gear[piece])) {
+                const Call remove = {.x = {eu, gear_slot[piece], 1, 0, 0, 0, 0, 1}};
+                game_call(c, EQUIP_REMOVE_FN, &remove, NULL);
+            }
+            p->gear[piece] = 0, p->gear_set[piece] = 1;
+            continue;
+        }
+        if (strcmp(name, wanted)) {
+            if (p->gear_set[piece] && p->gear[piece] == id && now - p->gear_at[piece] < AGAIN_MS) continue;
+            const uint64_t cell = p->block + B_GEAR + piece * B_GEAR_STRIDE, text = cell + 8;
+            memcpy(GP(text), wanted, strlen(wanted) + 1);
+            recomp_store64(c, cell, text);
+            const Call equip = {.x = {eu, gear_kind[piece], cell, 2, UINT32_MAX, 1, 0}};
+            const int requested = (int)(game_call(c, EQUIP_FN, &equip, NULL) & 1);
+            p->gear[piece] = id, p->gear_set[piece] = 1, p->gear_at[piece] = now;
+            if (P.trace) hos_log("coop: puppet: %s %s request %u: %s", p->name, piece ? "shield" : "sword", id, requested ? "taken" : "not taken");
+            continue;   /* no hand call until the native piece is observed, not just requested */
+        }
+        p->gear[piece] = id, p->gear_set[piece] = 1;
+        const Call state = {.x = {eu, gear_slot[piece]}};
+        const unsigned want = (at->hands & (1u << piece)) ? 1 : 2;
+        if (game_call(c, EQUIP_STATE_FN, &state, NULL) != want) {
+            const Call hand = {.x = {eu, gear_slot[piece], want}};
+            game_call(c, EQUIP_HAND_FN, &hand, NULL);
+        }
+    }
+}
+
 /* ---- a member's actor */
 
 static void say_counts(const char *when) {
@@ -466,7 +576,7 @@ static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t 
         hos_log("coop: puppet: member %d is in %s at %.2f %.2f %.2f, %s Link%s", id, at->area, at->pos[0], at->pos[1], at->pos[2],
                 at->flags & COOP_POS_ADULT ? "adult" : "child", reason == COOP_PLAYER_SHOWN ? "" : " (another map than this game's: not shown)");
     }
-    const char *name = P.actor_name;
+    const char *name = P.actor_name[(at->flags & COOP_POS_ADULT) != 0];
     if (p->state != PP_NONE && (reason != COOP_PLAYER_SHOWN || strcmp(p->name, name)))
         puppet_remove(c, id, reason != COOP_PLAYER_SHOWN ? coop_players_why(reason) : "another actor is shown for it", now);
     if (reason != COOP_PLAYER_SHOWN) return;
@@ -489,6 +599,7 @@ static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t 
         }
         P.made++, p->state = PP_SHOWN, p->said_ms = now;
         memset(p->node, 0, sizeof p->node), memset(p->plays, 0, sizeof p->plays);
+        memset(p->gear_set, 0, sizeof p->gear_set);
         hos_log("coop: puppet: member %d is shown as %s at %.2f %.2f %.2f (made in %u ms)", id, p->name, at->pos[0], at->pos[1], at->pos[2],
                 (unsigned)(now - p->asked_ms));
     }
@@ -501,6 +612,7 @@ static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t 
     floats_at(p->actor + A_POS, was, 3);
     actor_place(c, p, at->pos, at->yaw);
     if (P.anim) anim_play(c, p, at);
+    equipment_play(c, p, at, now);
     if (P.trace && now - p->said_ms >= 2000) {
         p->said_ms = now;
         hos_log("coop: puppet: member %d's %s at %.2f %.2f %.2f, facing %.0f degrees (the actor: state %u, was at %.2f %.2f %.2f, %d animation slots)",
@@ -513,7 +625,7 @@ typedef struct { int member; uint64_t now; const CoopPos *pose; } BodyWrite;
 static int body_write(void *game, const void *payload) {
     const BodyWrite *body = payload;
     if (P.storage_failed) return 0;
-    if (body->member < 1 || body->member > COOP_MAX_MEMBERS || !body->pose || (body->pose->flags & COOP_POS_ADULT)) return 0;
+    if (!P.show || body->member < 1 || body->member > COOP_MAX_MEMBERS || !body->pose || !age_permitted(body->pose->flags)) return 0;
     if (!P.blocks) {
         P.blocks = hos_sys_alloc((uint64_t)B_SIZE * (COOP_MAX_MEMBERS + 1) + SCRATCH_SIZE, 16);
         if (!P.blocks) {
@@ -585,7 +697,7 @@ static void test_feed(const CoopPos *me, uint64_t now) {
     for (; P.at < P.nsteps && P.step[P.at].t <= t; P.at++) {
         const TestStep *s = &P.step[P.at];
         if (s->kind == T_ACTOR) {
-            text_copy(P.actor_name, sizeof P.actor_name, s->text);
+            text_copy(P.actor_name[(me->flags & COOP_POS_ADULT) != 0], sizeof P.actor_name[0], s->text);
             hos_log("coop: players: test: the actor shown is %s from %.1f s", s->text, t);
         } else {
             P.mode = s->kind, P.seg = P.at, P.side = s->v[0];
@@ -679,6 +791,7 @@ static void on_view(const CoopView *v, void *user) {
 static void place_hidden(CoopPos *me) {
     if (P.show) return;
     memset(me->pos, 0, sizeof me->pos), me->yaw = 0, me->nslots = 0;
+    me->sword = me->shield = me->hands = 0;
     memset(me->slot, 0, sizeof me->slot);
 }
 
@@ -698,17 +811,17 @@ static void update(Ctx *c, uint64_t actor) {
     floats_at(actor + A_POS, me.pos, 3), floats_at(actor + A_ROT, rot, 9);
     me.yaw = atan2f(rot[2], rot[8]);
     if (!isfinite(me.pos[0]) || !isfinite(me.pos[1]) || !isfinite(me.pos[2]) || !isfinite(me.yaw)) return;
-    if (strstr(text_at(recomp_load64(c, actor + A_FILE), file, sizeof file), "Adult")) me.flags |= COOP_POS_ADULT;
-    if (me.flags & COOP_POS_ADULT) {
-        remove_all(c, "child-body adapter does not support the local adult age", now);
-        return;
-    }
+    text_at(recomp_load64(c, actor + A_FILE), file, sizeof file);
+    if (!strcmp(file, "Player_Adult")) me.flags |= COOP_POS_ADULT;
+    else if (strcmp(file, "Player_Child")) return;   /* an unknown age is not silently a child */
     if (!map_now(c, me.area, sizeof me.area)[0]) return;
     if (strcmp(me.area, P.own_map)) {
         text_copy(P.own_map, sizeof P.own_map, me.area);
         if (P.trace) hos_log("coop: players: this game's Link (%s) is in %s at %.2f %.2f %.2f", file, me.area, me.pos[0], me.pos[1], me.pos[2]);
     }
-    if (P.anim) anim_read(c, actor, &me);
+    const int disclose = age_permitted(me.flags);
+    if (P.show && disclose && P.anim) anim_read(c, actor, &me);
+    if (P.show && disclose && P.gear && (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT)) equipment_read(c, actor, &me);
     if (P.test) test_feed(&me, now);
     place_hidden(&me);
 
@@ -719,12 +832,12 @@ static void update(Ctx *c, uint64_t actor) {
     const uint32_t accepted = P.show ? hos_oot_coop_shown() | P.forced : 0;
     if (!TryAcquireSRWLockExclusive(&P.lock)) return;   /* the co-op thread is taking a position: the next frame */
     P.last_me = me, P.me_ms = now;
-    const size_t n = coop_players_send(&P.store, buf, sizeof buf, &me, now);
+    const size_t n = disclose ? coop_players_send(&P.store, buf, sizeof buf, &me, now) : 0;
     for (int id = 1; P.show && id <= COOP_MAX_MEMBERS; id++) reason[id] = coop_players_show(&P.store, id, accepted, me.area, now, &at[id]);
     in_room = P.store.others > 0;
     memcpy(tickets, P.ticket, sizeof tickets);
     ReleaseSRWLockExclusive(&P.lock);
-    if (n && hos_oot_coop_presence()) coop_send(COOP_K_POS, buf, n);
+    if (n && age_permitted(me.flags)) coop_send(COOP_K_POS, buf, n);
     if (!P.show) return;   /* (nobody is shown: nothing is made in the game) */
 
     int shown = 0;
@@ -734,7 +847,7 @@ static void update(Ctx *c, uint64_t actor) {
             puppet_step(c, id, reason[id], &at[id], now);   /* retirement only; cannot create or move */
         } else {
             const int result = hos_oot_coop_gameplay_dispatch(&tickets[id], &body, sizeof body, c);
-            if (!result) puppet_remove(c, id, "presentation permission or child pose expired", now);
+            if (!result) puppet_remove(c, id, "presentation permission or pose expired", now);
         }
         shown += P.puppet[id].state != PP_NONE;
     }
@@ -764,7 +877,7 @@ void hos_oot_coop_players_tick(int loaded, int open) {
             me.flags |= COOP_POS_LOADED | (P.last_me.flags & COOP_POS_ADULT);
             memcpy(me.area, P.last_me.area, sizeof me.area);
         }
-        n = coop_players_send(&P.store, buf, sizeof buf, &me, now);
+        if (age_permitted(me.flags)) n = coop_players_send(&P.store, buf, sizeof buf, &me, now);
     }
     ReleaseSRWLockExclusive(&P.lock);
     if (n) coop_send(COOP_K_POS, buf, n);
@@ -800,13 +913,21 @@ void hos_oot_coop_players_start(void) {
     }
     if (show) {
         P.show = 1;
-        P.anim = env_on("HOS_COOP_PLAYERS_ANIM") && hos_coop_players_assets();
-        if (env_on("HOS_COOP_PLAYERS_ANIM") && !P.anim && !(names && *names))
-            hos_log("coop: players: animation unavailable: rebuild this game to make its local actor assets (or remove the conflicting mod)");
-        text_copy(P.actor_name, sizeof P.actor_name, P.anim ? "CoopPuppet_Child" : "PouchPlayer_Child");
+        const char *animation = getenv("HOS_COOP_PLAYERS_ANIM");
+        const int animate = !animation || !env_value_off(animation);
+        P.anim = animate && hos_coop_players_assets();
+        P.gear = a64_lookup(EQUIP_FN) && a64_lookup(EQUIP_STATE_FN) && a64_lookup(EQUIP_HAND_FN) && a64_lookup(EQUIP_REMOVE_FN);
+        if (!P.gear) hos_log("coop: players: sword/shield display unavailable: native equipment routines are missing");
+        if (animate && !P.anim)
+            hos_log("coop: players: animation unavailable: using standing child/adult models of the correct age; rebuild local assets or remove the conflicting mod");
+        text_copy(P.actor_name[0], sizeof P.actor_name[0], P.anim ? "CoopPuppet_Child" : "PouchPlayer_Child");
+        text_copy(P.actor_name[1], sizeof P.actor_name[1], P.anim ? "CoopPuppet_Adult" : "PouchPlayer_Adult");
         if (names && *names) {
-            text_copy(P.actor_name, sizeof P.actor_name, names);
-            P.anim = env_on("HOS_COOP_PLAYERS_ANIM");   /* explicit test actors may bring their own animation set */
+            const char *comma = strchr(names, ',');
+            size_t n = comma ? (size_t)(comma - names) : strlen(names);
+            if (n && n <= NAME_MAX_LEN) memcpy(P.actor_name[0], names, n), P.actor_name[0][n] = 0;
+            if (comma && comma[1]) text_copy(P.actor_name[1], sizeof P.actor_name[1], comma + 1);
+            P.anim = animation && !env_value_off(animation);   /* explicit test actors opt into animation */
         }
         if (test && *test) test_read(test);
     }
@@ -823,7 +944,7 @@ void hos_oot_coop_players_start(void) {
         on_view(&v, NULL);
     }
     if (show)
-        hos_log("coop: players: child bodies configured as %s; waiting for signed presence permission", P.actor_name);
+        hos_log("coop: players: child/adult bodies configured as %s / %s; waiting for signed presence permission", P.actor_name[0], P.actor_name[1]);
     else
         hos_log("coop: players: the other players are not shown (coop_players is off): a room hears only this game's map and whether a save "
                 "is played, every 2 s and at each change");

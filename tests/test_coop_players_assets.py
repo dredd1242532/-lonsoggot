@@ -130,7 +130,7 @@ def required_output_names(romfs, contract=ROOT / 'host/coop_players_assets.h'):
     return names
 
 
-def run_loader(exe, game, romfs, names=(), *, players='1', animation='1', ini=0, mods=None):
+def run_loader(exe, game, romfs, names=(), *, players='1', animation=None, ini=0, mods=None):
     env = os.environ.copy()
     env.update(TEST_GAME_EXE=str(game / 'longshot.exe'), TEST_ROMFS=str(romfs),
                TEST_PLAYERS_OPTION=str(ini), HOS_MODS=str(mods if mods is not None else game / 'mods'))
@@ -201,6 +201,7 @@ def fixture(root, endian='<'):
     kt, st = table(keys), table(strings)
     def val(v):
         if isinstance(v, str): return 0xa0, strings.index(v)
+        if isinstance(v, bool): return 0xd0, int(v)
         if isinstance(v, int): return 0xd3, v
         pairs = sorted(v.items()) if isinstance(v, dict) else list(enumerate(v))
         children = [(k, *val(x)) for k, x in pairs]
@@ -251,12 +252,18 @@ class FakeRomfs:
             menu, world = 'PouchPlayer_' + age, 'Player_' + age
             asref = 'Component/ASInfo/' + age + '.bgyml'
             base = 'Component/ASInfo/Base.bgyml'
-            for n, components in [(menu, {'ASRef': '?AS/menu.asb', 'ASInfoRef': '?menu', 'AIInfoRef': '?menu-ai'}),
+            eqref = 'Component/EquipmentUserParam/Menu_' + age + '.bgyml'
+            for n, components in [(menu, {'ASRef': '?AS/menu.asb', 'ASInfoRef': '?menu', 'AIInfoRef': '?menu-ai', 'EquipmentUserRef': '?' + eqref}),
                                   (world, {'ASRef': '?AS/' + age + '.asb', 'ASInfoRef': '?' + asref})]:
                 pack = {param(n): fixture({'Components': components}), 'opaque.bin': b'not a model'}
                 if n == world:
                     pack[asref] = fixture({'$parent': 'Work/Component/ASInfo/Base.gyml', 'Rate': 33})
                     pack[base] = fixture({'Slots': 9})
+                else:
+                    pack[eqref] = fixture({'$parent': '?Component/EquipmentUserParam/Base.bgyml', 'IsPouchUser': False})
+                    pack['Component/EquipmentUserParam/Base.bgyml'] = fixture({
+                        'IsPouchUser': True, 'BlackboardTableRef': '?Component/Blackboard/Equipment.bgyml', 'BoneName': age + 'Hand'})
+                    pack['Component/Blackboard/Equipment.bgyml'] = fixture({'Equipment': ['Weapon', 'Shield']})
                 path = 'Pack/Actor/' + n + '.pack.zs'
                 self.files[path] = a.sarc_write(pack)
                 sizes[path.removesuffix('.zs')] = len(self.files[path]) + 300
@@ -308,6 +315,7 @@ class Assets(unittest.TestCase):
         before = dict(rom.files)
         with tempfile.TemporaryDirectory() as tmp:
             entries = contract_entries()
+            self.assertEqual({age for kind, age, _ in entries if kind == 'actor'}, {'Child', 'Adult'})
             required = {name: rom.one(path) if '*' in path else path for _, name, path in entries}
             expected = set(required.values())
             self.assertEqual(a.generate(rom, tmp), len(expected))
@@ -323,6 +331,10 @@ class Assets(unittest.TestCase):
                 self.assertEqual(params['ASRef'], '?AS/CoopPuppet_' + age + '.root.asb')
                 self.assertEqual(params['AIInfoRef'], '')
                 self.assertIn('Component/ASInfo/Base.bgyml', pack)
+                self.assertEqual(params['EquipmentUserRef'], '?Component/EquipmentUserParam/Menu_' + age + '.bgyml')
+                eq = a.Byml(pack[params['EquipmentUserRef'][1:]]).root
+                self.assertEqual(eq['IsPouchUser'].word, 0)
+                self.assertIn('Component/Blackboard/Equipment.bgyml', pack)
                 self.assertEqual(pack['opaque.bin'], b'not a model')
                 for kind in ('ActorInfo', 'GameActorInfo'):
                     rows = a.Byml((Path(tmp) / ('RSDB/' + kind + '.Product.999.rstbl.byml.zs')).read_bytes()).root
@@ -382,6 +394,27 @@ class Assets(unittest.TestCase):
             with self.assertRaises(KeyError):
                 a.generate(rom, tmp)
             self.assertFalse(any(Path(tmp).rglob('*.zs')))
+
+    def test_equipment_component_and_inheritance_fail_closed_for_each_age(self):
+        for age in ('Child', 'Adult'):
+            for broken in ('missing', 'parent', 'blackboard', 'cycle', 'pouch'):
+                with self.subTest(age=age, broken=broken):
+                    rom = FakeRomfs()
+                    path = 'Pack/Actor/PouchPlayer_' + age + '.pack.zs'
+                    pack = a.sarc_read(rom.files[path])
+                    eq = 'Component/EquipmentUserParam/Menu_' + age + '.bgyml'
+                    if broken == 'missing': del pack[eq]
+                    elif broken == 'parent': del pack['Component/EquipmentUserParam/Base.bgyml']
+                    elif broken == 'blackboard': del pack['Component/Blackboard/Equipment.bgyml']
+                    else:
+                        doc = a.Byml(pack[eq])
+                        if broken == 'cycle': doc.root['$parent'] = '?' + eq
+                        else: doc.root['IsPouchUser'] = a.Scalar(0xd0, 1)
+                        pack[eq] = doc.encode()
+                    rom.files[path] = a.sarc_write(pack)
+                    with tempfile.TemporaryDirectory() as tmp:
+                        with self.assertRaises((KeyError, ValueError)): a.generate(rom, tmp)
+                        self.assertFalse(any(Path(tmp).rglob('*.zs')))
 
 
     def test_contract_is_checked_before_any_output_is_written(self):
@@ -577,13 +610,15 @@ class Loader(unittest.TestCase):
         (self.assets / 'another.bin').write_bytes(b'authored extra')
         self.assert_ready(1)
 
-    def test_local_display_and_animation_switches_still_gate_indexing(self):
+    def test_local_display_and_diagnostic_override_gate_indexing(self):
         for settings in ({'players': '0', 'ini': 1}, {'players': None, 'ini': 0},
-                         {'animation': '0'}, {'animation': None}):
+                         {'animation': '0'}, {'animation': 'off'}, {'animation': 'false'}):
             with self.subTest(settings=settings):
                 files, _ = self.assert_ready(0, **settings)
                 self.assertTrue(all(path is None for path in files.values()))
         self.assert_ready(1, players=None, ini=1)
+        self.assert_ready(1, animation=None)
+        self.assert_ready(1, animation='1')
 
 
 def main():

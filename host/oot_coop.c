@@ -216,7 +216,7 @@ static struct {
     int copy_busy_said;
     int playing;            /* co-op is on and the game is being played (gate): what Link's update reads (atomic) */
     uint32_t pub_shown;     /* bit id: a member of the accepted offer whose key the player accepted (atomic) */
-    int presence;           /* signed and accepted presentation capability, atomic; absence is off */
+    int presence;           /* accepted signed presentation mask, atomic; absence is off */
 
     /* the maker's key for a room (the co-op thread's) */
     char key_code[COOP_SECRET_TEXT + 1];
@@ -1377,13 +1377,13 @@ static void gameplay_context_locked(void) {
     CoopGameplayContext context = {0};
     CoopOffer offer;
     CoopView view;
+    int presence = 0;
     coop_view_get(&view);
     if (!coop_profile_active() && G.eng && G.bound && G.gate && G.loaded && view.state == COOP_JOINED &&
         coop_sync_offer(G.eng, &offer, coop_now_ms()) && offer.accepted && coop_sync_open(G.eng)) {
         context.version = COOP_GAMEPLAY_VERSION, context.size = sizeof context;
         context.capabilities = COOP_GAMEPLAY_DURABLE;
-        int presence = 0;
-        if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && (presence & COOP_PRESENCE_CHILD_BODY))
+        if (coop_feature_present(&offer.rules, COOP_RULE_PRESENCE, &presence) && (presence & COOP_PRESENCE_BODIES))
             context.capabilities |= COOP_GAMEPLAY_PRESENTATION;
         context.offer = offer.token, context.rules_epoch = offer.rules.epoch;
         context.room_session = view.session;
@@ -1395,7 +1395,7 @@ static void gameplay_context_locked(void) {
         }
     }
     coop_gameplay_publish(&G.gameplay, &context);
-    __atomic_store_n(&G.presence, (G.gameplay.context.capabilities & COOP_GAMEPLAY_PRESENTATION) != 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&G.presence, (G.gameplay.context.capabilities & COOP_GAMEPLAY_PRESENTATION) ? presence : 0, __ATOMIC_RELEASE);
 }
 
 static void apply(Ctx *c, uint64_t mgr) {

@@ -344,9 +344,9 @@ static const CoopFeatureRule feature_rules[] = {
      "Co-op, or PvP room setup. This build cannot start a fight. Off refuses acceptance."},
     {30, "coop_hit_events", 0, 1, 0, "Native hit observations",
         "Share committed native life-loss observations. Diagnostics only; never hurts another player."},
-    // Child presence family. Higher presentation bits require a later supported adapter.
-    {COOP_RULE_PRESENCE, "coop_presence_permissions", 0, COOP_PRESENCE_CHILD_BODY, 0, "Child bodies",
-     "On: accepted players may share child Link positions and show their bodies. Off: no body or position disclosure."},
+    // Each signed bit grants one supported cosmetic family; gaps are not consent.
+    {COOP_RULE_PRESENCE, "coop_presence_permissions", 0, COOP_PRESENCE_SUPPORTED, 0, "Player bodies and gear",
+     "Add permissions: 1 child bodies, 2 adult bodies, 16 swords and shields. 3 shows both ages; 19 also shows gear. 0 shares nothing."},
 };
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -369,6 +369,7 @@ static int feature_value(const uint8_t *p) {
 
 static int feature_valid(int id, int value) {
     const CoopFeatureRule *d = coop_feature_definition(id);
+    if (d && id == COOP_RULE_PRESENCE && (value < 0 || (value & ~COOP_PRESENCE_SUPPORTED))) return 0;
     return id > 0 && id <= 255 && value >= -32768 && value <= 32767 && (!d || (value >= d->lo && value <= d->hi));
 }
 

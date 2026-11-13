@@ -38,6 +38,16 @@ import tempfile
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
 ROOT = Path(__file__).resolve().parents[1]
+MUTATIONS = {
+    "age-permission": ("return (hos_oot_coop_presence() & bit) != 0;", "return bit != 0;"),
+    "adult-model": ('const char *name = P.actor_name[(at->flags & COOP_POS_ADULT) != 0];', 'const char *name = P.actor_name[0];'),
+    "animation-default": ('const int animate = !animation || !env_value_off(animation);', 'const int animate = animation && !env_value_off(animation);'),
+    "lasting-draw-state": ('if (hand == 1)', 'if (hand == 2)'),
+    "unknown-hand-state": ('if (hand != 1 && hand != 2) break;', 'if (0) break;'),
+    "unknown-equipment": ('if (!id) {', 'if (!id && 0) {'),
+    "stale-body": ('if (!actor_alive(c, p)) {', 'if (0) {'),
+    "equipment-permission": ('const int permitted = (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT) != 0;', 'const int permitted = 1;'),
+}
 
 STEPS = """# seconds what
 0 actor Test_Actor
@@ -60,9 +70,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cc", default=os.environ.get("CC") or shutil.which("gcc") or shutil.which("clang") or "gcc")
     p.add_argument("--source-root", type=Path, default=ROOT)
+    p.add_argument("--mutation", choices=sorted(MUTATIONS), help="deliberately break one production guard; the compiled fixture must fail")
     a = p.parse_args()
     host = a.source_root.resolve() / "host"
     players = (host / "oot_coop_players.c").read_text(encoding="utf-8")
+    if a.mutation:
+        old, new = MUTATIONS[a.mutation]
+        if players.count(old) != 1:
+            raise SystemExit("mutation anchor missing or ambiguous: " + a.mutation)
+        players = players.replace(old, new, 1)
     marker = '#define PLAYERS_BUILD "'
     if players.count(marker) != 1:
         print("FAIL: %r is not once in host/oot_coop_players.c" % marker)

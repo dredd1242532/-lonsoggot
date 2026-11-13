@@ -476,8 +476,9 @@ static int printable(const uint8_t *p, size_t n) {
 enum { POS_HEAD = 11 };   // version, pseq, t_ms, flags, area length
 
 size_t coop_pos_pack(uint8_t *out, size_t cap, const CoopPos *p) {
-    size_t alen = bounded_len(p->area, COOP_POS_TEXT), n = POS_HEAD + alen + 17;
-    int slots = p->nslots < COOP_POS_SLOTS ? p->nslots : COOP_POS_SLOTS;
+    if (p->nslots > COOP_POS_SLOTS || (p->hands & ~COOP_HAND_MASK)) return 0;
+    size_t alen = bounded_len(p->area, COOP_POS_TEXT), n = POS_HEAD + alen + 17 + 3;
+    int slots = p->nslots;
     for (int i = 0; i < slots; i++) n += 1 + bounded_len(p->slot[i].node, COOP_POS_TEXT) + 4;
     if (cap < n) return 0;
     out[0] = COOP_POS_VERSION;
@@ -496,6 +497,7 @@ size_t coop_pos_pack(uint8_t *out, size_t cap, const CoopPos *p) {
         putf(q + 1 + len, p->slot[i].frame);
         q += 1 + len + 4;
     }
+    q[0] = p->sword, q[1] = p->shield, q[2] = p->hands;
     return n;
 }
 
@@ -520,7 +522,8 @@ int coop_pos_parse(const uint8_t *p, size_t n, CoopPos *out) {
         memcpy(r.slot[i].node, p + at + 1, p[at]);
         at += 1u + p[at] + 4;
     }
-    if (at != n) return 0;
+    if (at + 3 != n || (p[at + 2] & ~COOP_HAND_MASK)) return 0;
+    r.sword = p[at], r.shield = p[at + 1], r.hands = p[at + 2];
     *out = r;
     return 1;
 }

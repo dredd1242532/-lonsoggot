@@ -75,7 +75,14 @@ int main(void) {
     presence_rule_present = 1;
     gameplay_context_locked(); assert(!G.presence);   // explicit off
     presence_rule_value = 1;
-    gameplay_context_locked(); assert(G.presence);
+    gameplay_context_locked(); assert(G.presence == 1);
+    presence_rule_value = COOP_PRESENCE_ADULT_BODY;
+    gameplay_context_locked(); assert(G.presence == COOP_PRESENCE_ADULT_BODY);
+    presence_rule_value = COOP_PRESENCE_SUPPORTED;
+    gameplay_context_locked(); assert(G.presence == COOP_PRESENCE_SUPPORTED);
+    presence_rule_value = COOP_PRESENCE_EQUIPMENT;
+    gameplay_context_locked(); assert(!G.presence); // gear alone grants no position/body capability
+    presence_rule_value = COOP_PRESENCE_SUPPORTED;
     G.save_generation = 0;
     gameplay_context_locked(); assert(!G.presence);   // invalid native context fails closed
     G.save_generation = 1, presence_rule_value = 0;
