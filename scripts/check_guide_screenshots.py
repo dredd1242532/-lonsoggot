@@ -153,7 +153,10 @@ def main():
     if errors:
         print(f'Guide screenshot check failed: {len(errors)} issue(s). Review the affected UI and guide before updating review hashes.')
         return 1
-    print('Guide screenshot checks passed for the inputs checked above; NOT CHECKED items remain outstanding.')
+    if any(line.startswith('NOT CHECKED:') for line in notices):
+        print('Guide screenshot checks passed for the inputs checked above; NOT CHECKED items remain outstanding.')
+    else:
+        print('Guide screenshot integrity and all recorded UI/fixture source checks passed.')
     return 0
 
 
