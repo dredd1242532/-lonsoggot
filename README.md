@@ -96,7 +96,7 @@ Longshot's first version will be **v3.0.0**; the launcher's first will be **v1.0
 **Your game copy:** program `0400486024DEC000` · update **v131072** · build `e0f3ccfa`.
 Use a `.nup` file, or the `romfs` and `exefs` folders. Other game versions are not supported.
 
-These are estimates from the [tested configurations](docs/tested-configurations.md), not a promise of a particular
+These are estimates from the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/), not a promise of a particular
 frame rate: the game runs on more than this, and performance depends on the resolution and settings you choose.
 
 | Component | Minimum | Recommended |
@@ -110,7 +110,7 @@ frame rate: the game runs on more than this, and performance depends on the reso
 | **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
 
 Memory use depends on the build, driver and scene: recent Linux/NVIDIA runs used roughly
-13–19 GiB for the game alone (see [tested configurations](docs/tested-configurations.md)), so even a 16 GB PC can need
+13–19 GiB for the game alone (see the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/)), so even a 16 GB PC can need
 swap. Leave room for the desktop and other programs.
 Swap can prevent an out-of-memory exit, but it is not extra RAM; heavy swapping can make the whole desktop unresponsive.
 
