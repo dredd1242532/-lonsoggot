@@ -34,7 +34,8 @@ or NVIDIA frame-generation measurement. Those results do not validate this Longs
 [Hookshot #2481](https://github.com/NotRexed/Hookshot/pull/2481) introduced PsychoV35 and deliberately narrowed
 RGBA16F to Native HDR plus PsychoV35. Its discussion confirms that selecting DLSS and frame generation in the menu
 did not prove they ran: the log revealed the format rejection and fallback. [Hookshot #2243](https://github.com/NotRexed/Hookshot/pull/2243)
-established the native-HDR DLSS encoding; its author confirmed that it landed through #2342. Removing the format
+established the native-HDR DLSS encoding; its author confirmed that it landed through
+[Hookshot #2342](https://github.com/NotRexed/Hookshot/pull/2342). Removing the format
 check alone would leave a packed-format storage shader bound to an RGBA16F image. Skipping the prep decode because
 storage is floating point would instead change brightness.
 
@@ -47,88 +48,9 @@ Accepting the scene restores this handoff. Existing GPU/runtime support, fixed-m
 still apply; accepting RGBA16F does not promise that every present can use NVIDIA frame generation.
 
 Runtime validation must start cold with Native HDR, PsychoV35, DLSS/DLAA, the switch above and a supported fixed NVIDIA
-frame-generation multiplier. Verify the HDR feature creation, `PsychoV35 DLSS: enabled` with input/output format 97,
-repeated DLSS drawn-frame counts and `DLSS Frame Gen (NGX)` made-frame counts. Compare against the switch off and
-Vanilla in the same scene, then switch tone mappers and DLSS/DLAA during play. Check brightness on an HDR display,
-edges, actor motion, history resets and validation errors. A transitional packed-format frame after a hot switch is
-insufficient evidence; a menu selection alone is insufficient too. Record measured runs in `tested-configurations.md`.
-
-### Local verification, 2026-11-12
-
-Renderer: `d4a69456` plus this port, build source stamp `878c957c`; host: unchanged `7afe6ae1`
-(`v2.1.0-rc.3-328-g7afe6ae1`, source `7cfff061`). The renderer API and scene-format host hook agree between those
-bases. Windows 11 Home build 26300, RTX 4070 12 GB, NVIDIA 621.01, i7-13700F, 32 GB RAM. Copied Hyrule Field child
-save, 2560x1440 output (2560x1421 client), DLSS Quality 1707x960, preset K, sharpness 0, Native HDR, PsychoV35,
-200-nit paper white, 400-nit peak, NVIDIA frame generation 2x. Both NVIDIA runtimes were installed locally through
-`scripts/ngx_sdk.py` with the player's explicit licence acceptance.
-
-Four cold starts, on / off / off / on, each with 30 seconds standing after the map settled. The off arm uses the same
-renderer with `RX_VK_PSYCHOV35_DLSS=0`, retaining main's packed-only rejection. These are correctness measurements;
-they are not an FPS comparison or a claim about performance on another GPU.
-
-| Steady gameplay interval | Switch off, both runs | Switch on, both runs |
-|---|---|---|
-| Native HDR DLSS feature | Not made | Made, HDR linear colour |
-| Network input/output | RGBA16F rejected | RGBA16F accepted (format 97) |
-| DLSS evaluation | Game's network runs | 600 frames drawn per complete status interval |
-| NVIDIA FG sets made per 600 presents | 0 | 600 |
-| Missing-input FG fallbacks in those intervals | 600 | 0 |
-
-The enabled logs also show actor motion (37,800 draws in one complete 600-frame interval). Live Vanilla -> PsychoV35
-switching returns to the RGBA16F route, with history resets and complete 600/600 FG intervals after settling. No device
-lost or failure to make the RGBA16F shader was logged. Local PNGs were captured for both arms; they contain PQ values,
-so an SDR image viewer is not a brightness assessment on an HDR monitor. Absolute brightness/colour judgement,
-Linux, other NVIDIA GPUs/drivers and reactive-mask runtime behaviour remain unverified.
-
-A further cold start with `RX_VK_DLSS=2` verifies DLAA at 2560x1440: RGBA16F input/output, an HDR feature,
-repeated 600/600 DLAA evaluations and 600/600 NVIDIA FG sets with no missing-input fallbacks in steady gameplay.
-Live DLSS/DLAA switching was not verified: the control bridge rejected both `dlss=2` and `resolution=1`; the menu's
-Native step changes the upscaler while preserving its saved render-resolution value. The failed automation request
-did not change the game setting. A separate extra DLSS run repeated the successful tone-mapper transitions.
-
-The renderer build compiled 207 files and linked with NGX, zero failures. The focused PsychoV35, HDR encoding,
-reactive-mask and temporal-history checks pass; the new format-policy fixture fails on the original source. The packed
-output header regenerates byte-for-byte identically with glslang 16.6.0. The whole `tests/run_all.py` run gives 479
-passed, 10 failed, 41 skipped. Eight failures reproduce in the unchanged `d4a69456` checkout (`test_bake_ds`,
-`test_bake_portability`, `test_control`, `test_fpx_sticky`, `test_lift_cache`, `test_nup_paths`, `test_spawn_emit`,
-`test_team_chat`); `test_linux_play_scope` hangs there too. `test_oot_wide_save_picture` timed out compiling under
-the parallel suite's load and passes alone on both trees. No checks were weakened or skipped to obtain these results.
-
-After rebasing onto `2a2da67f`, the renderer rebuilt with NGX (207 files, zero failures; source fingerprint `4255c3b1`).
-With the bundled Python dependencies and llvm-mingw selected explicitly, the refreshed whole suite gives 492 passed,
-4 failed, 35 skipped (`--jobs 6 --timeout 180`). All four failures also reproduce in unchanged `2a2da67f`:
-`test_nup_paths` (Windows symlink privilege), `test_check_third_party` (Windows output handling), `test_setup_runtime`
-(Windows path handling) and `test_release` (missing OpenSSL and Windows newlines). The focused checks pass after rebase.
-The earlier runtime measurements remain identified by their actual renderer/host versions above. No temporal-chain,
-view-binding or renderer-API changes intervened on main; its DLSS change settles preset-row selection, whereas these
-runs held preset K fixed. The player subsequently confirmed that the isolated HDR build worked well visually.
-
-### Review follow-up verification, 2026-11-13
-
-The renderer was measured again after rebasing onto main `dd02c6cc`: main source `cb01b5a3`, PR renderer
-`6b8bc562`, source `cdee3127`. Both were built with NGX, 207 translation units and zero failures. The host stayed
-`7afe6ae1` (source `7cfff061`) and the runtime files, copied save and settings were unchanged between arms. This
-isolates the renderer change; it does not test newer host changes.
-
-Nine cold starts used the same Hyrule Field child viewpoint, 2560x1440 output (2560x1421 window), preset K,
-sharpness 0, NVIDIA FG 2x, and 40 seconds standing after settling. DLSS Quality was 1707x960; the separate DLAA
-start was 2560x1440. HDR white/peak were 200/400 nits. Hardware remained the RTX 4070, driver 621.01,
-i7-13700F, 32 GB, Windows 11 Home 26300.
-
-Vanilla DLSS with the opt-in unset, in both Native HDR and SDR, sustains 600/600 engine evaluations and NVIDIA FG
-on main and the PR. Neither PR Vanilla run logs a PsychoV35 diagnostic. PsychoV35 DLSS was interleaved PR/main/main/PR
-(with the Vanilla checks between the middle runs): both main runs have 0/600 NVIDIA FG and 600 missing-input fallbacks;
-both PR runs have 600/600 evaluations and NVIDIA FG, with zero missing-input fallbacks. Those are also the medians
-across each pair. The separate PR DLAA cold start likewise sustains 600/600 evaluations and NVIDIA FG. These results
-repeat in the last two complete 600-frame reporting intervals of each run, excluding loading and partial intervals.
-The PR Psycho runs report `RGBA16F linear route; scene format 122, network input 97, output 97` and an HDR feature.
-These are correctness counts, not performance measurements. Each run is recorded in tested-configurations.md.
-
-The log now reports the actual packed/RGBA route only for Psycho-related transitions. The production-block fixture
-covers initial Vanilla silence and route changes; the redundant Python square-root loop was removed while the actual
-shader decode and specialization checks remain. The four focused checks pass. The complete suite gives 484 passed,
-6 failed, 33 skipped with local sockets available (`--jobs 6 --timeout 180`). All six failures reproduce on unchanged
-`dd02c6cc`: texture_staging_publication, nup_paths, check_third_party, display_pointer, finish_output and release.
-No checks were weakened. Builds, suites and game runs held the shared machine lock and finished before the other
-chat's next scheduled build. Linux runtime/full renderer build, other NVIDIA GPUs/drivers, FSR 4 runtime,
-reactive-mask runtime and live DLSS/DLAA switching remain untested; the feature stays opt-in.
+frame-generation multiplier. Verify the HDR feature creation, the log line `vk: PsychoV35 DLSS: RGBA16F linear route`
+with network input and output format 97, repeated DLSS drawn-frame counts and `DLSS Frame Gen (NGX)` made-frame counts.
+Compare against the switch off and Vanilla in the same scene, then switch tone mappers and DLSS/DLAA during play. Check
+brightness on an HDR display, edges, actor motion, history resets and validation errors. A transitional packed-format
+frame after a hot switch is insufficient evidence; a menu selection alone is insufficient too. Record measured runs in
+`tested-configurations.md`.
