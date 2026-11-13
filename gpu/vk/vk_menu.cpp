@@ -136,6 +136,19 @@ const char* tx_compact_menu_key(int v) {
     return names[std::clamp(v, 0, 1)];
 }
 const char* tx_hdr(int v) { return v == 1 ? "Expanded" : v == 2 ? "Native (the game's)" : "Off"; }
+/// HDR: on, when the swapchain stayed SDR, why (dev.hdr_sdr_why, vk_main.cpp create_swapchain). Variants: each reason
+const char* hn_hdr(int v, int variant) {
+    static const char* const t[] = {
+        "The picture stays SDR: the graphics driver offers no HDR output (no VK_EXT_swapchain_colorspace).",
+        "The picture stays SDR: HDR is off for this display in Windows' display settings.",
+        ("The picture stays SDR: Windows has HDR on, but the graphics driver offers the game no HDR output. Reinstall the "
+         "driver with a clean install, then restart the PC (longshot.magicbean.dev/help)."),
+        "The picture stays SDR: the display offers no HDR output. Is HDR on in the display settings?"};
+    const int reasons = hdr_sdr_count - 1;   // (every HdrSdrWhy but hdr_sdr_none)
+    static_assert(sizeof t / sizeof *t == hdr_sdr_count - 1, "hn_hdr: a line for each HdrSdrWhy but hdr_sdr_none");
+    if (variant >= 0) return variant < reasons ? t[variant] : nullptr;
+    return v && dev.hdr_sdr_why != hdr_sdr_none ? t[std::clamp((int)dev.hdr_sdr_why, 1, reasons) - 1] : nullptr;
+}
 const char* tx_tonemap(int v) { return v == 1 ? "PsychoV35" : "Vanilla"; }
 const char* tx_nits(int v) {
     static char b[24];
@@ -1230,7 +1243,7 @@ Row rows[] = {
     {TAB_GRAPHICS, "HDR", &opts.hdr, 0, 2, 1, tx_hdr,
      "HDR10 out on an HDR display (Windows: Use HDR on in the display settings). Expanded: the game's SDR picture, its white at "
      "the paper white and its highlights up to the peak. Native: the game's own HDR, told the display's peak and paper white.",
-     nullptr, false, true},
+     hn_hdr, false, true},
     {TAB_GRAPHICS, "HDR paper white", &opts.hdr_white, 80, 400, 10, tx_nits,
      "How bright the picture's white is with HDR on. Around 200 for a normal room; higher in a bright one.", nullptr, false, true},
     {TAB_GRAPHICS, "HDR peak brightness", &opts.hdr_peak, 400, 4000, 100, tx_nits,
