@@ -1,0 +1,10 @@
+# CircleCI Smarter Testing (circleci testsuite run): Longshot's game-free checks, tests/run_all.py's. discover lists the
+# checks a run starts on Linux (each tests/test_*.py and nx2/test_*.py not skipped here, and gpu/vk/tests' C++ checks), by
+# file, running none; run starts the ones it is given, with --strict: the job installs every tool they need, so a missing
+# one fails. The byte-compile of every tracked .py, which is no file, is the job's lint step. No game data is involved.
+---
+name: game-free checks
+discover: python3 -I -B tests/run_all.py --strict --list
+run: python3 -I -B tests/run_all.py --strict --junit "<< outputs.junit >>" << test.atoms >>
+outputs:
+  junit: test-results/run_all.xml

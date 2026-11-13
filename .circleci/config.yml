@@ -1,0 +1,324 @@
+# CircleCI's run of pull requests (the project's trigger starts it for pull requests only): the game-free checks
+# (tests/run_all.py, through .circleci/test-suites.yml) and the two Longshot Builders, as .forgejo/workflows/ci.yml,
+# build-linux.yml and build-windows.yml make them. No game data is involved: the builders are made without it, and the
+# checks never read it. The builders are kept as artifacts of the run. Nothing here is signed or released.
+version: 2.1
+
+commands:
+  # (the pinned glslang the checked-in shader headers are generated with: an older distro compiler lowers discard differently)
+  glslang:
+    steps:
+      - run:
+          name: glslang 16.6.0
+          command: |
+            tool_dir="$HOME/glslang-16.6.0"
+            mkdir -p "$tool_dir"
+            curl -fL --retry 3 -o "$tool_dir/glslang.tar.gz" https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-linux-x86_64-release.tar.gz
+            echo '2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce  '"$tool_dir/glslang.tar.gz" | sha256sum --check --strict
+            tar -xzf "$tool_dir/glslang.tar.gz" -C "$tool_dir"
+            echo "export PATH=\"$tool_dir/bin:\$PATH\"" >> "$BASH_ENV"
+  # (.NET 8 by Microsoft's install script: the image has none. The Windows builder is net8.0-windows, built on Linux with
+  # EnableWindowsTargeting)
+  dotnet:
+    steps:
+      - run:
+          name: .NET 8
+          command: |
+            curl -fsSL --retry 3 -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh
+            bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+            echo "export DOTNET_ROOT=\"$HOME/.dotnet\" PATH=\"$HOME/.dotnet:\$PATH\" DOTNET_CLI_TELEMETRY_OPTOUT=1" >> "$BASH_ENV"
+  # (tools.lock's llvm-mingw, Linux build: the Windows setup and back end are cross-compiled with it. Cached by its name)
+  llvm-mingw:
+    steps:
+      - run:
+          name: llvm-mingw version
+          command: python -I scripts/builder_package.py llvm-mingw --name --host linux | tee /tmp/llvm-mingw-name
+      - restore_cache:
+          keys:
+            - v1-llvm-mingw-{{ checksum "/tmp/llvm-mingw-name" }}
+      - run:
+          name: llvm-mingw
+          command: echo "export LLVM_MINGW=\"$(python -I scripts/builder_package.py llvm-mingw "$HOME/llvm" --host linux)\"" >> "$BASH_ENV"
+      - save_cache:
+          key: v1-llvm-mingw-{{ checksum "/tmp/llvm-mingw-name" }}
+          paths:
+            - ~/llvm
+
+jobs:
+  # tests/run_all.py's checks, all of them in one job (Forgejo's CI splits them in two), and the Windows builder's
+  # compile and --cli delivery checks, as Forgejo's part 1 has them
+  checks:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: large
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-pip-{{ checksum "requirements.txt" }}-{{ checksum "nx2/prompt_requirements.txt" }}
+      # (the compilers, spirv-val and dav1d's headers are not in the image: apt is the only way to them here)
+      - run:
+          name: Compilers and the SPIR-V validator
+          command: sudo apt-get update && sudo apt-get install -y --no-install-recommends g++ clang spirv-tools libdav1d-dev
+      # (the packages tests import, pinned as requirements.txt and nx2/prompt_requirements.txt have them)
+      - run:
+          name: Python packages for the tests
+          command: python -m pip install --disable-pip-version-check --no-deps zstandard==0.25.0 pillow==13.0.0 numpy==2.5.4
+      - save_cache:
+          key: v1-pip-{{ checksum "requirements.txt" }}-{{ checksum "nx2/prompt_requirements.txt" }}
+          paths:
+            - ~/.cache/pip
+      - glslang
+      - dotnet
+      # (the versions scripts/linux/deps.sh builds the Vulkan back end with)
+      - run:
+          name: Pinned SPIR-V and Vulkan headers
+          command: |
+            scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/spirv-headers   # vulkan-sdk-1.4.341.0
+            scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/vulkan-headers   # v1.4.345
+            echo "export LONGSHOT_SPIRV_HEADERS=\"$PWD/_deps/spirv-headers/include\" LONGSHOT_VULKAN_HEADERS=\"$PWD/_deps/vulkan-headers/include\"" >> "$BASH_ENV"
+      - run:
+          name: Compile Windows Builder
+          command: dotnet build builder/LongshotBuilder/LongshotBuilder.csproj --configuration Debug -p:NuGetAudit=false -p:EnableWindowsTargeting=true
+      - run:
+          name: Windows Builder --cli delivery
+          when: always
+          command: |
+            dotnet restore tests/builder_cli/BuilderCliTests.csproj --configfile tests/builder_cli/NuGet.Config -p:EnableWindowsTargeting=true
+            dotnet run --project tests/builder_cli/BuilderCliTests.csproj --configuration Release --no-restore \
+              -p:EnableWindowsTargeting=true -- "$(command -v python)"
+      - run:
+          name: Game-free checks
+          when: always
+          no_output_timeout: 30m
+          command: circleci testsuite run "game-free checks"
+      - run:
+          name: Byte-compile every tracked .py
+          when: always
+          command: python -I -B tests/run_all.py byte-compile
+      - store_test_results:
+          path: test-results
+
+  # The Linux Longshot Builder, Longshot-<version>-x86_64.AppImage (build-linux.yml): built in Ubuntu 22.04, the oldest
+  # system it is for (glibc 2.35), as Forgejo builds it
+  linux-appimage:
+    docker:
+      - image: ubuntu:22.04
+    resource_class: large
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      # (before the checkout, which needs git; the image is bare Ubuntu, so every tool comes from apt)
+      - run:
+          name: System packages
+          command: |
+            echo force-unsafe-io > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
+            retry_packages() {
+              for try in 1 2 3; do
+                if "$@"; then return 0; else package_status=$?; fi
+                if [ "$try" = 3 ]; then return "$package_status"; fi
+                sleep 20
+              done
+            }
+            base_packages() {
+              apt-get update &&
+                apt-get install -y --no-install-recommends software-properties-common gpg-agent
+            }
+            toolchain_packages() {
+              # (libstdc++ 13, from the toolchain PPA: C++20 <format>; linked in statically)
+              timeout --kill-after=5s 180s add-apt-repository -y --no-update ppa:ubuntu-toolchain-r/test &&
+                apt-get update &&
+                apt-get install -y --no-install-recommends g++-13 libstdc++-13-dev &&
+                apt-get install -y --no-install-recommends git openssh-client ca-certificates curl xz-utils zstd file unzip python3 \
+                build-essential gcc-12 g++-12 libstdc++-12-dev nasm meson ninja-build cmake pkg-config \
+                libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxinerama-dev \
+                libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+                libpulse-dev libasound2-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev zlib1g-dev
+            }
+            retry_packages base_packages
+            retry_packages toolchain_packages
+      - checkout
+      - run:
+          name: Trust the checkout
+          command: git config --global --add safe.directory "$PWD"
+      # (the built dependencies, without the downloads they were built from: deps.sh fetches only a part it has not built)
+      - restore_cache:
+          keys:
+            - v1-linux-deps-built-{{ checksum "scripts/linux/deps.sh" }}-{{ checksum "requirements.txt" }}-{{ checksum "nx2/prompt_requirements.txt" }}
+      - run:
+          name: Dependencies (Python, the AppImage packer)
+          command: scripts/linux/deps.sh
+      - run:
+          name: The downloads out of the cache
+          command: if [ -d build-linux/deps/downloads ]; then mv build-linux/deps/downloads /tmp/deps-downloads; fi
+      - save_cache:
+          key: v1-linux-deps-built-{{ checksum "scripts/linux/deps.sh" }}-{{ checksum "requirements.txt" }}-{{ checksum "nx2/prompt_requirements.txt" }}
+          paths:
+            - build-linux/deps
+      - run:
+          name: The downloads back
+          command: if [ -d /tmp/deps-downloads ]; then mv /tmp/deps-downloads build-linux/deps/downloads; fi
+      # (tools.lock's linux-x64 tools, each checked by its SHA-256: what the player's builder downloads)
+      - restore_cache:
+          keys:
+            - v1-linux-tools-{{ checksum "tools.lock" }}
+      - run:
+          name: The build tools (tools.lock, linux-x64)
+          command: python3 -I scripts/tools.py install build-linux/tools --system linux-x64 --cache /tmp/tools-cache
+      - save_cache:
+          key: v1-linux-tools-{{ checksum "tools.lock" }}
+          paths:
+            - build-linux/tools
+      # work/: the play profile made on the development PC (addresses and counts, no game code): tools.lock's profile
+      # when it has one; without it the game is built all the same
+      - run:
+          name: Play profile
+          command: |
+            if [ -f work/hot_order.txt ]; then echo "work/ is in the repository"; exit 0; fi
+            grep -q '^tool profile ' tools.lock || { echo "tools.lock has no profile yet: built without it"; exit 0; }
+            python3 -I scripts/tools.py install /tmp/profile --only profile --cache /tmp/tools-cache
+            mkdir -p work && cp -r /tmp/profile/LongshotBuilder/tools/work/. work/
+            ls -la work
+      - run:
+          name: AppImage
+          no_output_timeout: 30m
+          command: scripts/linux/appimage.sh
+      # (AMD FSR 4's Linux side, a build option the AppImage's prebuilt back end leaves off: built once more in a copy of
+      # the back end's work folder, where only vk_fsr4.cpp compiles again. The AppImage above is not changed)
+      - run:
+          name: longshot_vk.so with AMD FSR 4 (build check)
+          shell: /bin/bash -eo pipefail
+          command: |
+            cp -r build-linux/vk-work /tmp/vk-fsr
+            rm -f /tmp/vk-fsr/sa/build/longshot_vk.so
+            D="$PWD/build-linux/deps" T="$PWD/build-linux/tools"
+            OOT_WORK=/tmp/vk-fsr EMSDK="$T/usr/lib/longshot/emsdk" RX_CPM="$T/usr/share/longshot/cpm" RX_MARCH=x86-64-v3 \
+              RX_VK_ONLY=1 RX_RELEASE=1 LONGSHOT_FSR=1 "$D/python/bin/python3" -I nx2/build.py --standalone --jobs "$(nproc)" |
+              tee /tmp/vk-fsr.log
+            grep -q "with AMD FSR 4" /tmp/vk-fsr.log
+            test -f /tmp/vk-fsr/sa/build/longshot_vk.so
+      - run:
+          name: The AppImage as an artifact
+          command: mkdir -p dist && cp build-linux/*.AppImage dist/
+      - store_artifacts:
+          path: dist
+          destination: linux
+      # (a player's build started from the AppImage itself, with no game, up to where the lifted game is needed)
+      - run:
+          name: A player's build from the AppImage
+          command: scripts/linux/check_player_build.sh
+
+  # The Windows Longshot Builder, LongshotBuilder-<version>-windows-x64.zip (build-windows.yml's package job): the setup
+  # cross-compiled with llvm-mingw, the builder published for win-x64, the files checked and started under Wine
+  windows-builder:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: large
+    steps:
+      - checkout
+      - dotnet
+      # (Wine starts the Windows files; it is not in the image)
+      - run:
+          name: Wine
+          command: sudo apt-get update && sudo apt-get install -y --no-install-recommends wine64 xvfb xauth
+      - llvm-mingw
+      # (git describe --long's name, v3.0.1-3-g1a2b3c4: no release is made here, so the builder's MSBuild version is 0.0.0)
+      - run:
+          name: Version
+          command: |
+            tag=$(git describe --tags --long --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-0-g$(git rev-parse --short HEAD)")
+            echo "export TAG=$tag VERSION=0.0.0" >> "$BASH_ENV"
+            echo "version: $tag"
+      - run:
+          name: LongshotBuilder-Setup.exe
+          working_directory: builder/setup
+          command: |
+            "$LLVM_MINGW/bin/x86_64-w64-mingw32-windres" setup.rc -O coff -o /tmp/setup_rc.o
+            "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" -O2 -mwindows -municode \
+              setup.c /tmp/setup_rc.o \
+              -lwinhttp -lbcrypt -lcomctl32 -lshell32 -lole32 -Wl,--dependent-load-flag=0x800 \
+              -o /tmp/LongshotBuilder-Setup.exe
+            ls -l /tmp/LongshotBuilder-Setup.exe
+      - run:
+          name: Longshot Builder
+          command: >-
+            dotnet publish builder/LongshotBuilder/LongshotBuilder.csproj --configuration Release
+            --runtime win-x64 -p:EnableWindowsTargeting=true
+            -p:Version="$VERSION" -p:NuGetAudit=false --output /tmp/publish
+      - run:
+          name: Package folder
+          command: >-
+            python -I scripts/builder_package.py package /tmp/package
+            --publish /tmp/publish --setup /tmp/LongshotBuilder-Setup.exe
+      - run:
+          name: The zip
+          command: |
+            mkdir -p dist
+            python -I scripts/builder_package.py zip /tmp/package "$TAG" --setup /tmp/LongshotBuilder-Setup.exe \
+              --out "dist/LongshotBuilder-$TAG-windows-x64.zip"
+            ls -l dist
+      - store_artifacts:
+          path: dist
+          destination: windows
+      - run:
+          name: Check the Windows files
+          command: >-
+            python -I scripts/check_windows_files.py --objdump "$LLVM_MINGW/bin/llvm-objdump"
+            --readobj "$LLVM_MINGW/bin/llvm-readobj" "dist/LongshotBuilder-$TAG-windows-x64.zip"
+      - run:
+          name: Start them under Wine
+          command: |
+            export WINEPREFIX=/tmp/wine WINEDEBUG=-all WINEDLLOVERRIDES="mshtml="
+            xvfb-run -a python -I scripts/check_windows_files.py \
+              --wine "$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)" "dist/LongshotBuilder-$TAG-windows-x64.zip"
+      # (tools.lock's dav1d, in its CPM cache package, under the test of host/dav1d_av1.c compiled with llvm-mingw)
+      - run:
+          name: tools.lock's dav1d, under Wine
+          command: |
+            python -I scripts/tools.py install /tmp/cpm-tool --system windows-x64 --only cpm --cache /tmp/tools-cache
+            dav1d=(/tmp/cpm-tool/LongshotBuilder/tools/cpm/dav1d/*)
+            [ -f "${dav1d[0]}/lib/libdav1d.a" ] || { echo "tools.lock's cpm package has no dav1d"; exit 1; }
+            export WINEPREFIX=/tmp/wine WINEDEBUG=-all WINEDLLOVERRIDES="mshtml="
+            python -I -B tests/test_dav1d_av1.py --cross "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" \
+              --run "$(command -v wine || command -v wine64 || echo /usr/lib/wine/wine64)" --dav1d "${dav1d[0]}"
+
+  # The Windows Vulkan back end, longshot_vk.dll (build-windows.yml's vulkan job): players build it on their PC; this
+  # checks that it still builds, cross-compiled with llvm-mingw
+  windows-vulkan:
+    docker:
+      - image: cimg/python:3.12
+    resource_class: large
+    steps:
+      - checkout
+      # (the headers in the CPM cache layout nx2/build.py reads, at the versions scripts/linux/deps.sh pins)
+      - run:
+          name: Pinned Vulkan, SPIR-V and VulkanMemoryAllocator headers
+          command: |
+            scripts/fetch_commit.sh https://github.com/KhronosGroup/Vulkan-Headers 74d8a6cb930c68ef617b202c3ff3c59d919e086b _deps/cpm/vulkanheaders/v1.4.345   # v1.4.345
+            scripts/fetch_commit.sh https://github.com/KhronosGroup/SPIRV-Headers 04f10f650d514df88b76d25e83db360142c7b174 _deps/cpm/spirv-headers/vulkan-sdk-1.4.341.0   # vulkan-sdk-1.4.341.0
+            scripts/fetch_commit.sh https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator 1d8f600fd424278486eade7ed3e877c99f0846b1 _deps/cpm/vulkanmemoryallocator/v3.3.0   # v3.3.0
+      - llvm-mingw
+      # (RX_TARGET=windows: nx2/build.py builds the Windows back end on Linux; the back end alone, no lift, no game)
+      - run:
+          name: longshot_vk.dll
+          no_output_timeout: 30m
+          environment:
+            RX_TARGET: windows
+            RX_VK_ONLY: '1'
+            RX_RELEASE: '1'
+          command: |
+            LONGSHOT_MINGW="$LLVM_MINGW" OOT_WORK=/tmp/vk-work RX_CPM="$PWD/_deps/cpm" \
+              python -I nx2/build.py --standalone --jobs "$(nproc)"
+            ls -l /tmp/vk-work/sa/build/longshot_vk.dll
+            mkdir -p dist && cp /tmp/vk-work/sa/build/longshot_vk.dll dist/
+      - store_artifacts:
+          path: dist
+          destination: windows-vulkan
+
+workflows:
+  pull-request:
+    jobs:
+      - checks
+      - linux-appimage
+      - windows-builder
+      - windows-vulkan

@@ -3,11 +3,14 @@ gpu/vk/tests and a byte-compile of every tracked Python file. All of them run ev
 printed whole at the end, with a table of every check (slowest first), also to $GITHUB_STEP_SUMMARY when it is set.
 Exits 1 when anything failed.
 
-    python -I -B tests/run_all.py [--jobs N] [--timeout SECONDS] [--strict] [--no-skip] [--shard K/N] [name ...]
+    python -I -B tests/run_all.py [--jobs N] [--timeout SECONDS] [--strict] [--no-skip] [--shard K/N] [--list]
+                                  [--junit FILE] [name ...]
 
 A name picks the checks whose path contains it. --strict: a check that needs a tool this PC lacks (a compiler, the
 SPIR-V or Vulkan headers, spirv-val) fails instead of being skipped (CI installs them all). --no-skip runs the checks a
-test skips on this OS too. Standard library only: no package is installed for the runner itself.
+test skips on this OS too. --list prints the checks a run would start (with --strict, those whose tool is missing here
+too) and runs none: CircleCI's test suite (.circleci/test-suites.yml) finds them so, and gives them back as names, with
+--junit FILE for the results it shows. Standard library only: no package is installed for the runner itself.
 
 A test says what it needs in its own file, with up to three top-level assignments of plain literals (after its
 docstring and imports). The runner reads them with ast and never imports the test; a test that declares none runs with
@@ -364,6 +367,31 @@ def unicode_output():
             stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+def write_junit(path, checks, wall):
+    """The run's checks as JUnit XML (one testcase each, named and filed by its path; a failure carries its output, a
+    skip its reason), for a CI that shows test results from it"""
+    import xml.etree.ElementTree as ET
+    ran = [c for c in checks if not c.why_skip]
+    failed = sum(c.status != "pass" for c in ran)
+    suite = ET.Element("testsuite", name="run_all (%s)" % OS, tests=str(len(checks)), failures=str(failed),
+                       skipped=str(len(checks) - len(ran)), time="%.3f" % wall)
+    for c in checks:
+        case = ET.SubElement(suite, "testcase", name=c.name, classname=c.name, time="%.3f" % (0 if c.why_skip else c.secs))
+        if not c.name.startswith("("):
+            case.set("file", c.name)
+        if c.why_skip:
+            ET.SubElement(case, "skipped", message=c.why_skip)
+        elif c.status != "pass":
+            fail = ET.SubElement(case, "failure", message=c.status)
+            # (XML 1.0 has no control characters but tab and the line ends: a compiler's escape codes are dropped)
+            fail.text = "".join(ch for ch in c.output if ch in "\t\n\r" or ord(ch) >= 0x20)
+    folder = os.path.dirname(os.path.abspath(path))
+    os.makedirs(folder, exist_ok=True)
+    root = ET.Element("testsuites")
+    root.append(suite)
+    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+
+
 def main():
     unicode_output()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -375,6 +403,9 @@ def main():
     p.add_argument("--shard", type=shard_arg, metavar="K/N", help="run only the K-th of N parts (split by the times)")
     p.add_argument("--write-times", action="store_true",
                    help="write this run's times to tests/run_all_times.json for this OS (a full run only)")
+    p.add_argument("--list", action="store_true",
+                   help="print the name of each check a run would start, one a line, and run none")
+    p.add_argument("--junit", metavar="FILE", help="also write the results as JUnit XML to FILE")
     a = p.parse_args()
     if a.write_times and (a.names or a.shard):
         p.error("--write-times needs a full run: no names, no --shard")
@@ -430,6 +461,13 @@ def main():
     checks.append(Check("(byte-compile every tracked .py)", compile_all))
     if a.names:
         checks = [c for c in checks if any(n in c.name for n in a.names)]
+    if a.list:
+        # (a file's checks only: the byte-compile is no file. Skipped ones are left out, so a run of the names listed
+        # skips nothing: a name given runs its check even when its file skips this OS)
+        for c in checks:
+            if not c.why_skip and not c.name.startswith("("):
+                print(c.name)
+        return 0
     part = ""
     if a.shard:
         k, n = a.shard
@@ -495,6 +533,8 @@ def main():
             lines.append("| %s | %s | `%s` | %s |" % (mark[c.status], "" if c.why_skip else "%.1f s" % c.secs, c.name, note))
         with open(summary, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n\n")
+    if a.junit:
+        write_junit(a.junit, checks, wall)
     if a.write_times:
         write_times(to_run)
         print("times for %s written to %s" % (OS, os.path.relpath(TIMES, ROOT)))
