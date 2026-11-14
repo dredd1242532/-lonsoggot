@@ -5,8 +5,9 @@ targets' above everything, the sampled textures' below, the rest where the drive
 The rule (gpu/vk/memory_priority.h) is compiled and run alone. The source checks read vk_main.cpp and vk_vma.cpp:
 the extension is asked of the device only with the switch on and used only with its feature, and, since VMA gives a
 pool's blocks and an allocation with a memory object of its own the priority in their create info once the extension
-is on (a zero left there is the lowest there is), every pool and every allocation the renderer makes sets one. No
-game or GPU is needed.
+is on (a zero left there is the lowest there is), every pool and every allocation the renderer makes through VMA sets
+one. Memory the renderer allocates itself (vkAllocateMemory: the sparse textures' chunks, two small buffers the CPU
+reads, the imports of guest memory) has no priority and keeps the driver's 0.5. No game or GPU is needed.
 
     python -I -B tests/test_memory_priority.py [--cxx g++]
 """
@@ -38,13 +39,22 @@ int main() {
         CHECK(t.on && t.targets == 1.0f && t.textures == 0.25f && t.rest == 0.5f);
         CHECK(t.textures < t.rest && t.rest < t.targets);
     }
-    // (<targets>,<textures>: a test's own two, each held to 0..1; the rest is never moved)
+    // (<targets>,<textures>: a test's own two, each from 0 to 1; the rest is never moved)
     CHECK(parse("1,0.5").on && parse("1,0.5").targets == 1.0f && parse("1,0.5").textures == 0.5f);
     CHECK(parse("0.75,0.125").targets == 0.75f && parse("0.75,0.125").textures == 0.125f);
     CHECK(parse("0.5,0").on && parse("0.5,0").targets == 0.5f && parse("0.5,0").textures == 0.0f);
-    CHECK(parse("2,-1").targets == 1.0f && parse("2,-1").textures == 0.0f);
-    CHECK(parse("0,0").on && parse("0,0").targets == 0.0f);
-    for (const char* v : {"1,0.5", "0.75,0.125", "2,-1", "0,0"}) CHECK(parse(v).rest == 0.5f);
+    CHECK(parse("0,0").on && parse("0,0").targets == 0.0f && parse("0,0").textures == 0.0f);
+    CHECK(parse(" 1 , 0.5 ").targets == 1.0f && parse(" 1 , 0.5 ").textures == 0.5f);
+    for (const char* v : {"1,0.5", "0.75,0.125", "0.5,0", "0,0", " 1 , 0.5 "}) CHECK(!parse(v).unread && parse(v).rest == 0.5f);
+    // (anything else with a comma is not guessed at: the usual two, and `unread` for the log. 0,5 is a half written with
+    // a decimal comma, which read as two numbers would put the render targets at the bottom and the textures at the top;
+    // nan would reach the driver as a priority, and the extension wants 0 to 1)
+    for (const char* bad : {"0,5", "2,-1", "nan,0.25", "0.5,nan", "inf,0", "1,", ",0.25", ",", "1,0.5,0.2", "a,b", "1;0.25,", "0.5x,0.25",
+                            "1e400,0"}) {
+        const auto t = parse(bad);
+        CHECK(t.on && t.unread && t.targets == 1.0f && t.textures == 0.25f && t.rest == 0.5f);
+    }
+    for (const char* word : {"1", "on", "abc", "0.0", "1;0.25"}) CHECK(!parse(word).unread);
     // (an image's: a render target's first, then a texture of the textures' pool, then the rest)
     const auto t = parse("1");
     CHECK(image(t, true, false) == 1.0f && image(t, false, true) == 0.25f && image(t, false, false) == 0.5f);
@@ -92,7 +102,8 @@ def check_source():
          ['static const memory_priority::Tiers t = memory_priority::parse(getenv("RX_VK_MEMORY_PRIORITY"));'])
     init = block(vma, "bool vma_init(PFN_vkGetInstanceProcAddr gipa) {")
     need("vk_vma.cpp: vma_init()", init,
-         ["if (dev.memory_priority) ci.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;", 'logf("vk: memory priority (RX_VK_MEMORY_PRIORITY'])
+         ["if (dev.memory_priority) ci.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;", 'logf("vk: memory priority (RX_VK_MEMORY_PRIORITY',
+          "if (memory_tiers().unread)"])
     if len(re.findall(r"VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT", vma)) != 1:
         raise SystemExit("FAIL: vk_vma.cpp sets the allocator's memory priority bit somewhere dev.memory_priority does not guard")
     # (the pools: a block has its pool's priority)
@@ -143,7 +154,7 @@ def main():
         subprocess.run([args.cxx, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "gpu" / "vk"), str(src),
                         "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=60)
-    print("PASS: RX_VK_MEMORY_PRIORITY is off by default, and every pool and allocation of the renderer has a priority")
+    print("PASS: RX_VK_MEMORY_PRIORITY is off by default, and every pool and allocation the renderer makes through VMA has a priority")
 
 
 if __name__ == "__main__":

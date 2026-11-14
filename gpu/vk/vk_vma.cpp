@@ -38,11 +38,14 @@ bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     ci.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT |
                (dev.memory_budget ? VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT : 0);
     if (dev.memory_priority) ci.flags |= VMA_ALLOCATOR_CREATE_EXT_MEMORY_PRIORITY_BIT;
+    if (memory_tiers().unread)
+        logf("vk: memory priority (RX_VK_MEMORY_PRIORITY): the value is not <targets>,<textures> with two numbers from 0 to 1 "
+             "(a decimal point, not a comma): the usual %.2f and %.2f instead", memory_tiers().targets, memory_tiers().textures);
     if (memory_tiers().on && dev.memory_priority)
         logf("vk: memory priority (RX_VK_MEMORY_PRIORITY, VK_EXT_memory_priority): render targets %.2f, textures %.2f, the rest %.2f",
              memory_tiers().targets, memory_tiers().textures, memory_tiers().rest);
     else if (memory_tiers().on)
-        logf("vk: memory priority (RX_VK_MEMORY_PRIORITY): the device has no VK_EXT_memory_priority, nothing changes");
+        logf("vk: memory priority (RX_VK_MEMORY_PRIORITY): the device has no VK_EXT_memory_priority with its feature, nothing changes");
     ci.physicalDevice = dev.physical;
     ci.device = dev.device;
     ci.instance = dev.instance;
