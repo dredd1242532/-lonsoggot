@@ -299,6 +299,8 @@ jobs:
   test-linux:
     executor: ubuntu2404-large
     parallelism: 4
+    retention:
+      caches: 5d
     steps:
       - mb/get-source:
           fork-pr: << pipeline.parameters.fork_pr >>
@@ -437,6 +439,8 @@ jobs:
     executor: ubuntu22
     environment:
       DEBIAN_FRONTEND: noninteractive
+    retention:
+      caches: 5d
     steps:
       - run:
           name: Package installs without fsync
@@ -523,6 +527,8 @@ jobs:
 
   windows-builder:
     executor: ubuntu2404-vm
+    retention:
+      caches: 5d
     steps:
       - mb/get-source:
           fork-pr: << pipeline.parameters.fork_pr >>
@@ -630,6 +636,8 @@ jobs:
 
   windows-vulkan:
     executor: py312-large
+    retention:
+      caches: 5d
     steps:
       - mb/get-source:
           fork-pr: << pipeline.parameters.fork_pr >>
@@ -658,6 +666,8 @@ jobs:
 
   vulkan-dlss:
     executor: py312-large
+    retention:
+      caches: 5d
     steps:
       - mb/get-source:
           fork-pr: << pipeline.parameters.fork_pr >>
@@ -900,6 +910,8 @@ jobs:
   release-windows:
     executor: ubuntu2404-vm
     resource_class: large
+    retention:
+      caches: 5d
     steps:
       - attach_workspace:
           at: .
