@@ -5290,6 +5290,13 @@ void menu_tick() {
     }
 }
 
+/// (longshot) Once a present: the Rumble strength row changed with the menu open, and the new strength is felt at once, a
+/// short rumble, which also shows that the controller rumbles (Off is silent). Whatever changed it: the keys, the mouse
+void menu_rumble_tick() {
+    static int was = -1;
+    if (was >= 0 && opts.rumble != was && menu_is_open() && host && host->version >= 22 && host->rumble_test) host->rumble_test();
+    was = opts.rumble;
+}
 void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
