@@ -49,7 +49,10 @@ def main():
         value = re.search(r"\b" + name + r"\s*=\s*([^,;]+)[,;]", declarations)
         assert value, "Missing production page-table dimension: " + name
         dimensions.append("constexpr uint64_t %s = %s;" % (name, value[1]))
-    types = "\n".join(dimensions) + "\n\n" + "\n\n".join([block(header, "struct BufferRef {", True), block(source, "struct Pool {", True),
+    # (Pool as Windows and Linux lay it out: the Apple import owner's member is darwin_import_lifetime_test's, as in
+    # tests/test_import_buffer_binding.py)
+    pool = block(source, "struct Pool {", True).replace("#if defined(__APPLE__)", "#if 0")
+    types = "\n".join(dimensions) + "\n\n" + "\n\n".join([block(header, "struct BufferRef {", True), pool,
                              block(source, "struct TlPool {", True), block(source, "struct WriteBack {", True)])
     pages = source[source.index("std::mutex wb_pages_mu;"):source.index("void wb_pages_note(")]
     direct_note = block(source, "void note_direct_write(") if "void note_direct_write(" in source else ""

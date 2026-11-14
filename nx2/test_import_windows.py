@@ -21,6 +21,12 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--cxx',default='clang++');a=p.parse_args()
     source=(ROOT/'gpu/vk/vk_memory.cpp').read_text(encoding='utf-8')
     guard=source[source.index('bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {'):source.index('    p.lo = lo;',source.index('bool import_pool('))]
+    # (the guards both routes share, then the import as Windows and Linux make it, which the fixture's continuation models:
+    # darwin_import_pool, the Apple route since 044635ea, is darwin_import_lifetime_test's)
+    if '#if defined(__APPLE__)' in guard:
+        if guard.count('#if defined(__APPLE__)')!=1 or not guard.endswith('#else\n'):
+            raise SystemExit('import_pool: the Apple route is no longer one #if just before the import: update this test')
+        guard=guard[:guard.index('#if defined(__APPLE__)')]
     lookup=block(source,'Pool* pool_lookup(uint64_t guest, uint64_t size) {')
     chunking=source[source.index('uint64_t import_chunk() {'):source.index('Pool* pool_lookup(uint64_t guest, uint64_t size) {')]
     cache=block(source,'Pool* pool_of(uint64_t guest, uint64_t size) {')

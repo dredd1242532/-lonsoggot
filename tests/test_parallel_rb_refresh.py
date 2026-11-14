@@ -69,7 +69,9 @@ def main():
 
     inc = {
         "rb_bufferref.inc": block(internal, "struct BufferRef {") + ";\n",
-        "rb_pool.inc": block(memory, "struct Pool {") + ";\n",
+        # (Pool as Windows and Linux lay it out: the Apple import owner's member is darwin_import_lifetime_test's, as in
+        # tests/test_import_buffer_binding.py)
+        "rb_pool.inc": block(memory, "struct Pool {").replace("#if defined(__APPLE__)", "#if 0") + ";\n",
         "rb_writeback.inc": block(memory, "struct WriteBack {") + ";\n",
         "rb_refresh.inc": cut(memory, "// ---- (from PR 430, YunaraDebugs) Readback pages", "BufferRef gpu_buffer(uint64_t gpu, uint64_t size) {"),
         "rb_bindtail.inc": cut(block(memory, "BufferRef gpu_buffer_bind("),
