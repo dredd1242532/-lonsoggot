@@ -756,7 +756,7 @@ void hos_crash_clean_end(void) {
     if (dump_status != INVALID_HANDLE_VALUE) { CloseHandle(dump_status); dump_status = INVALID_HANDLE_VALUE; DeleteFileW(dump_status_temp); }
 #endif
 }
-void hos_crash_record_start(const char *dir, const char *version) {
+void hos_crash_record_start(const char *dir, const char *version, const char *log_path) {
     if (ready) return;
     char root[PATH_CAP], host[256] = "", leaf[64];
 #ifdef _WIN32
@@ -797,9 +797,13 @@ void hos_crash_record_start(const char *dir, const char *version) {
     }
     maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
 #endif
-    /* Icon launches redirect stderr after this preparation. External regular-file
-       stderr keeps its actual path privately; only its basename is reported. */
-    if (!session.log_path[0]) join(session.log_path, sizeof session.log_path, dir, "longshot_log.txt");
+    /* Icon launches supply the exact destination selected before log rotation,
+       including the logs/ folder or the host's fallback beside the game.
+       External regular-file stderr keeps its actual path privately. */
+    if (!session.log_path[0] && log_path) {
+        const size_t n = length(log_path, sizeof session.log_path);
+        if (n < sizeof session.log_path) memcpy(session.log_path, log_path, n + 1);
+    }
     snprintf(leaf, sizeof leaf, "%llu.running", (unsigned long long)session.pid);
     if (!join(marker_path, sizeof marker_path, running_dir, leaf)) return;
     marker = open_file(marker_path, 1, 1); if (marker == NO_FILE) return;

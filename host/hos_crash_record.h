@@ -19,8 +19,9 @@ typedef struct HosCrashContext {
 } HosCrashContext;
 
 /* Normal startup, before installing handlers. dir is the game folder, not cwd.
-   Failure (read-only folder etc.) disables recording without affecting the game. */
-void hos_crash_record_start(const char *dir, const char *version);
+   log_path is the selected stderr destination before rotation, or NULL when not
+   redirecting. Failure (read-only folder etc.) disables recording without affecting the game. */
+void hos_crash_record_start(const char *dir, const char *version, const char *log_path);
 /* Explicit process-exit sites (ExitProcess/_exit do not run atexit). Never removes
    a report; only this process's running marker and its empty staging file. */
 void hos_crash_clean_end(void);

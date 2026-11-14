@@ -191,9 +191,10 @@ adds the process id and a counter; an older record is never overwritten.
 The existing `CRASH:` log lines remain unchanged. Nothing is uploaded or opened.
 Fatal-message collection runs in the shared host logger before its thread and level tags are
 added. Both ordinary and levelled host logging keep their existing formatting.
-Each start gets a random `run_id`, logged immediately after the version line and
-copied into its records. Match that id, not a rotated log's current filename, to
-find the right run. An unclean-end record keeps the previous marker's id.
+Each start gets a random `run_id`, logged immediately after the version line, before
+the cache/log migration summary and record-pruning notes, and copied into its records.
+Match that id, not a rotated log's current filename, to find the right run.
+An unclean-end record keeps the previous marker's id.
 
 The text has the failed run's version, UTC time, uptime, exception/signal code,
 fault-address class (not the address), thread, module basenames and offsets,
@@ -217,8 +218,10 @@ an **unclean-end**, not a crash, record: `unclean-<UTC time>.txt`. It means only
 that the last run did not end cleanly. It cannot distinguish a power cut,
 forced termination, an out-of-memory kill, or a handler that could not run.
 Only file size/time and named trouble flags from the last log's tail are added,
-not arbitrary log text. Recovery runs before log rotation. Live markers are
-skipped, even when two games use one folder; process-id liveness is not the test.
+not arbitrary log text. Recovery runs before log rotation. The private marker keeps
+the host's selected destination (`logs/longshot_log.txt`, or its beside-game fallback)
+or an externally redirected stderr file, rather than assuming a loose log.
+Live markers are skipped, even when two games use one folder; process-id liveness is not the test.
 SIGTERM, SIGINT and SIGHUP are deliberately not crash signals here. Logout,
 Ctrl-C or a test timeout can therefore leave an unclean-end record. Its fixed
 note says: "ended from outside or lost power, not necessarily a crash".

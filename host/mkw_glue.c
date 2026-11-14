@@ -177,7 +177,7 @@ void hos_crash_record_fatal(const uint64_t *guest_registers, const char *reason)
 
 /* Before log rotation, so recovery reads the last run rather than this run's
    new log. hos_game_path_a also understands the installed bin/ layout. */
-void hos_crash_record_prepare(void) {
+void hos_crash_record_prepare(const char *log_path) {
     char path[4096];
     DWORD n = hos_game_path_a(path, sizeof path);
     if (!n || n >= sizeof path) return;
@@ -185,7 +185,7 @@ void hos_crash_record_prepare(void) {
     if (!n) return;
     path[n] = 0;
     const char *hos_version(void);
-    hos_crash_record_start(path, hos_version());
+    hos_crash_record_start(path, hos_version(), log_path);
 }
 
 static LONG WINAPI report_crash(EXCEPTION_POINTERS *info) {

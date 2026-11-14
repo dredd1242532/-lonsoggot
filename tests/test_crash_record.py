@@ -57,7 +57,18 @@ def source_contract():
         wrapper = block(threads, marker)
         assert "hos_vlog(" in wrapper and "hos_crash_record_fatal(" not in wrapper
     main = (ROOT / "host/hos_main.c").read_text(encoding="utf-8")
-    assert main.index("hos_crash_record_prepare();") < main.index("MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);")
+    prepare = main.index("hos_crash_record_prepare(path);")
+    rotate = main.index("MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);")
+    assert main.index('memcpy(path + n, "longshot_log.txt", 17);') < prepare < rotate < main.index('freopen(path, "w", stderr)')
+    assert "else hos_crash_record_prepare(NULL);" in main
+    assert "hos_crash_record_start(path, hos_version(), log_path);" in block(glue, "void hos_crash_record_prepare(")
+    banner = main[main.index('    hos_log("longshot %s", LONGSHOT_VERSION);'):main.index("    removed_switch_notes();")]
+    assert re.findall(r'hos_log\("([^"]+)"', banner)[:2] == ["longshot %s", "run_id: %s"]
+    assert banner.index('hos_log("run_id: %s",') < banner.index("hos_game_layout_log();")
+    assert banner.index('hos_log("run_id: %s",') < banner.index("hos_crash_record_log_notes();")
+    assert main.index("hos_game_layout();") < prepare
+    linux_main = main[main.rindex("int main(int argc, char **argv) {"):]
+    assert linux_main.index("hos_game_layout();") < linux_main.index("hos_display_init();")
     assert "hos_crash_clean_end();" in block(main, "static DWORD WINAPI game_thread(")
 
     # An exhaustive inventory: a new process exit must be classified, not silently
@@ -365,6 +376,28 @@ def main():
         assert int(values["log_size_bytes"]) == old_log.stat().st_size
         assert values["log"] == "previous.log" and "token" not in text
         print("PASS: unclean record keeps previous run id and bounded log facts, never private log text")
+
+        for relative in ("logs/longshot_log.txt", "longshot_log.txt"):
+            folder = temp / ("selected-" + relative.split("/")[0]); folder.mkdir()
+            selected = folder / relative
+            selected.parent.mkdir(exist_ok=True)
+            child = subprocess.Popen([str(exe), str(folder), "hold", str(selected)], env=env, stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                assert child.stdout.readline().strip() == "ready"
+                child.kill(); _, previous = child.communicate(timeout=10)
+            finally:
+                if child.poll() is None:
+                    child.kill(); child.wait(timeout=10)
+            old_id = re.search(r"run_id: ([0-9a-f]{32})", previous).group(1)
+            selected.write_text("[hos host] run_id: " + old_id + "\n[hos host] FATAL: private-user token\n", encoding="utf-8")
+            fresh = run(folder, "clean")
+            text, values = checked_record(records(folder, "unclean")[0], "unclean")
+            assert values["run_id"] == old_id and old_id not in fresh.stderr
+            assert values["log"] == "longshot_log.txt" and values["log_tail_fatal"] == "yes"
+            assert int(values["log_size_bytes"]) == selected.stat().st_size
+            assert "token" not in text
+        print("PASS: selected logs/ destination and beside-game fallback retain previous run id and log facts")
 
         if os.name == "nt":
             folder = temp / "fatal-no-exception-dump"; folder.mkdir()
