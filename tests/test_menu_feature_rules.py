@@ -18,6 +18,8 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 MAIN = r'''
+// The shared fixture has one ordinary button; neither pause button is in its binding table.
+constexpr int HOS_SW_PLUS = HOS_SW_N, HOS_SW_MINUS = HOS_SW_N + 1;
 std::string mic_key(const char* s) { return s; }
 void refresh_mics() {}
 void mic_tell_host() {}

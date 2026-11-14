@@ -670,7 +670,8 @@ build does not recognize retain their contents; they are not rewritten with defa
 options file is loaded/migrated at startup and next saved. `tests/test_menu_feature_rules.py` compiles the real
 registry, host metadata callback and menu persistence against empty and synthetic registries, including an unchanged
 five-field entry, a newly appended labelled entry and all three persistence cases. Its startup fixture supplies
-the ordinary output-resolution presence flag too, without changing how the real options parser reads it.
+the ordinary output-resolution presence flag and the pause-button exclusions used by the current controls parser,
+without changing how the real options parser reads them.
 
 Progress-message format 5 appends a count and up to 64 `(u8 number, little-endian i16 value)` entries to the charter,
 before its signature. Numbers are nonzero, unique and increasing; values range from -32768 to 32767, with each
