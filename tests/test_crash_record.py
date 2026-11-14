@@ -12,6 +12,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 
 RUN_ALL_ARGS = ["--cc", "gcc"]
@@ -199,7 +200,10 @@ def main():
             print("PASS: sent signals re-raised; real faults return to preserve original core siginfo")
             folder = temp / "module-offsets"; folder.mkdir()
             run(folder, "module-offsets")
-            print("PASS: module offsets equal dladdr load-base offsets; gapped segments, same basenames and repeated mappings covered")
+            if sys.platform == "darwin":
+                print("PASS: module offsets equal dladdr load-base offsets; a library loaded after startup found; data, stack and page zero refused")
+            else:
+                print("PASS: module offsets equal dladdr load-base offsets; gapped segments, same basenames and repeated mappings covered")
 
         device_modes = ("device-lost", "device-early", "device-lost-tagged", "device-early-tagged")
         for mode in ("fake", "partial", "privacy", "namespace", "bounds", "fatal", *device_modes, "crash", "signal", "abort", "heap"):
@@ -229,9 +233,18 @@ def main():
                     assert "[warn] vk: device lost: reading the checkpoints" in result.stderr
             if mode == "signal" and os.name != "nt":
                 assert values["signal"] == str(signal.SIGSEGV)
-                assert int(values["signal_code"]) <= 0
+                if sys.platform == "darwin":
+                    # Darwin gives a sent SIGSEGV a fault code (SEGV_ACCERR on arm64, SEGV_MAPERR
+                    # under Rosetta), so the record keeps the kernel's code; it cannot say "sent".
+                    assert values["signal_code"] in ("1", "2")
+                else:
+                    assert int(values["signal_code"]) <= 0
             if mode == "crash" and os.name != "nt":
-                assert values["signal_code"] == "1"  # SEGV_MAPERR: the authored 0x40 fault, not SI_TKILL
+                if sys.platform == "darwin":
+                    # The authored 0x40 fault is in __PAGEZERO: SEGV_ACCERR on arm64, SEGV_MAPERR under Rosetta.
+                    assert values["signal_code"] in ("1", "2")
+                else:
+                    assert values["signal_code"] == "1"  # SEGV_MAPERR: the authored 0x40 fault, not SI_TKILL
             run(folder, "clean")
             assert not records(folder, "unclean") and records(folder) == paths
         print("PASS: allocation-poisoned writer, bounds, short writes/EINTR, privacy, fatal/device-lost and real fatal children")

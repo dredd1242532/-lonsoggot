@@ -16,9 +16,16 @@
 #ifndef _WIN32
 #include <signal.h>
 #include <pthread.h>
+#ifdef __APPLE__
+#include <sys/resource.h>
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 #include <dlfcn.h>
+#ifndef __APPLE__
 #include <sys/prctl.h>
+#endif
 #include <unistd.h>
 #endif
 
@@ -169,7 +176,12 @@ int main(int argc, char **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 #else
     /* Same no-core rule as test_linux_driver_fault_guard.py. */
+#ifdef __APPLE__
+    const struct rlimit no_core = {0, 0}; /* no core file; macOS still writes its crash report */
+    setrlimit(RLIMIT_CORE, &no_core);
+#else
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+#endif
 #endif
     const char *mode = argv[2];
     if (!strcmp(mode, "denied")) fail_storage = 1;
@@ -198,6 +210,23 @@ int main(int argc, char **argv) {
             assert(module_at(pcs[i], name, sizeof name, &offset));
             assert(offset == pcs[i] - (uintptr_t)info.dli_fbase);
         }
+#ifdef __APPLE__
+        /* No maps text on Darwin: dyld's live image list is read at fault time, so an
+           image loaded after startup is found; data, stack and page-zero addresses are not. */
+        static const char late_path[] = "/usr/lib/libz.1.dylib";
+        assert(!dlopen(late_path, RTLD_NOW | RTLD_NOLOAD));
+        void *late = dlopen(late_path, RTLD_NOW | RTLD_LOCAL); assert(late);
+        const uintptr_t late_pc = (uintptr_t)dlsym(late, "zlibVersion");
+        Dl_info late_info; assert(late_pc && dladdr((const void *)late_pc, &late_info));
+        char name[160]; uint64_t offset = 0;
+        poison_alloc = 1;
+        assert(module_at(late_pc, name, sizeof name, &offset) && !strcmp(name, "libz.1.dylib"));
+        assert(offset == late_pc - (uintptr_t)late_info.dli_fbase);
+        assert(!module_at((uintptr_t)guest_memory, name, sizeof name, &offset)); /* image data, not __TEXT */
+        assert(!module_at((uintptr_t)&offset, name, sizeof name, &offset)); /* stack */
+        assert(!module_at(0x40, name, sizeof name, &offset)); /* page zero, below every image */
+        poison_alloc = 0;
+#else
         /* Executable virtual offsets differ from file offsets by one page.
            Same basename/different path and a second instance must not alias. */
         static const char maps[] =
@@ -221,15 +250,30 @@ int main(int argc, char **argv) {
         assert(!module_at(0x100020, name, sizeof name, &offset)); /* not executable */
         poison_alloc = 0;
         maps_fd = original; close_file(file);
+#endif
         hos_crash_clean_end(); return 0;
     }
     if (!strcmp(mode, "signal-metadata")) {
+#ifdef __APPLE__
+        /* Darwin's context is pointer-valued (getcontext is deprecated there). */
+        _STRUCT_MCONTEXT machine; memset(&machine, 0, sizeof machine);
+        ucontext_t uc; memset(&uc, 0, sizeof uc); uc.uc_mcontext = &machine;
+#else
         ucontext_t uc; assert(getcontext(&uc) == 0);
+#endif
         siginfo_t si; memset(&si, 0, sizeof si); si.si_addr = (void *)0x40;
         simulate_signal = 1;
         si.si_code = SEGV_MAPERR; on_signal(SIGSEGV, &si, &uc); assert(reraises == 0);
+#ifdef __APPLE__
+        /* Measured on Darwin: kill/raise/pthread_kill/abort of SIGABRT carry si_code 0 (its
+           SI_USER, 0x10001, is not what kill delivers), while a sent SIGSEGV carries a fault code
+           (SEGV_ACCERR on arm64, as the 0x40 fault does), so it cannot be told from a fault. */
+        si.si_code = SEGV_ACCERR; on_signal(SIGSEGV, &si, &uc); assert(reraises == 0);
+        si.si_code = 0; on_signal(SIGABRT, &si, &uc); assert(reraises == 1);
+#else
         si.si_code = SI_USER; on_signal(SIGSEGV, &si, &uc); assert(reraises == 1);
         si.si_code = SI_TKILL; on_signal(SIGSEGV, &si, &uc); assert(reraises == 2);
+#endif
         hos_crash_clean_end(); return 0;
     }
 #endif
