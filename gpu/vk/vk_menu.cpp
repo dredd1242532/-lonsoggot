@@ -1612,7 +1612,7 @@ mr::State restart_state;
 int restart_slot[kRows];             // (a row's slot in restart_state, -1 none)
 const char* restart_names[mr::kMax];
 // Mono and Stereo use the same channel layout; their live mix does not need a restart.
-int restart_value(const Row& r) {
+int row_restart_value(const Row& r) {
     return r.value == &opts.audio_output && *r.value == 3 ? 1 : *r.value;
 }
 void restart_init() {
@@ -1621,7 +1621,7 @@ void restart_init() {
     done = true;
     opts.game_lang = i18n::game_lang_index();   // (language.txt's, the language the game started in)
     for (int i = 0; i < kRows; i++) {
-        restart_slot[i] = rows[i].restart && rows[i].value ? restart_state.add(restart_value(rows[i])) : -1;
+        restart_slot[i] = rows[i].restart && rows[i].value ? restart_state.add(row_restart_value(rows[i])) : -1;
         if (restart_slot[i] >= 0) restart_names[restart_slot[i]] = rows[i].name;
     }
 }
@@ -1629,11 +1629,11 @@ int restart_slot_of(const Row& r) { return restart_slot[&r - rows]; }
 /// A row that takes a restart, changed from what the game started with (a row past menu_restart.h's kMax has no slot: never)
 bool restart_changed(const Row& r) {
     const int slot = restart_slot_of(r);
-    return r.value && r.restart && slot >= 0 && restart_value(r) != restart_state.start[slot];
+    return r.value && r.restart && slot >= 0 && row_restart_value(r) != restart_state.start[slot];
 }
 void restart_values(int* now) {
     for (int i = 0; i < kRows; i++)
-        if (restart_slot[i] >= 0) now[restart_slot[i]] = restart_value(rows[i]);
+        if (restart_slot[i] >= 0) now[restart_slot[i]] = row_restart_value(rows[i]);
 }
 /// The rows whose value is not the one the game runs with (a bit a slot)
 unsigned restart_pending() {

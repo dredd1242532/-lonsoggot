@@ -48,11 +48,11 @@ int main(int argc, char **argv) {
     const Row output_row = {1, "Audio output", &opts.audio_output};
     for (int v = 0; v <= 3; v++) {
         opts.audio_output = v;
-        assert(restart_value(output_row) == (v == 3 ? 1 : v));
+        assert(row_restart_value(output_row) == (v == 3 ? 1 : v));
     }
     const Row other_row = {1, "VSync", &opts.vsync};
     opts.vsync = 3;
-    assert(restart_value(other_row) == 3);   /* no other row's restart tracking changes */
+    assert(row_restart_value(other_row) == 3);   /* no other row's restart tracking changes */
     const char *saved = argv[2];
     device_channels = atoi(argv[3]);
     const int want = atoi(argv[4]), want_asked = atoi(argv[5]);
@@ -125,9 +125,9 @@ def main():
     menu_part = between(menu, "/// A row's hints from a table", "const char* tx_framegen(") + hints.group(0) + \
         between(menu, "const char* tx_audio_output(int v) {", "const char* tx_robust(") + \
         between(menu, "const char* ini_key(const Row& r) {", "// (longshot) the controls, kept by the host")
-    menu_part += between(menu, "int restart_value(const Row& r) {", "void restart_init() {")
-    assert "restart_state.add(restart_value(rows[i]))" in menu
-    assert "now[restart_slot[i]] = restart_value(rows[i]);" in menu
+    menu_part += between(menu, "int row_restart_value(const Row& r) {", "void restart_init() {")
+    assert "restart_state.add(row_restart_value(rows[i]))" in menu
+    assert "now[restart_slot[i]] = row_restart_value(rows[i]);" in menu
     with tempfile.TemporaryDirectory(prefix="audio-output-menu-") as tmp:
         work = Path(tmp)
         source, exe = work / "fixture.cpp", work / "fixture.exe"
