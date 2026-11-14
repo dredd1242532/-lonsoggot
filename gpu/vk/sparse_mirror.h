@@ -4,9 +4,11 @@
 // A pool's mirror covers its import's whole range, and an import is made by chunk around what was bound: the mirrors
 // held 243-533 MB of blocks outside every game pool (padding, and pools the game has let go; most after an area change),
 // of 1.1-1.6 GB, at DLAA 2560 x 1440 with 4 MB chunks. A sparse mirror gives memory only to the blocks a game pool is in.
-// The others read 0 and drop writes (residencyNonResidentStrict), and nothing reaches them: the page table points their
-// pages at guest memory, and a binding that reaches one is served from guest memory until the block is given memory at
-// the next submission. A block a game pool has left is given back once the GPU is past it.
+// The others read 0 and drop writes (residencyNonResidentStrict), and nothing of the game's reaches them: the page table
+// points their pages at guest memory, and a binding that reaches one where a game pool is is served from guest memory
+// until the block is given memory at the next submission (one whose blocks with none are all outside every game pool, a
+// guessed size run past a pool's end, is served from the mirror as it is). A block a game pool has left is given back
+// once the GPU is past it. On by default (RX_VK_MIRROR_SPARSE=0: whole mirrors).
 #pragma once
 
 #include <algorithm>

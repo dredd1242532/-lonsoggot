@@ -3125,22 +3125,27 @@ struct WriteBack {
 };
 std::vector<WriteBack> writebacks;
 
-// ---- (longshot) sparse mirrors (RX_VK_MIRROR_SPARSE=1, sparse_mirror.h): memory only in the blocks a game pool is in.
-// The mirrors held 243-533 MB of blocks outside every game pool, of 1.1-1.6 GB (DLAA 2560 x 1440, 4 MB import chunks;
-// the most after an area change): chunk padding, and pools the game let go. Such a block's pages point at guest memory
-// in the page table, so the shaders' pointers reach the game's memory itself there, as in a pool with no mirror; a
+// ---- (longshot) sparse mirrors (RX_VK_MIRROR_SPARSE, on by default, sparse_mirror.h): memory only in the blocks a game
+// pool is in. The mirrors held 243-533 MB of blocks outside every game pool, of 1.1-1.6 GB (DLAA 2560 x 1440, 4 MB import
+// chunks; the most after an area change): chunk padding, and pools the game let go. Such a block's pages point at guest
+// memory in the page table, so the shaders' pointers reach the game's memory itself there, as in a pool with no mirror; a
 // binding that reaches one is served from guest memory too, and the block gets memory at the next submission
-// (sparse_grow), filled as mirror_make fills a mirror. A block every game pool has left is given back (sparse_release)
-// once the GPU is past the work that may have reached it. Needs sparse residency for buffers with strict non-resident
-// access (reads 0, writes dropped), which nothing should reach anyway ----
+// (sparse_grow), filled as mirror_make fills a mirror; unless every such block it reaches is outside every game pool (a
+// binding with a guessed size that runs past a pool's end): the mirror serves that one as it is. A block every game pool
+// has left is given back (sparse_release) once the GPU is past the work that may have reached it. Needs sparse residency
+// for buffers with strict non-resident access (reads 0, writes dropped), which nothing of the game's reaches. On by
+// default (the maintainer's call; measured on an RTX 4070 SUPER with 6 and 8 GB allowances and an RTX 3060 Ti 8 GB);
+// RX_VK_MIRROR_SPARSE=0 (or off, false, no: longshot_env.h's rule): whole mirrors, as before. Off on its own, and logged,
+// where the device lacks strict sparse residency for buffers ----
 bool mirror_sparse_on() {
     static const bool on = [] {
-        const bool asked = env_on("RX_VK_MIRROR_SPARSE");
+        const char* v = getenv("RX_VK_MIRROR_SPARSE");
+        const bool asked = !v || !env_value_off(v);
         const bool can = dev.sparse_buffers && dev.features.sparseResidencyBuffer &&
                          dev.props.sparseProperties.residencyNonResidentStrict;
         if (asked)
             logf("vk: sparse VRAM mirrors (RX_VK_MIRROR_SPARSE): %s",
-                 can ? "on" : "not on this device (no strict sparse residency for buffers)");
+                 can ? "on" : "not on this device (no strict sparse residency for buffers): whole mirrors");
         return asked && can;
     }();
     return on;
@@ -3177,7 +3182,7 @@ struct DeadBlock { VkBuffer buffer; Pool* pool; size_t index; VmaAllocation allo
 std::deque<DeadBlock> dead_blocks;
 struct DeadSparse { VkBuffer buffer; uint64_t value; std::vector<VmaAllocation> blocks; uint64_t binds = 0; };   // (a freed sparse mirror; binds: the binds' value then)
 std::deque<DeadSparse> dead_sparse;
-int64_t st_sparse_mixed = 0, st_sparse_in_place = 0, st_sparse_grown = 0, st_sparse_released = 0, st_sparse_binds = 0, st_sparse_refused = 0;
+int64_t st_sparse_mixed = 0, st_sparse_past = 0, st_sparse_in_place = 0, st_sparse_grown = 0, st_sparse_released = 0, st_sparse_binds = 0, st_sparse_refused = 0;
 double st_sparse_bind_ms = 0;
 // (the binds' own timeline: a bind signals the next value, every submission of recordings waits for the latest one on the GPU
 // (memory_sparse_wait), and memory an unbind let go is freed once the GPU's count has passed it. Each bind waited for on the
@@ -3195,16 +3200,6 @@ uint64_t sparse_tl_done() {
 bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo>& infos, uint64_t* signaled = nullptr) {
     if (infos.empty()) return true;
     const auto t0 = std::chrono::steady_clock::now();
-    if (!sparse_tl) {
-        VkSemaphoreTypeCreateInfo ti{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
-        ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-        VkSemaphoreCreateInfo ci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        ci.pNext = &ti;
-        if (vkCreateSemaphore(dev.device, &ci, nullptr, &sparse_tl) != VK_SUCCESS) {
-            sparse_tl = VK_NULL_HANDLE;
-            return false;
-        }
-    }
     static const bool cpu_wait = env_on("RX_VK_SPARSE_WAIT");
     VkResult res;
     uint64_t next = 0;
@@ -3213,6 +3208,15 @@ bool sparse_bind_infos(std::vector<VkSparseBufferMemoryBindInfo>& infos, uint64_
         // back and wanted again takes back the memory it still has, one unbound is past its GPU work; and every submission of
         // recordings after this waits for it)
         std::lock_guard qk(dev.present_mu);
+        if (!sparse_tl) {   // (made under dev.present_mu, which memory_sparse_wait reads it under on the replay's submit paths)
+            VkSemaphoreTypeCreateInfo ti{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+            ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+            VkSemaphoreCreateInfo ci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            ci.pNext = &ti;
+            VkSemaphore made = VK_NULL_HANDLE;
+            if (vkCreateSemaphore(dev.device, &ci, nullptr, &made) != VK_SUCCESS) return false;
+            sparse_tl = made;
+        }
         queue_flush_locked();
         next = sparse_tl_value.load(std::memory_order_relaxed) + 1;
         VkTimelineSemaphoreSubmitInfo tsi{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
@@ -3339,6 +3343,23 @@ bool sparse_none(const Pool& p, uint64_t off, uint64_t size) {
             st_sparse_mixed++;
             return false;
         }
+    return true;
+}
+/// Whether every block [off, off + size) reaches that has no memory lies outside every game pool (pools_mu held): the usual
+/// mixed binding, one with a guessed size that runs past a pool's end. The mirror serves it as it is then: those blocks read 0
+/// and drop writes (residencyNonResidentStrict), and nothing of the game's is there. Within a pool, a block with none holds
+/// the game's bytes in guest memory only, and the binding is served from there (sparse_want)
+bool sparse_gaps_outside_pools(const Pool& p, uint64_t off, uint64_t size) {
+    const uint64_t b = sparse_block(p);
+    size_t a = 0, e = 0;
+    sparse_mirror::block_span(off, size, b, p.has.size(), &a, &e);
+    if (e <= a) return true;
+    // (the blocks [a, e) within the pool, block-aligned from p.lo as the mirror's: live[i - a] is block i's)
+    const uint64_t lo = p.lo + (uint64_t)a * b, hi = std::min(p.hi, p.lo + (uint64_t)e * b);
+    if (hi <= lo) return true;
+    const std::vector<uint8_t> live = sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end());
+    for (size_t i = a; i < e; i++)
+        if (!block_has(p, i) && i - a < live.size() && live[i - a]) return false;
     return true;
 }
 /// A binding reached blocks with no memory: they get it at the next submission (pools_mu held)
@@ -4048,13 +4069,21 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         note_in_place_read();
         return remember({p->buffer, off, size, 0});
     }
-    if (p->sparse && !sparse_has(*p, off, size)) {
-        // (longshot, RX_VK_MIRROR_SPARSE) blocks of its mirror with no memory (a game pool there since the mirror was made, or
-        // let go and back): served from guest memory for this submission, where the page table points those pages too, as a
-        // pool with no mirror yet is; they get memory at the next one (sparse_grow)
+    if (p->sparse && !sparse_has(*p, off, size) && sparse_gaps_outside_pools(*p, off, size)) {
+        // (longshot, RX_VK_MIRROR_SPARSE) its blocks with no memory are all outside every game pool: a binding with a guessed
+        // size that runs past a pool's end. Served from the mirror below, as a mirror with memory everywhere would serve it:
+        // what the GPU wrote only into the mirror is read, and a write lands there, written back where a block has memory. Not
+        // wanted: no game pool is there (sparse_want_live gives them memory at the submission after one comes)
+        st_sparse_past++;
+    } else if (p->sparse && !sparse_has(*p, off, size)) {
+        // (longshot, RX_VK_MIRROR_SPARSE) blocks of its mirror with no memory where a game pool is (one there since the mirror
+        // was made, or let go and back): served from guest memory for this submission, where the page table points those pages
+        // too, as a pool with no mirror yet is; they get memory at the next one (sparse_grow). One that reaches blocks with
+        // memory too is counted (st_sparse_mixed): GPU-only data in those is missed by it
         sparse_want(*p, off, size);
         sparse_touch(*p, off, size);
-        if (written && !sparse_none(*p, off, size))   // (and the blocks with memory it reached: copied in again from guest memory)
+        // (counted, read or written; written: the blocks with memory it reached are copied in again from guest memory)
+        if (!sparse_none(*p, off, size) && written)
             p->refill.push_back({off, std::min(size, p->hi - p->lo - off)});
         auto& e = direct_by_pool[p->lo];
         e.first++, e.second = 10;   // (state 10 in the log: a sparse mirror's block with no memory yet)
@@ -4064,7 +4093,7 @@ BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t size, bool written) {
         st_sparse_in_place++;
         return remember({p->buffer, off, size, 0});
     }
-    sparse_touch(*p, off, size);   // (its mirror's blocks, all with memory, are in use)
+    sparse_touch(*p, off, size);   // (its mirror's blocks are in use: all with memory, or those without past every game pool)
     if (p->synced_epoch != mirror_epoch || p->sync_seg > texture_segment()) mirror_sync(*p);
     if (written) {
         p->gpu_written = true;   // (its mirror kept: mirrors_give_back)
@@ -4570,10 +4599,11 @@ void memory_begin_submission() {
             for (auto& [lo, p] : imported)
                 if (p.sparse && p.mstate == Pool::MIRROR_ON) n++, whole += p.hi - p.lo, held += p.resident_bytes;
             logf("vk: sparse mirrors: %zu, %llu MB with memory of %llu MB (%llu MB spared); blocks given memory later %lld, given back "
-                 "%lld; bindings served from guest memory meanwhile %lld (%lld reaching blocks with memory too); %lld binds (%.1f ms); %lld made whole for want of memory",
+                 "%lld; bindings served from guest memory meanwhile %lld (%lld reaching blocks with memory too), from the mirror past every game pool %lld; "
+                 "%lld binds (%.1f ms); %lld made whole for want of memory",
                  n, (unsigned long long)(held >> 20), (unsigned long long)(whole >> 20),
                  (unsigned long long)((whole - std::min(whole, held)) >> 20), (long long)st_sparse_grown, (long long)st_sparse_released,
-                 (long long)st_sparse_in_place, (long long)st_sparse_mixed, (long long)st_sparse_binds, st_sparse_bind_ms, (long long)st_sparse_refused);
+                 (long long)st_sparse_in_place, (long long)st_sparse_mixed, (long long)st_sparse_past, (long long)st_sparse_binds, st_sparse_bind_ms, (long long)st_sparse_refused);
         }
     }
     if (mirror_wanted.empty()) {
@@ -4641,8 +4671,9 @@ bool mirror_make(Pool& pool) {
             p->mstate = n > (1ull << 30) ? Pool::MIRROR_REFUSED : Pool::MIRROR_NONE;
             static int logged;
             if (logged++ < 8)
-                logf("vk: pool %#llx (%llu MB) stays in system memory: the mirrors have %llu MB of %llu", (unsigned long long)p->lo,
-                     (unsigned long long)(take >> 20), (unsigned long long)(mirror_bytes >> 20),
+                logf("vk: pool %#llx (%llu MB, its mirror %llu MB) stays in system memory: the mirrors have %llu MB of %llu",
+                     (unsigned long long)p->lo, (unsigned long long)(n >> 20), (unsigned long long)(take >> 20),
+                     (unsigned long long)(mirror_bytes >> 20),
                      (unsigned long long)(mirror_budget() >> 20));
             return false;
         }
@@ -5567,8 +5598,8 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
                     runs.push_back({w.lo, w.lo, w.hi - w.lo});
             }
             cut_cpu_words(*p, runs);
-            if (p->sparse) {   // (longshot: never from a sparse mirror's block with no memory, which reads 0. None should be: a
-                               // written binding reaching one was served from guest memory)
+            if (p->sparse) {   // (longshot: never from a sparse mirror's block with no memory, which reads 0. A written binding
+                               // that ran past every game pool into one, served from the mirror, has its part there dropped)
                 std::vector<sparse_mirror::Copy> in;
                 for (const VkBufferCopy& r : runs) in.push_back({r.srcOffset, r.dstOffset, r.size});
                 const auto has = [&](uint64_t o) { return o / sparse_block(*p) < p->has.size() && block_has(*p, (size_t)(o / sparse_block(*p))); };

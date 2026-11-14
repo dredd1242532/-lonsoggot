@@ -1,8 +1,9 @@
-"""Sparse VRAM mirrors (RX_VK_MIRROR_SPARSE=1; gpu/vk/sparse_mirror.h, no game/GPU required): the header's block rules
+"""Sparse VRAM mirrors (RX_VK_MIRROR_SPARSE; gpu/vk/sparse_mirror.h, no game/GPU required): the header's block rules
 compiled and run, and checks that vk_memory.cpp uses them where a block with no memory could be reached: the page table
-points such blocks at guest memory, a binding that reaches one is served from guest memory and asks for it, copies from
-or into a mirror leave such blocks out, a write-back never reads one, and a freed mirror's blocks go with it. Off unless
-asked for.
+points such blocks at guest memory, a binding that reaches one where a game pool is is served from guest memory and asks
+for it (one whose blocks with none are all outside every game pool is served from the mirror), copies from or into a
+mirror leave such blocks out, a write-back never reads one, and a freed mirror's blocks go with it. On by default
+(RX_VK_MIRROR_SPARSE=0: off), and off where the device lacks strict sparse residency for buffers.
 
 python -I -B tests/test_sparse_mirror.py [--cxx g++]
 """
@@ -11,7 +12,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-RUN_ALL_ARGS = ["--cxx", "g++"]
+RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,8 +35,10 @@ def need(text, needles, where):
 
 def check_source():
     mem = (ROOT / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
-    need(block(mem, "bool mirror_sparse_on()"), ['env_on("RX_VK_MIRROR_SPARSE")', "residencyNonResidentStrict",
-                                                 "sparseResidencyBuffer", "return asked && can;"], "mirror_sparse_on()")
+    # (on by default: unset is on, =0 / off / false / no off; never where the device can't)
+    need(block(mem, "bool mirror_sparse_on()"), ['getenv("RX_VK_MIRROR_SPARSE")', "const bool asked = !v || !env_value_off(v);",
+                                                 "residencyNonResidentStrict", "sparseResidencyBuffer", "return asked && can;"],
+         "mirror_sparse_on()")
     make = block(mem, "bool mirror_make(Pool& pool) {")
     need(make, ["sparse_mirror::live_blocks(p->lo, p->hi", "sparse_fill(*p, sparse_buf, sparse_req, live)",
                 "sparse_table(*p, ma, 0, p->has.size())", "sparse_mirror::clip(", "sparse_mirror::cut_src(out, pending)", "cap_pages_over(*p, p->lo, p->hi, over)",
@@ -50,6 +53,16 @@ def check_source():
     at = slow.index("if (p->sparse && !sparse_has(*p, off, size)) {")
     if not at < slow.index("mirror_sync(*p);") < slow.index("return remember({p->mirror, off, size, 0});"):
         raise SystemExit("vk_memory.cpp: gpu_buffer_bind() can hand out a sparse mirror's block with no memory")
+    # (a binding whose blocks with no memory are all outside every game pool: served from the mirror, nothing wanted; the
+    # others from guest memory, below)
+    past = slow.index("if (p->sparse && !sparse_has(*p, off, size) && sparse_gaps_outside_pools(*p, off, size)) {")
+    if not past < at < slow.index("mirror_sync(*p);"):
+        raise SystemExit("vk_memory.cpp: gpu_buffer_bind() no longer serves a binding past every game pool from the mirror first")
+    if "sparse_want(" in slow[past:at]:
+        raise SystemExit("vk_memory.cpp: gpu_buffer_bind() wants blocks no game pool is in")
+    need(block(mem, "bool sparse_gaps_outside_pools("), ["sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end())",
+                                                       "if (!block_has(p, i) && i - a < live.size() && live[i - a]) return false;"],
+         "sparse_gaps_outside_pools()")
     need(slow[at:slow.index("mirror_sync(*p);")], ["sparse_want(*p, off, size);", "note_direct_write(*p, off, size)",
                                                   "p->refill.push_back(",
                                                   "shadow_forget(", "return remember({p->buffer, off, size, 0});"],
@@ -85,8 +98,12 @@ def check_source():
     replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text(encoding="utf-8")
     if replay.count("if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;") != 3:
         raise SystemExit("vk_replay.cpp: a submission of recordings (the flush, a submit, a parallel segment) does not wait for the sparse binds")
-    need(block(mem, "bool sparse_bind_infos("), ["si.pSignalSemaphores = &sparse_tl;", "vkQueueBindSparse(dev.queue, 1, &si, VK_NULL_HANDLE)",
-                                                  'env_on("RX_VK_SPARSE_WAIT")'], "sparse_bind_infos()")
+    binds = block(mem, "bool sparse_bind_infos(")
+    need(binds, ["si.pSignalSemaphores = &sparse_tl;", "vkQueueBindSparse(dev.queue, 1, &si, VK_NULL_HANDLE)",
+                 'env_on("RX_VK_SPARSE_WAIT")'], "sparse_bind_infos()")
+    # (the binds' semaphore is made under dev.present_mu, which memory_sparse_wait reads it under)
+    if not binds.index("std::lock_guard qk(dev.present_mu);") < binds.index("vkCreateSemaphore(") < binds.index("vkQueueBindSparse("):
+        raise SystemExit("vk_memory.cpp: sparse_bind_infos() makes the binds' semaphore outside dev.present_mu")
     need(block(mem, "void sparse_reap() {"), ["sparse_frees.front().first <= done", "dead_sparse.front().binds <= done"], "sparse_reap()'s frees")
     vma = (ROOT / "gpu/vk/vk_vma.cpp").read_text(encoding="utf-8")
     need(block(vma, "bool create_sparse_buffer("), ["VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT",
