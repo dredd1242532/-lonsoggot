@@ -12,7 +12,7 @@ The real code is cut out of the sources and compiled against a fake query pool, 
   pass began, or whose vertex input was not all bound, or that is split into task batches, begins no query, and its
   report stays visible; every query is begun at most once;
 - occ_queries_on() in its own process per environment: RX_VK_OCC_FIXED wins over RX_VK_OCC_QUERIES=1, and the queries
-  are off with RX_VK_ASYNC=1.
+  are off with RX_VK_ASYNC=1, on with RX_VK_ASYNC=2 (the render thread).
 
 The rest is checked in the source: where the helpers are called, every draw command in draw() preceded by its query's
 issue with no way out between, the guard made after StatsQuery, the stopped queues' reports made visible.
@@ -568,6 +568,7 @@ struct VkQueryPoolCreateInfo { int sType; const void* pNext = nullptr; int flags
 VkResult vkCreateQueryPool(VkDevice, const VkQueryPoolCreateInfo*, const void*, VkQueryPool* p) { *p = (VkQueryPool)1; return VK_SUCCESS; }
 void vkResetQueryPool(VkDevice, VkQueryPool, uint32_t, uint32_t) {}
 bool async_on() { return getenv("RX_VK_ASYNC") && atoi(getenv("RX_VK_ASYNC")) != 0; }
+bool behind_on() { return getenv("RX_VK_ASYNC") && atoi(getenv("RX_VK_ASYNC")) == 2; }
 constexpr uint64_t kOccPool = 1 << 16;
 VkQueryPool occ_pool = VK_NULL_HANDLE;
 ''' + "%SWITCH%" + r'''
@@ -582,6 +583,7 @@ SWITCH_CASES = [
     ({"RX_VK_OCC_QUERIES": "1", "RX_VK_OCC_FIXED": "4096"}, 0),   # (the fixed value wins, as documented)
     ({"RX_VK_OCC_QUERIES": "2", "RX_VK_OCC_FIXED": "-1"}, 0),
     ({"RX_VK_ASYNC": "1"}, 0),
+    ({"RX_VK_ASYNC": "2"}, 1),   # (the render thread keeps them)
 ]
 
 
@@ -668,7 +670,7 @@ def main():
             got = int(subprocess.run([str(exe)], check=True, capture_output=True, text=True, env=env).stdout.strip())
             if got != want:
                 sys.exit("occ_queries_on() with %s: %d, want %d" % (extra, got, want))
-        print("PASS: occ_queries_on(): RX_VK_OCC_FIXED wins over RX_VK_OCC_QUERIES; off with RX_VK_ASYNC=1")
+        print("PASS: occ_queries_on(): RX_VK_OCC_FIXED wins over RX_VK_OCC_QUERIES; off with RX_VK_ASYNC=1, on with =2")
     check_wiring(replay, draw)
     print("PASS: the wiring in vk_replay.cpp and draw()")
 
