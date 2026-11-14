@@ -51,6 +51,7 @@
 #include "host_shaders/bc7_encoder_comp_spv.h"
 #include "bc_levels.h"
 #include "astc_bc_policy.h"
+#include "astc_opaque.h"
 #include "drawn_writeback.h"
 #include "vram_compact.h"
 #include "evict_reason.h"
@@ -159,6 +160,8 @@ VkFormat view_format_of(VkFormat image, bool astc_decoded, bool bc, int view_nvn
         const bool srgb = f == VK_FORMAT_R8G8B8A8_SRGB;
         if (linear_twin(image) == VK_FORMAT_BC7_UNORM_BLOCK)
             f = srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+        else if (linear_twin(image) == VK_FORMAT_BC1_RGB_UNORM_BLOCK)   // (longshot, RX_VK_ASTC_BC1: an opaque one, kept as BC1)
+            f = srgb ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_BC1_RGB_UNORM_BLOCK;
         else
             f = srgb ? VK_FORMAT_BC3_SRGB_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
     }
@@ -641,6 +644,18 @@ bool bc7_enabled() {
     }();
     return on && bc7_ok;
 }
+/// (longshot) RX_VK_ASTC_BC1=1: a big ASTC texture whose every block is opaque (astc_opaque.h) is kept as BC1, not BC3: 4 bits
+/// a texel, half the memory, the same colours (BC3's colour half). Off by default. As BC1_RGB, the format with no alpha at
+/// all: whatever its blocks say, none decodes as 1-bit alpha. Only where this GPU samples that format and blits from it (what
+/// puts such a texture's texels back into BC3 once its memory holds alpha: bc1_to_bc3)
+bool astc_bc1_on() {
+    static const bool on = [] {
+        const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT;
+        return env_on("RX_VK_ASTC_BC1") && (format_props(VK_FORMAT_BC1_RGB_UNORM_BLOCK).optimalTilingFeatures & need) == need;
+    }();
+    return on;
+}
+uint64_t st_bc1_back;   // (textures kept as BC1 whose image was made again as BC3: alpha came into their memory)
 VkImage bc_scratch = VK_NULL_HANDLE;
 VmaAllocation bc_scratch_alloc = nullptr;
 VkImageView bc_scratch_view = VK_NULL_HANDLE;
@@ -802,10 +817,13 @@ void bc_encode_resized(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t ow,
                        uint32_t level, uint32_t layer);
 
 /// Encodes scratch layers [0, n) (a w x h region at its corner) and copies the blocks into dst's level and layers
+/// (longshot, RX_VK_ASTC_BC1) into an image kept as BC1: the encoder's colour blocks alone, 8 bytes each. Its source is
+/// opaque (astc_opaque.h), so the encoder, which takes its 1-bit alpha mode only for a texel with alpha under a half, writes
+/// every block in the four-colour mode (a block of one colour as two equal colours, all texels the first)
 void bc_encode_into(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t n, Texture& dst, uint32_t level,
                     uint32_t layer, int dx, int dy, VkImageView from = VK_NULL_HANDLE) {
     full_barrier(cmd);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bc7_enabled() ? bc7_pipe : bc_pipe);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, !dst.bc1 && bc7_enabled() ? bc7_pipe : bc_pipe);
     VkDescriptorImageInfo ii{VK_NULL_HANDLE, from ? from : bc_scratch_view, VK_IMAGE_LAYOUT_GENERAL};
     VkDescriptorBufferInfo bi{bc_out, 0, VK_WHOLE_SIZE};
     VkWriteDescriptorSet wr[2]{{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
@@ -815,7 +833,7 @@ void bc_encode_into(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t n, Tex
     wr[1].pBufferInfo = &bi;
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, bc_layout, 0, 2, wr);
     descriptors_disturbed();
-    const BcPush pc{(w + 3) / 4, (h + 3) / 4, w, h, 1, 0};
+    const BcPush pc{(w + 3) / 4, (h + 3) / 4, w, h, dst.bc1 ? 0u : 1u, 0};
     vkCmdPushConstants(cmd, bc_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
     vkCmdDispatch(cmd, (pc.blocks_x + 7) / 8, (pc.blocks_y + 7) / 8, n);
     full_barrier(cmd);
@@ -834,6 +852,20 @@ void bc_encode_resized(VkCommandBuffer cmd, uint32_t w, uint32_t h, uint32_t ow,
     bl.dstOffsets[1] = {(int32_t)ow, (int32_t)oh, 1};
     vkCmdBlitImage(cmd, bc_scratch, VK_IMAGE_LAYOUT_GENERAL, bc_scratch2, VK_IMAGE_LAYOUT_GENERAL, 1, &bl, VK_FILTER_LINEAR);
     bc_encode_into(cmd, ow, oh, n, dst, level, layer, 0, 0, bc_scratch2_view);
+}
+
+/// (longshot, RX_VK_ASTC_BC1) a w x h region of a BC image's level, layers [layer, layer + n), decompressed into the scratch's
+/// corner by a blit (its texels as stored: the image's own format is the UNORM one)
+void bc_blit_to_scratch(VkCommandBuffer cmd, VkImage image, uint32_t level, uint32_t layer, int x, int y, uint32_t w, uint32_t h,
+                        uint32_t n) {
+    full_barrier(cmd);
+    VkImageBlit bl{};
+    bl.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, n};
+    bl.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, n};
+    bl.srcOffsets[0] = {x, y, 0};
+    bl.srcOffsets[1] = {x + (int32_t)w, y + (int32_t)h, 1};
+    bl.dstOffsets[1] = {(int32_t)w, (int32_t)h, 1};
+    vkCmdBlitImage(cmd, image, VK_IMAGE_LAYOUT_GENERAL, bc_scratch, VK_IMAGE_LAYOUT_GENERAL, 1, &bl, VK_FILTER_NEAREST);
 }
 
 /// The scratch for the upload recording now: made if it is not there, and its layout set (false: it could not be made).
@@ -986,6 +1018,39 @@ bool overlaps(const Ranges* dirty, uint64_t a, uint64_t b) {
     return false;
 }
 
+/// (longshot, RX_VK_ASTC_BC1) Whether one layer's ASTC blocks are all opaque (astc_opaque.h): the n bytes at p, the layer's
+/// storage from the first level the image keeps as upload_astc_gpu stages it, each level the image keeps. A block those bytes
+/// do not hold (they end before it) is not opaque
+bool astc_layer_opaque(const Texture& tex, const uint8_t* p, uint64_t n) {
+    if (!tex.levels) return false;
+    const uint64_t tail0 = level_geo(tex, 0).offset;
+    for (uint32_t level = 0; level < tex.levels; level++) {
+        const LevelGeo g = level_geo(tex, level);
+        const uint64_t off = g.offset - tail0;
+        if (g.offset < tail0 || off >= n || g.tile_d ||
+            !astc_opaque::level(p + off, n - off, g.tw, g.th, g.tile_h, (uint32_t)tex.block_w, (uint32_t)tex.block_h))
+            return false;
+    }
+    return true;
+}
+
+/// (longshot, RX_VK_ASTC_BC1) Whether every layer's blocks in the game's memory are opaque now: what create() makes a BC1 image
+/// by. Only a forecast: the game may write its memory after, so each upload judges the bytes it stages again (upload_astc_gpu)
+bool astc_blocks_opaque(const Texture& tex, uint64_t total) {
+    const uint64_t layer_size = tex.layers > 1 ? tex.L.layer_size : std::max<uint64_t>(tex.L.layer_size, total);
+    const uint64_t tail0 = level_geo(tex, 0).offset;
+    if (!layer_size || tail0 >= layer_size) return false;
+    const uint64_t tail = layer_size - tail0;
+    std::vector<uint8_t> scratch;
+    for (uint32_t layer = 0; layer < tex.layers; layer++) {
+        const uint64_t at = (uint64_t)layer * layer_size + tail0;
+        if (at >= total) return false;
+        const uint64_t n = std::min(tail, total - at);
+        if (!astc_layer_opaque(tex, guest_bytes(tex.gpu + at, n, scratch), n)) return false;
+    }
+    return true;
+}
+
 /// The view of one level the ASTC decoder writes: every layer, or one (layer)
 VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
     if (layer == ~0u) return astc_target_view(tex, level);
@@ -1001,6 +1066,7 @@ VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
 /// every layer's chain: Eden's AssembleInto does the same)
 /// (longshot) why the last upload_astc_gpu on this thread failed, for the log of a BC3 image left to be tried again
 thread_local const char* astc_fail = nullptr;
+bool bc1_to_bc3(Texture& tex, VkCommandBuffer cmd, bool may_wait);   // (below, after destroy_later)
 
 bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     astc_fail = nullptr;
@@ -1020,17 +1086,42 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         if (overlaps(dirty, (uint64_t)layer * layer_size + tail0, (uint64_t)(layer + 1) * layer_size)) layers.push_back(layer);
     if (layers.empty()) return true;
     const bool all = layers.size() == tex.layers;
+    // (longshot, RX_VK_ASTC_BC1) an image kept as BC1: its layers are read first, once, into one copy (the game may write its memory
+    // while this reads it), judged there, and staged from that copy below, so what was judged opaque is what is encoded. With
+    // alpha in them its image is made again as BC3 first, the texels it holds kept (bc1_to_bc3), and the encodes below go into
+    // that. Where that cannot be done now (a present's cap, no memory) nothing is staged or recorded: an arena's bytes stay taken
+    // until its submission is done, and texture_touch tries again, as for a BC3 image whose upload failed, perhaps in this
+    // present. Alpha is never encoded into BC1 or dropped
+    std::vector<uint8_t> scratch, held;
+    if (tex.bc1) {
+        held.resize(tail * layers.size());
+        bool opaque = true;
+        for (size_t k = 0; k < layers.size(); k++) {
+            const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
+            if (at >= total) {   // (a layer the storage does not hold stages nothing, so not opaque)
+                opaque = false;
+                continue;
+            }
+            const uint64_t n = std::min(tail, total - at);
+            std::memcpy(held.data() + k * tail, guest_bytes(tex.gpu + at, n, scratch), n);
+            opaque = opaque && astc_layer_opaque(tex, held.data() + k * tail, n);
+        }
+        if (!opaque && !bc1_to_bc3(tex, upload_cmd(), true)) {
+            astc_fail = "its BC1 image could not be made again as BC3 now, for the alpha its memory holds";
+            return false;
+        }
+    }
     const Staging s = staging(tail * layers.size(), std::max<uint64_t>(256, dev.props.limits.minStorageBufferOffsetAlignment));
     if (!s.buffer) {
         astc_fail = "no staging memory for its ASTC blocks";
         return false;
     }
-    std::vector<uint8_t> scratch;
     for (size_t k = 0; k < layers.size(); k++) {
         const uint64_t at = (uint64_t)layers[k] * layer_size + tail0;
         if (at >= total) continue;
         const uint64_t n = std::min(tail, total - at);
-        std::memcpy(s.data + k * tail, guest_bytes(tex.gpu + at, n, scratch), n);
+        // (longshot, RX_VK_ASTC_BC1: an image made as BC1 is staged from the copy judged above, not from a second read)
+        std::memcpy(s.data + k * tail, held.empty() ? guest_bytes(tex.gpu + at, n, scratch) : held.data() + k * tail, n);
     }
     const uint64_t staged = tail * layers.size();
     flush_mapped_range(s.allocation, s.offset, staged);   // (encoded blocks read by the GPU decoder, not necessarily coherent)
@@ -1886,6 +1977,84 @@ void destroy_later(Texture& tex) {
     total_bytes -= std::min(total_bytes, tex.bytes + tex.pad);
 }
 
+/// (longshot, RX_VK_ASTC_BC1) A texture kept as BC1 that is about to hold alpha (an upload whose blocks are not all opaque, a GPU
+/// copy into it): its image is made again as BC3 (BC7 with RX_VK_ASTC_BC7), and what it held is encoded into the new one, each
+/// level and layer decompressed into the scratch by a blit, so alpha is never encoded into BC1 or dropped. The Texture stays.
+/// The BC1 image and its views go to the dead list as an evicted texture's do (destroy_later), freed once the GPU is done with
+/// the work that used them; its bytes leave the textures' count as the BC3 image's enter it. One way: BC3 until it is evicted.
+/// false: not now, nothing changed, and the caller writes nothing into the BC1 image: no memory for the image or the scratch,
+/// or (may_wait: an upload, which is tried again) this present's conversions already have 256 MB of BC1 images waiting in the
+/// dead list, so a burst of them holds no more than that beside the textures' count
+bool bc1_to_bc3(Texture& tex, VkCommandBuffer cmd, bool may_wait) {
+    static uint64_t cap_frame, cap_bytes;   // (the replay's lock is held, as for the rest of the cache)
+    if (cap_frame != frame_no) cap_frame = frame_no, cap_bytes = 0;
+    const uint64_t old_bytes = tex.bytes + tex.pad;
+    if (may_wait && cap_bytes && cap_bytes + old_bytes > (256ull << 20)) return false;
+    if (tex.uploaded && !bc_scratch_layout(cmd)) return false;
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};   // (as create() made it, but for its format and usage)
+    ci.flags = tex.create_flags;
+    ci.imageType = tex.type;
+    ci.format = bc7_enabled() ? VK_FORMAT_BC7_UNORM_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
+    ci.extent = {tex.width, tex.height, tex.depth};
+    ci.mipLevels = tex.levels;
+    ci.arrayLayers = tex.layers;
+    ci.samples = tex.samples;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    // (without the raw block views' usage: none is made of an image kept as BC, and a driver may refuse it for one format only)
+    ci.usage = tex.usage & ~(VkImageUsageFlags)(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImage image = VK_NULL_HANDLE;
+    VmaAllocation allocation = nullptr;
+    // (from the textures' pool where there is one, as create() takes it)
+    if (!(compact_on() && create_image(ci, image, allocation, false, false, true)) && !create_image(ci, image, allocation))
+        return false;
+    const VkImage old = tex.image;
+    destroy_gen++;   // (what was resolved to its views is stale)
+    Dead d{std::max(tex.last_value, rec_value), tex.image, tex.allocation, {}, {}};
+    for (auto& kv : tex.views)
+        if (kv.second) d.views.push_back(kv.second);
+    tex.views.clear();   // (made again when next asked for)
+    dead.push_back(std::move(d));
+    total_bytes -= std::min(total_bytes, old_bytes);
+    cap_bytes += old_bytes;
+    tex.image = image, tex.allocation = allocation, tex.format = ci.format, tex.usage = ci.usage, tex.bc1 = false;
+    tex.last_value = std::max(tex.last_value, rec_value);   // (its end, if it goes now, waits for the encodes below too)
+    tex.bytes *= 2;   // (16 bytes a block, not 8)
+    static const bool by_estimate = env_on("RX_VK_COUNT_BY_ESTIMATE");   // (as create() counts it)
+    tex.pad = by_estimate ? 0 : std::max(tex.bytes, allocation_size(tex.allocation)) - tex.bytes;
+    total_bytes += tex.bytes + tex.pad;
+    {   // (into GENERAL: a parallel replay's worker records it in the earliest open segment's init command buffer, as create())
+        InitRedirect redirect;
+        VkImageMemoryBarrier2 b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+        b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = tex.image;
+        b.subresourceRange = {tex.aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
+        VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        di.imageMemoryBarrierCount = 1;
+        di.pImageMemoryBarriers = &b;
+        vkCmdPipelineBarrier2(redirect.to ? upload_cmd() : cmd, &di);
+    }
+    if (tex.uploaded)   // (what it held; one layer a run, as the uploads encode)
+        for (uint32_t level = 0; level < tex.levels; level++) {
+            const uint32_t w = std::max(1u, tex.width >> level), h = std::max(1u, tex.height >> level);
+            for (uint32_t layer = 0; layer < tex.layers; layer++) {
+                bc_blit_to_scratch(cmd, old, level, layer, 0, 0, w, h, 1);
+                bc_encode_into(cmd, w, h, 1, tex, level, layer, 0, 0);
+            }
+        }
+    st_bc1_back++;
+    static int told;
+    if (told++ < 40)
+        logf("vk: texture #%u %#llx %ux%u x%u kept as BC1: %s holds alpha, its image made again as %s (%llu so far)", tex.id,
+             (unsigned long long)tex.gpu, tex.width, tex.height, tex.layers, may_wait ? "its memory now" : "a GPU copy into it",
+             ci.format == VK_FORMAT_BC7_UNORM_BLOCK ? "BC7" : "BC3", (unsigned long long)st_bc1_back);
+    return true;
+}
+
 void vw_forget(const Texture& t);   // (below: a destroyed texture leaves the list of GPU-written ones)
 void forget_gpu(Texture* tex) {
     vw_forget(*tex);
@@ -2090,6 +2259,15 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
             x.bc = true;
             x.format = bc7_enabled() ? VK_FORMAT_BC7_UNORM_BLOCK : VK_FORMAT_BC3_UNORM_BLOCK;
         }
+        // (longshot, RX_VK_ASTC_BC1=1) one made for sampling whose every block is opaque (astc_opaque.h: the blocks its upload
+        // will stage, read from the game's memory now) is kept as BC1, half of BC3. Chosen here, before the image is made and
+        // counted: the image is BC1 from the start, and x.bytes, the textures' count, the budget and the eviction see its true
+        // size; no image is made as BC3 and replaced. BC1 wins over RX_VK_ASTC_BC7 for these. Its memory may change after:
+        // every upload into it judges the blocks it stages (upload_astc_gpu), and a GPU copy into it makes it BC3 first
+        if (x.bc && !as_target && astc_bc1_on() && astc_blocks_opaque(x, x.guest_size)) {
+            x.bc1 = true;
+            x.format = VK_FORMAT_BC1_RGB_UNORM_BLOCK;
+        }
     }
     const VkFormatProperties fp = format_props(x.format);
     x.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -2206,14 +2384,14 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         return nullptr;
     }
     // what it costs: whole blocks for native BC/ASTC and re-encoded BC3, texels for other images.
-    // Re-encoded BC3 has 4x4, 16-byte blocks, not the source ASTC's block dimensions.
+    // Re-encoded BC3 has 4x4, 16-byte blocks, not the source ASTC's block dimensions (kept as BC1: 8-byte blocks).
     const bool blocks = is_bc(x.format) || is_astc(x.format);
     const uint32_t unit_w = x.bc ? 4u : blocks ? (uint32_t)bw : 1u;
     const uint32_t unit_h = x.bc ? 4u : blocks ? (uint32_t)bh : 1u;
     uint64_t px = 0;
     for (uint32_t l = 0; l < x.levels; l++)
         px += texture_level_units(x.width >> l, x.height >> l, x.depth >> l, unit_w, unit_h);
-    const uint32_t texel = x.bc ? 16 : astc ? 4 : std::max(1, from ? (from == 3 ? 4 : from == 6 ? 8 : 16) : bpb);
+    const uint32_t texel = x.bc1 ? 8 : x.bc ? 16 : astc ? 4 : std::max(1, from ? (from == 3 ? 4 : from == 6 ? 8 : 16) : bpb);
     x.bytes = x.sparse ? 0 : px * x.layers * texel * x.samples;   // (a sparse image's: as its layers are bound)
     // (the budget counts what the allocator gave it: the texels' 8% short of that over a scene's 2000 textures, 3228 MB counted for 3504
     // MB held, and a budget of 4035 MB took 4300. RX_VK_COUNT_BY_ESTIMATE=1: the texels)
@@ -2295,10 +2473,20 @@ Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw
         }
     }
     static int logged;
-    if (logged++ < 40 || textures.size() % 500 == 0 || p->bytes > (64ull << 20))
-        logf("vk: texture %#llx %ux%ux%u x%u levels %u NVN %#x -> vk %d%s (%zu textures, %llu MB)",
+    if (logged++ < 40 || textures.size() % 500 == 0 || p->bytes > (64ull << 20)) {
+        char bc1_note[112] = "";   // (longshot, RX_VK_ASTC_BC1: the textures kept as BC1 now, and what they hold less than as BC3)
+        if (astc_bc1_on()) {
+            size_t kept = 0;
+            uint64_t saved = 0;
+            for (const auto& kv : textures)
+                if (kv.second->bc1) kept++, saved += kv.second->bytes;
+            snprintf(bc1_note, sizeof bc1_note, "; %zu kept as BC1, %llu MB less than as BC3, %llu made BC3 again", kept,
+                     (unsigned long long)(saved >> 20), (unsigned long long)st_bc1_back);
+        }
+        logf("vk: texture %#llx %ux%ux%u x%u levels %u NVN %#x -> vk %d%s (%zu textures, %llu MB%s)",
              (unsigned long long)p->gpu, p->width, p->height, p->depth, p->layers, p->levels, d.format, (int)p->format,
-             astc ? " (ASTC decoded)" : "", textures.size(), (unsigned long long)(total_bytes >> 20));
+             astc ? " (ASTC decoded)" : "", textures.size(), (unsigned long long)(total_bytes >> 20), bc1_note);
+    }
     return p;
 }
 
@@ -2668,7 +2856,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
             logf("vk: slow upload %.1f ms: #%u %#llx %ux%ux%u x%u levels %u NVN %#x%s%s, %llu of %llu KB%s", ms, tex->id,
                  (unsigned long long)tex->gpu, tex->width, tex->height, tex->depth, tex->layers, tex->levels,
                  tex->nvn_format, tex->astc ? " ASTC" : "",
-                 tex->bc ? (linear_twin(tex->format) == VK_FORMAT_BC7_UNORM_BLOCK ? " (BC7)" : " (BC3)") : "",
+                 tex->bc ? (tex->bc1 ? " (BC1)" : linear_twin(tex->format) == VK_FORMAT_BC7_UNORM_BLOCK ? " (BC7)" : " (BC3)") : "",
                  (unsigned long long)((partial ? part : tex->guest_size) >> 10), (unsigned long long)(tex->guest_size >> 10),
                  tex->uploaded ? " again" : "");
         }
@@ -2951,7 +3139,14 @@ void copy_block_attachment(VkCommandBuffer cmd, const Texture& tex, VkImage bloc
 bool texture_copy_into_bc(VkCommandBuffer cmd, Texture* src, uint32_t src_level, uint32_t src_layer, int sx, int sy,
                           Texture* dst, uint32_t dst_level, uint32_t dst_layer, int dx, int dy, uint32_t w, uint32_t h,
                           uint32_t layers) {
-    if (!src || !dst || !dst->bc || !src->astc || src->bc || !bc_ready() || w > kBcDim || h > kBcDim || (dx & 3) || (dy & 3))
+    if (!src || !dst || !dst->bc || !src->astc || !bc_ready() || w > kBcDim || h > kBcDim || (dx & 3) || (dy & 3))
+        return false;
+    // (longshot, RX_VK_ASTC_BC1) from a texture kept as BC too, when the two are not of one format (BC1 and BC3: vk_xfer.cpp
+    // copies two of one format block for block, and that copy cannot cross block sizes): its texels are decompressed into the
+    // scratch by a blit, below. Not from a resized one (longshot-amd: its texels are not the game's), nor where this GPU does
+    // not blit from its format
+    if (src->bc && (src->format == dst->format || src->bc_resized ||
+                    !(format_props(src->format).optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT)))
         return false;
     // (longshot-amd) into a resized BC3 image only whole levels, resized as their upload is
     const uint32_t ow = std::max(1u, dst->width >> dst_level), oh = std::max(1u, dst->height >> dst_level);
@@ -2966,13 +3161,20 @@ bool texture_copy_into_bc(VkCommandBuffer cmd, Texture* src, uint32_t src_level,
             return false;
         }
     }
+    // (longshot, RX_VK_ASTC_BC1) into one kept as BC1: what is copied in may hold alpha (decoded ASTC, or a BC3 image), so its
+    // image is made again as BC3 first, its texels kept. Where that cannot be done the copy is left out, not written into BC1
+    if (dst->bc1 && !bc1_to_bc3(*dst, cmd, false)) return false;
     if (!bc_scratch_layout(cmd, dst->bc_resized)) return false;
     for (uint32_t l0 = 0; l0 < layers; l0 += kBcLayers) {
         const uint32_t n = std::min(kBcLayers, layers - l0);
-        full_barrier(cmd);
-        const VkImageCopy cp{{VK_IMAGE_ASPECT_COLOR_BIT, src_level, src_layer + l0, n}, {sx, sy, 0},
-                             {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, n}, {0, 0, 0}, {w, h, 1}};
-        vkCmdCopyImage(cmd, src->image, VK_IMAGE_LAYOUT_GENERAL, bc_scratch, VK_IMAGE_LAYOUT_GENERAL, 1, &cp);
+        if (src->bc) {
+            bc_blit_to_scratch(cmd, src->image, src_level, src_layer + l0, sx, sy, w, h, n);
+        } else {
+            full_barrier(cmd);
+            const VkImageCopy cp{{VK_IMAGE_ASPECT_COLOR_BIT, src_level, src_layer + l0, n}, {sx, sy, 0},
+                                 {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, n}, {0, 0, 0}, {w, h, 1}};
+            vkCmdCopyImage(cmd, src->image, VK_IMAGE_LAYOUT_GENERAL, bc_scratch, VK_IMAGE_LAYOUT_GENERAL, 1, &cp);
+        }
         if (dst->bc_resized)
             bc_encode_resized(cmd, w, h, ow, oh, n, *dst, dst_level, dst_layer + l0);
         else

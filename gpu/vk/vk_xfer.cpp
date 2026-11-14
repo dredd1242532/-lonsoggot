@@ -269,7 +269,9 @@ void copy_t2t(VkCommandBuffer cmd, NvnState& st, const nvn_p_copy_tt& p) {
     GprofSpan gp(cmd, "xfer copy texture->texture (with its barriers)");
     full_barrier(cmd);
     const bool same_size = s.w == d.w && s.h == d.h && s.d == d.d;
-    if (s.tex->bc != d.tex->bc || (s.tex->bc && !same_size)) {   // (big ASTC kept as BC3 on one side: vk_texture.cpp)
+    // (longshot, RX_VK_ASTC_BC1) and two kept as BC that are not of one format, a BC1 and a BC3: their blocks are 8 and 16 bytes,
+    // which the block-for-block copy below cannot cross; texture_copy_into_bc re-encodes. With the switch off they never differ
+    if (s.tex->bc != d.tex->bc || (s.tex->bc && (!same_size || s.tex->format != d.tex->format))) {   // (big ASTC kept as BC3 on one side: vk_texture.cpp)
         bool done = false;
         if (d.tex->bc && same_size) {
             done = texture_copy_into_bc(cmd, s.tex, s.level, s.layer, s.x, s.y, d.tex, d.level, d.layer, d.x, d.y, s.w, s.h,

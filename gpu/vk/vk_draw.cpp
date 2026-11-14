@@ -3131,16 +3131,22 @@ VkImageView texture_view_of(uint32_t handle, VkImageViewType want, ViewUse use, 
         else st_hit++;
     }
     if (it != handle_hits().end() && it->second.version == version && it->second.destroy_gen == dgen) {
+        bool stale = false;
         if (it->second.tex && it->second.tex_epoch != texture_epoch()) {   // (once a submission: its age and contents)
             if (!texture_touch_quick(it->second.tex, it->second.sampling)) {
                 ParLock lk;
                 texture_touch(it->second.tex, it->second.sampling);
             }
             it->second.tex_epoch = texture_epoch();
+            // (longshot, RX_VK_ASTC_BC1) the touch's upload may have made a BC1 image again as BC3 (bc1_to_bc3): the view kept here
+            // is then the old image's, retired with it, so the handle is resolved again below, to a view of the new image
+            stale = texture_destroy_generation() != dgen;
         }
-        if (tex_out) *tex_out = it->second.tex;
-        if (level_out) *level_out = it->second.level;
-        return it->second.view;
+        if (!stale) {
+            if (tex_out) *tex_out = it->second.tex;
+            if (level_out) *level_out = it->second.level;
+            return it->second.view;
+        }
     }
     ParLock lk;
     nvn_tex t;

@@ -66,7 +66,10 @@ struct Texture {
     VkImageType type = VK_IMAGE_TYPE_2D; VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
     uint32_t layers = 2; struct { uint64_t layer_size = 1536; } L;
     uint64_t gpu = 0;
+    bool bc1 = false;   // (RX_VK_ASTC_BC1: never here; an image kept as BC1 has its staged blocks judged, test_astc_bc1_remake.py)
 };
+bool astc_layer_opaque(const Texture&, const uint8_t*, uint64_t) { return true; }
+bool bc1_to_bc3(Texture&, VkCommandBuffer, bool) { return true; }
 struct { uint64_t offset = 0; } geo;
 auto level_geo(const Texture&, int) { return geo; }
 bool astc_ready() { return true; }

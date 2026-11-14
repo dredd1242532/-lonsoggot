@@ -50,6 +50,7 @@ struct Image {
     bool bc, sparse;
     int samples;
     uint64_t allocation, bytes = 0, pad = 0;
+    bool bc1 = false;   // (RX_VK_ASTC_BC1: an opaque re-encoded texture kept as BC1; a case's bc is 2)
 };
 uint64_t allocation_size(uint64_t allocation) { return allocation; }
 bool env_on(const char*) { return false; }
@@ -72,7 +73,9 @@ int main() {
         Image x{w, h, z, levels, layers, (VkFormat)format, false, false, (int)samples, allocation};
         const uint64_t e = estimate(x, Desc{(int)samples}, astc != 0, bw, bh, bpb, skip);
         Image made{std::max(1u, w >> skip), std::max(1u, h >> skip), std::max(1u, z >> skip), levels - skip, layers,
-                   bc ? VK_FORMAT_BC3_UNORM_BLOCK : (VkFormat)format, bc != 0, sparse != 0, (int)samples, allocation};
+                   bc == 2 ? VK_FORMAT_BC1_RGB_UNORM_BLOCK : bc ? VK_FORMAT_BC3_UNORM_BLOCK : (VkFormat)format, bc != 0,
+                   sparse != 0, (int)samples, allocation};
+        made.bc1 = bc == 2;
         const uint64_t c = count(made, astc != 0, bw, bh, bpb, from);
         std::printf("%llu %llu %llu\n", (unsigned long long)e, (unsigned long long)made.bytes, (unsigned long long)c);
     }
@@ -134,6 +137,7 @@ def accounting_checks(source, create, helper, cxx, temp):
             add(vk, 0, bw, bh, 16)
         add(37, 1, bw, bh, 16)          # decoded ASTC: RGBA8, not source blocks
         add(37, 1, bw, bh, 16, bc=1)    # re-encoded: always BC3's 4x4 blocks
+        add(37, 1, bw, bh, 16, bc=2)    # re-encoded and opaque, kept as BC1: the same blocks at 8 bytes, counted before it is made
     bc_formats = range(131, 147)         # is_bc's complete Vulkan range, UNORM/SNORM/sRGB/float variants
     for vk in bc_formats:
         add(vk, 0, 4, 4, 8 if vk in (131, 132, 133, 134, 139, 140) else 16)
@@ -154,7 +158,7 @@ def accounting_checks(source, create, helper, cxx, temp):
 
         native = not astc and (131 <= vk <= 146 or 157 <= vk <= 184)
         est = chain(bw, bh) * bpb if native else chain(1, 1) * (4 if astc else max(1, bpb // (bw * bh)))
-        raw = (chain(4, 4) * 16 if bc else chain(bw, bh) * bpb if native else
+        raw = (chain(4, 4) * (8 if bc == 2 else 16) if bc else chain(bw, bh) * bpb if native else
                chain(1, 1) * (4 if astc else from_bytes * 4 // 3 if from_bytes else bpb))
         want = (est, 0, 0) if sparse else (est, raw, max(raw, allocation))
         got = tuple(map(int, line.split()))
