@@ -56,6 +56,7 @@
 #include "evict_reason.h"
 #include "keep_rendered.h"
 #include "target_overlap.h"
+#include "guest_holes.h"
 #include "host_shaders/block_linear_unswizzle_2d_comp_spv.h"
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
@@ -1479,35 +1480,18 @@ bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool wid
     const uint8_t* p = host->gpu_ptr(tex.gpu, &avail);
     if (!p || avail < total) return false;
     const auto t0 = std::chrono::steady_clock::now();
-    std::atomic<bool> found{false};
-    const uint32_t nthreads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u);
-    const uint64_t per = ((total / nthreads) + 4095) & ~4095ull;
-    auto part = [&](uint32_t t) {
-        const uint64_t a = std::min<uint64_t>(total, (uint64_t)t * per), b = std::min<uint64_t>(total, a + per);
-        for (uint64_t at = a; at < b && !found.load(std::memory_order_relaxed); at += 65536) {
-            const uint64_t end = std::min<uint64_t>(b, at + 65536);
-            uint64_t acc = 0;
-            uint64_t k = at;
-            for (; k + 8 <= end; k += 8) {
-                uint64_t w;
-                std::memcpy(&w, p + k, 8);
-                acc |= w;
-            }
-            for (; k < end; k++) acc |= p[k];
-            if (acc) found.store(true, std::memory_order_relaxed);
-        }
-    };
-    if (nthreads > 1) {
-        std::vector<std::thread> th;
-        for (uint32_t t = 1; t < nthreads; t++) th.emplace_back(part, t);
-        part(0);
-        for (auto& x : th) x.join();
-    } else {
-        part(0);
-    }
+    // (only what the game ever wrote is read. On Linux the rest of a fresh storage is holes of the guest window's file, zero
+    // without a read, and reading them made their pages: the shadow map's 288 MB at each arrival in an area, 117 to 153 ms of
+    // the replay thread on a Steam Deck. RX_VK_ZERO_HOLES=0: all of it read, as before)
+    static const bool read_holes = getenv("RX_VK_ZERO_HOLES") && atoi(getenv("RX_VK_ZERO_HOLES")) == 0;
+    std::vector<std::pair<uint64_t, uint64_t>> parts;
+    if (read_holes || !memory_guest_data_parts(p, total, parts)) parts.assign(1, {0, total});
+    uint64_t read = 0;
+    for (const auto& r : parts) read += r.second - r.first;
+    const bool zero = guest_holes::all_zero(p, parts, std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u));
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     static std::atomic<int> told{0};
-    if (found.load()) {
+    if (!zero) {
         if (told.fetch_add(1) < 4)
             logf("vk: upload: %ux%u NVN %#x (%llu MB) is not all zero (checked in %.1f ms): unswizzled as before", tex.width,
                  tex.height, tex.nvn_format, (unsigned long long)(total >> 20), ms);
@@ -1524,8 +1508,8 @@ bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool wid
         vkCmdClearColorImage(upload_cmd(), tex.image, VK_IMAGE_LAYOUT_GENERAL, &z, 1, &range);
     }
     if (told.fetch_add(1) < 4)
-        logf("vk: upload: %ux%u NVN %#x (%llu MB) is all zero: cleared on the GPU (checked in %.1f ms)", tex.width, tex.height,
-             tex.nvn_format, (unsigned long long)(total >> 20), ms);
+        logf("vk: upload: %ux%u NVN %#x (%llu MB) is all zero: cleared on the GPU (checked in %.1f ms, %llu MB of it read)",
+             tex.width, tex.height, tex.nvn_format, (unsigned long long)(total >> 20), ms, (unsigned long long)(read >> 20));
     return true;
 }
 bool upload_inner(Texture& tex, const Ranges* dirty) {

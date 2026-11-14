@@ -276,6 +276,9 @@ uint64_t memory_in_place_part();
 void memory_note_texture_upload(uint64_t guest, uint64_t size);
 /// Whether [guest, guest + n) has pages kept as a capture took them
 bool memory_has_shadow(uint64_t guest, uint64_t n);
+/// The parts of the guest window's p..p+n the game ever wrote, as offsets from p (guest_holes.h): the rest reads as zero
+/// and has no pages yet. False when not known (not Linux, the window not a memfd's, p outside it): all of it is read
+bool memory_guest_data_parts(const uint8_t* p, uint64_t n, std::vector<std::pair<uint64_t, uint64_t>>& parts);
 /// A read of guest memory by the replay as the submission being recorded had it: the pages a kept capture holds from
 /// there (the game writes several submits ahead of the replay), the rest from guest memory. False when unreadable
 bool memory_read_as_submitted(uint64_t gpu, void* dst, uint64_t n);

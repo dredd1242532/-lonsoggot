@@ -37,6 +37,7 @@
 #include "mirror_inherit.h"
 #include "retired_give_back.h"
 #include "sparse_mirror.h"
+#include "guest_holes.h"
 #include <atomic>
 #include <unordered_set>
 #ifdef __linux__
@@ -1352,6 +1353,23 @@ uint32_t memory_page_stamp(uint64_t gpu) {
     const uint64_t guest = gpu < (1ull << 40) ? gpu : host->gpu_guest(gpu);
     if (!guest) return 0;
     return page_gen(guest >> kPageShift);
+}
+
+bool memory_guest_data_parts(const uint8_t* p, uint64_t n, std::vector<std::pair<uint64_t, uint64_t>>& parts) {
+    parts.clear();
+#ifdef __linux__
+    static const int fd = [] {   // (the window's memfd, host/hos_main.c; none: the window is anonymous memory)
+        typedef int (*MemfdFn)(void);
+        const MemfdFn fn = (MemfdFn)dlsym(RTLD_DEFAULT, "hos_posix_guest_memfd");
+        return fn ? fn() : -1;
+    }();
+    const uint8_t* const base = host->guest_base();
+    if (fd < 0 || p < base || (uint64_t)(p - base) > host->guest_size() || n > host->guest_size() - (uint64_t)(p - base)) return false;
+    return guest_holes::data_parts(fd, (uint64_t)(p - base), (uint64_t)(p - base) + n, parts);
+#else
+    (void)p, (void)n;
+    return false;
+#endif
 }
 
 bool memory_has_shadow(uint64_t guest, uint64_t n) {
