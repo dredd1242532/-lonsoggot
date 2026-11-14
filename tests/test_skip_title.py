@@ -136,8 +136,8 @@ def check_menu():
         raise SystemExit("vk_replay.cpp: the renderer does not answer HOS_OPT_SKIP_TITLE")
     if menu.count("HOS_OPT_SKIP_TITLE") or header.count("HOS_OPT_SKIP_TITLE"):
         raise SystemExit("the menu should use opts.skip_title, not the host's option id")
-    if "Skip title screen" not in (ROOT / "readme.md").read_text(encoding="utf-8"):
-        raise SystemExit("readme.md: the menu's Skip title screen row is not documented")
+    if "Skip title screen" not in (ROOT / "README.md").read_text(encoding="utf-8"):
+        raise SystemExit("README.md: the menu's Skip title screen row is not documented")
 
 
 def main():
@@ -162,8 +162,9 @@ def main():
         windows = os.name == "nt"
         flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS if windows else 0
         extra = {"creationflags": flags} if windows else {}
-        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "host"),
-                                "-I", str(ROOT / "gpu" / "vk"), str(src), str(AUTOLOAD), "-o", str(exe)], **extra)
+        build = subprocess.run([a.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS",
+                                "-I", str(ROOT / "host"), "-I", str(ROOT / "gpu" / "vk"),
+                                str(src), str(AUTOLOAD), "-o", str(exe)], **extra)
         if build.returncode:
             raise SystemExit("the host did not compile: see the compiler's output above")
         run = subprocess.run([str(exe), str(root / "user"), str(empty / "user")], capture_output=True, text=True, **extra)
