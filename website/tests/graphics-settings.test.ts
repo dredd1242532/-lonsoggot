@@ -73,6 +73,24 @@ bool row_shown(int i) {
   assert.throws(() => readMenuRows(menu.replace(/bool row_shown\(int i\) \{/, 'bool shown(int i) {')), /row_shown/);
 });
 
+test('a text field row (field_rows) is listed with README\'s choices; a valueless row that is not one stops publication', () => {
+  const rows = readMenuRows(`Row rows[] = {
+    {TAB_GRAPHICS, "Size", &opts.a, 0, 1, 1, tx_onoff, "x", nullptr, true},
+    {TAB_GRAPHICS, "Own size", nullptr, 0, 0, 0, nullptr, "Typed. Applies after a restart."},
+    {TAB_GRAPHICS, "Loose", nullptr, 0, 0, 0, nullptr, "y"},
+};
+bool row_shown(int i) {
+    return v != &opts.a;
+}
+const FieldRow field_rows[] = {{"Own size", &own_field, own_apply}};`);
+  assert.deepEqual(rows.map(row => [row.name, row.field, row.restart]), [['Size', false, true], ['Own size', true, true], ['Loose', false, false]]);
+  const setting = readGraphicsSettings(readme, menu).flatMap(group => group.settings).find(setting => setting.name === 'Custom output size');
+  const line = readme.split('\n').find(line => line.startsWith('| | Custom output size |')).split('|').map(cell => cell.trim());
+  assert.deepEqual([setting.choices, setting.defaultValue, setting.restart], [line[3], line[4], true]);
+  assert.throws(() => readGraphicsSettings(readme, menu.replace(/const FieldRow field_rows\[\] = \{\{"Custom output size"/, 'const FieldRow field_rows[] = {{"Other size"')),
+    /graphics coverage mismatch at Custom output size/);
+});
+
 test('cards take the menu\'s help, the source restart flag and README conditions', () => {
   const settings = readGraphicsSettings(readme, menu).flatMap(group => group.settings);
   const find = name => settings.find(setting => setting.name === name);
@@ -80,7 +98,8 @@ test('cards take the menu\'s help, the source restart flag and README conditions
   assert(settings.every(setting => setting.summary), 'every card has the menu\'s description');
   assert(!settings.some(setting => /Applies after/.test(setting.summary)));
   assert.deepEqual(settings.filter(setting => setting.restart).map(setting => setting.name),
-    ['Aspect ratio', 'Output resolution', 'Profile', 'GPU device', 'Audio output', 'Game language', 'Button prompts']);
+    ['Aspect ratio', 'Output resolution', 'Custom output size', 'Profile', 'GPU device', 'Audio output', 'Skip title screen',
+      'Game language', 'Button prompts']);
   assert.deepEqual(find('NVIDIA Reflex').badges, ['NVIDIA GPUs only']);
   assert.deepEqual(find('HDR tone mapper').badges, ['With HDR on Native']);
   assert(find('HDR contrast').badges.includes('While HDR is on'));
@@ -91,7 +110,7 @@ test('cards take the menu\'s help, the source restart flag and README conditions
 test('restart, coverage and condition drift between README and the menu stop publication', () => {
   // (README says after a restart where the menu applies at once, or not where it takes one)
   assert.throws(() => readGraphicsSettings(readme.replace('| | Fullscreen | Off, On', '| | Fullscreen | Off, On (after a restart)'), menu), /restart mismatch at Fullscreen/);
-  assert.throws(() => readGraphicsSettings(readme.replace('Auto, Stereo, 5.1 (after a restart)', 'Auto, Stereo, 5.1'), menu), /restart mismatch at Audio output/);
+  assert.throws(() => readGraphicsSettings(readme.replace('(layout changes after a restart; Mono/Stereo live on stereo output)', '(Mono/Stereo live on stereo output)'), menu), /restart mismatch at Audio output/);
   // (a row of another tab added to the menu, or one README lists that the menu lacks)
   assert.throws(() => readGraphicsSettings(readme, menu.replace('{TAB_AUDIO, "Volume"', '{TAB_AUDIO, "Balance", &opts.volume, 0, 1, 1, tx_onoff, "x"},\n    {TAB_AUDIO, "Volume"')), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(readme.replace(/^\| \| Mute in background .*\n/m, ''), menu), /Audio coverage mismatch/);

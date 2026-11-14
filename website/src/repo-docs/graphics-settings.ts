@@ -31,7 +31,8 @@ function cString(field) {
 
 /// The menu's row table (gpu/vk/vk_menu.cpp `Row rows[]`), read without evaluating C++: each `{TAB_..., ...}` entry split at
 /// its top-level commas, strings and comments skipped. The fields are Row's: tab, name, value, lo, hi, step, text, help, hint,
-/// restart, preset_exempt, cheat, heading. `shown` is false for a row row_shown can hide.
+/// restart, preset_exempt, cheat, heading. `shown` is false for a row row_shown can hide. `field` is true for a text field
+/// (a row with no value named in `field_rows[]`); what it sets takes the restart, so its own is its help's restart sentence.
 export function readMenuRows(menu) {
   const body = menu.match(/Row rows\[\]\s*=\s*\{([\s\S]*?)\n\};/)?.[1];
   if (!body) throw new Error('Missing menu row table');
@@ -78,6 +79,12 @@ export function readMenuRows(menu) {
   const conditional = new Set([...shown.matchAll(/&opts\.\w+/g)].map(match => match[0]));
   for (const row of rows) if (conditional.has(row.value)) row.shown = false;
   if (!rows.some(row => !row.shown)) throw new Error('Unrecognized menu row_shown');
+  const fieldBody = menu.match(/FieldRow field_rows\[\]\s*=\s*\{([\s\S]*?)\};/)?.[1] || '';
+  const fieldNames = new Set([...fieldBody.matchAll(/\{\s*("(?:[^"\\]|\\.)*")/g)].map(match => cString(match[1])));
+  for (const row of rows) {
+    row.field = row.value === 'nullptr' && !row.heading && fieldNames.has(row.name);
+    if (row.field) row.restart = /Applies after (?:a )?restart/.test(row.help);
+  }
   return rows;
 }
 
@@ -132,7 +139,7 @@ export function readGraphicsSettings(readme, menu) {
       groups.push({ name: row.name, settings: [] });
       continue;
     }
-    if (!row.value.startsWith('&opts.')) throw new Error(`README/menu graphics coverage mismatch at ${row.name}`);
+    if (!row.value.startsWith('&opts.') && !row.field) throw new Error(`README/menu graphics coverage mismatch at ${row.name}`);
     const setting = settings[at++];
     if (setting?.name !== row.name) throw new Error(`README/menu graphics order mismatch at ${row.name}`);
     groups.at(-1).settings.push({ ...withSource(setting, 'Graphics'), id: `setting-${slug(row.name)}` });
