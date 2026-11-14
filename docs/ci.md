@@ -1,6 +1,6 @@
 # CircleCI (Longshot)
 
-Continuation uses **`magicbeandev/ci@0.1.1`** (alias **`mb`**). Local validation inlines the packed orb from a checkout (`MB_ORB_DIR`); see below.
+Continuation uses **`magicbeandev/ci@0.1.2`** (alias **`mb`**). Local validation inlines the packed orb from a checkout (`MB_ORB_DIR`); see below.
 
 **PR title and description** are checked on **Forgejo** (`.forgejo/workflows/ci.yml`), not in CircleCI.
 
