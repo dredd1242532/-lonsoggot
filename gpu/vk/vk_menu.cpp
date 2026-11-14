@@ -828,10 +828,10 @@ const char* tx_stick_dead_zone(int v) {
     static const char* t[] = {"Default (24%)", "5%", "10%", "15%", "20%", "30%"};
     return (unsigned)v < 6 ? t[v] : t[0];
 }
-// (longshot) Audio output: the speakers the game mixes for, read once at its start (host/nn_audio.c au_menu_output)
+// Audio output: layout read at startup (host/nn_audio.c au_menu_output); Mono averages stereo live.
 const char* tx_audio_output(int v) {
-    static const char* t[] = {"Auto", "Stereo", "5.1"};
-    return (unsigned)v < 3 ? t[v] : t[0];
+    static const char* t[] = {"Auto", "Stereo", "5.1", "Mono"};
+    return (unsigned)v < 4 ? t[v] : t[0];
 }
 // (longshot) the motion's deadzone: the console's three zero-drift modes, the rate under which the pad counts as still
 const char* tx_deadzone(int v) {
@@ -1137,7 +1137,8 @@ MENU_HINTS(hn_speed, 0, "A step each frame: the game slows down whenever it runs
 MENU_HINTS(hn_text_speed, 0, "The game's own pace, with its pauses.", "Twice as fast.", "Four times as fast.",
            "Each page at once, as pressing A does.")
 MENU_HINTS(hn_audio_output, 0, "5.1 when the default output device has 5.1 or more speakers, else stereo.",
-           "Stereo, whatever the device has.", "5.1, whatever the device has. Mixed down on stereo speakers.")
+           "Stereo, whatever the device has.", "5.1, whatever the device has. Mixed down on stereo speakers.",
+           "The stereo average in both ears. Changes live on stereo output; restart from 5.1.")
 MENU_HINTS(hn_text_size, 0, "The game's original size.", "A little larger.", "Larger.", "Much larger.", "Largest.")
 MENU_HINTS(hn_background, 0, "Only while the game's window has the focus.",
            "Also behind other windows, for streaming or other apps. The keyboard and mouse still need the game's window.")
@@ -1256,8 +1257,8 @@ Row rows[] = {
     {TAB_AUDIO, "Mute in background", &opts.mute_background, 0, 1, 1, tx_onoff,
      "Silences the game while another window has the focus. The sound comes back when you switch to the game.", nullptr,
      false, true},
-    {TAB_AUDIO, "Audio output", &opts.audio_output, 0, 2, 1, tx_audio_output,
-     "The speakers the game mixes its sound for. Applies after a restart.", hn_audio_output, true, true},
+    {TAB_AUDIO, "Audio output", &opts.audio_output, 0, 3, 1, tx_audio_output,
+     "The speakers the game mixes for. Mono/Stereo changes live on stereo output; channel layout changes need a restart.", hn_audio_output, true, true},
 
     // Gameplay
     {TAB_GAMEPLAY, "FPS counter", &opts.show_fps, 0, fps_stats::kLevels - 1, 1, tx_fps_level,
@@ -1616,13 +1617,17 @@ namespace mr = menu_restart;
 mr::State restart_state;
 int restart_slot[kRows];             // (a row's slot in restart_state, -1 none)
 const char* restart_names[mr::kMax];
+// Mono and Stereo use the same channel layout; their live mix does not need a restart.
+int row_restart_value(const Row& r) {
+    return r.value == &opts.audio_output && *r.value == 3 ? 1 : *r.value;
+}
 void restart_init() {
     static bool done = false;
     if (done) return;
     done = true;
     opts.game_lang = i18n::game_lang_index();   // (language.txt's, the language the game started in)
     for (int i = 0; i < kRows; i++) {
-        restart_slot[i] = rows[i].restart && rows[i].value ? restart_state.add(*rows[i].value) : -1;
+        restart_slot[i] = rows[i].restart && rows[i].value ? restart_state.add(row_restart_value(rows[i])) : -1;
         if (restart_slot[i] >= 0) restart_names[restart_slot[i]] = rows[i].name;
     }
 }
@@ -1630,11 +1635,11 @@ int restart_slot_of(const Row& r) { return restart_slot[&r - rows]; }
 /// A row that takes a restart, changed from what the game started with (a row past menu_restart.h's kMax has no slot: never)
 bool restart_changed(const Row& r) {
     const int slot = restart_slot_of(r);
-    return r.value && r.restart && slot >= 0 && *r.value != restart_state.start[slot];
+    return r.value && r.restart && slot >= 0 && row_restart_value(r) != restart_state.start[slot];
 }
 void restart_values(int* now) {
     for (int i = 0; i < kRows; i++)
-        if (restart_slot[i] >= 0) now[restart_slot[i]] = *rows[i].value;
+        if (restart_slot[i] >= 0) now[restart_slot[i]] = row_restart_value(rows[i]);
 }
 /// The rows whose value is not the one the game runs with (a bit a slot)
 unsigned restart_pending() {
@@ -1863,13 +1868,13 @@ void save() {
     // (one writer at a time: the present's thread, the game's (menu_option_set) and the control bridge's, menu_setting_set)
     static std::mutex save_mu;
     std::lock_guard lk(save_mu);
-    // (longshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c)
+    // (longshot) the lines that are not the menu's are kept: the controls, pad_ and key_ (host/nn_hid.c), and their toggle_ flags
     // (and every other line the menu does not write, such as discord_app_id=: they were dropped at the next save)
     std::string kept, others;
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
         char line[256];
         while (fgets(line, sizeof line, f)) {
-            if (!strncmp(line, "pad_", 4) || !strncmp(line, "key_", 4)) {
+            if (!strncmp(line, "pad_", 4) || !strncmp(line, "key_", 4) || !strncmp(line, "toggle_", 7)) {
                 kept += line;
                 continue;
             }
@@ -1925,6 +1930,7 @@ void save() {
                 if (alternate >= 0) fprintf(f, ",%d", alternate);
                 fputc('\n', f);
             }
+            if (i < HOS_SW_N) fprintf(f, "toggle_%s=%d\n", bind_names[i], (opts.hold_toggle >> i) & 1);
             fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
         fclose(f);
@@ -2927,20 +2933,59 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
     c.d->PopClipRect();
 }
 
+// A report cannot format Options{} as a live list index, or format a hypothetical
+// default through a callback that reads the current engine/display (the Output
+// resolution, Upscaler, Render resolution, Window scaling filter). The Quality
+// preset's is Auto (this PC) at a first start. The other rows a preset sets have
+// the built-in defaults only for a Custom player Auto never chose for (auto_for 0);
+// else Auto's for this PC, which only apply_auto knows, and running it here would
+// change the live options the renderer reads. Keep their current values, but do
+// not call them changes or invent a default. GPU 0 and microphone 1 stay stable;
+// report_default has the Aspect ratio's, the Game language's and Frame generation by's.
+bool report_default_depends_on_pc(const Row& r) {
+    if (r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
+        r.value == &opts.handheld || r.value == &opts.vram_budget)
+        return opts.preset != 0 || auto_for != 0;
+    return r.value == &opts.output_res || r.value == &opts.resolution || r.value == &opts.dlss ||
+           r.value == &opts.preset || r.value == &opts.upscale ||
+           (r.value == &opts.dlss_model && dlss_preset_env());
+}
+// The report's default for row r: the default options' value (fixed), or the one the
+// menu knows better. The Aspect ratio's is the monitor's shape, as outputs_sync makes
+// it from the default Output resolution and ultrawide=1; the Game language's is
+// language.txt's, else the first (README). *named: the default as the row names it,
+// where the row's own text shows the live state (Frame generation by at Auto: who
+// makes the frames now), else nullptr.
+int report_default(const Row& r, int fixed, const char** named) {
+    static const Options defaults{};
+    *named = nullptr;
+    if (r.value == &opts.ultrawide) return aspect_of_choice(defaults.output_res, defaults.ultrawide);
+    if (r.value == &opts.game_lang) return i18n::game_lang_index();
+    if (r.value == &opts.framegen_by) *named = "Auto";
+    return fixed;
+}
 // (longshot) the Gameplay tab's Bug report: the rows not at their defaults, as the menu shows them, for its "Changes from the
 // defaults"
-std::string changed_rows_text() {
+std::string changed_rows_text(std::string& pc_options) {
     static const Options defaults{};
     std::string out;
+    pc_options.clear();
     for (const Row& r : rows) {
         const char* at = (const char*)r.value;
         if (!r.value || !r.text || r.heading || at < (const char*)&opts || at >= (const char*)(&opts + 1)) continue;
-        const int was = *(const int*)((const char*)&defaults + (at - (const char*)&opts));
-        if (*r.value == was) continue;
+        const char* named = nullptr;
+        const int was = report_default(r, *(const int*)((const char*)&defaults + (at - (const char*)&opts)), &named);
+        const bool depends = report_default_depends_on_pc(r);
+        if (!depends && *r.value == was) continue;
+        std::string& to = depends ? pc_options : out;
+        to += r.name;
+        to += ": ";
         // (a microphone chosen by its name, not the name: a device's name can be a person's)
-        const std::string now = r.value == &opts.mic && *r.value >= 2 ? "a microphone by its name" : r.text(*r.value);
-        out += std::string(r.name) + ": " + now + " (default: " + r.text(was) +
-               (restart_changed(r) ? "; takes effect after a restart" : "") + ")\n";
+        to += r.value == &opts.mic && *r.value >= 2 ? "a microphone by its name" : r.text(*r.value);
+        to += depends ? " (default depends on this PC" : " (default: ";
+        if (!depends) to += named ? named : r.text(was);
+        if (restart_changed(r)) to += "; takes effect after a restart";
+        to += ")\n";
     }
     return out;
 }
@@ -2958,7 +3003,7 @@ void bug_report_save() {
     bug_report::fill_here(in);
     in.version = LONGSHOT_VERSION;
     in.gpu = device_report_text();
-    in.options = changed_rows_text();
+    in.options = changed_rows_text(in.pc_options);
     const std::string ini = ini_path();
     in.game_dir = ini.substr(0, ini.find_last_of("\\/") + 1);
     in.log = [](const char* line) { logf("%s", line); };
@@ -3243,9 +3288,13 @@ void draw_controls(ui::Ctx& c) {
     const char* title = page_row ? page_row->name : sel_i < kControls ? controls[sel_i].name : "Reset to defaults";
     const char* help = listening ? (listening == 1 ? "Press the gamepad button to use. Esc cancels." : "Press the key to use. Esc cancels.")
                        : page_row ? page_row->help
-                                  : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
-                                    "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
-                                    "another's empty Input 2. The game's button icons follow after a restart.";
+                       : sel_i < kControls && controls[sel_i].button < HOS_SW_N && controls[sel_i].button != HOS_SW_PLUS &&
+                         controls[sel_i].button != HOS_SW_MINUS && ccol == kCtlToggle
+                           ? "Hold-to-toggle: press once to hold this Switch button, again to release it. Either gamepad input or a "
+                             "bound key works. Opening Insert, pressing Plus or Minus, focus loss or rebinding releases it. Off by default."
+                           : "Either gamepad input or an assigned key presses the selected Switch button. Enter binds the "
+                             "selected input and Delete clears it. A button's only gamepad input stays with it: it does not move into "
+                             "another's empty Input 2. The game's button icons follow after a restart.";
     const char* hint = page_row ? (page_row->hint ? page_row->hint(*page_row->value, -1) : nullptr)
                                 : "Gamepad: the D-pad moves, A binds, B goes back. Ocarina note keys are only notes while "
                                   "the ocarina waits for one; away from it they do their other jobs.";
@@ -3259,12 +3308,12 @@ void draw_controls(ui::Ctx& c) {
                  hh + 18 * s, bar_top - 12 * s);
     }
     const float rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, width = rx1 - rx0;
-    const float pad_x = rx0 + width * 0.32f, key_x = rx0 + width * 0.75f;
-    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, rx1};
+    const float pad_x = rx0 + width * 0.28f, key_x = rx0 + width * 0.64f, toggle_x = rx0 + width * 0.87f;
+    const float col_x[] = {pad_x, (pad_x + key_x) * 0.5f, key_x, toggle_x, rx1};
     float top = hh + 22 * s;
     ui::text_mid_centre(c, c.f.body, 15 * s, col_x[kCtlAlternate], top + 8 * s, ui::kDim, "Gamepad");
     ui::text_mid(c, c.f.body, 15 * s, rx0 + 20 * s, top + 27 * s, ui::kDim, "Button");
-    const char* titles[kCtlColumns] = {"Input 1", "Input 2", "Keyboard"};
+    const char* titles[kCtlColumns] = {"Input 1", "Input 2", "Keyboard", "Toggle"};
     for (int col = kCtlPrimary; col < kCtlColumns; col++)
         ui::text_mid_centre(c, c.f.body, 15 * s, (col_x[col] + col_x[col + 1]) * 0.5f, top + 27 * s, ui::kDim, titles[col]);
     top += 43 * s;
@@ -3298,9 +3347,11 @@ void draw_controls(ui::Ctx& c) {
         hits.add(rx0, y0, pad_x, y1, menu_hit::kCtlRow, i);
         const bool keys = keys_only(i);
         for (int col = kCtlPrimary; col < kCtlColumns; col++) {
-            const bool keyboard = col == kCtlKeyboard, disabled = keys && !keyboard;
-            const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (keyboard ? 0 : 3 * s);
-            const std::string v = keyboard ? keys_text(ctl.button) : disabled ? "-" : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
+            const bool keyboard = col == kCtlKeyboard, toggle = col == kCtlToggle;
+            const bool disabled = (keys && !keyboard) || (toggle && (ctl.button >= HOS_SW_N || ctl.button == HOS_SW_PLUS || ctl.button == HOS_SW_MINUS));
+            const float a = col_x[col] + (col == kCtlPrimary ? 0 : 3 * s), b = col_x[col + 1] - (toggle ? 0 : 3 * s);
+            const std::string v = disabled ? "-" : keyboard ? keys_text(ctl.button) : toggle
+                ? tx_onoff((opts.hold_toggle >> ctl.button) & 1) : pad_name(host->binding(HOS_BIND_PAD, ctl.button, col));
             const bool here = sel && col == (keys ? kCtlKeyboard : ccol);
             const ImVec2 va(a, y), vb(b, y + rh);
             if (here && listening) {   // (waiting for the new input: amber, the outline as a selected value's)
@@ -4083,6 +4134,12 @@ void menu_init() {
                 const int v = atoi(eq + 1);
                 *r.value = r.value == &opts.output_res ? parse_output(eq + 1) : std::min(std::max(v, r.lo), r.hi);
             }
+            if (!strncmp(line, "toggle_", 7))
+                for (int i = 0; i < HOS_SW_N; i++)
+                    if (i != HOS_SW_PLUS && i != HOS_SW_MINUS && !strcmp(line + 7, bind_names[i])) {
+                        const int bit = 1 << i;
+                        opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
+                    }
             has_resolution |= !strcmp(line, "resolution");
             has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");
@@ -4931,8 +4988,11 @@ void menu_tick() {
                 set_row(r, *r.value + (press[3] ? -r.step : r.step), press[3] ? -1 : 1);
                 changed = true;
             } else if (i >= 0) {
+                const int columns = i < kControls && controls[i].button < HOS_SW_N &&
+                                    controls[i].button != HOS_SW_PLUS && controls[i].button != HOS_SW_MINUS ? kCtlColumns : kCtlToggle;
+                if (ccol >= columns) ccol = kCtlKeyboard;   // (no toggle on pause, map, stick directions or ocarina notes)
                 if ((press[3] || press[4]) && i < kControls && !keys_only(i)) {
-                    ccol = (ccol + kCtlColumns + (press[3] ? -1 : 1)) % kCtlColumns;
+                    ccol = (ccol + columns + (press[3] ? -1 : 1)) % columns;
                     changed = true;
                 }
                 const int col = keys_only(i) ? kCtlKeyboard : ccol;
@@ -4940,13 +5000,19 @@ void menu_tick() {
                     if (i == kControls) {
                         host->bind(HOS_BIND_PAD, -1, 0, 0);
                         opts.pad_layout = 0;
+                        opts.hold_toggle = 0;
+                        save();
+                    }
+                    else if (col == kCtlToggle) {
+                        opts.hold_toggle ^= 1 << controls[i].button;
                         save();
                     }
                     else listening = col == kCtlKeyboard ? 2 : 1, listen_armed = false, listen_end = prof_now() + 6000000000LL;
                     changed = true;
                 }
                 if ((press[8] || press[9]) && i < kControls) {
-                    if (col != kCtlKeyboard) {
+                    if (col == kCtlToggle) opts.hold_toggle &= ~(1 << controls[i].button);
+                    else if (col != kCtlKeyboard) {
                         host->bind(HOS_BIND_PAD, controls[i].button, col, -1);
                         opts.pad_layout = detect_pad_layout();
                     }

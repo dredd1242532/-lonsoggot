@@ -411,7 +411,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
-| | Audio output | Auto, Stereo, 5.1 (after a restart) | Auto |
+| | Audio output | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
 | Gameplay | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev | Off |
 | | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
 | | Menu size | Small, Medium, Large | Medium |
@@ -490,6 +490,13 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   system, the menu options and the `RX_`/`HOS_` switches you changed) and ends with a link that opens the form with them
   filled in (the switches by name only); `longshot_log.txt` (this run's log so far) and `longshot_log.1.txt` (the run
   before's, which has the crash if the game crashed last time); and `picture.png`, the game's picture without the menu.
+  Settings whose defaults depend on the display, upscaler, Auto preset or other run-time context are listed after the
+  changes, in the same answer, under a **Depends on this PC** line, with their current value and “default depends on this
+  PC”. They are not counted as changed settings; the report does not invent a default from a run-time list index. The rows
+  a preset sets keep their fixed defaults on Custom while Auto (this PC) has never chosen for the options file; with a
+  preset, or once Auto has chosen, they depend on this PC.
+  Fixed defaults, including GPU Auto, the system-default microphone and Frame generation by's Auto, still report actual
+  changes; the Aspect ratio's default is the monitor's shape, and the Game language's `language.txt`'s.
   Your home folder is written `~` (`%USERPROFILE%` on Windows) and your user name `<user>` in the logs' paths. A switch's
   value is written only when it is a number, a size or on/off, and never for a name with `TOKEN`, `KEY`, `ROOM`,
   `SECRET`, `PASS`, `SERVER` or `USER` in it; other values read `(value left out)`. Nothing else goes in (no saves, no
@@ -602,7 +609,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   while the game was in front.
 - **Audio output** is the speakers the game mixes its sound for. Auto is 5.1 when your default output device has 5.1
   or more speakers, else stereo; Stereo or 5.1 chooses one whatever the device has (5.1 on stereo speakers is mixed
-  down). For one run, `HOS_AUDIO_CHANNELS=2` or `6` chooses stereo or 5.1 and wins over the menu.
+  down). Mono averages the stereo channels into both ears, for one-sided hearing or one earbud. Mono/Stereo
+  changes apply live while output is stereo; changing the channel layout (from or to 5.1) needs a restart.
+  Auto never applies the mono average. Saved `audio_output` values remain 0 Auto, 1 Stereo, 2 5.1; Mono is 3.
+  For one run, `HOS_AUDIO_CHANNELS=2` or `6` chooses the channel layout over the menu (6 leaves Mono inactive).
 - **Microphone** is what the ocarina hears when the game's own microphone option is on (an instrument, or humming).
   Default follows Windows' default recording device; the list shows each microphone by name, and a change applies at
   once. A chosen microphone that is unplugged stays chosen (shown as not connected): Default stands in until it is
@@ -680,6 +690,13 @@ face button), then the new button or key. <kbd>Esc</kbd> cancels, <kbd>Delete</k
 puts them all back. A gamepad button taken from another Switch button swaps with it. The page saves them in
 `longshot_options.ini`.
 
+**Toggle:** on the Controls page, set a Switch button's Toggle column to On to hold it with one press and release it
+with the next. Both gamepad inputs, bound keys and mouse buttons share the latch. Every Toggle starts Off.
+Plus, Minus, stick directions and ocarina note rows have no Toggle. Opening Insert, pressing Plus or Minus,
+losing focus, rebinding or Reset to defaults releases latched buttons. With Controller in background On, a new
+press can latch again behind another window. On Linux, other game dialogs do not necessarily clear the latch;
+press Insert to release it. There is no separate on-screen latch indicator.
+
 **Ocarina notes:** the page gains five rows, `Ocarina note (L)`, `(R)`, `(A)`, `(Y)`, `(X)`, unset by default: the game's own
 buttons play until you bind a note to a key or gamepad input of your own, and a bound note then answers only that input while
 the game waits for it. A dialogue or cutscene that takes the buttons ends the wait, and a song lesson keeps the game's own too.
@@ -690,6 +707,7 @@ the game waits for it. A dialogue or cutscene that takes the buttons ends the wa
 ```ini
 pad_a=0
 key_a=69,13
+toggle_a=0
 ```
 
 `pad_<button>` is a gamepad input by position: 0 bottom face button, 1 right, 2 left, 3 top, 4 Select or Back, 5 Home,
@@ -701,7 +719,9 @@ buttons), and count while the mouse is captured. The buttons are `a` `b` `x` `y`
 `rs` `left` `up` `right` `down`, for keys only the left stick's and the camera's directions: `move_up`
 `move_down` `move_left` `move_right` `cam_up` `cam_down` `cam_left` `cam_right`, and the ocarina's five notes,
 which also take a `pad_` line: `note_l` `note_r` `note_a` `note_y` `note_x`. A button the file leaves out keeps
-its default.
+its default. `toggle_<button>=0|1` sets that button's Toggle (0 Off, the default; 1 On). It accepts the Switch
+buttons above except `plus` and `minus`; stick directions and note rows do not accept it. Other values mean Off.
+The file saves enabled flags, not held state; a restart starts with no button latched.
 
 </details>
 
