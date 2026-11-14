@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-14 | 5c2175e8dfb8536c4dd0e4a4227c102dd4715b2b; colour-pr-1 protanopia | NixOS 26.11 / Linux 7.2.7, private headless Sway 1.12/Xwayland | RX 7900 XT 20 GB, RADV Mesa 26.2.3 | Ryzen 5 7600X, 32 GB | 1920x1080, resolution 100%, game upscaler, window filter/sharpness/FG/HDR Off, Uncapped, VSync Auto; mesh fallback, udmabuf, audio off; Colour filter protanopia | Castle Town wooden door (Market_Child), copied save; stationary 30 s after warm-up, interleaved main/PR | colour-pr-1 protanopia: last five presents readings 55.8, 55.7, 55.8, 55.7, 55.7; median 55.70 FPS |

@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-14 | f87557ae73df279128686b274055e6345dedc102; colour-main-1 off | NixOS 26.11 / Linux 7.2.7, private headless Sway 1.12/Xwayland | RX 7900 XT 20 GB, RADV Mesa 26.2.3 | Ryzen 5 7600X, 32 GB | 1920x1080, resolution 100%, game upscaler, window filter/sharpness/FG/HDR Off, Uncapped, VSync Auto; mesh fallback, udmabuf, audio off; Colour filter off | Castle Town wooden door (Market_Child), copied save; stationary 30 s after warm-up, interleaved main/PR | colour-main-1 off: last five presents readings 56.1, 56.1, 56.5, 56.0, 55.9; median 56.10 FPS |
