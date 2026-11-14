@@ -169,9 +169,13 @@ class Bridge:
             req["timeout"] = timeout
         self.send(req)
         wait = (timeout if timeout is not None else 3600 if cmd in ("press", "stick", "sequence") else 60) + 10
-        deadline = time.monotonic() + (wait if reply_timeout is None else reply_timeout)
-        while True:
-            msg = self.line(wait if reply_timeout is None else max(0, deadline - time.monotonic()))
+        limit = wait if reply_timeout is None else reply_timeout
+        deadline = time.monotonic() + limit
+        while True:   # (one deadline: an event line that comes meanwhile does not start the wait again)
+            left = deadline - time.monotonic()
+            if left <= 0 and b"\n" not in self.pending:
+                raise Failed("no answer from the game in %.0f s" % limit, 3)
+            msg = self.line(max(0, left))
             if msg is None:
                 if cmd == "quit":
                     return {"id": rid, "ok": True, "quitting": True}
