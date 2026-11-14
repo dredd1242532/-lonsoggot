@@ -475,12 +475,7 @@ jobs:
           name: Trust checkout
           command: git config --global --add safe.directory "$PWD"
       - unless:
-          condition:
-            or:
-              - equal: [true, << pipeline.parameters.release_dry_run >>]
-              - and:
-                  - not:
-                      equal: ["", << pipeline.git.tag >>]
+          condition: pipeline.parameters.release_dry_run == true or (pipeline.git.tag or "") != ""
           steps:
             - restore_cache:
                 keys:

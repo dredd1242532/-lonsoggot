@@ -24,12 +24,8 @@ jobs:
           command: echo skip
 workflows:
   setup-pr:
-    when:
-      and:
-        - equal: [pull_request, << pipeline.event.name >>]
-        - not:
-            equal: [main, << pipeline.git.branch >>]
-        - equal: ["", << pipeline.git.tag >>]
+    # expression strings: git.tag is null (not "") on Forgejo pipelines with no tag
+    when: pipeline.event.name == "pull_request" and pipeline.git.branch != "main" and (pipeline.git.tag or "") == ""
     jobs:
       - mb/setup:
           name: setup-pr
@@ -39,11 +35,7 @@ workflows:
             {"nightly":false,"release_dry_run":false,"website_refresh":false,
             "vulkan_dlss":false,"fork_pr":0,"fork_sha":""}
   setup-main:
-    when:
-      and:
-        - equal: [push, << pipeline.event.name >>]
-        - equal: [main, << pipeline.git.branch >>]
-        - equal: ["", << pipeline.git.tag >>]
+    when: pipeline.event.name == "push" and pipeline.git.branch == "main" and (pipeline.git.tag or "") == ""
     jobs:
       - mb/setup:
           name: setup-main
@@ -55,14 +47,11 @@ workflows:
             {"nightly":false,"release_dry_run":true,"website_refresh":false,
             "vulkan_dlss":false,"fork_pr":0,"fork_sha":""}
   setup-release:
-    when:
-      matches:
-        pattern: ^v.*
-        value: << pipeline.git.tag >>
+    when: (pipeline.git.tag or "") starts-with "v"
     jobs:
       - mb/setup:
           name: setup-release
-          filters: pipeline.git.tag starts-with "v"
+          filters: (pipeline.git.tag or "") starts-with "v"
           event-file: .circleci/events/release.yml
           force-full: true
           # dry-run until cutover: Forgejo's release.yml is still the live publisher (docs/ci.md)
@@ -116,18 +105,11 @@ workflows:
             "vulkan_dlss":<< pipeline.parameters.vulkan_dlss >>,
             "fork_pr":0,"fork_sha":""}
   setup-noop-tag:
-    when:
-      and:
-        - not:
-            equal: ["", << pipeline.git.tag >>]
-        - not:
-            matches:
-              pattern: ^v.*
-              value: << pipeline.git.tag >>
+    when: (pipeline.git.tag or "") != "" and not ((pipeline.git.tag or "") starts-with "v")
     jobs:
       - setup-noop:
           name: setup-noop-tag
-          filters: pipeline.git.tag and not (pipeline.git.tag starts-with "v")
+          filters: (pipeline.git.tag or "") != "" and not ((pipeline.git.tag or "") starts-with "v")
   setup-noop-schedule:
     when:
       and:
@@ -146,3 +128,8 @@ workflows:
     jobs:
       - setup-noop:
           name: setup-noop-api
+  setup-noop-branch-push:
+    when: pipeline.event.name == "push" and pipeline.git.branch != "main" and (pipeline.git.tag or "") == ""
+    jobs:
+      - setup-noop:
+          name: setup-noop-branch-push
