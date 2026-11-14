@@ -191,6 +191,9 @@ nothing is sent.
 The text fields take keyboard input or a paste. With a controller, Left and Right move the caret, the left shoulder
 removes a character, and Paste, Done and Cancel work as in Custom output size. Unlike that numeric field, the name,
 relay and room-secret fields have no character picker, so they do not show Character or Add prompts.
+The Controls page's hold-to-toggle applies to gameplay, not these text actions. Editing uses physical pad presses
+and the keyboard's editing keys; saving a name or relay keeps the controls' saved Toggle flags, and changing a Toggle
+keeps the name and relay.
 
 ## The log
 

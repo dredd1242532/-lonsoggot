@@ -134,10 +134,12 @@ int main(int argc, char** argv) {
     CHECK(opts.pace == 1 && opts.realtime == 1 && opts.resolution == 0 && opts.upscale == 2 && opts.framegen == 4);
     CHECK(output_at(opts.output_res).w == 2400 && output_at(opts.output_res).h == 1344);
     // An unrelated row changed and saved: the file keeps the player's values
+    coop_name_field = {5, "Alice"}, coop_relay_field = {9, "localhost"};
     opts.sharpness = 40;
     save();
     CHECK(has("sharpness=40\n"));
     CHECK(has("pad_a=1,17\n") && has("key_a=69,0\n") && has("toggle_a=1\n"));
+    CHECK(has("coop_name=Alice\n") && has("coop_server=localhost\n"));
     CHECK(has("frame_pacing=0\n"));
     CHECK(has("game_speed=0\n"));
     CHECK(has("resolution=2\n"));
@@ -168,12 +170,16 @@ int main(int argc, char** argv) {
     host->binding = [](int set, int, int slot) {
         return set == HOS_BIND_PAD ? (slot ? 17 : 1) : (slot ? 0 : 69);
     };
+    coop_name_field = {3, "Bob"};
     save();
     CHECK(has("pad_a=1,17\n") && has("key_a=69,0\n") && has("toggle_a=0\n"));
     CHECK(!has("toggle_a=1\n"));   // the old flag must not overwrite the new one on reload
+    CHECK(has("coop_name=Bob\n") && !has("coop_name=Alice\n") && has("coop_server=localhost\n"));
     opts.hold_toggle = 1;
     save();
     CHECK(has("toggle_a=1\n") && !has("toggle_a=0\n"));
+    CHECK(has("coop_name=Bob\n") && has("coop_server=localhost\n"));
+    std::puts("PASS: co-op text saves and toggle flags persist together, with and without the binding callback");
     std::puts("PASS: the environment's rows last for the run; the options file keeps the player's");
 }
 """
