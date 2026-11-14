@@ -84,7 +84,6 @@ struct PointerEntry { uint64_t addr, size; };
 const PointerEntry* pointer_table(const NvnState& s, int stage);
 uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uint32_t offset);   // (vk_shader.cpp)
 uint64_t sampler_registrations_generation();   // (vk_bank.cpp: sampler_for's cache)
-uint64_t driver_cache_bytes(std::string* where);   // (below: the drivers' shader cache folders; pcache_load_off)
 namespace {
 // ---- (longshot) this file's per-thread objects that need a constructor or a destructor ----
 // With llvm-mingw every use of such a thread_local calls the file's TLS init function, which saves registers, finds the
@@ -1046,9 +1045,9 @@ bool play_cache_in_use() { return play_cache.load() != nullptr; }
 bool pcache_no_save = false;   // (RX_VK_PCACHE_LOAD=0: pcache_init)
 // (RX_VK_PCACHE_LOAD=0, an A/B of what the file costs in memory: its 2.5 GB read whole and held by the driver. The cache
 // starts empty and is not saved; the driver's own shader cache is all there is.) (longshot, issue 388) Unset, the file is
-// not read either on a Linux PC with NVIDIA's driver, 20 GB of RAM or less and programs loaded at their create calls, where
-// the driver's own cache is not nearly empty: the driver's copy of it was most of a gigabyte of a 16 GB PC's swap
-// (pcache_load.h). RX_VK_PCACHE_LOAD=1 reads it there too
+// not read either on a Linux PC with NVIDIA's own driver, 20 GB of RAM or less and programs loaded at their create calls,
+// where NVIDIA's own shader cache is on and not nearly empty: the driver's copy of the file was most of a gigabyte of a 16 GB
+// PC's swap (pcache_load.h). RX_VK_PCACHE_LOAD=1 reads it there too. One log line gives the answer and why, on every PC
 bool pcache_load_off() {
     static const bool off = [] {
         const char* e = getenv("RX_VK_PCACHE_LOAD");
@@ -1058,19 +1057,35 @@ bool pcache_load_off() {
         const bool linux_nvidia = false;
         const uint32_t ram_mb = 0;
 #else
-        const bool linux_nvidia = dev.props.vendorID == 0x10DE;
+        const bool linux_nvidia = dev.driver_id == VK_DRIVER_ID_NVIDIA_PROPRIETARY;   // (not NVK: Mesa's, with Mesa's cache)
         const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
         const uint32_t ram_mb = pages > 0 && page > 0 ? (uint32_t)(((uint64_t)pages * (uint64_t)page) >> 20) : 0;
 #endif
-        // (the driver's folders walked only where everything else says not to read the file)
-        const bool small = sw < 0 && !preparing && at_create && linux_nvidia && ram_mb && ram_mb <= pcache_load::kSmallRamMb;
-        const uint64_t cache_mb = small ? driver_cache_bytes(nullptr) >> 20 : 0;
-        const pcache_load::Choice c = pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache_mb);
-        if (small || sw >= 0)
-            logf("vk: pipeline cache file %s: %s (%u MB of RAM, the driver's own cache %llu MB; RX_VK_PCACHE_LOAD=%d %s)",
-                 c.load ? "read" : "not read", pcache_load::why_text(c.why), (unsigned)ram_mb, (unsigned long long)cache_mb,
-                 c.load ? 0 : 1, c.load ? "would leave it" : "reads it");
-        return !c.load;
+        // (NVIDIA's folder walked only where everything else says not to read the file; its size alone counts, not Mesa's)
+        pcache_load::Measured cache{pcache_load::Cache::kUnknown, 0};
+        std::string dir;
+        const bool looked = pcache_load::needs_cache(sw, preparing, at_create, linux_nvidia, ram_mb);
+        if (looked) {
+            const char* c = getenv("__GL_SHADER_DISK_CACHE");
+            cache = pcache_load::nvidia_cache(c && *c && env_value_off(c), getenv("__GL_SHADER_DISK_CACHE_PATH"),
+                                              getenv("XDG_CACHE_HOME"), getenv("HOME"), &dir);
+        }
+        const pcache_load::Choice choice =
+            pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache.cache, cache.bytes >> 20);
+        std::string seen;   // (what was looked at: the switch, or the RAM and NVIDIA's cache where they were)
+        if (sw >= 0) seen = std::string("RX_VK_PCACHE_LOAD=") + e;
+        else if (choice.why == pcache_load::Why::kRam || looked)
+            seen = std::to_string(ram_mb) + " MB of RAM";
+        if (looked) {
+            seen += ", NVIDIA's own shader cache ";
+            seen += cache.cache == pcache_load::Cache::kOff       ? std::string("off (__GL_SHADER_DISK_CACHE, or no folder for it)")
+                    : cache.cache == pcache_load::Cache::kUnknown ? "not measured: " + dir + " could not be walked through"
+                                                                  : std::to_string(cache.bytes >> 20) + " MB in " + dir;
+        }
+        if (!choice.load && sw < 0) seen += "; RX_VK_PCACHE_LOAD=1 reads it";
+        logf("vk: pipeline cache file %s: %s%s%s%s", choice.load ? "read" : "not read", pcache_load::why_text(choice.why),
+             seen.empty() ? "" : " (", seen.c_str(), seen.empty() ? "" : ")");
+        return !choice.load;
     }();
     return off;
 }
