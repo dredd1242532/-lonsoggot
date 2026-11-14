@@ -24,6 +24,23 @@ and saved-size accounting intact, so a later save can retry. There is no in-plac
 overwrite fallback. On Windows a mapped destination can prevent replacement;
 the old cache is retained until the reader releases it and a later save succeeds.
 
+On macOS, the empty sibling temporary reserves its whole capacity with
+`fcntl(F_PREALLOCATE)`, `F_ALLOCATEALL` and `F_PEOFPOSMODE`, then `ftruncate`
+sets the logical length before the writable mapping is exposed. Physical
+contiguity is not required. Either syscall failing returns an empty acquisition;
+the temporary is removed and the published cache is left alone, as on Linux.
+A filesystem that does not support preallocation is a save failure, not a
+sparse-file fallback. Read views, publication and cleanup use the same POSIX
+path, including the restriction on external in-place truncation.
+
+The program cache's two small per-record read hints use `fcntl(F_RDADVISE)` on
+macOS for the same head and tail ranges as Linux's `POSIX_FADV_WILLNEED`.
+These are best effort: ordinary reads still perform and validate the I/O even
+when the hint is refused. `F_RDAHEAD` is not used because it changes read-ahead
+policy rather than requesting those particular ranges. These calls are described
+in the macOS `fcntl(2)` and `truncate(2)` manual pages. This is cache-file support,
+not a complete macOS renderer or game port.
+
 At cache initialization, recognized base/play temporary names older than 24 hours
 are collected. Published caches, other names, links and recent temporaries are
 left alone. A POSIX writer holds an exclusive advisory lock;Windows write handles
@@ -46,6 +63,12 @@ Game-free checks:
 ```sh
 python -I -B tests/run_all.py pipeline_cache pipeline_play_cache pcache_header
 ```
+
+`tests/test_pipeline_cache_allocation.py` adds macOS-only checks of the logical
+file length and allocated 512-byte blocks before any mapped write, and a child
+with a file-size limit that must fail cleanly, retain the old file and clean up.
+The native fault fixture also refuses `F_PREALLOCATE` with `ENOSPC`, before any
+mapping. Windows and Linux continue to use their existing code and checks.
 
 These compile actual production functions/helpers, exercise native file ownership
 and injected syscall refusals, and reject semantic mutations for incorrect saved

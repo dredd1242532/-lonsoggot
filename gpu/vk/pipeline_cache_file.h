@@ -266,12 +266,22 @@ public:
         PipelineCacheFile result;
         if (!capacity || capacity > (uint64_t)INT64_MAX || !result.create_temporary(path)) return {};
         result.size_ = capacity;
+#if defined(__APPLE__)
+        // The new temporary is empty: reserve every byte before setting its
+        // logical length. ftruncate alone leaves holes that can SIGBUS on write.
+        fstore_t store{};
+        store.fst_flags = F_ALLOCATEALL;
+        store.fst_posmode = F_PEOFPOSMODE;
+        store.fst_length = (off_t)capacity;
+        if (fcntl(result.file_, F_PREALLOCATE, &store) == -1 || !result.resize(capacity)) return {};
+#else
         if (!result.resize(capacity)) return {};
 #if !defined(_WIN32)
         // ftruncate can leave sparse holes. Reserve backing storage before the
         // driver writes through mmap, so ENOSPC is a clean failure, not SIGBUS.
         // posix_fallocate returns an error number directly, not -1/errno.
         if (posix_fallocate(result.file_, 0, (off_t)capacity) != 0) return {};
+#endif
 #endif
         if (!result.map(true)) return {};
         return result;

@@ -685,8 +685,18 @@ void program_cache_load(uint64_t key, std::vector<std::unique_ptr<Program>>& var
     // that it serves them together and not one after the other. A record's head is its first bytes, its descriptors its last)
     if (disk_in)
         for (const DiskRecord& d : recs) {
+#if defined(__APPLE__)
+            // Best-effort range reads, not a change to the file's read-ahead policy.
+            struct radvisory front{d.at - 16, 4096};
+            (void)fcntl(fileno(disk_in), F_RDADVISE, &front);
+            if (d.size > 8192) {
+                struct radvisory tail{d.at + (int64_t)d.size - 8192, 8192};
+                (void)fcntl(fileno(disk_in), F_RDADVISE, &tail);
+            }
+#else
             posix_fadvise(fileno(disk_in), d.at - 16, 4096, POSIX_FADV_WILLNEED);
             if (d.size > 8192) posix_fadvise(fileno(disk_in), d.at + (int64_t)d.size - 8192, 8192, POSIX_FADV_WILLNEED);
+#endif
         }
 #endif
     for (const DiskRecord& d : recs) {

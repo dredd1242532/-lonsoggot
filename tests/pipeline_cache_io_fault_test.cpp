@@ -50,7 +50,14 @@ static BOOL io_remove(LPCWSTR p){if(refuse(CLEANUP)){SetLastError(ERROR_ACCESS_D
 #else
 static int io_create(char* path){if(refuse(CREATE))return -1;return mkstemp(path);}
 static int io_resize(int fd,off_t n){if(refuse(RESIZE)||refuse(TRUNCATE))return -1;return ftruncate(fd,n);}
+#if defined(__APPLE__)
+static int io_control(int fd,int cmd,int arg){return fcntl(fd,cmd,arg);}
+static int io_control(int fd,int cmd,fstore_t* store){
+    if(cmd==F_PREALLOCATE&&refuse(ALLOCATE)){errno=ENOSPC;return -1;}return fcntl(fd,cmd,store);
+}
+#else
 [[maybe_unused]] static int io_allocate(int fd,off_t start,off_t n){if(refuse(ALLOCATE))return ENOSPC;return posix_fallocate(fd,start,n);}
+#endif
 [[maybe_unused]] static int io_lock(int fd,int op){if(refuse(LOCK)){errno=EWOULDBLOCK;return -1;}return flock(fd,op);}
 [[maybe_unused]] static int io_time(int fd,const timespec times[2]){if(refuse(TOUCH))return -1;return futimens(fd,times);}
 [[maybe_unused]] static int io_mode(int fd,mode_t mode){if(refuse(MODE))return -1;return fchmod(fd,mode);}
@@ -64,7 +71,11 @@ static int io_replace(const char* a,const char* b){if(refuse(REPLACE))return -1;
 static int io_remove(const char* p){if(refuse(CLEANUP)){errno=EACCES;return -1;}return unlink(p);}
 #define mkstemp io_create
 #define ftruncate io_resize
+#if defined(__APPLE__)
+#define fcntl io_control
+#else
 #define posix_fallocate io_allocate
+#endif
 #define flock io_lock
 #define futimens io_time
 #define fchmod io_mode
@@ -92,6 +103,9 @@ static int io_remove(const char* p){if(refuse(CLEANUP)){errno=EACCES;return -1;}
 #else
 #undef mkstemp
 #undef ftruncate
+#if defined(__APPLE__)
+#undef fcntl
+#endif
 #undef posix_fallocate
 #undef flock
 #undef futimens
