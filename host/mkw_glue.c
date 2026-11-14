@@ -44,9 +44,9 @@ static int commit_wait(void *p, SIZE_T size) {
 }
 /* (longshot, issue 333) The out-of-memory line and notice, said once for the run, by whichever runs out first: a guest commit
    (commit_refused) or the host's own allocation (hos_alloc_failed). oom_state: 0 not said, 1 the notice up (or about to be), 2 said
-   and the notice closed (or none: HOS_HEADLESS, or no thread for it). wait 0: the notice on a thread of its own, the caller goes
-   on; wait 1: the caller ends the game next, so it shows the notice itself, or waits for the one already up, rather than end the
-   process under the player's eyes before they could read it */
+   and the notice closed (or none: HOS_HEADLESS, or no thread for it). The notice is on a thread of its own. wait 0: the caller
+   goes on; wait 1: the caller ends the game next, so it waits until the notice (its own or one already up) is closed, rather
+   than end the process before the player could read it */
 DWORD WINAPI hos_out_of_memory_box(LPVOID unused);
 static volatile LONG oom_state;
 static DWORD WINAPI oom_box(LPVOID unused) {
@@ -61,10 +61,11 @@ void hos_out_of_memory(int wait) {
 #else
         hos_log("mem: out of memory (RAM and swap): close other programs, or add swap");
 #endif
+        /* (on a thread of its own either way: on the game's thread that ran out, sead::MainThread, MessageBoxA came back at
+           once and showed nothing) */
         HANDLE t = NULL;
         if (env_on("HOS_HEADLESS")) InterlockedExchange(&oom_state, 2);
-        else if (wait) oom_box((LPVOID)1);
-        else if ((t = CreateThread(NULL, 0, oom_box, NULL, 0, NULL)) != NULL) CloseHandle(t);
+        else if ((t = CreateThread(NULL, 0, oom_box, wait ? (LPVOID)1 : NULL, 0, NULL)) != NULL) CloseHandle(t);
         else InterlockedExchange(&oom_state, 2);
     }
     while (wait && InterlockedCompareExchange(&oom_state, 1, 1) == 1) Sleep(100);

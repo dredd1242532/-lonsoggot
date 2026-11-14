@@ -7,8 +7,8 @@ Compiles the real hos_out_of_memory and hos_alloc_failed (and the pieces around 
 tests/host_alloc_wait_test.c's fake malloc, clock and notice, and runs each case in its own process:
 
 - recovers: refused three times, allocated 150 ms on, logged; realloc keeps the old block while it waits; no notice;
-- limit: never given: 5 s of tries, the line, the notice shown on the caller's thread (it stops next), then the fatal
-  that says out of memory; a guest commit refused after says nothing again;
+- limit: never given: 5 s of tries, the line, the notice (on a thread of its own: on the game's thread MessageBoxA
+  showed nothing) waited for until it is closed, then the fatal that says out of memory; a guest commit refused after says nothing again;
 - commit-first: a guest commit's notice already up on its own thread: the fatal waits until it is closed;
 - not-limit: refused with plenty of commit left: no notice, the fatal says how much was left;
 - overflow: calloc's count x size past size_t: the fatal at once, no wait;

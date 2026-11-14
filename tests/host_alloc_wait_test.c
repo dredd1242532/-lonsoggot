@@ -100,11 +100,11 @@ int main(int argc, char **argv) {
         CHECK(slept_ms == 5000 && fatals == 1);
         CHECK(strstr(logs, "native NVN: recording handle set: 1048576 bytes of host memory still refused after 5 s at the commit limit (10 MB of commit left)"));
         CHECK(strstr(logs, "mem: Windows is out of memory (RAM and page file)"));
-        CHECK(boxes == 1 && box_closing && threads == 0);
+        CHECK(boxes == 1 && box_closing && threads == 1);   /* (on a thread of its own: on the game's, nothing showed) */
         CHECK(!strcmp(fatal_text, "out of memory (RAM plus the page file): native NVN: recording handle set (1048576 bytes)"));
         CHECK(oom_state == 2);
         hos_out_of_memory(0);   /* (a guest commit refused after: said once) */
-        CHECK(boxes == 1 && threads == 0);
+        CHECK(boxes == 1 && threads == 1);
         const char *line = strstr(logs, "Windows is out of memory");
         CHECK(line && !strstr(line + 1, "Windows is out of memory"));
     } else if (!strcmp(scenario, "commit-first")) {   /* (a guest commit said it first, its notice still up: waited for) */
@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
         CHECK(!STOPS(p = hos_xmalloc(64, "native NVN: recording copy")));
         CHECK(p && slept_ms == 0);
         CHECK(STOPS(hos_xcalloc(65536, 8, "native NVN: recording handle set")));
-        CHECK(slept_ms == 5000 && boxes == 1 && box_closing);
+        CHECK(slept_ms == 5000 && boxes == 1 && box_closing && threads == 1);
         CHECK(!strcmp(fatal_text, "out of memory (RAM plus the page file): native NVN: recording handle set (524288 bytes)"));
     } else {
         fprintf(stderr, "unknown scenario %s\n", scenario);
