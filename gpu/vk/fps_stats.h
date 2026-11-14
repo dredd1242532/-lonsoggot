@@ -13,12 +13,14 @@ namespace mkwvk::fps_stats {
 
 /// The FPS counter row (opts.show_fps, saved as fps_counter=): an options file from before the levels has 0 Off or 1 On,
 /// and 1 is the counter as it was, the number alone. Dev: the Breakdown and the renderer's own numbers under it (dev_line)
-enum Level { kOff, kFps, kFrameTime, kGraph, kBreakdown, kDev, kLevels };
+enum Level { kOff, kFps, kFrameTime, kGraph, kBreakdown, kDev, kSystem, kLevels };
 inline int level_of(int saved) { return std::clamp(saved, (int)kOff, (int)kLevels - 1); }
 inline const char* level_name(int v) {
-    static const char* const t[] = {"Off", "FPS", "Frame time", "Graph", "Breakdown", "Dev"};
+    static const char* const t[] = {"Off", "FPS", "Frame time", "Graph", "Breakdown", "Dev", "System"};
     return t[level_of(v)];
 }
+// System is a compact alternative to the graph/Breakdown/Dev details, not another frame-time instrument.
+inline int timing_level(int saved) { const int level = level_of(saved); return level == kSystem ? kFrameTime : level; }
 
 /// The Dev level's lines, under the Breakdown's: their names, and their values from the renderer's counters (vk_menu.cpp
 /// fps_texts, every half second: the counts a frame over that half second, the uploads a second)

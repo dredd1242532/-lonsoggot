@@ -66,6 +66,12 @@ class MenuI18nTests(unittest.TestCase):
                 "alone)."
             ),
         }
+        hints["system readings"] = (
+            "System readings instead of the graph: process CPU (100% is one logical CPU), resident RAM, available RAM and "
+            "GPU heap usage and budget. Updated once a second by default; n/a means unavailable."
+        )
+        hints.update({name: name for name in ("System", "Process CPU", "Resident RAM", "Available RAM",
+                                             "GPU heap used", "GPU heap budget")})
         for name, hint in hints.items():
             self.assertTrue(hint in self.menu, "%s: expected complete hint is no text of vk_menu.cpp" % name)
         for table, pairs in self.tables.items():

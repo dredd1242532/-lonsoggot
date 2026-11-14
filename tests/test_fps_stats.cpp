@@ -1,5 +1,6 @@
 // tests/test_fps_stats.py: gpu/vk/fps_stats.h, the FPS counter's levels, its ring of frames, the averages, the 1% low, the
 // graph's columns and scale
+#define _CRT_SECURE_NO_WARNINGS
 #include "../gpu/vk/fps_stats.h"
 
 #include <cmath>
@@ -17,12 +18,14 @@ int main() {
     // the row's values: an options file from before the levels (0 Off, 1 On) keeps its meaning, On is the number alone
     CHECK("old off", fs::level_of(0) == fs::kOff);
     CHECK("old on is FPS", fs::level_of(1) == fs::kFps);
-    CHECK("a hand-edited value past the last", fs::level_of(9) == fs::kDev && fs::level_of(-3) == fs::kOff);
+    CHECK("a hand-edited value past the last", fs::level_of(9) == fs::kSystem && fs::level_of(-3) == fs::kOff);
     CHECK("names", !std::strcmp(fs::level_name(0), "Off") && !std::strcmp(fs::level_name(1), "FPS") &&
                        !std::strcmp(fs::level_name(2), "Frame time") && !std::strcmp(fs::level_name(3), "Graph") &&
                        !std::strcmp(fs::level_name(4), "Breakdown") && !std::strcmp(fs::level_name(5), "Dev") &&
-                       fs::kLevels == 6);
+                       !std::strcmp(fs::level_name(6), "System") && fs::kLevels == 7);
     CHECK("Dev is past the Breakdown", fs::kDev > fs::kBreakdown);
+    CHECK("System has only frame-time instrumentation", fs::timing_level(fs::kSystem) == fs::kFrameTime);
+    for (int i = 0; i <= fs::kDev; i++) CHECK("existing timing level unchanged", fs::timing_level(i) == i);
 
     // the Dev level's lines: a name each, and their values
     for (int i = 0; i < fs::kDevLines; i++) CHECK("a Dev line's name", fs::dev_name(i)[0] != 0);

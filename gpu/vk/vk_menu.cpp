@@ -32,6 +32,7 @@
 #include "vk_menu.h"
 #include "vk_menu_hit.h"
 #include "vk_fps.h"    // (the FPS counter's levels and numbers)
+#include "system_readings.h"
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
 #include "vk_texture.h"   // (the FPS counter's Dev level: texture_count, texture_bytes, texture_stats)
 #include "oot_cheat_items.h"
@@ -123,7 +124,7 @@ const char* tx_framegen(int v) {
     return t[v];
 }
 const char* tx_onoff(int v) { return v ? "On" : "Off"; }
-const char* tx_fps_level(int v) { return fps_stats::level_name(v); }
+const char* tx_fps_level(int v) { return v == fps_stats::kSystem ? "System" : fps_stats::level_name(v); }
 const char* tx_fps_corner(int v) { return fps_stats::corner_name(v); }   // (the FPS counter row: Off, FPS, Frame time, Graph, Breakdown)
 const char* tx_profile(int v) { return v ? "Handheld" : "Docked"; }   // (opts.handheld: the Profile row)
 const char* tx_menu_shortcut(int v) {
@@ -1143,7 +1144,9 @@ MENU_HINTS(hn_fps, 0, nullptr, "The frame rate. With frame generation on, the ga
            "And where each frame's time goes: the game, the renderer, waiting for the GPU, waiting for its turn (frame pacing, "
            "vsync); the GPU's own time; red marks where shaders were built or draws left out.",
            "And the renderer's own numbers, for debugging: video memory, textures, draws, dispatches and render passes a "
-           "frame, draws skipped, texture uploads and pipelines built.")
+           "frame, draws skipped, texture uploads and pipelines built.",
+           "System readings instead of the graph: process CPU (100% is one logical CPU), resident RAM, available RAM and "
+           "GPU heap usage and budget. Updated once a second by default; n/a means unavailable.")
 MENU_HINTS(hn_menu_size, 1, "Smaller, for a desk.", "The usual size.", "Larger, for a TV across the room.")
 MENU_HINTS(hn_speed, 0, "A step each frame: the game slows down whenever it runs below 60 fps.",
            "Normal speed down to 15 fps, by taking longer steps.")
@@ -2752,6 +2755,51 @@ char fps_gpu_text[24] = "";
 char fps_built_text[16] = "", fps_left_text[16] = "";
 char fps_dev_text[fps_stats::kDevLines][32];   // (the Dev level's values, fps_texts)
 bool fps_vram_over = false;                    // (the VRAM line in red: past what the driver allows)
+namespace sr = system_readings;
+sr::Sampler system_sampler;
+FILE* system_file = nullptr;
+uint32_t system_interval_ms = 1000;
+bool system_config_valid = true;
+char system_text[5][32] = {"n/a", "n/a", "n/a", "n/a", "n/a"};
+
+void system_init() {
+    const char* interval = getenv("RX_VK_SYSTEM_INTERVAL_MS");
+    if (interval && !sr::parse_interval(interval, system_interval_ms)) {
+        logf("vk: system: RX_VK_SYSTEM_INTERVAL_MS must be 250..60000; system readings disabled");
+        system_config_valid = false;
+        return;
+    }
+    const char* path = getenv("RX_VK_SYSTEM_LOG");
+    if (!path || !*path) return;
+    system_file = sr::create_csv(path);
+    if (!system_file) logf("vk: system: cannot create requested CSV (existing files are never replaced)");
+    else {
+        sr::csv_header(system_file);
+        logf("vk: system: CSV enabled, interval %u ms; CPU 100%% is one logical CPU; bytes are not private commit",
+             system_interval_ms);
+    }
+}
+void system_tick() {
+    const bool enabled = system_config_valid && (opts.show_fps == fps_stats::kSystem || system_file);
+    system_sampler.tick(enabled, system_interval_ms, sr::monotonic_ns, [] {
+        sr::Sample sample = sr::read_process();
+        uint64_t used = 0, budget = 0;
+        if (dev.memory_budget && vram_usage(&used, &budget) && budget) {
+            sample.device_used_bytes = used;
+            sample.device_budget_bytes = budget;
+        }
+        return sample;
+    }, [](const sr::Sample& sample) {
+        sr::cpu_text(system_text[0], sizeof system_text[0], sample.cpu_hundredths);
+        const sr::Reading bytes[] = {sample.rss_bytes, sample.ram_available_bytes, sample.device_used_bytes, sample.device_budget_bytes};
+        for (int i = 0; i < 4; i++) sr::memory_text(system_text[i + 1], sizeof system_text[0], bytes[i]);
+        if (system_file && !sr::csv_sample(system_file, sample)) {
+            logf("vk: system: CSV write failed; file output stopped");
+            fclose(system_file);
+            system_file = nullptr;
+        }
+    });
+}
 /// The FPS counter's target frame time, ms: the Game frame rate cap row's (HOS_FPS_MAX over it, as host/nn_vi.c, which follows
 /// the row in play), or the display's refresh with V-Sync On and no frame generation when that is slower; 0 for none (Uncapped
 /// without V-Sync)
@@ -4087,9 +4135,11 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
     const float row = 17 * s, gh = 50 * s, lh = 16 * s;
     float h = 32 * s + (fps_sub[0] ? row : 0);
     if (level >= fs::kFrameTime && fps_ms_text[0]) h += row;
-    if (level >= fs::kGraph) h += 8 * s + gh + 4 * s;
-    if (level >= fs::kBreakdown) h += 10 * s + 6 * s + 4 * lh + 6 * s + 3 * lh;
-    if (level >= fs::kDev) h += 6 * s + fs::kDevLines * lh;
+    const bool system = level == fs::kSystem;
+    if (system) h += 6 * s + 5 * lh;
+    if (!system && level >= fs::kGraph) h += 8 * s + gh + 4 * s;
+    if (!system && level >= fs::kBreakdown) h += 10 * s + 6 * s + 4 * lh + 6 * s + 3 * lh;
+    if (!system && level >= fs::kDev) h += 6 * s + fs::kDevLines * lh;
     const float edge = left ? c.safe : c.w - c.safe;
     const float top = bottom ? c.h - c.safe - h : under_banner && !tune_mode && page != 5 && !beside ? banner_h(c) + 10 * s : c.safe;
     // (x for a width at the column's edge)
@@ -4134,6 +4184,16 @@ void draw_fps(ui::Ctx& c, bool under_banner) {
         tab.draw(c.d, x, y, ms_col, fps_ms_text, s);
         tab.draw(c.d, x + mw + gap, y, soft, fps_low_text, s);
         y += row;
+    }
+    if (system) {
+        static const char* const names[] = {"Process CPU", "Resident RAM", "Available RAM", "GPU heap used", "GPU heap budget"};
+        y += 6 * s;
+        for (int i = 0; i < 5; i++) {
+            lab.draw(c.d, at(gw), y, soft, i18n::tr(names[i]), s);
+            tab.draw(c.d, at(tab.width(system_text[i])), y, ink, system_text[i], s);
+            y += lh;
+        }
+        return;
     }
     if (level < fs::kGraph) return;
     // (the graph)
@@ -4479,7 +4539,8 @@ void menu_init() {
     if (!has_vram_budget) opts.vram_budget = preset_vram_budget(opts.budget);   // (a file from before the row)
     vram_budget_sync();
     menu_debug_rows(opts.descriptor_reuse, opts.sampler_cache);   // (the Debug rows that apply in play: what was loaded)
-    fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);
+    fps_level_now.store(fps_stats::timing_level(opts.show_fps), std::memory_order_relaxed);
+    system_init();
     output_field_show();   // (longshot: Custom output size, the size of the player's own, as the file has it)
     // (the environment over the saved rows, for this run only: env_override, save)
     if (const char* e = getenv("RX_VK_FRAMEGEN_MULT")) env_override(&opts.framegen, std::min(std::max(atoi(e), 2), 8));
@@ -4623,6 +4684,7 @@ void fps_texts(int64_t now) {
     fs::low_text(fps_low_text, sizeof fps_low_text, half.low_fps);
     if (!half.frames) fps_ms_text[0] = 0;
     fps_ms_now = half.avg_ms;
+    if (level == fs::kSystem) return;
     for (int p = 0; p < fs::kParts; p++) fps_parts_now[p] = half.part[p];
     if (level < fs::kBreakdown) return;
     for (int p = 0; p < fs::kParts; p++) fs::frame_time_text(fps_part_text[p], sizeof fps_part_text[p], half.part[p]);
@@ -5535,7 +5597,8 @@ void menu_tick() {
             PostMessageA(app_window(), WM_APP + 8, (WPARAM)now_open, (LPARAM)(now_open && esc_opens));
         }
     }
-    fps_level_now.store(fps_stats::level_of(opts.show_fps), std::memory_order_relaxed);   // (what vk_fps.cpp measures)
+    fps_level_now.store(fps_stats::timing_level(opts.show_fps), std::memory_order_relaxed);   // (what vk_fps.cpp measures)
+    system_tick();
     if (opts.show_fps) {
         static int64_t next = 0, last_game = 0, last_shown = 0;
         const int64_t now = prof_now();

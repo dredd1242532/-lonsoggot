@@ -303,6 +303,39 @@ case-sensitive, and an unknown one is ignored.
 
 ### Time and profiles
 
+#### System readings
+
+The FPS counter's **System** choice is a compact alternative to Graph/Breakdown/Dev, keeping FPS and frame time.
+It samples process CPU use, resident memory and available system RAM, plus the existing selected-device Vulkan
+usage/budget snapshot. Linux reads `CLOCK_PROCESS_CPUTIME_ID`, `VmRSS` in `/proc/self/status` and `MemAvailable`
+in `/proc/meminfo`. Windows reads `GetProcessTimes`, `K32GetProcessMemoryInfo`'s working set, and
+`GlobalMemoryStatusEx`'s available physical memory. CPU 100% is one logical CPU, not the whole PC. The resident
+set includes shared pages and is not private commit. Device-local usage/budget requires `VK_EXT_memory_budget`;
+without it both values are unavailable on any GPU vendor. On integrated GPUs those heaps can be shared system RAM.
+The budget is a moving driver allowance, not capacity. GPU utilization, temperatures and busiest-thread sampling
+are later work, not readings supplied by this slice.
+
+`RX_VK_SYSTEM_LOG` creates a local CSV at the explicit path; it creates no directory and never overwrites a file.
+No samples are uploaded or automatically attached to a Bug report. The header is:
+
+```text
+# longshot_system,1
+monotonic_ns,cpu_process_pct,rss_bytes,ram_available_bytes,vram_used_bytes,vram_budget_bytes
+```
+
+Integers are bytes or monotonic nanoseconds as named; CPU is percent, with a decimal dot. `na` is unavailable
+(including CPU's first interval), not zero. Displayed memory uses MiB, bytes divided by 1048576. These names retain
+the earlier proposed monitor's units, but this smaller format is deliberately **not** its `perf.csv` V1 schema:
+there is no frame-clock join, frame statistics, completion summary or vendor-sensor protocol.
+
+One complete line is flushed per interval while frames reach the menu tick, without catching up missed intervals.
+The first sample is immediate; a long pause delays the next sample. CPU covers the actual time between samples.
+Reads and optional file writes run on that tick's thread, so enabling them can add latency, particularly on slow
+storage. Use a local file, not a network filesystem. A write failure stops file output with a diagnostic; System
+can still display readings. Choosing another counter level and leaving file output unset disables all monitor
+clock reads, OS reads, formatting and file operations. Its enable check remains; no zero-overhead timing claim is made.
+
+
 | Switch | What it does |
 |---|---|
 | `HOS_PROFILE=<seconds>` | Every interval, the busiest threads in the log; it also starts the samplers below |
@@ -313,6 +346,8 @@ case-sensitive, and an unknown one is ignored.
 | `HOS_FPS_LOG` (set), `HOS_PRESENT_TRACE=<csv>` | The game's frame limiter, VRR flags and nominal rate every 300 presents, and the game clock's speed (1.000: real time); a CSV line per game present with host-clock times before queue flushing, around the renderer call, after virtual-core reacquisition, and at the return counter. These are CPU wall times, not GPU completion or scanout; async rendering measures the enqueue call. Unset/empty trace adds no clock reads |
 | `HOS_FPS_MAX=<61-1000>` | A frame rate cap for one run, over the Game frame rate cap row (1000 is Uncapped's) |
 | `RX_VK_FRAME_LOG=<csv>` | A CSV line per present: frame, seconds, frame time in ms. Also works with `HOS_HEADLESS`: CPU intervals after submitting the offscreen copy, without swapchain/display waits. Not `RX_VK_FRAMELOG` (no underscore: pictures, above) |
+| `RX_VK_SYSTEM_LOG=<csv>` | Optional System readings file, even with the counter off. Unset or empty: no file. Relative to the process working directory; an absolute UTF-8 path is accepted. Exclusive creation refuses an existing path. Set in the process environment or a test-owned `HOS_ENV_FILE`, not the ordinary `longshot_env.txt`. |
+| `RX_VK_SYSTEM_INTERVAL_MS=<250..60000>` | System readings interval in milliseconds (default 1000), for the System counter and file alike. Invalid or empty values disable the readings with a diagnostic. No effect on existing counter levels when file output is off. |
 | `RX_VK_PRESENTS_AHEAD=<1-8>` | How many presents the game may hand over ahead of the replay (2). Not `RX_VK_PRESENT_AHEAD` |
 | `RX_VK_PRESENT_AHEAD=0` | Frame generation's copies into the window submitted each at its own time, as before #1702 (default on: a set's copies go to the GPU together). Not `RX_VK_PRESENTS_AHEAD` |
 | `RX_VK_PASS_TIMING=1` or `2` | GPU time per pass (2: per program too), logged every 600 presents |
@@ -741,6 +776,7 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 | `quality_preset` | 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+) |
 | `gpu_device` | 0 Auto, n the n-th card with Vulkan 1.3 as the row lists them |
 | `frame_generation` | 0 Off, 2 to 8 the multiplier |
+| `fps_counter` | 0 Off (default), 1 FPS, 2 Frame time, 3 Graph, 4 Breakdown, 5 Dev, 6 System. System samples CPU/RAM and device-local GPU heap usage/budget; existing values keep their meaning. |
 | `resolution` | 0 Auto, 1 100%, 2 75%, 3 67%, 4 50% |
 | `output_res` | A size, `<width>x<height>`: 2048x1152 (the game's own reduced size), one of the screen's display modes (the menu's Aspect ratio and Output resolution rows), or any other with each side a multiple of 8 (rounded down), at least 640x360, at most 5120x2880's pixels, 5:4 to 48:9; anything else is 2048x1152. No line: 2560x1440, the game's own picture, or the screen's size where that has fewer pixels, at the screen's shape (2560x1080 and 2256x1504 start at their own size, as 1280x800 and 1920x1200 did before). The menu marks 2048x1152 "(reduced)". A size more than 1 % off 16:9 sets the picture's shape (`host/hos_wide_size.h` `hos_output_own_shape`). The Aspect ratio row saves `ultrawide=` 1 for the monitor's own shape, else 0; another shape is `output_res`'s own. The numbers saved before (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, 5 5120x2880) are still read |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |

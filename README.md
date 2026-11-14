@@ -450,7 +450,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
 | | Audio output | Auto, Stereo, 5.1, Mono (layout changes after a restart; Mono/Stereo live on stereo output) | Auto |
-| Gameplay | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev | Off |
+| Gameplay | FPS counter | Off, FPS, Frame time, Graph, Breakdown, Dev, System | Off |
 | | FPS counter position | Top right, Top left, Bottom right, Bottom left | Top right |
 | | Menu size | Small, Medium, Large | Medium |
 | | Game speed | Per frame, Real time | Real time |
@@ -640,7 +640,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
   down to 15 fps.
 - **FPS counter** shows in a corner (**FPS counter position**; at the top right while the menu is open), at one of
-  five levels. **FPS** is the number alone (an options file's old On); with frame generation on, it also shows the
+  six levels. **FPS** is the number alone (an options file's old On); with frame generation on, it also shows the
   game's own rate and who makes the frames: `Base 60, DLSS FG` (NVIDIA DLSS Frame Generation), `FSR 3.1 FG` or `Built-in FG`. **Frame time** adds the game's frame time and its 1% low (the rate of the slowest 1% of frames over
   the last 10 seconds). From this level on, the number and the frame time are green at the Game frame rate cap's rate,
   amber under it and red under two thirds of it. (The cap's rate is the display's refresh instead with V-Sync On when
@@ -655,6 +655,16 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   renderer's own numbers, for debugging and bug reports: video memory used of what the driver allows (red past it), the
   textures held and their memory, draws, dispatches and render passes a frame, draws skipped a frame (red when any),
   texture uploads a second and the pipelines built since the start.
+  **System** keeps FPS and frame time, replacing the graph and renderer details with process CPU use, resident RAM,
+  available system RAM, and the selected GPU's device-local heap usage and budget. CPU 100% means one logical CPU,
+  so the process can exceed 100%. Memory is shown in MiB; resident RAM includes shared pages, not private commit.
+  An integrated GPU's device-local heaps may be system RAM, not dedicated VRAM. `n/a` means the reading is unavailable,
+  never zero. The first CPU sample needs an interval before it has a value. GPU utilization, temperatures and the
+  busiest thread are not part of this view yet.
+  System readings refresh once a second by default, only while System or optional file output is enabled. For a local
+  capture, set `RX_VK_SYSTEM_LOG=system.csv` in the process environment (relative to the working directory), or give an
+  absolute UTF-8 path. Existing files are refused, never replaced. `RX_VK_SYSTEM_INTERVAL_MS=250..60000` selects the
+  interval in milliseconds (default 1000). See [the file format and limits](docs/development.md#system-readings).
 - **Volume** scales the game's whole sound, on top of the game's own sound settings and Windows' volume. Its steps
   follow a curve so they sound about even: 50% is a quarter of the level (-12 dB). **Mute in background** silences the
   game while another window has the focus; an overlay such as Steam's or Discord's does not count as another window
