@@ -24,11 +24,11 @@ memory = importlib.import_module("darwin_memory")
 
 def actual_build(source):
     tree = ast.parse(source.read_text(encoding="utf-8"))
-    names = {"free_mb", "rss_mb"}
+    names = {"free_mb", "rss_mb", "tree_rss"}
     nodes: list[ast.stmt] = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     assert {node.name for node in nodes if isinstance(node, ast.FunctionDef)} == names
     scope: dict[str, Any] = dict(sys=SimpleNamespace(platform="darwin"), os=SimpleNamespace(name="posix"),
-                                 open=mock.Mock(side_effect=OSError("no /proc on macOS")), tree_rss=mock.Mock(return_value=0))
+                                 open=mock.Mock(side_effect=OSError("no /proc on macOS")))
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), scope)
     return scope
 
@@ -176,7 +176,7 @@ class DarwinMemoryTests(unittest.TestCase):
             self.assertEqual(scope["rss_mb"](None), 0)
             self.assertEqual(scope["rss_mb"](SimpleNamespace(pid=123, poll=lambda: 0)), 0)
         read.assert_called_once_with(123)
-        scope["tree_rss"].assert_not_called()
+        scope["open"].assert_not_called()
         with mock.patch.object(memory, "tree_rss", side_effect=OSError("libproc unavailable")):
             self.assertEqual(scope["rss_mb"](proc), 0)
 

@@ -364,7 +364,10 @@ def free_mb():
 
 
 def tree_rss(pid):
-    """(linux) The resident bytes of a process and the processes it started (a driver that runs its compiler as a child, or ccache)"""
+    """The resident bytes of a process and the processes it started (a driver that runs its compiler as a child, or ccache)"""
+    if sys.platform == "darwin":
+        import darwin_memory
+        return darwin_memory.tree_rss(pid)
     with open("/proc/%d/statm" % pid) as f:
         n = int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
     for task in os.listdir("/proc/%d/task" % pid):
@@ -436,9 +439,6 @@ def rss_mb(proc):
         # A retained Popen can outlive its driver while PID counters still remain.
         if proc.poll() is not None:
             return 0
-        if sys.platform == "darwin":
-            import darwin_memory
-            return darwin_memory.tree_rss(proc.pid) >> 20
         if os.name == "nt":
             return tree_ws(proc.pid) >> 20
         return tree_rss(proc.pid) >> 20

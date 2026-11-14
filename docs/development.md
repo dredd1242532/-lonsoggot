@@ -343,6 +343,8 @@ compressed memory and swap are not added. File-backed pages may need writeback o
 guarantee; the existing 1.5 GB reserve and one-compiler floor still apply. `proc_pidinfo` supplies resident bytes and
 `proc_listchildpids` walks the compiler's descendants without starting `ps`. Unreadable available memory remains `None`
 (the jobs limit decides); an exited or unreadable process counts as zero (its unmet estimate stays reserved).
+The POSIX `tree_rss()` backend still returns bytes; the common `rss_mb()` path checks process lifetime, handles read
+failures and converts to MiB on every host.
 The Python builder runs natively even when cross-compiling an x86-64 game for Rosetta. These readers alone do not make
 the rest of the build pipeline support macOS.
 
