@@ -5096,8 +5096,8 @@ void clear_after_draws(VkCommandBuffer cmd) {
 /// (longshot) The temporal upscalers' reactive mask (vk_reactive.h, RX_VK_REACTIVE=1): before the scene's transparent draws
 /// (reactive_policy.h: blended over it, tested against its depth without writing it) the scene's colour is copied, in a
 /// break of the pass. The scene is the B10G11R11 target with a depth of the size the upscaler last took, as its jitter is
-/// given (temporal_jitter_size, fsr3_inputs::jitter_size: 0 while neither draws). Not while AMD FSR 4 draws on the frame
-/// chain: it is given no mask, so nothing is copied for it
+/// given (temporal_jitter_size, fsr3_inputs::jitter_size: 0 while neither draws). Not while AMD FSR 4 or Intel XeSS draws on
+/// the frame chain: neither is given a mask, so nothing is copied for it
 void reactive_scene_draw(VkCommandBuffer cmd, const Program& p, const NvnState& s, const Targets& at) {
     if (!reactive::wanted()) return;
     if (!at.n || !at.color[0] || !at.depth || !temporal_scene_format(at.color_format[0])) return;
@@ -5106,7 +5106,7 @@ void reactive_scene_draw(VkCommandBuffer cmd, const Program& p, const NvnState& 
     static thread_local Seen seen{~0ull, 0, 0};
     if (seen.frame != now) {   // (once a frame on each thread, not once a draw)
         const bool chain = temporal_jitter_size(0) != 0;   // (one upscaler at a time: the chain's engine, else FSR 3.1)
-        if (chain && upscaler_rows::is_fsr4(temporal_mode()))
+        if (chain && (upscaler_rows::is_fsr4(temporal_mode()) || upscaler_rows::is_xess(temporal_mode())))
             seen = {now, 0, 0};
         else
             seen = {now, chain ? temporal_jitter_size(0) : fsr3_inputs::jitter_size(0),

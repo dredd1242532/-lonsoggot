@@ -45,6 +45,7 @@
 #include "vk_fsr3.h"      // (the Upscaler row: whether AMD FSR 3.1 runs on this GPU)
 #include "vk_fsr3fi.h"    // (the Frame generation row: whether FSR 3.1 makes the frame)
 #include "vk_fsr4.h"
+#include "vk_xess.h"
 #include "vk_temporal.h"
 #include "vk_reflex.h"
 #include "vk_antilag.h"
@@ -192,24 +193,26 @@ const char* hn_antilag(int v, int variant) {
     return variant <= 0 ? t[v ? 1 : 0] : nullptr;
 }
 // The Upscaler (opts.dlss): what scales the 3D up to the output. DLSS and DLAA only where dlss_why() lets them run, FSR 3.1
-// only where vk_fsr3.cpp says it does, FSR 4 and its native AA only where fsr4_why() does, Off (no upscaler: vk_temporal.cpp
-// temporal_off) everywhere; the menu shows (and steps from) what runs, and keeps the saved choice for a PC where it can
+// only where vk_fsr3.cpp says it does, FSR 4 and its native AA only where fsr4_why() does, Intel XeSS and its Native AA only
+// where xess_why() does, Off (no upscaler: vk_temporal.cpp temporal_off) everywhere; the menu shows (and steps from) what runs,
+// and keeps the saved choice for a PC where it can
 namespace ur = upscaler_rows;
 /// One bit per upscaler that runs here (upscaler_rows.h bit). Each backend caches its own answer, so this costs nothing
 unsigned upscalers_available() {
     return ur::bit(ur::GAME) | ur::bit(ur::OFF) | ur::dlss_bits(dlss_why() == DLSS_OK) |
-           (fsr3::supported() ? ur::bit(ur::FSR3) : 0u) | ur::fsr4_bits(fsr4_why() == FSR_OK);
+           (fsr3::supported() ? ur::bit(ur::FSR3) : 0u) | ur::fsr4_bits(fsr4_why() == FSR_OK) |
+           ur::xess_bits(xess_why() == XESS_OK);
 }
-/// (FSR 3.1 has inputs of its own; DLSS and FSR 4 run on the frame chain they share, temporal_mode; Off is neither)
+/// (FSR 3.1 has inputs of its own; DLSS, FSR 4 and XeSS run on the frame chain they share, temporal_mode; Off is neither)
 int upscaler() { return fsr3_wanted() ? (int)ur::FSR3 : temporal_off() ? (int)ur::OFF : temporal_mode(); }
 const char* tx_upscaler(int) {
     static const char* t[ur::kUpscalers] = {"Game's own", "NVIDIA DLSS", "NVIDIA DLAA", "AMD FSR 3.1", "AMD FSR 4",
-                                            "AMD FSR 4 Native AA", "Off (no upscaling)"};
-    // (by engine: DLAA and FSR 4's native AA are the Render resolution row's Native, upscaler_rows.h engine)
+                                            "AMD FSR 4 Native AA", "Off (no upscaling)", "Intel XeSS", "Intel XeSS Native AA"};
+    // (by engine: DLAA and FSR 4's and XeSS's native AA are the Render resolution row's Native, upscaler_rows.h engine)
     return t[std::clamp(ur::engine(upscaler()), 0, ur::kUpscalers - 1)];
 }
-/// The Upscaler: the one shown (what runs, upscaler()), and with the game's own, why DLSS and FSR are not offered. Variants
-/// (every one): each value, then the game's own with each of DLSS's reasons, then with each of FSR's
+/// The Upscaler: the one shown (what runs, upscaler()), and with the game's own, why DLSS, FSR and XeSS are not offered.
+/// Variants (every one): each value, then the game's own with each of DLSS's reasons, then with each of FSR's, then XeSS's
 const char* hn_upscaler(int v, int variant) {
     static const char* const t[ur::kUpscalers] = {
         "The game's own network.",
@@ -224,6 +227,9 @@ const char* hn_upscaler(int v, int variant) {
         "AMD's machine-learned upscaler, the 3D at full size with its edges smoothed; the slowest.",
         "No upscaler, not even the game's network: the 3D is stretched to the output with a plain linear filter. The "
         "fastest choice and the roughest picture: no edge smoothing, and softer below 100%.",
+        "Intel's machine-learned upscaler, from a smaller 3D, with Intel's libxess.dll beside the game. Things that move by "
+        "themselves can trail for now.",
+        "Intel's machine-learned upscaler, the 3D at full size with its edges smoothed; the slowest.",
     };
     static const char* const dlss_no[DLSS_WHY_COUNT] = {
         nullptr,
@@ -241,25 +247,37 @@ const char* hn_upscaler(int v, int variant) {
         "AMD FSR 4: AMD's files were not found beside the game (see the readme).",
         "AMD FSR 4: AMD's files have no FSR 4 for this GPU.",
     };
-    // (now: the value shown and what runs here, with both engines' reasons; every one: as said above)
-    int d = 0, f = 0;
+    static const char* const xess_no[XESS_WHY_COUNT] = {
+        nullptr,
+        "Intel XeSS: Windows only (Intel makes no XeSS library for Linux).",
+        "Intel XeSS: off for this run (RX_VK_XESS=0).",
+        "Intel XeSS: Intel's libxess.dll was not found beside the game (see the readme).",
+        "Intel XeSS: the GPU or its Vulkan driver lacks what XeSS needs.",
+        "Intel XeSS: Intel's library does not run on this GPU or driver.",
+    };
+    // (now: the value shown and what runs here, with every engine's reasons; every one: as said above)
+    int d = 0, f = 0, x = 0;
     if (variant < 0) {
-        v = std::clamp(upscaler(), 0, ur::kUpscalers - 1), d = (int)dlss_why(), f = (int)fsr4_why();
+        v = std::clamp(upscaler(), 0, ur::kUpscalers - 1), d = (int)dlss_why(), f = (int)fsr4_why(), x = (int)xess_why();
     } else if (v == ur::GAME) {
         if (variant < DLSS_WHY_COUNT) d = variant;
         else if (variant < DLSS_WHY_COUNT + FSR_WHY_COUNT - 1) f = variant - DLSS_WHY_COUNT + 1;
+        else if (variant < DLSS_WHY_COUNT + FSR_WHY_COUNT + XESS_WHY_COUNT - 2) x = variant - DLSS_WHY_COUNT - FSR_WHY_COUNT + 2;
         else return nullptr;
     } else if (variant > 0) {
         return nullptr;
     }
     v = std::clamp(v, 0, ur::kUpscalers - 1);
-    // (the reasons are said only where the engine is in the build: one without FSR does not tell an NVIDIA user why)
+    // (the reasons are said only where the engine is in the build: one without FSR does not tell an NVIDIA user why, and a
+    // Linux build does not tell anyone that XeSS is Windows only)
     const char* dn = dlss_built() || variant >= 0 ? dlss_no[d] : nullptr;
     const char* fn = fsr4_built() || variant >= 0 ? fsr_no[f] : nullptr;
-    if (v != ur::GAME || (!dn && !fn)) return t[v];
-    static char b[DLSS_WHY_COUNT][FSR_WHY_COUNT][320];
-    snprintf(b[d][f], sizeof b[d][f], "%s%s%s%s%s", t[0], dn ? " " : "", dn ? dn : "", fn ? " " : "", fn ? fn : "");
-    return b[d][f];
+    const char* xn = xess_built() || variant >= 0 ? xess_no[x] : nullptr;
+    if (v != ur::GAME || (!dn && !fn && !xn)) return t[v];
+    static char b[DLSS_WHY_COUNT][FSR_WHY_COUNT][XESS_WHY_COUNT][400];
+    snprintf(b[d][f][x], sizeof b[d][f][x], "%s%s%s%s%s%s%s", t[0], dn ? " " : "", dn ? dn : "", fn ? " " : "", fn ? fn : "",
+             xn ? " " : "", xn ? xn : "");
+    return b[d][f][x];
 }
 /// The DLSS model row (opts.dlss_model): NVIDIA's network by its preset, or RX_VK_DLSS_PRESET's for this run
 const char* dlss_preset_env() {
@@ -620,16 +638,17 @@ const char* tx_resolution(int v) {
     const int up = upscaler();
     // (each stop with the 3D's real size, the render input: a twelfth of the picture (game_size), Native
     // the picture itself)
-    if (up == ur::DLAA || up == ur::FSR4_AA) {
+    if (up == ur::DLAA || up == ur::FSR4_AA || up == ur::XESS_AA) {
         const Out o = shown_output();
-        snprintf(b, sizeof b, "Native (%s, %ux%u)", up == ur::DLAA ? "DLAA" : "FSR 4", o.w, o.h);
+        snprintf(b, sizeof b, "Native (%s, %ux%u)", up == ur::DLAA ? "DLAA" : up == ur::FSR4_AA ? "FSR 4" : "XeSS", o.w, o.h);
         return b;
     }
     v = ur::snap_render(up, v);   // (show the active engine's size without overwriting the player's saved scale)
     if (!ur::percent(v)) return "Auto (dynamic)";
     uint32_t w, h;
     game_size(ur::percent(v) / 100.0f, w, h);
-    if (const char* mode = ur::scales_by_mode(up) ? ur::dlss_mode_name(v) : nullptr) {
+    // (XeSS: the preset whose range holds the share, upscaler_rows.h xess_mode_name)
+    if (const char* mode = up == ur::XESS ? ur::xess_mode_name(v) : ur::scales_by_mode(up) ? ur::dlss_mode_name(v) : nullptr) {
         snprintf(b, sizeof b, "%s %d%% (%ux%u)", mode, ur::percent(v), w, h);
         return b;
     }
@@ -643,6 +662,7 @@ const char* hn_resolution(int v, int variant) {
     // (Native is the slider's top: the 3D at the picture's full size)
     if (up == ur::DLAA) return "DLAA: the 3D at the picture's full size, anti-aliased by DLSS. The sharpest, and the heaviest.";
     if (up == ur::FSR4_AA) return "FSR 4's native AA: the 3D at the picture's full size. The sharpest, and the heaviest.";
+    if (up == ur::XESS_AA) return "XeSS's Native AA: the 3D at the picture's full size. The sharpest, and the heaviest.";
     const int p = ur::percent(ur::snap_render(up, v));
     if (up == ur::DLSS) {
         switch (p) {
@@ -666,6 +686,18 @@ const char* hn_resolution(int v, int variant) {
         case 50: return "FSR's Performance mode, 2x: faster, and softer.";
         case 33: return "FSR's Ultra Performance mode, 3x: its fastest, and its softest.";
         default: return nullptr;   // (not one of FSR's steps: the row moves to one)
+        }
+    }
+    if (up == ur::XESS) {   // (each stop under the XeSS preset whose range holds it: xess_rules.h)
+        switch (p) {
+        case 0: return "The game lowers it when the GPU is busy, and XeSS follows.";
+        case 92: case 83: return "XeSS's Ultra Quality Plus mode, 1.3x: sharper than Ultra Quality, a little slower.";
+        case 75: return "Between Ultra Quality Plus and Ultra Quality, under XeSS's Ultra Quality mode.";
+        case 67: return "XeSS's Ultra Quality mode, 1.5x.";
+        case 58: return "Between XeSS's Quality and Balanced, under its Balanced mode.";
+        case 50: return "XeSS's Balanced mode, 2x: faster, and softer.";
+        case 33: return "XeSS's Ultra Performance mode, 3x: its fastest, and its softest.";
+        default: return nullptr;   // (not one of the slider's stops: the row moves to one)
         }
     }
     if (up == ur::OFF) {   // (no upscaler: the 3D stretched to the output as it is drawn)
@@ -2356,7 +2388,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
     if (r.value == &opts.resolution) {
         int up = upscaler(), res = *r.value;
         ur::step_render(upscaler(), ur::snap_render(upscaler(), *r.value), dir, &up, &res);
-        if (up != upscaler()) opts.dlss = up;   // (Native in or out: DLAA / DLSS, FSR 4's native AA / FSR 4)
+        if (up != upscaler()) opts.dlss = up;   // (Native in or out: DLAA / DLSS, FSR 4's native AA / FSR 4, XeSS's / XeSS)
         v = ur::full_scale(up) ? *r.value : res;   // (Native changes the mode, not the saved numeric scale)
     }
     if (r.value == &opts.output_res) {   // (smallest to largest: step_output_choice)
@@ -4081,7 +4113,7 @@ void draw_startup(ui::Ctx& c) {
 void startup_fade_to(float f) { startup_fade.store(f, std::memory_order_relaxed); }
 
 // (longshot, #1886) The Upscaler row's one-time questions: NVIDIA's NGX started (dlss_probe), AMD's FSR 4 loaded
-// (fsr4_probe), FSR 3.1's GPU check. They were asked at the menu's first open, on the frame's thread, and NGX's start
+// (fsr4_probe), Intel's XeSS context made once (xess_probe), FSR 3.1's GPU check. They were asked at the menu's first open, on the frame's thread, and NGX's start
 // alone held that frame about 3 s (an RTX 5080 at 4K; 2.9 s here): the game stood still and its sound ran on, out of
 // step with a cutscene. Now asked once on a thread of their own while the start-up screen shows, where nobody waits on
 // them; each is locked and asked once (ngx_init, fsr4's load, fsr3::supported's static), so the menu's own calls at its
@@ -4094,6 +4126,7 @@ static void probe_upscalers_soon() {
             const auto t0 = std::chrono::steady_clock::now();
             dlss_probe();
             fsr4_probe();
+            xess_probe();
             (void)fsr3::supported();
             logf("menu: the upscalers asked in the background while the start-up screen shows (%.0f ms)",
                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
@@ -4528,7 +4561,8 @@ void menu_auto_tune(double gpu_ms, double draws, double fps) {
             samplers_changed();
             menu_refresh = true;
             tuning.n = 0;   // (the windows gathered were at the other share)
-            static const char* const name[ur::kUpscalers] = {"the game's own", "DLSS", "DLAA", "FSR 3.1", "FSR 4", "FSR 4", "Off"};
+            static const char* const name[ur::kUpscalers] = {"the game's own", "DLSS", "DLAA", "FSR 3.1", "FSR 4", "FSR 4", "Off",
+                                                             "XeSS", "XeSS"};
             logf("vk: Auto (this PC): %s runs, not the %s chosen: Render resolution %d%% -> %d%%",
                  name[std::clamp(u, 0, ur::kUpscalers - 1)], name[std::clamp(c.upscaler, 0, ur::kUpscalers - 1)], ur::percent(v),
                  ur::percent(opts.resolution));
@@ -4926,7 +4960,7 @@ void menu_tick() {
         // (the layout row shows the controls as they are: host/nn_hid.c keeps them, the ini's pad_ lines, and a saved
         // layout is not applied over them at start)
         if (open_now.load()) opts.pad_layout = detect_pad_layout();
-        if (open_now.load()) dlss_probe(), fsr4_probe();   // (whether the Upscaler row can offer DLSS and FSR here: asked once)
+        if (open_now.load()) dlss_probe(), fsr4_probe(), xess_probe();   // (whether the Upscaler row can offer DLSS, FSR and XeSS: asked once)
         if (open_now.load()) refresh_mics();   // (the microphones as they are now)
     }
     if (open_now.load() && page == 5) {   // (longshot) the restart question: Later (the default) or Restart now

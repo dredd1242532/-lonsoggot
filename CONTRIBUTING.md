@@ -444,7 +444,9 @@ public source when there is one.
 
 The third-party parts (Eden, suyu, Sirit, the Vulkan Memory Allocator, SDL, Opus, Dear ImGui, zstd, the Libertinus
 fonts, zbic and the a64-kit tools) keep their own notices: preserve them, and don't relicense their code. NVIDIA's DLSS
-SDK is not one of them: it is never in the repository ([NVIDIA DLSS](#nvidia-dlss-optional)).
+SDK is not one of them: it is never in the repository ([NVIDIA DLSS](#nvidia-dlss-optional)). Nor is Intel's
+`libxess.dll` (Intel's license): only XeSS's MIT API headers are (`third_party/xess`), and the player puts the DLL beside
+the game (the README's Intel XeSS section).
 
 ## Where to talk
 

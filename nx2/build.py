@@ -1210,6 +1210,13 @@ def main():
         fsr_flags = ["-DLONGSHOT_FSR", "-I" + os.path.join(kit.HERE, "..", "third_party", "fidelityfx")] if FSR else []
         if FSR:
             print("the Vulkan back end: with AMD FSR 4 (AMD's FSR API headers, third_party/fidelityfx)", flush=True)
+        # (longshot) Intel XeSS Super Resolution (vk_xess.cpp), from Intel's MIT XeSS API headers (third_party/xess/inc): in every
+        # Windows build, as it only loads the player's own libxess.dll at run time (never shipped: Intel's license) and does
+        # nothing without it. Only vk_xess.cpp sees Intel's headers. Not on Linux, where Intel ships no XeSS library: there it is
+        # the stubs that say XeSS is Windows only
+        xess_headers = os.path.join(kit.HERE, "..", "third_party", "xess", "inc")
+        xess_flags = [] if LINUX else ["-DLONGSHOT_XESS", "-I" + xess_headers]
+        xess_deps = b"" if LINUX else tree_headers(os.path.join(xess_headers, "xess"))
         # (Eden's recompiler and sirit see only their own headers: a change to the back end's vk_*.h does not
         # rebuild their ~500 files; the back end itself depends on everything, suyu's texture decoders included)
         vk_lib_deps = tree_headers(os.path.join(vk, "eden"), os.path.join(vk, "sirit"), os.path.join(vk, "compat"),
@@ -1241,9 +1248,11 @@ def main():
                             ([stamp_def] if os.path.basename(src) == "vk_menu.cpp" else []) +
                             (ngx_flags if os.path.basename(src) == "vk_dlss.cpp" else []) +
                             (imgui_flags if os.path.basename(src) in imgui_users else []) +
-                            (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []),
+                            (fsr_flags if os.path.basename(src) == "vk_fsr4.cpp" else []) +
+                            (xess_flags if os.path.basename(src) == "vk_xess.cpp" else []),
                             vk_lib_deps if lib else vdeps + (logo_text if os.path.basename(src) == "vk_imgui.cpp" else b"") +
                             (ngx_deps if os.path.basename(src) == "vk_dlss.cpp" else b"") +
+                            (xess_deps if os.path.basename(src) == "vk_xess.cpp" else b"") +
                             (imgui_deps if os.path.basename(src) in imgui_users else b"")))
         # (longshot) the program cache's zstd compression (RX_VK_PROGRAM_CACHE_ZSTD): third_party/zbic's single-file
         # zstd, built as C into the same DLL. Its headers are the object's dependencies.

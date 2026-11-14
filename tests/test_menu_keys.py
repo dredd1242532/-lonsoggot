@@ -137,6 +137,7 @@ static bool restart_ask() { return false; }
 static int detect_pad_layout() { return 0; }
 static void dlss_probe() {}
 static void fsr4_probe() {}
+static void xess_probe() {}
 static void refresh_mics() {}
 // TX_MENU_SHORTCUT
 
