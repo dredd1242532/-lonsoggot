@@ -215,7 +215,9 @@ class TokenLogin(unittest.TestCase):
                         out)
         for scope in ("write:repository", "write:issue", "read:user"):
             self.assertIn(scope, lines[1])
-        self.assertEqual(self.saved(), {"kind": "token", "login": "tokenuser", "access_token": TOKEN})
+        self.assertEqual(self.saved(), {"kind": "token", "login": "tokenuser", "access_token": TOKEN, "expires_at": 4102444800})
+        # (an older forge.py, which knows no token kind, reads expires_at before renewing: it must find it far away)
+        self.assertGreater(self.saved()["expires_at"] - 60, time.time() + 50 * 365 * 86400)
         if os.name != "nt":
             self.assertEqual(os.stat(auth.forge_path()).st_mode & 0o777, 0o600)
         self.assertEqual(self.forgejo.calls, [("GET", "/api/v1/user")])
@@ -244,7 +246,7 @@ class TokenLogin(unittest.TestCase):
         self.assertEqual(state["access_token"], TOKEN)
         self.assertEqual(forge.api("GET", "/user")["login"], "tokenuser")   # (sent as the bearer)
         self.assertNotIn("/login/oauth/access_token", self.forgejo.paths())
-        self.assertEqual(self.saved(), {"kind": "token", "login": "tokenuser", "access_token": TOKEN})
+        self.assertEqual(self.saved(), {"kind": "token", "login": "tokenuser", "access_token": TOKEN, "expires_at": 4102444800})
 
     def test_credential_helper_answers_with_the_token(self):
         self.assertEqual(self.forge("login", "--token-stdin", stdin=TOKEN + "\n")[0], 0)

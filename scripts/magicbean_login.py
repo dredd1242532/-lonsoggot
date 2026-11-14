@@ -218,7 +218,9 @@ def token_sign_in(token):
         raise
     if not isinstance(user, dict) or not user.get("login"):
         raise LoginError("%s answered with no login for the token" % FORGE_HOST)
-    state = {"kind": TOKEN_KIND, "login": user["login"], "access_token": token}
+    # (expires_at: never read for a token here, but forge.py from before --token-stdin renews when it is near, so a far one
+    # (2100-01-01) keeps an older checkout's forge.py using the token as it is instead of failing on the missing field)
+    state = {"kind": TOKEN_KIND, "login": user["login"], "access_token": token, "expires_at": 4102444800}
     with _SessionLock():   # (not in the middle of another process's renewal of the sign-in it replaces)
         write_private(forge_path(), state)
     return state
