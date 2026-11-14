@@ -56,3 +56,31 @@ line is `vk: PsychoV35 FSR 4: RGBA16F linear route`, the status lines count `AMD
 `the game's upscale runs` follows; there is no NVIDIA frame generation to check. A transitional packed-format
 frame after a hot switch is insufficient evidence; a menu selection alone is insufficient too. Record measured runs in
 `tested-configurations.md`.
+
+## Native HDR and FSR 3.1 frame generation
+
+FSR 3.1 interpolation prepares its own scene depth and camera motion, independently of the shared upscaler chain.
+`RX_VK_FSR_FG=1` asks for its midpoint at Frame generation 2x. Native HDR PsychoV35 also needs the existing
+`RX_VK_PSYCHOV35_DLSS=1` opt-in to accept matching RGBA16F network buffers. Known and shape-detected networks use
+matching sampled/storage views; mixed formats and unrelated dispatches are rejected. This does not enable the legacy
+FSR 3.1 upscaler, which still needs its separate compatibility work. No new default or environment switch is added.
+
+The present copied into frame generation can contain PQ codes despite its UNORM capture storage. Pass the captured
+present's native-PQ flag from both presentation paths; give the same transfer function and peak luminance to the AMD
+frame-interpolation and optical-flow constant blocks. SDR retains transfer 0 and its unused 0..1 range; native PQ uses
+transfer 1 and 0..the selected HDR peak in nits. This corrects Native HDR metadata for Vanilla too. The SDK fields are
+documented in [AMD's frame-interpolation guide](https://gpuopen.com/manuals/fidelityfx_sdk/techniques/frame-interpolation/).
+No vendored shader or constant-block layout changes are needed.
+
+Scene input format or tone-map changes reset depth/motion history. Encoding or PQ peak changes, frame gaps, cuts and
+resizes reset interpolation history, so frames in different colour spaces are never blended. A reset frame keeps the
+new source for the next interval but produces no AMD midpoint; existing fallback remains in effect for that frame.
+
+Validate Native HDR PsychoV35 at 67/83/100%, Vanilla HDR and SDR, an HDR-peak change, FG Off/on, and camera movement.
+On NVIDIA hardware, disable NVIDIA FG to isolate FSR. Inspect `fsr3fi` generated-frame and missing-input counts, the
+PQ/peak diagnostic and actual generated captures; a selected menu row proves none of these. Record GPU/driver/OS,
+scene and exact commits. These are functional checks, not an uncapped performance measurement or calibrated HDR proof.
+
+Existing limitations remain: a single midpoint at 2x only, camera-derived motion without the shared chain's actor
+vectors, and no HUD-less colour. HUD smearing/ghosting can remain, so FSR generation stays opt-in; 3x and higher use
+the renderer's existing generation path. This change does not solve the separate general scene-transition flicker.

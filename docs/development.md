@@ -164,8 +164,16 @@ late), which is how the ranges worth a rule are found on a PC.
 `RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
 with Native HDR and PsychoV35. The successful upscale supplies NVIDIA frame generation with depth, camera and actor
 motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this
-path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
+path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 upscaling and TAAU are not enabled by this change.
 See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-and-fsr-4-opt-in) for validation and shader regeneration.
+
+For **FSR 3.1 frame generation**, use Frame generation **2x**, `RX_VK_FSR_FG=1`, and, with Native HDR PsychoV35,
+`RX_VK_PSYCHOV35_DLSS=1` as well. This enables the independent RGBA16F depth/motion input path, not the legacy FSR
+upscaler. To isolate FSR generation on NVIDIA hardware, select Frame generation by **Built-in FG** or use
+`RX_VK_DLSS_FG=0`; confirm actual `fsr3fi` made-frame counts, not only the menu selection. Both opt-ins remain off.
+The captured present's actual PQ/sRGB encoding and HDR peak are given to both AMD interpolation and optical flow;
+format, tone mapper, encoding and luminance changes reset the corresponding histories. See
+[FSR frame generation](temporal-history.md#native-hdr-and-fsr-31-frame-generation) for limits and validation.
 
 ### Running a test
 
