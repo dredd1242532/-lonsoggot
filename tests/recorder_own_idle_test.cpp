@@ -379,12 +379,15 @@ static bool real_setup() {
 static bool parked() {   // (the recorder inside the OS wait on W)
     return wait_until([] { return in_real_wait.load() == 1; });
 }
-/// one packet published while the recorder waits; true once it ran (3 s)
+/// one packet published while the recorder waits; true once it ran (3 s). The last returned wait's start and end are read after
+/// the packet ran and before the unlock, whose wait for the recorder may kick its next wait: until then nothing wakes that one
+static uint64_t seen_call_ns = 0, seen_return_ns = 0;
 static bool publish_runs(int want) {
     replay_mu.lock();
     vkCmdWriteTimestamp2(kCmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, (VkQueryPool)(uintptr_t)0x40, 0);
     rec::t_prod->flush();   // (published; the producer does not wait for it, so no kick())
     const bool ran = wait_until([want] { return g_ran.load() == want; });
+    seen_call_ns = last_call_ns, seen_return_ns = last_return_ns;
     if (ran) replay_mu.unlock();
     return ran;
 }
@@ -449,7 +452,7 @@ int main(int argc, char** argv) {
                 if (!publish_runs(++published)) fail("a publish did not wake the recorder waiting on W (3 s)");
                 // (the wait that returned began before the publish and blocked for 15 ms or more: no compare at its start, so the
                 // wake ended it. Otherwise inconclusive: again)
-                woken = last_call_ns < pub && last_return_ns >= pub && last_return_ns - last_call_ns >= 15000000;
+                woken = seen_call_ns < pub && seen_return_ns >= pub && seen_return_ns - seen_call_ns >= 15000000;
             }
             if (!woken) fail("no attempt showed the wake ending a blocked wait");
             no_timeout = false;
