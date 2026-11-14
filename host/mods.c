@@ -8,8 +8,8 @@
    Every mod file is indexed once at the start (no disk lookups per open); nn_fs.c asks hos_mods_romfs for each rom:
    path and lists a folder's mod-only entries with the game's own (hos_mods_dir_extras). HOS_FS_OVERLAY (nn_fs.c) is
    looked at after this, so a test overlay wins over mods.
-   exefs patches (.pchtxt, .ips) are not applied: the code is compiled ahead of time from the original instructions, and
-   the game folder has no module map (image.json) to place data patches with. A mod's exefs folder is logged as left out.
+   active ExeFS .pchtxt patches are compiled into the native image by the Builder before lifting; runtime patch emulation is
+   disabled. Other ExeFS formats are not applied.
    From Skybound's loader (NotRexed/SkyboundTotk a64-kit/hos/mods.c, MIT): its RomFS part. */
 #include "hos.h"
 #include "hos_paths.h"
@@ -171,9 +171,6 @@ void hos_mods_init(const char *image_path) {
         char dir[MAX_PATH];
         snprintf(dir, sizeof dir, "%s\\romfs", mods[i].path);
         const int files = index_romfs(dir, "", 0);
-        snprintf(dir, sizeof dir, "%s\\exefs", mods[i].path);
-        if (GetFileAttributesA(dir) != INVALID_FILE_ATTRIBUTES)
-            hos_log("mods: %s: exefs patches are left out (the code is compiled ahead of time)", mods[i].name);
         hos_log("mods: %s: %d RomFS files", mods[i].name, files);
     }
     hos_log("mods: %d mods from %s: %zu RomFS entries", nmods, root, table_n);

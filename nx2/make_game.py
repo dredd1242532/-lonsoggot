@@ -1677,11 +1677,14 @@ def lift_key(exefs, work, env, planning=True):
     to tell whether anything else it reads changed while it ran"""
     import kit  # noqa: F401  (a64-kit on the path, for standalone)
     import standalone
+    import pchtxt
     h = hashlib.sha1(sys.version.encode(), usedforsecurity=False)
     h.update(" ".join(sorted(standalone.implemented())).encode())
     # (each file named from its own base: the exefs and the work folder may be on another drive than the source, which relpath refuses)
     files = [(exefs, os.path.join(exefs, f)) for f in sorted(os.listdir(exefs))]
     files += [(ROOT, f) for f in lift_sources()]
+    mods_root = env.get("OOT_MODS")
+    files += [(mods_root, path) for _name, path in pchtxt._active_pchtxt_files(mods_root)] if mods_root else []
     # (hot_pieces.txt: split_hot's pieces of the last lift, which the next split keeps. The pieces' C follows it, so two work folders
     # with other histories may lift the same game into other pieces: their keys differ too)
     files += [(work, os.path.join(work, "hot_funcs.txt"))]
@@ -2253,7 +2256,8 @@ def main(a=None):
     src = os.path.join(ROOT, "work", "image", "chunks.txt")   # (where the lifted code's files begin: addresses)
     if os.path.exists(src):
         copy_writable(src, os.path.join(work, "image", "chunks.txt"))
-    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out, "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
+    env = {"OOT_WORK": work, "OOT_EXEFS": exefs, "OOT_ROMFS": romfs, "OOT_DUMP": out,
+           "OOT_MODS": os.path.join(out, "mods"), "RX_RELEASE": "1", "A64_HOT_CHUNK": "1"}
     if os.path.exists(os.path.join(work, "hot_funcs.txt")):
         env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
     if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):

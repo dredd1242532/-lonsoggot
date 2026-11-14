@@ -34,6 +34,7 @@ import chunks
 import standalone
 import adr_entries  # noqa: E402
 import nso
+import pchtxt
 import poll
 import nx_image
 import image as eden_image
@@ -145,6 +146,9 @@ def main():
         print("standalone: %d HLE functions in host/, %d OS-facing imports stubbed" % (len(hle), len(stubbed)))
         hle = hle | stubbed
     img = eden_image.EdenImage(a.exefs, a.aslr, hle=hle) if a.layout == "eden" else nx_image.NxImage(a.exefs)
+    pchtxt_records, pchtxt_bytes = pchtxt.apply_to_image(img, os.environ.get("OOT_MODS"))
+    if pchtxt_records:
+        print("pchtxt: %d records (%d bytes) applied before lifting" % (pchtxt_records, pchtxt_bytes), flush=True)
     out_dir = os.path.join(a.work, "sa") if a.standalone else a.work
     img_dir = os.path.join(out_dir, "image")
     meta = img.write(img_dir)
