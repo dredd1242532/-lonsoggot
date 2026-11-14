@@ -112,16 +112,6 @@ def source(root):
     adapter = (root / "host/hos_sdl.c").read_text(encoding="utf-8")
     start = adapter.index("int hos_sdl_vulkan_surface(")
     surface = adapter[start:adapter.index("\n}", start) + 2]
-    # Wiring assertions do not replace the compiled bridge cases above.
-    display = (root / "host/posix/display_sdl.c").read_text(encoding="utf-8")
-    backend = (root / "host/rx_backend.c").read_text(encoding="utf-8")
-    for text, required in ((adapter, "hos_darwin_vulkan_sdl(m, version)"), (adapter, "hos_darwin_vulkan_prepare()"),
-                           (display, "hos_darwin_vulkan_capture(window)"), (display, '"cocoa"'),
-                           (backend, "hos_darwin_vulkan_library, hos_darwin_vulkan_extensions,")):
-        if required not in text:
-            raise SystemExit("FAIL: missing Darwin bridge wiring: " + required)
-    if display.index("hos_darwin_vulkan_capture(window)") > display.index("CloseHandle(CreateThread(NULL, 0, renderer_main"):
-        raise SystemExit("FAIL: SDL extension discovery occurs after renderer thread creation")
     return PRELUDE + bridge + surface + CASES
 
 

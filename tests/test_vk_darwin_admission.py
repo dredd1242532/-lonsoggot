@@ -1,8 +1,8 @@
 """Vulkan admission without a GPU, SDL, a window or game data.
 
 Compile the actual loader/instance code and device-extension selection against authored call recorders, plus the pure
-Darwin decisions. Windows' System32 loader and Linux's names/surface list are pinned to main 514591a3. The non-Apple API
-header fingerprint, version, host layout and member offsets are pinned too; Apple appends two callbacks at version 22.
+Darwin decisions. Windows' System32 loader and Linux's names/surface list are pinned to main 514591a3. A fixed semantic
+contract pins the non-Apple API version, host size and named member offsets; Apple appends two callbacks at version 22.
 SDL2/SDL3's loader and extension bridge is exercised with ABI-correct stand-ins, not a real video driver.
 
     python -I -B tests/test_vk_darwin_admission.py --cxx clang++ --headers <Vulkan-Headers/include>
@@ -10,7 +10,6 @@ SDL2/SDL3's loader and extension bridge is exercised with ABI-correct stand-ins,
     # --source <main tree> is the negative control. Device-level evidence is a separate, explicitly gated local probe.
 """
 import argparse
-import hashlib
 from pathlib import Path
 import re
 import subprocess
@@ -19,7 +18,19 @@ import tempfile
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]
 ROOT = Path(__file__).resolve().parents[1]
-API_BASE = "c802844c7146ad9ac9a1fbcf184ba7b5e45ec2c053b99308b9ba7392abcaa322"
+# The semantic host ABI at main 514591a3 on its 64-bit platforms. Expected names and offsets are deliberately literal,
+# not inferred from the current header: reordering or renaming a callback must fail even when the total size is unchanged.
+HOST_ABI_BASE = (
+    ("version", 0), ("log", 8), ("guest_base", 16), ("guest_size", 24), ("gpu_ptr", 32), ("gpu_guest", 40),
+    ("gpu_read", 48), ("gpu_write", 56), ("collect_written", 64), ("free_pages", 72), ("mark_written", 80),
+    ("ticks", 88), ("now_ns", 96), ("tex_layout", 104), ("tex_level_offset", 112), ("fmt_bpb", 120),
+    ("tex_level_tiles", 128), ("tex_linear_stride", 136), ("depth_minus_w", 144), ("gpu_pools", 152),
+    ("maps_generation", 160), ("vmap_generation", 168), ("reserved_cpus", 176), ("collect_written_in", 184),
+    ("guest_alloc", 192), ("watch_guest_writes", 200), ("pad_raw", 208), ("binding", 216), ("bind", 224),
+    ("aspect_ratio", 232), ("take_key_press", 240), ("pointer", 248), ("mic_count", 256), ("mic_name", 264),
+    ("mic_select", 272), ("gyro_status", 280), ("log_flush", 288), ("prompt_face", 296), ("romfs_dir", 304),
+    ("wide_menus", 312), ("slept_ns", 320), ("fps_timing", 328), ("prompts_live", 336), ("screen_size", 344),
+)
 
 
 def block(text, marker):
@@ -66,8 +77,6 @@ def select(text, apple, windows=None):
     return "".join(out)
 
 
-def compact(text):
-    return "\n".join(line for line in text.splitlines() if line.strip())
 
 
 PRELUDE = r'''
@@ -83,6 +92,7 @@ PRELUDE = r'''
 #include <cstdarg>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include "gpu/vk/vk_api.h"
 #include "gpu/vk/mesh_mode.h"
@@ -352,30 +362,49 @@ static void run() {
 
 
 def abi_fixture(api):
-    off = select(api, False)
-    if hashlib.sha256(compact(off).encode()).hexdigest() != API_BASE:
-        raise SystemExit("FAIL: non-Apple vk_api.h differs from main 514591a3")
+    off, on = select(api, False), select(api, True)
     original = block(off, "typedef struct MkwVkHost")
-    extended = block(select(api, True), "typedef struct MkwVkHost")
-    fields = re.findall(r"\(\*(\w+)\)\(", original)
-    if len(fields) != 43 or "#define MKWVK_API_VERSION 21" not in off:
-        raise SystemExit("FAIL: non-Apple host API version or member count changed")
+    extended = block(on, "typedef struct MkwVkHost")
     code = original.replace("MkwVkHost", "NonAppleHost") + " NonAppleHost;\n"
     code += extended.replace("MkwVkHost", "AppleHost") + " AppleHost;\n"
-    code += 'static_assert(offsetof(NonAppleHost, version) == 0);\n'
-    code += 'static_assert(sizeof(NonAppleHost) == (43 + 1) * sizeof(void (*)()));\n'
-    for index, field in enumerate(fields, 1):
-        code += f'static_assert(offsetof(NonAppleHost, {field}) == {index} * sizeof(void (*)()));\n'
-        code += f'static_assert(offsetof(AppleHost, {field}) == offsetof(NonAppleHost, {field}));\n'
-    if "vulkan_library" in extended:
-        if "#define MKWVK_API_VERSION 22" not in select(api, True):
-            raise SystemExit("FAIL: Apple callbacks require API version 22")
-        code += 'static_assert(offsetof(AppleHost, vulkan_library) == sizeof(NonAppleHost));\n'
-        code += 'static_assert(offsetof(AppleHost, vulkan_extensions) == sizeof(NonAppleHost) + sizeof(void (*)()));\n'
-        code += 'static_assert(sizeof(AppleHost) == sizeof(NonAppleHost) + 2 * sizeof(void (*)()));\n'
-    code += '#if defined(__APPLE__)\nstatic_assert(sizeof(MkwVkHost) == sizeof(AppleHost));\n'
-    code += '#else\nstatic_assert(sizeof(MkwVkHost) == sizeof(NonAppleHost) && MKWVK_API_VERSION == 21);\n#endif\n'
-    code += 'static void abi_run() { std::printf("PASS: non-Apple API equals main: version 21, size %zu, all 44 offsets; Apple size %zu\\n", sizeof(NonAppleHost), sizeof(AppleHost)); }\n'
+    # Compile the header's version definitions as code; comments/formatting are not the assertion's subject.
+    for variant, name in ((off, "FIXTURE_NONAPPLE_API_VERSION"), (on, "FIXTURE_APPLE_API_VERSION")):
+        definition = re.search(r"^[ \t]*#[ \t]*define[ \t]+MKWVK_API_VERSION\b[^\n]*", variant, re.M)
+        if definition is None:
+            raise ValueError("cannot extract the host API version definition")
+        code += definition.group().replace("MKWVK_API_VERSION", name, 1) + "\n"
+    code += 'static_assert(FIXTURE_NONAPPLE_API_VERSION == 21);\n'
+    code += 'static_assert(sizeof(NonAppleHost) == 352);\n'
+    for field, offset in HOST_ABI_BASE:
+        code += f'static_assert(offsetof(NonAppleHost, {field}) == {offset});\n'
+        code += f'static_assert(offsetof(AppleHost, {field}) == {offset});\n'
+        code += f'static_assert(offsetof(MkwVkHost, {field}) == {offset});\n'
+    code += r'''
+template<class T> static void apple_abi() {
+    if constexpr (requires(T host) { host.vulkan_library; host.vulkan_extensions; }) {
+        static_assert(offsetof(T, vulkan_library) == 352);
+        static_assert(offsetof(T, vulkan_extensions) == 360);
+        static_assert(sizeof(T) == 368);
+        static_assert(std::is_same_v<decltype(T::vulkan_library), void* (*)(void)>);
+        static_assert(std::is_same_v<decltype(T::vulkan_extensions), int (*)(uint32_t*, const char* const**)>);
+    } else {
+        check(false, "Apple host has no Vulkan library/extension callbacks");
+    }
+}
+#if defined(__APPLE__)
+static_assert(sizeof(MkwVkHost) == sizeof(AppleHost) && MKWVK_API_VERSION == FIXTURE_APPLE_API_VERSION);
+#else
+static_assert(sizeof(MkwVkHost) == 352 && MKWVK_API_VERSION == 21);
+#endif
+static void abi_run() {
+    const int before = failures;
+    check(FIXTURE_APPLE_API_VERSION == 22, "Apple host API version is 22");
+    apple_abi<AppleHost>();
+    if (before == failures)
+        std::printf("PASS: fixed non-Apple ABI: version 21, size %zu, all 44 named offsets; Apple version 22, size %zu, typed callbacks at 352/360\n",
+                    sizeof(NonAppleHost), sizeof(AppleHost));
+}
+'''
     return code
 
 
