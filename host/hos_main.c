@@ -575,7 +575,7 @@ void hos_oot_cct_speed(Ctx *c, uint64_t controller, int per_second) {
     memcpy(&c->vreg[0][0], &speed, sizeof speed);
 }
 
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
 /* OneShotAddOrRemovePouchContent (f_828d4a70) for one pouch content by actor name: delta > 0 adds, < 0 removes.
    Returns the event status (top bits of the result word), or -1 when the pouch is not ready. */
 static int oot_pouch_change(Ctx *c, const char *name, int delta) {
@@ -1420,7 +1420,7 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
 #endif
 
 int hos_oot_flight_shortcut_ready(void) {
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
     const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
     return seen && hos_now_ns() - seen < 250000000;
 #else
@@ -1428,7 +1428,7 @@ int hos_oot_flight_shortcut_ready(void) {
 #endif
 }
 
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
 static void oot_write_flight_rotation(Ctx *c, uint64_t matrix) {
     const float s = sinf(flight_transform_yaw), co = cosf(flight_transform_yaw);
     const float rotation[3][3] = {{co, 0, s}, {0, 1, 0}, {-s, 0, co}};
@@ -1443,7 +1443,7 @@ static void oot_write_flight_rotation(Ctx *c, uint64_t matrix) {
 #endif
 
 void hos_oot_flight_rotation(Ctx *c, uint64_t controller, uint64_t matrix) {
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
     if (flight_transform_controller == controller) oot_write_flight_rotation(c, matrix);
 #else
     (void)c;
@@ -1453,7 +1453,7 @@ void hos_oot_flight_rotation(Ctx *c, uint64_t controller, uint64_t matrix) {
 }
 
 void hos_oot_flight_pose(Ctx *c, uint64_t actor, uint64_t matrix) {
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
     if (flight_pose_actor == actor) {
         flight_pose_actor = 0;
         oot_write_flight_rotation(c, matrix);
@@ -1542,7 +1542,7 @@ int hos_oot_opening(Ctx *c, int mode) {
 }
 
 void hos_oot_lift_player(Ctx *c, uint64_t actor) {
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
     flight_pose_actor = 0;
     if (recomp_load64(c, actor) != 0x84b45e18ULL) return;
     const uint64_t components = recomp_load64(c, actor + 624);
@@ -1564,7 +1564,7 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
 #endif
 }
 
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
 static void oot_build_free_view(Ctx *c, uint64_t view, uint64_t out) {
     int rx_option(int id, int otherwise);
     static uint64_t active_view;
@@ -1625,7 +1625,7 @@ static void oot_build_free_view(Ctx *c, uint64_t view, uint64_t out) {
 #endif
 
 void hos_oot_free_view(Ctx *c, uint64_t view) {
-#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)   /* (the debug tools: host/posix has what they call) */
     int rx_option(int id, int otherwise);
     if (!view || recomp_load64(c, view) != 0x84c18a88ULL) return;
 

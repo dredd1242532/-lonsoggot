@@ -1,9 +1,11 @@
-"""Game-free: the OoT debug tools (cheats, pouch, flight, lift, free view) and the HOS_OOT_PROTECT_HEARTS switch are
-compiled on Linux as well as Windows. They were inside `#ifdef _WIN32`, although everything they call exists on Linux
-too (host/posix provides the Windows calls they use), so a Linux build had the Insert menu's cheats without their code.
+"""Game-free: the OoT debug tools (cheats, pouch, flight, lift, free view, teleport) and the HOS_OOT_PROTECT_HEARTS switch
+are compiled on Linux and macOS as well as Windows. They were inside `#ifdef _WIN32`, although everything they call exists
+on Linux too (host/posix provides the Windows calls they use), so a Linux build had the Insert menu's cheats without their
+code. macOS was then left out the same way, and its executable did not link: host/control.c's game table names the
+teleport, age and state functions.
 
-The check follows host/hos_main.c's preprocessor conditions to each tool's definition and evaluates them twice: with
-_WIN32 defined, and with __linux__ defined instead. Conditions on other macros count as true.
+The check follows host/hos_main.c's preprocessor conditions to each tool's definition and evaluates them three times: with
+_WIN32 defined, with __linux__ defined instead, and with __APPLE__. Conditions on other macros count as true.
 
 python -I -B tests/test_debug_tools_linux.py
 """
@@ -13,7 +15,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "host/hos_main.c"
 
-# The debug tools' definitions, and the line that reads the hearts switch.
+SYSTEMS = (("Windows", "_WIN32"), ("Linux", "__linux__"), ("macOS", "__APPLE__"))
+KNOWN = tuple(macro for _, macro in SYSTEMS)
+
+# The debug tools' definitions, the functions host/control.c's game table names, and the line that reads the hearts switch.
 TOOLS = [
     r"static int oot_pouch_change\(",
     r"static void oot_update_player_cheats\(",
@@ -24,6 +29,13 @@ TOOLS = [
     r"void hos_oot_lift_player\(",
     r"static void oot_build_free_view\(",
     r"void hos_oot_free_view\(",
+    r"int hos_oot_state\(",
+    r"int hos_oot_current_map\(",
+    r"int hos_oot_destination\(",
+    r"int hos_oot_teleport_ask\(",
+    r"int hos_oot_age_ask\(",
+    r"int hos_oot_teleport_result\(",
+    r"void hos_oot_teleport_cancel\(",
     r'getenv\("HOS_OOT_PROTECT_HEARTS"\)',
 ]
 
@@ -32,16 +44,16 @@ def condition(expr, defined):
     """True, False or None (a condition on other macros) for one #if / #ifdef / #ifndef line."""
     m = re.match(r"#\s*ifdef\s+(\w+)", expr)
     if m:
-        return m.group(1) in defined if m.group(1) in ("_WIN32", "__linux__") else None
+        return m.group(1) in defined if m.group(1) in KNOWN else None
     m = re.match(r"#\s*ifndef\s+(\w+)", expr)
     if m:
-        return m.group(1) not in defined if m.group(1) in ("_WIN32", "__linux__") else None
+        return m.group(1) not in defined if m.group(1) in KNOWN else None
     m = re.match(r"#\s*(?:el)?if\s+(.*)", expr)
     if not m:
         return None
     body = re.sub(r"/\*.*?\*/|//.*", "", m.group(1)).strip()
     names = re.findall(r"defined\s*\(\s*(\w+)\s*\)", body)
-    if not names or any(n not in ("_WIN32", "__linux__") for n in names):
+    if not names or any(n not in KNOWN for n in names):
         return None
     rest = re.sub(r"defined\s*\(\s*\w+\s*\)", "", body).replace("||", "").replace("!", "").strip()
     if rest:
@@ -87,12 +99,12 @@ def main():
             problems.append("not found in host/hos_main.c: " + pattern)
             continue
         for i in hits + [first_statement(lines, i) for i in hits if lines[i].rstrip().endswith("{")]:
-            for system, defined in (("Windows", {"_WIN32"}), ("Linux", {"__linux__"})):
-                if not compiled(lines, i, defined):
+            for system, macro in SYSTEMS:
+                if not compiled(lines, i, {macro}):
                     problems.append("host/hos_main.c:%d (%s) is not compiled on %s" % (i + 1, lines[i].strip(), system))
     if problems:
         raise SystemExit("\n".join(problems))
-    print("ok: the %d debug tools are compiled on Windows and Linux" % len(TOOLS))
+    print("ok: the %d debug tools are compiled on %s" % (len(TOOLS), ", ".join(system for system, _ in SYSTEMS)))
 
 
 if __name__ == "__main__":
