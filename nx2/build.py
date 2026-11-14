@@ -1494,6 +1494,10 @@ def main():
             print("link FAILED (%.0fs), %d undefined symbols" % (time.time() - t, len(undefined)))
             print("\n".join(undefined[:40]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
+        too_big = image_too_big(dll)
+        if too_big:
+            print(too_big)
+            return 1
         print("linked %s: %d MB, no undefined symbols (%.0fs)" % (dll, os.path.getsize(dll) >> 20, time.time() - t))
     return 0
 

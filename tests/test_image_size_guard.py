@@ -7,6 +7,7 @@ image_span/image_too_big cut out of build.py:
   - a PE's SizeOfImage and an ELF's PT_LOAD span are read right (made-up headers, both sides of the limit);
   - an image at or past 2 GB gives the "link FAILED" message and is deleted; one under it is kept;
   - a file that is neither gives None (no check, no deletion);
+  - every link of the lifted code in build.py's main() (Linux, Windows, --dll) is followed by the check;
   - with clang and lld on this PC: a small program linked for Windows and Linux reads as a small image.
 
 python -I -B tests/test_image_size_guard.py
@@ -116,6 +117,20 @@ class FailsPastTheLimit(Case):
         p = self.file("a.exe", b"MZ")
         self.assertIsNone(self.ns["image_too_big"](p))
         self.assertTrue(os.path.exists(p))
+
+
+class EveryGameLinkIsChecked(unittest.TestCase):
+    def test_each_link_of_the_lifted_code_is_followed_by_the_check(self):
+        """main() links the lifted code three ways (Linux longshot, Windows longshot.exe, --dll longshot_game.dll): each
+        image it writes with -o is checked before it is said to be linked"""
+        import re
+        src = BUILD_SCRIPT.read_text(encoding="utf-8")
+        main = src[src.index("\ndef main("):]
+        linked = re.findall(r'"-o", (exe|dll)\b', main)
+        self.assertGreaterEqual(len(linked), 3, "build.py's main() links the game fewer ways than this test knows")
+        for name in set(linked):
+            self.assertEqual(main.count("image_too_big(%s)" % name), linked.count(name),
+                             "a link of %s in build.py's main() is not followed by image_too_big(%s)" % (name, name))
 
 
 class RealLinks(Case):
