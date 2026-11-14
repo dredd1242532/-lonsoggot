@@ -308,6 +308,9 @@ PICTURE_BUTTONS = {"east": (869, 227, 31), "south": (800, 286, 31), "north": (80
 # part of the pad input bound to it: one line per pad input, chosen by the controls; a face button or the d-pad: a frame round the
 # group, as the game's round its face buttons, the label's icon telling which) or a pad input (fixed: the sticks)
 GUIDES = ("ControllerGuide_Pro_00", "ControllerGuide_Pro_01")
+# (longshot) the page's other leader line textures: a face may give any of the five by hand, and a hand-given one is
+# written whole, with no line drawn over it (nx2/prompt_faces/README.md)
+HAND_GUIDES = tuple(f"ControllerGuide_Pro_0{i}" for i in range(5))
 GUIDE_SCALE, GUIDE_AT, BARS = 1.1136, (131.3, 462.6), (147, 1407)
 GUIDE_LINES = [(0, 0, 333, "zl"), (1, 0, 561, "minus"), (0, 0, 667, "lstick"), (0, 1, 558, "plus"), (0, 1, 713, "a"),
                (0, 1, 1225, "rstick")]
@@ -489,13 +492,13 @@ def face_layers(b, tex, face, otf):
             im = Image.new("L", (w, h), 0)
             im.paste(letter, ((w - letter.width) // 2, (h - letter.height) // 2))
             layers.append(Layer(f"{name}.{pad}.png", name, SW[sw], PADS.index(pad), im))
-    own = None
+    own, by_hand = None, False
     if face != "switch":
         hand = override(face, PICTURES[0] + ".png")
-        own = Image.open(hand).convert("RGBA") if hand else prompt_draw.picture(
-            face, decode(b, tex[PICTURES[0]]).convert("RGBA"), Icons("switch", otf))
+        own, by_hand = (Image.open(hand).convert("RGBA"), True) if hand else (prompt_draw.picture(
+            face, decode(b, tex[PICTURES[0]]).convert("RGBA"), Icons("switch", otf)), False)
     if own:
-        layers += picture_layers(b, tex, own)
+        layers += picture_layers(b, tex, own, by_hand)
     for name in PICTURES if face != "switch" and not own else ():
         t = tex[name]
         im = decode(b, t)
@@ -800,6 +803,8 @@ def guide_layers_of(b, tex, face):
         return []
     game = [decode(b, tex[n]) for n in GUIDES]
     keep, moving = guide_layers(game, face)
+    if all(override(face, n + ".png") for n in GUIDES):
+        moving = {}   # (every line of these two is given by hand: nothing is drawn over them)
     layers = []
     for tx, name in enumerate(GUIDES):
         box = Image.new("L", game[tx].size, 0)   # (every place a line is or may be)
@@ -809,13 +814,27 @@ def guide_layers_of(b, tex, face):
         for end, lines in moving.get(tx, []):
             for pad, im in lines.items():
                 layers.append(Layer(f"{name}.{end}.{pad}.png", name, SW[end], PADS.index(pad), im, over=name + ".png"))
+    for name in HAND_GUIDES:
+        if name in GUIDES:
+            continue
+        hand = override(face, name + ".png")
+        if not hand:
+            continue
+        im = Image.open(hand).convert("L")
+        mine = im.getbbox()
+        if not mine:
+            continue
+        box = ImageChops.lighter(decode(b, tex[name]), im).getbbox() or mine   # (the game's own lines go with ours: ours cover them)
+        layers.append(Layer(name + ".png", name, 0xFF, 0, im, box))
     return layers
 
 
-def picture_layers(b, tex, im):
+def picture_layers(b, tex, im, by_hand=False):
     """the layers putting a face's controller picture (1160x680 RGBA, drawn like Controller_Pro) in place of the Pro Controller:
     the picture, the page's tinted copy (each channel a line of the grey level, fitted on the game's pair) and the shadow (the
-    outline's left part squeezed into ControllerSh_Pro1 and blurred, fitted on the game's)"""
+    outline's left part squeezed into ControllerSh_Pro1 and blurred, fitted on the game's). A picture given by hand already has
+    its own colours, so it is its own tinted copy: fitting the game's grey-to-brown line on it would take them away (a
+    DualSense's light bar is blue)"""
     import numpy as np
     from PIL import Image, ImageFilter
     plain, tinted = (np.asarray(decode(b, tex[n]).convert("RGBA")).astype(float) for n in (PICTURES[0], PICTURE_TINT))
@@ -828,8 +847,9 @@ def picture_layers(b, tex, im):
     sh = tex[PICTURE_SHADOW]
     shadow = im.getchannel("A").crop((40, 0, 480, 680)).resize((sh[2], sh[3])).filter(ImageFilter.GaussianBlur(24))
     shadow = shadow.point(lambda v: round(v * 0.7))
+    copy = im if by_hand else Image.fromarray(tint.astype("uint8"))
     return [Layer(PICTURES[0] + ".png", PICTURES[0], 0xFF, 0, im),
-            Layer(PICTURE_TINT + ".png", PICTURE_TINT, 0xFF, 0, Image.fromarray(tint.astype("uint8"))),
+            Layer(PICTURE_TINT + ".png", PICTURE_TINT, 0xFF, 0, copy),
             Layer(PICTURE_SHADOW + ".png", PICTURE_SHADOW, 0xFF, 0, shadow)]
 
 
