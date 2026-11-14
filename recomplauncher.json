@@ -31,7 +31,41 @@
       "{game}"
     ],
     "label": "Building the game from your copy (15 to 30 minutes)",
-    "timeout": 7200
+    "timeout": 7200,
+    "options": [
+      {
+        "id": "dlss",
+        "label": "NVIDIA DLSS",
+        "note": "Sharper, faster picture on NVIDIA RTX cards.",
+        "args": [
+          "--fetch-ngx-sdk",
+          "--accept-nvidia-license"
+        ],
+        "gpu": "nvidia",
+        "license": {
+          "name": "NVIDIA DLSS SDK license",
+          "url": "https://github.com/NVIDIA/DLSS/blob/9981c6350dc58c0ce21f024fd65e31e851c31689/LICENSE.txt"
+        }
+      },
+      {
+        "id": "fsr4",
+        "label": "AMD FSR 4",
+        "note": "For AMD Radeon RX 9000 cards.",
+        "args": [
+          "--fsr",
+          "--fetch-fsr-runtime",
+          "--accept-amd-license"
+        ],
+        "gpu": "amd",
+        "os": [
+          "windows"
+        ],
+        "license": {
+          "name": "AMD FidelityFX SDK license",
+          "url": "https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/7539ae8b6568ad29ed78a753404351daf3b5cca7/Kits/FidelityFX/docs/license.md"
+        }
+      }
+    ]
   },
   "config": [
     {
