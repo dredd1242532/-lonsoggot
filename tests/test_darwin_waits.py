@@ -45,8 +45,12 @@ def fixture(root, harness=None):
     # Fibers are deliberately not extracted; their deprecated header rejects Darwin
     # without feature macros, independently of whether this wait group compiles.
     prefix = prefix.replace("#include <ucontext.h>\n", "")
-    thread = source[source.index("typedef struct {", source.index("/* ---- threads ---- */")):
-                    source.index("static __thread HThread *self_thread;")]
+    # The thread record is the first typedef in the threads section: tagged (struct HThread, for
+    # Darwin's thread registry links) or untagged. An empty cut must stop the check, not compile.
+    threads = source.index("/* ---- threads ---- */")
+    thread = source[source.index("typedef struct", threads):source.index("static __thread HThread *self_thread;")]
+    if "} HThread;" not in thread:
+        raise SystemExit("FAIL: win32_posix.c's HThread definition was not found in its threads section")
     events = source[source.index("/* ---- events and semaphores ---- */"):
                     source.index("/* ---- fibers", source.index("/* ---- events and semaphores ---- */"))]
     lookup = "static HThread *thread_of(HANDLE h) { return is(h, H_THREAD) ? (HThread *)h : NULL; }\n"
