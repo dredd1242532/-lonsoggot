@@ -13,6 +13,9 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #endif
+#if defined(__APPLE__)
+extern char** environ;   // (translator_stamp's _environ: Darwin's <unistd.h> declares none, as in vk_menu.cpp)
+#endif
 #include <io.h>
 #include <algorithm>
 #include <cctype>

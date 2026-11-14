@@ -39,6 +39,12 @@ bool programs_life_flag = false;
 std::atomic<bool> programs_in_play{false};
 
 namespace {
+#if defined(__APPLE__)
+// (Darwin counts no thread's own major faults: getrusage takes only RUSAGE_SELF and RUSAGE_CHILDREN, and the per-thread
+// thread_info flavours (THREAD_BASIC_INFO, THREAD_EXTENDED_INFO, which is proc_threadinfo) hold run times and scheduling, no
+// faults or page-ins. The task's counts (task_events_info, proc_taskinfo, rusage_info's ri_pageins) are every thread's, not a
+// create call's: programs_created logs the count as unavailable)
+#else
 /// (the life log) this thread's page faults that waited for the disk so far: what a slow create call was, when it is not ours
 long thread_major_faults() {
 #ifndef _WIN32
@@ -47,6 +53,7 @@ long thread_major_faults() {
 #endif
     return 0;
 }
+#endif
 using Clock = std::chrono::steady_clock;
 const Clock::time_point life_t0 = Clock::now();
 double secs(Clock::time_point t) { return std::chrono::duration<double>(t - life_t0).count(); }
@@ -566,7 +573,9 @@ void programs_created(const nvn_prog* p) {
     const auto t0 = Clock::now();
     double since = 0;
     const bool in_load = programs_in_load(&since);
+#if !defined(__APPLE__)   // (no count of this thread's major faults: thread_major_faults)
     const long faults0 = life ? thread_major_faults() : 0;
+#endif
     const CreatedProgram made = program_created_read(*p);
     const auto t_read = Clock::now();
     if (load && made.ok) load_at_create(*p, made);
@@ -578,12 +587,20 @@ void programs_created(const nvn_prog* p) {
     const auto t1 = Clock::now();
     census.created++, census.created_ok += made.ok, census.created_in_load += in_load;
     census.create_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+#if defined(__APPLE__)   // (no count of this thread's major faults: thread_major_faults)
+    logf("vk: program life: create serial %llx t %.3f frame %lld since_present_ms %.1f in_load %d kind %s stages %d codes "
+         "%016llx %016llx %016llx %016llx read_us %.0f queue_us %.0f major_faults unavailable",
+         (unsigned long long)p->serial, secs(t0), (long long)l.frame, since, (int)in_load, made.ok ? kind_name(l) : "none",
+         made.stages, (unsigned long long)l.codes[0], (unsigned long long)l.codes[1], (unsigned long long)l.codes[2],
+         (unsigned long long)l.codes[3], ms_between(t0, t_read) * 1000.0, ms_between(t_read, t1) * 1000.0);
+#else
     logf("vk: program life: create serial %llx t %.3f frame %lld since_present_ms %.1f in_load %d kind %s stages %d codes "
          "%016llx %016llx %016llx %016llx read_us %.0f queue_us %.0f major_faults %ld",
          (unsigned long long)p->serial, secs(t0), (long long)l.frame, since, (int)in_load, made.ok ? kind_name(l) : "none",
          made.stages, (unsigned long long)l.codes[0], (unsigned long long)l.codes[1], (unsigned long long)l.codes[2],
          (unsigned long long)l.codes[3], ms_between(t0, t_read) * 1000.0, ms_between(t_read, t1) * 1000.0,
          thread_major_faults() - faults0);
+#endif
     std::lock_guard lk(life_mu);
     lives[p->serial] = l;
     created_this_frame.push_back(p->serial);
