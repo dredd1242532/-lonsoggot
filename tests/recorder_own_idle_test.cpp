@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include "vk_work.h"
 
@@ -90,14 +91,20 @@ static void open_gate() {
 }
 /// a failure after 3 s: the gate opened, so the case ends and reports it. Each armed watchdog has its number; done() disarms it
 static std::atomic<int> g_armed{0}, g_done{0};
+static std::mutex threads_mu;
+static std::vector<std::thread> g_threads;   // (the watchdogs: joined before a normal return, so none outlives main)
+static void keep(std::thread t) {
+    std::lock_guard lk(threads_mu);
+    g_threads.push_back(std::move(t));
+}
 static void watchdog() {
     const int id = ++g_armed;
-    std::thread([id] {
+    keep(std::thread([id] {
         for (int i = 0; i < 300 && g_done.load() < id; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (g_done.load() >= id) return;
         g_watchdog = true;
         open_gate();
-    }).detach();
+    }));
 }
 /// (_Exit, not a return: the recorder thread may still be waiting on this file's mutexes, which exit() would destroy)
 [[noreturn]] static void pass(const std::string& c) {
@@ -334,14 +341,21 @@ static bool install_real_hooks() { return false; }
 #endif
 static void (*real_wake)(void*) = nullptr;
 static bool (*real_wait)(volatile void*, void*, size_t, uint32_t) = nullptr;
-static std::atomic<int> in_real_wait{0}, real_wait_returns{0};   // (the recorder inside the OS wait call now; its returns)
+static std::atomic<int> in_real_wait{0}, real_wait_returns{0}, real_timeouts{0};   // (inside the wait call now; returns; timeouts)
 static std::atomic<bool> no_timeout{false};   // (a case that must be released by the wake or the compare alone)
 static std::atomic<bool> entered_without_timeout{false};   // (the wait in progress was entered with no timeout)
+static std::atomic<uint64_t> last_call_ns{0}, last_return_ns{0};   // (the last wait that returned: its start and end)
 static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) {
     const bool inf = no_timeout;
     entered_without_timeout = inf;
+    const uint64_t call = rec::now_ns();
     in_real_wait++;
     const bool r = real_wait(a, c, n, inf ? 0xFFFFFFFFu : ms);   // (0xFFFFFFFF: INFINITE)
+#ifdef _WIN32
+    if (!r && GetLastError() == ERROR_TIMEOUT) real_timeouts++;   // (a timeout, not an early return: WaitOnAddress may return early)
+#endif
+    const uint64_t ret = rec::now_ns();
+    last_call_ns = call, last_return_ns = ret;   // (a pair, written at the return: the next wait does not touch them)
     in_real_wait--;
     real_wait_returns++;
     return r;
@@ -372,15 +386,17 @@ static bool publish_runs(int want) {
 }
 /// the recorder stopped through the renderer's own teardown (vkDestroyDevice's boundary), joined within 3 s, and a normal return:
 /// the process ends through exit() with nothing of the recorder left running
-static std::atomic<bool> stopped{false};   // (static: the watchdog thread below outlives orderly_end)
+static std::atomic<bool> stopped{false};
 static int orderly_end(const std::string& c) {
-    std::thread([] {
+    keep(std::thread([] {
         for (int i = 0; i < 300 && !stopped; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
         if (!stopped) fail("the recorder did not stop within 3 s (vkDestroyDevice)");
-    }).detach();
+    }));
     vkDestroyDevice(kDev, nullptr);
     stopped = true;
     if (rec::g_rec.th.joinable() || rec::g_rec.ready.load()) fail("the recorder thread still there after vkDestroyDevice");
+    g_done = g_armed.load();
+    for (std::thread& t : g_threads) t.join();   // (every watchdog disarmed: each ends within 10 ms)
     std::printf("PASS %s\n", c.c_str());
     std::fflush(stdout);
     return 0;
@@ -418,31 +434,38 @@ int main(int argc, char** argv) {
         if (c == "real_parked") {   // (asleep on W through the real wait, with no timeout: only the publish's wake lets it go)
             no_timeout = true;
             real_wake(&rec::g_rec.W);   // (back round into a wait entered with no timeout)
-            if (!wait_until([] { return in_real_wait == 1 && entered_without_timeout; })) fail("the recorder never waited on W");
-            if (!publish_runs(1)) fail("a publish did not wake the recorder waiting on W (3 s)");
+            bool woken = false;
+            for (int attempt = 0; attempt < 5 && !woken; attempt++) {
+                if (!wait_until([] { return in_real_wait == 1 && entered_without_timeout; })) fail("the recorder never waited on W");
+                const int r0 = real_wait_returns;
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                if (real_wait_returns != r0 || in_real_wait != 1) continue;   // (it returned early: again)
+                const uint64_t pub = rec::now_ns();
+                if (!publish_runs(attempt + 1)) fail("a publish did not wake the recorder waiting on W (3 s)");
+                // (the wait that returned began before the publish and blocked for 15 ms or more: no compare at its start, so the
+                // wake ended it. Otherwise inconclusive: again)
+                woken = last_call_ns < pub && last_return_ns >= pub && last_return_ns - last_call_ns >= 15000000;
+            }
+            if (!woken) fail("no attempt showed the wake ending a blocked wait");
             no_timeout = false;
         } else if (c == "real_timeout") {   // (no wake and nothing published: only the 2 ms timeout ends each wait)
             real_wake_works = false;
             if (!parked()) fail("the recorder never waited on W");
-            const int r0 = real_wait_returns;
-            if (!wait_until([r0] { return real_wait_returns - r0 >= 3; })) fail("with no wake the waits did not time out (3 s)");
+            const int t0 = real_timeouts;
+            if (!wait_until([t0] { return real_timeouts - t0 >= 3; })) fail("with no wake the waits did not time out (3 s)");
             if (!publish_runs(1)) fail("with no wake the timeout did not bring the recorder back to a publish (3 s)");
             real_wake_works = true;
         } else if (c == "real_race") {   // (a publish just before a wait with no timeout, the wake off: only the compare returns it)
-            no_timeout = true;
-            if (!parked()) fail("the recorder never waited on W");
-            race_armed = true;
-            real_wake(&rec::g_rec.W);   // (let go with nothing new: it idles again, into the armed hook)
+            race_armed = true;   // (the recorder's next timed-out wait brings it round into the hook)
             if (!wait_until([] { return race_step.load() == 1; })) fail("the recorder never reached its wait");
+            no_timeout = true;   // (the wait after the hook: no timeout, so only the compare can end it)
             real_wake_works = false;
             replay_mu.lock();
             vkCmdWriteTimestamp2(kCmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, (VkQueryPool)(uintptr_t)0x40, 0);
             rec::t_prod->flush();
-            const uint64_t t0 = rec::now_ns();
             race_step = 2;
             if (!wait_until([] { return g_ran.load() == 1; })) fail("the published packet never ran");
             replay_mu.unlock();
-            (void)t0;
             race_armed = false;
             no_timeout = false;
             real_wake_works = true;

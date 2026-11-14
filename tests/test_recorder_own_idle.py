@@ -68,8 +68,8 @@ DRAW_BEGIN = "void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t 
 
 
 def code(text):
-    """the text without its // comments: a call commented out is not a call"""
-    return re.sub(r"//[^\n]*", "", text)
+    """the text without its comments (// and /* */): a call commented out is not a call"""
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", text, flags=re.S))
 
 
 def source_problems(replay, draw, others):
@@ -140,6 +140,7 @@ def test_sources():
     if late == begin or not source_problems(replay.replace(begin, late, 1), draw, others):
         raise SystemExit("sources: the control with slot_begin() after the OwnSlot passed")
     for what, old, new in (("recording_wait commented out", "recording_wait(r);", "// recording_wait(r);"),
+                           ("recording_wait in a block comment", "recording_wait(r);", "/* recording_wait(r); */"),
                            ("another slot's descriptor pools", "draw_begin_recording(r.slot, r.cmd, value);",
                             "draw_begin_recording((r.slot + 1) % kRecordings, r.cmd, value);")):
         if begin.count(old) != 1 or not source_problems(replay.replace(begin, begin.replace(old, new, 1), 1), draw, others):
