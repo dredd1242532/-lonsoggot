@@ -60,4 +60,22 @@ inline Mode mode_for(bool intel_mesa, const char* env) {
 /// is pinned, as before)
 inline bool needed(Mode mode, bool known, const Uses& u) { return mode == Mode::All || !known || sees_lanes(u); }
 
+// Too big for Mesa's Intel compiler held to 32 lanes (vk_draw.cpp ComputeTurn). Its time goes to register allocation:
+// at SIMD32 an Iris Xe thread has 32 registers a lane, and a program needing far more spills them in rounds, each one
+// allocating the whole program again. Two of MKW's compute programs are about 12,400 phis each (045df6f2e27d05e6 and
+// 184791cd4644065f: 2.2 MB of SPIR-V, one function with 5,700 small branches); every other one held to 32 lanes has
+// 2,650 phis or fewer. Measured alone (i9-13900H, Iris Xe, Mesa 26.2.4): 045df6f2e27d05e6 was at 17.6 GB and not done
+// after 30 minutes held to 32 lanes, and at 8.4 GB and not done after 4.5 minutes at the lanes the driver chose; the
+// worst below the limit, 7a548525c239b91b (2,534 phis), took 531 s and 7.6 GB. In play the build would hold Intel's one
+// compute build lane for the half hour and take the memory the game needs. Neither program is in the shipped state list
+// or in this PC's play: nobody's recorded play has dispatched them. Their dispatches are left out, as a program the
+// driver refuses.
+constexpr uint32_t kIntelPhiLimit = 6000;   // (between the 2,650 that build in seconds to minutes and the 12,300 that never did)
+
+/// A compute stage not given to the driver: Mesa's Intel, held to 32 lanes, over the limit (0: no limit). The mesh
+/// fallback's stages are not judged here (fallback_size_policy.h)
+inline bool too_big(bool intel_mesa, bool pinned, uint32_t phis, uint32_t limit) {
+    return intel_mesa && pinned && limit && phis > limit;
+}
+
 }  // namespace compute_pin

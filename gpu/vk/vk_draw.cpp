@@ -234,7 +234,7 @@ struct ComputeDescribed {
     compute_pin::Uses uses;
     uint32_t workgroup[3] = {0, 0, 0};
     bool fallback = false;
-    uint32_t phis = 0;   // (its SPIR-V's: Stage::phis, for its weight at the gate)
+    uint32_t phis = 0;   // (its SPIR-V's: Stage::phis, for compute_refused)
 };
 thread_local ComputeDescribed compute_described;
 void compute_describe(const Program& p, const Stage& st) {
@@ -1560,13 +1560,38 @@ void compute_compiles_log(int64_t over_s = 30) {
         logf("vk: compute pipelines: the driver is compiling %zu, %d of them for %lld s or longer: %s%s", running, long_ones,
              (long long)over_s, line, long_ones > 6 ? ", ..." : "");
 }
+/// (longshot) Whether the compile described (compute_describe) is one the driver is not given: a game compute program held to
+/// 32 lanes on Mesa's Intel driver with more phis than its compiler finishes (compute_pin.h too_big). Named in the log, a few
+/// times. RX_VK_COMPUTE_PHI_LIMIT=<n>: another limit, 0 none
+bool compute_refused(const ComputeDescribed& d, bool pinned) {
+    static const uint32_t limit = [] {
+        uint32_t v = compute_pin::kIntelPhiLimit;
+        const char* e = getenv("RX_VK_COMPUTE_PHI_LIMIT");
+        if (e && !fallback_size::parse_limit(e, v)) {
+            v = compute_pin::kIntelPhiLimit;
+            logf("vk: RX_VK_COMPUTE_PHI_LIMIT=%s is not a number from 0 to 4294967295: ignored", e);
+        }
+        return v;
+    }();
+    if (d.fallback ||
+        !compute_pin::too_big(dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, pinned, d.phis, limit))
+        return false;
+    static std::atomic<int> told{0};
+    if (told++ < 8)
+        logf("vk: compute pipeline of %016llx is not built: held to 32 lanes with %u phis, more than Mesa's Intel compiler "
+             "finishes (the most %u, RX_VK_COMPUTE_PHI_LIMIT); its dispatches are left out",
+             (unsigned long long)d.key, d.phis, limit);
+    return true;
+}
 /// A compile's turn at the gate, for as long as it lives. A create call that only asks the caches compiles nothing and takes
-/// none. ok(): false when the preparation was stopped (the window closed) while this one waited: it is not compiled.
+/// none. ok(): false when the preparation was stopped (the window closed) while this one waited, or the program is one the
+/// driver is not given (compute_refused): it is not compiled.
 /// A long compile hands the memory it freed back to the system as it leaves (compute_gate.h trims)
 struct ComputeTurn {
     explicit ComputeTurn(const VkComputePipelineCreateInfo& ci)
         : gate((ci.flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT) ? nullptr : &compute_compiles()),
           weight(compute_gate::weight(compute_pinned(ci), compute_described.phis)) {
+        if (gate && compute_refused(compute_described, compute_pinned(ci))) gate = nullptr, stopped = true;
         if (gate && !gate->enter(weight, memory_available_mb, [] { return prepare_stopped(); })) gate = nullptr, stopped = true;
         began = std::chrono::steady_clock::now();   // (the turn is taken: the compile starts)
         if (gate) {
@@ -1609,7 +1634,7 @@ VkResult cached_compute(const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     // (the turn first, Intel's lock inside it: a worker that held the lock while it waited for a turn would block the compiles
     // that have theirs, and those hold the memory it waits for)
     const ComputeTurn turn(*ci);
-    if (!turn.ok()) return *pl = VK_NULL_HANDLE, VK_ERROR_OUT_OF_HOST_MEMORY;   // (stopped while it waited: not compiled)
+    if (!turn.ok()) return *pl = VK_NULL_HANDLE, VK_ERROR_OUT_OF_HOST_MEMORY;   // (stopped while it waited, or refused: not compiled)
     IntelDriverGate gate(compiles_nothing(ci->flags));
     if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_compute_held, ci, pl);

@@ -10,7 +10,12 @@ Compiles the rule and checks it: each subgroup flag keeps the pin, shared memory
 program with no stage keeps it, RX_VK_COMPUTE_PIN=all and lanes over the default, other GPUs keep every pin. And the
 source: every game compute pipeline (dispatch, load, precompile, the preparation's warm) is described by
 compute_pipeline_info, which pins through pin_compute, so all of them ask the caches for the same pipeline; the rule reads
-the program's record, never its SPIR-V; the default is Mesa's Intel driver alone. No game or GPU is needed.
+the program's record, never its SPIR-V; the default is Mesa's Intel driver alone.
+
+And the programs too big for that compiler held to 32 lanes (too_big: two of MKW's, about 12,400 phis, were not built after
+30 minutes and 17 GB): only Mesa's Intel driver, only a pinned stage, only over the limit, 0 none; every compile's turn
+(ComputeTurn) refuses one before it waits at the gate, never a stage of the mesh fallback, and a refused compile is not
+made. No game or GPU is needed.
 
 python -I -B tests/test_compute_pin.py [--cxx g++]
 """
@@ -55,6 +60,13 @@ int main() {
     Uses one_warp = plain; one_warp.invocations = 32;
     CHECK(!needed(lanes, true, one_warp), "one warp without shared memory: not pinned");
 
+    CHECK(too_big(true, true, 12329, kIntelPhiLimit), "045df6f2e27d05e6 (12,329 phis, pinned, Mesa Intel): not built");
+    CHECK(!too_big(true, true, 2643, kIntelPhiLimit), "the biggest of the others (2,643 phis): built");
+    CHECK(!too_big(true, true, kIntelPhiLimit, kIntelPhiLimit), "at the limit: built");
+    CHECK(!too_big(true, false, 12329, kIntelPhiLimit), "at the lanes the driver chooses: built");
+    CHECK(!too_big(false, true, 12329, kIntelPhiLimit), "another driver: built");
+    CHECK(!too_big(true, true, 80000, 0), "limit 0: none left out");
+    CHECK(kIntelPhiLimit > 2643 * 2 && kIntelPhiLimit * 2 < 12329, "the limit sits between the measured programs");
     std::printf(fails ? "compute_pin: FAILED\n" : "compute_pin: ok\n");
     return fails ? 1 : 0;
 }
@@ -100,6 +112,26 @@ def check_source():
         raise SystemExit("prepare_run's warm describes its compute pipelines itself, not through compute_pipeline_info")
     if "spirv" in needed or "spirv" in uses:
         raise SystemExit("the pin reads the SPIR-V: a program read without its code would ask for another pipeline")
+    # (the compile's turn refuses a program too big for the driver before it waits at the gate, from what compute_describe
+    # noted of the stage; the mesh fallback's stages are left to fallback_size_policy.h)
+    if "compute_described.phis = st.phis;" not in block(draw, "void compute_describe(const Program& p, const Stage& st) {"):
+        raise SystemExit("compute_describe does not note the stage's phis: the size rule would see none")
+    refused = block(draw, "bool compute_refused(const ComputeDescribed& d, bool pinned) {")
+    for needle, why in (("if (d.fallback ||", "it judges the mesh fallback's stages"),
+                        ("compute_pin::too_big(dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, pinned, d.phis, limit)",
+                         "it is not compute_pin::too_big on Mesa's Intel driver"),
+                        ('getenv("RX_VK_COMPUTE_PHI_LIMIT")', "the switch is gone"),
+                        ("fallback_size::parse_limit(e, v)", "the switch is not read as digits only")):
+        if needle not in refused:
+            raise SystemExit("compute_refused: " + why)
+    turn = block(draw, "struct ComputeTurn {")
+    refuse = "if (gate && compute_refused(compute_described, compute_pinned(ci))) gate = nullptr, stopped = true;"
+    if refuse not in turn or turn.index(refuse) > turn.index("gate->enter("):
+        raise SystemExit("ComputeTurn does not refuse a program too big for the driver before it waits at the gate")
+    if "if (!turn.ok()) return *pl = VK_NULL_HANDLE," not in block(draw, "VkResult cached_compute("):
+        raise SystemExit("cached_compute compiles a refused program")
+    if "if (turn.ok() && guarded_compute_held(" not in prepare:
+        raise SystemExit("the preparation's warm compiles a refused program")
 
 
 def main():
