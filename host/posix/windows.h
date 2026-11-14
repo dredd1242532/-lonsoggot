@@ -122,6 +122,7 @@ static inline int localtime_s(struct tm *out, const time_t *t) { return localtim
 #define ERROR_NOT_SUPPORTED 50L
 #define ERROR_FILE_EXISTS 80L
 #define ERROR_INVALID_PARAMETER 87L
+#define ERROR_INSUFFICIENT_BUFFER 122L
 #define ERROR_ALREADY_EXISTS 183L
 #define ERROR_COMMITMENT_LIMIT 1455L
 #define ERROR_NOT_ALL_ASSIGNED 1300L
@@ -267,6 +268,12 @@ static inline HANDLE GetCurrentProcess(void) { return (HANDLE)(intptr_t)-1; }
 static inline DWORD GetCurrentProcessId(void) { return (DWORD)getpid(); }
 DWORD GetCurrentThreadId(void);
 DWORD GetThreadId(HANDLE t);
+#if defined(__APPLE__)
+/* Win32's DWORD identities are task-local Mach port names. Use these helpers for native diagnostics;
+   Darwin's 64-bit thread IDs are never narrowed to DWORD, nor confused with those port names. */
+uint64_t darwin_thread_id(HANDLE t);
+int darwin_thread_name(uint64_t tid, char *out, size_t cap);
+#endif
 DWORD GetProcessId(HANDLE p);
 HANDLE OpenThread(DWORD access, BOOL inherit, DWORD id);
 BOOL DuplicateHandle(HANDLE sp, HANDLE src, HANDLE tp, HANDLE *out, DWORD access, BOOL inherit, DWORD options);
@@ -294,7 +301,7 @@ DWORD WaitForSingleObject(HANDLE h, DWORD ms);
 DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms);
 void *LocalFree(void *p);
 
-/* fibers: ucontext, each on its own stack */
+/* fibers: native guarded contexts on Darwin, ucontext elsewhere; user fibers may migrate between pthreads */
 #define FIBER_FLAG_FLOAT_SWITCH 0x1
 typedef void (*LPFIBER_START_ROUTINE)(void *);
 void *ConvertThreadToFiberEx(void *param, DWORD flags);

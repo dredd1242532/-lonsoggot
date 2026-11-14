@@ -15,6 +15,13 @@ typedef struct {
     int argc, envc;
 } HosRelaunch;
 
+#if defined(__APPLE__)
+/* Called at the very start of main, before any setenv/unsetenv or argv edits. A restart uses this owned
+   snapshot and the actual executable path, not argv[0], /proc, or the environment after options loaded. */
+int hos_relaunch_keep_startup(int argc, char *const argv[], char *const envp[]);
+int hos_relaunch_exec_startup(void);   /* error number on failure; success replaces this process */
+#endif
+
 /* A file's whole contents and one NUL more (a /proc file says it is empty: read until its end). NULL if it cannot be read */
 static inline char *hos_relaunch_slurp(const char *path, size_t *len) {
     FILE *f = fopen(path, "rb");

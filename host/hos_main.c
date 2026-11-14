@@ -43,6 +43,9 @@ const char *hos_version(void) { return LONGSHOT_VERSION; }   /* (discord_rpc.c's
 #endif
 #if defined(__APPLE__)
 #include "posix/darwin_mem.h"
+#include "hos_relaunch.h"
+#include <sys/sysctl.h>
+extern char **environ;
 #endif
 /* (linux) the separator of the paths the executable's folder is joined with */
 #ifdef _WIN32
@@ -1680,6 +1683,15 @@ static void occlusion_switch(void) {
    The game starts anyway, and headless runs only log the warning. Windows keeps its commit-limit check. */
 #define HOS_MEMORY_NEEDED_MB 10240ull
 static int memory_notice_text(unsigned long long ram_mb, unsigned long long swap_mb, char *out, size_t cap) {
+#if defined(__APPLE__)
+    if (ram_mb >= HOS_MEMORY_NEEDED_MB) return 0;
+    snprintf(out, cap,
+             "This Mac has %.1f GiB of RAM and currently %.1f GiB of allocated swap. Longshot recommends 16 GB of RAM or more; "
+             "the game alone can use more than 13 GiB.\n\nmacOS manages swap dynamically; this is not a fixed memory limit. "
+             "Heavy swapping can make the game and desktop unresponsive. Close other programs before playing. The game starts anyway.",
+             ram_mb / 1024.0, swap_mb / 1024.0);
+    return 1;
+#else
 #if defined(__linux__) && !defined(_WIN32)
     if (ram_mb < HOS_MEMORY_NEEDED_MB) {
         snprintf(out, cap,
@@ -1698,6 +1710,7 @@ static int memory_notice_text(unsigned long long ram_mb, unsigned long long swap
              "let it manage the page file's size), then start the game again. It starts now anyway.",
              ram_mb / 1024.0, swap_mb / 1024.0, HOS_MEMORY_NEEDED_MB / 1024);
     return 1;
+#endif
 }
 #ifndef A64_MEM_ZERO
 static void memory_notice(void) {
@@ -1711,6 +1724,22 @@ static void memory_notice(void) {
     struct sysinfo si;
     if (sysinfo(&si)) return;
     ram = ((unsigned long long)si.totalram * si.mem_unit) >> 20, swap = ((unsigned long long)si.totalswap * si.mem_unit) >> 20;
+#elif defined(__APPLE__)
+    uint64_t physical = 0;
+    struct xsw_usage usage;
+    size_t size = sizeof physical;
+    if (sysctlbyname("hw.memsize", &physical, &size, NULL, 0)) {
+        hos_log("boot: cannot query physical RAM on macOS (%s)", strerror(errno));
+        return;
+    }
+    size = sizeof usage;
+    if (sysctlbyname("vm.swapusage", &usage, &size, NULL, 0)) {
+        hos_log("boot: %llu MB of RAM; allocated swap is unavailable (%s)", (unsigned long long)(physical >> 20), strerror(errno));
+        return;
+    }
+    ram = physical >> 20;
+    swap = usage.xsu_total >> 20;
+    hos_log("boot: macOS manages swap dynamically; the swap figure is currently allocated, not a fixed commit limit");
 #else
     return;
 #endif
@@ -1719,7 +1748,7 @@ static void memory_notice(void) {
         hos_log("boot: %llu MB of memory, %llu MB of swap", ram, swap);
         return;
     }
-#if defined(__linux__) && !defined(_WIN32)
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(_WIN32)
     hos_log("boot: LOW MEMORY: %llu MB of memory, %llu MB of swap; below %llu MB of physical RAM: heavy swapping can make "
             "the game and desktop unresponsive (16 GB RAM or more recommended)", ram, swap, HOS_MEMORY_NEEDED_MB);
 #else
@@ -2102,6 +2131,10 @@ int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
     hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there, --prepare-shaders too: host/game_layout.c) */
+#if defined(__APPLE__)
+    const int saved = hos_relaunch_keep_startup(argc, argv, environ);
+    if (saved) fprintf(stderr, "restart: cannot retain the initial command/environment (%s); restart will be unavailable\n", strerror(saved));
+#endif
     load_longshot_env();
     driver_cache_room();
     driver_cache_folder();

@@ -67,6 +67,72 @@ static void relaunch(void) {
     free(cmd);
     free(env);
 }
+#elif defined(__APPLE__)
+#include "posix/darwin_process.h"
+#include <errno.h>
+#include <limits.h>
+#include <stdint.h>
+
+static HosRelaunch start;
+static char start_exe[PATH_MAX];
+static int start_error = EINVAL;
+
+static int copy_strings(char *const from[], size_t n, char **blob, char ***vector) {
+    size_t bytes = 0;
+    if (n > SIZE_MAX / sizeof(char *) - 1) return EOVERFLOW;
+    for (size_t i = 0; i < n; i++) {
+        if (!from[i]) return EINVAL;
+        const size_t len = strlen(from[i]) + 1;
+        if (bytes > SIZE_MAX - len) return EOVERFLOW;
+        bytes += len;
+    }
+    char *b = malloc(bytes ? bytes : 1);
+    char **v = malloc((n + 1) * sizeof *v);
+    if (!b || !v) { free(b); free(v); return ENOMEM; }
+    char *at = b;
+    for (size_t i = 0; i < n; i++) {
+        const size_t len = strlen(from[i]) + 1;
+        v[i] = at;
+        memcpy(at, from[i], len);
+        at += len;
+    }
+    v[n] = NULL;
+    *blob = b;
+    *vector = v;
+    return 0;
+}
+int hos_relaunch_keep_startup(int argc, char *const argv[], char *const envp[]) {
+    if (start.argv) return 0;        /* never replace the initial snapshot with a later, mutated one */
+    if (argc < 1 || !argv || !envp) return start_error = EINVAL;
+    size_t envc = 0;
+    while (envp[envc]) {
+        if (envc == INT_MAX) return start_error = EOVERFLOW;
+        envc++;
+    }
+    HosRelaunch saved = {0};
+    int e = darwin_executable_path(start_exe, sizeof start_exe);
+    if (!e) e = copy_strings(argv, (size_t)argc, &saved.args, &saved.argv);
+    if (!e) e = copy_strings(envp, envc, &saved.env, &saved.envp);
+    if (e) {
+        free(saved.args); free(saved.argv); free(saved.env); free(saved.envp);
+        return start_error = e;
+    }
+    saved.argc = argc;
+    saved.envc = (int)envc;
+    start = saved;
+    return start_error = 0;
+}
+int hos_relaunch_exec_startup(void) {
+    if (!start.argv) return start_error;
+    fflush(NULL);
+    pid_t pid;
+    return darwin_spawn(&pid, start_exe, start.argv, start.envp, NULL, 1);
+}
+static void relaunch(void) {
+    const int e = hos_relaunch_exec_startup();
+    hos_log("restart: the game could not be started again (%s): it only exits", strerror(e));
+    hos_log_flush();
+}
 #else
 #include <dirent.h>
 #include <fcntl.h>

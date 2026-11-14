@@ -34,7 +34,11 @@
 #define DEPTH 256
 typedef struct { uint64_t rets[4], target; void *buf[32]; } SjSlot;   /* (buf: recomp_sj_setjmp's 248 bytes) */
 typedef struct { SjSlot slot[DEPTH]; int depth, overflow; } SjStack;
+#if defined(__APPLE__)
+#include "posix/darwin_fiber.h"
+#else
 static _Thread_local SjStack *stack;
+#endif
 
 /* Darwin arm64's assembly is in posix/darwin_cpu.c; keep both existing x86 implementations unchanged. */
 #if !defined(__APPLE__) || !defined(__aarch64__)
@@ -147,7 +151,12 @@ __attribute__((naked, noreturn)) static void recomp_sj_longjmp(void **buf, int v
 
 void **recomp_sj_push(Ctx *c, uint64_t r0, uint64_t r1, uint64_t r2, uint64_t r3) {
     (void)c;
+#if defined(__APPLE__)
+    SjStack *stack = (SjStack *)darwin_fiber_local(sizeof(SjStack));
+    if (!stack) { hos_log("setjmp: cannot allocate the current fiber's nonlocal-return state"); abort(); }
+#else
     if (!stack) stack = (SjStack *)calloc(1, sizeof *stack);
+#endif
     if (stack->depth >= DEPTH) {   /* (too deep: the outermost slots go, as they are the least likely targets) */
         memmove(&stack->slot[0], &stack->slot[1], sizeof stack->slot[0] * (DEPTH - 1));
         stack->depth = DEPTH - 1;
@@ -161,6 +170,9 @@ void **recomp_sj_push(Ctx *c, uint64_t r0, uint64_t r1, uint64_t r2, uint64_t r3
 uint64_t recomp_sj_target(void **buf) { return ((SjSlot *)((char *)buf - offsetof(SjSlot, buf)))->target; }
 
 void recomp_sj_pop(void **buf) {
+#if defined(__APPLE__)
+    SjStack *stack = (SjStack *)darwin_fiber_local(0);
+#endif
     if (!stack) return;
     const int i = (int)(((SjSlot *)((char *)buf - offsetof(SjSlot, buf))) - stack->slot);
     if (i >= 0 && i < DEPTH && i < stack->depth) stack->depth = i;
@@ -168,6 +180,9 @@ void recomp_sj_pop(void **buf) {
 
 /* a64_call_miss's first question: a longjmp to a pushed setjmp owner? (does not return when it is) */
 void hos_setjmp_return(Ctx *c, uint64_t target) {
+#if defined(__APPLE__)
+    SjStack *stack = (SjStack *)darwin_fiber_local(0);
+#endif
     if (!stack || !stack->depth || !target) return;
     for (int i = stack->depth - 1; i >= 0; i--) {
         SjSlot *s = &stack->slot[i];

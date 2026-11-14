@@ -26,6 +26,8 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <fcntl.h>
+#include <stddef.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sys/socket.h>
@@ -97,10 +99,28 @@ static Ipc ipc_connect(int i) {
         struct sockaddr_un a;
         memset(&a, 0, sizeof a);
         a.sun_family = AF_UNIX;
-        snprintf(a.sun_path, sizeof a.sun_path, "%s/%sdiscord-ipc-%d", dir, subs[s], i);
+        const int n = snprintf(a.sun_path, sizeof a.sun_path, "%s/%sdiscord-ipc-%d", dir, subs[s], i);
+        if (n < 0 || (size_t)n >= sizeof a.sun_path) { errno = ENAMETOOLONG; continue; }
+        const socklen_t length = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + (size_t)n + 1);
+#if defined(__APPLE__)
+        a.sun_len = (unsigned char)length;
         const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+#else
+        const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#endif
         if (fd < 0) return IPC_NONE;
-        if (!connect(fd, (struct sockaddr *)&a, sizeof a)) return fd;
+#if defined(__APPLE__)
+        const int flags = fcntl(fd, F_GETFD);
+        const int no_pipe = 1;
+        if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) ||
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &no_pipe, sizeof no_pipe)) {
+            const int e = errno;
+            close(fd);
+            errno = e;
+            return IPC_NONE;
+        }
+#endif
+        if (!connect(fd, (struct sockaddr *)&a, length)) return fd;
         close(fd);
     }
     return IPC_NONE;
@@ -109,7 +129,12 @@ static void ipc_close(Ipc p) { close(p); }
 static int ipc_write(Ipc p, const void *d, size_t n) {
     const char *c = d;
     while (n) {
+#if defined(__APPLE__)
+        const ssize_t w = send(p, c, n, 0);   /* SO_NOSIGPIPE is set before the connection is published */
+#else
         const ssize_t w = send(p, c, n, MSG_NOSIGNAL);
+#endif
+        if (w < 0 && errno == EINTR) continue;
         if (w <= 0) return 0;
         c += w, n -= (size_t)w;
     }

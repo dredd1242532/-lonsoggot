@@ -8,7 +8,8 @@
    These leaf routines never touch x18 or create a frame. Saving x29 itself, not a computed frame address,
    keeps the caller's frame chain and spill slots intact. FPCR and FPSR are restored too, matching the x86
    jump's floating-point environment snapshot (FPSR need not be preserved by an ordinary AAPCS64 call).
-   This is a same-thread jump to a still-live caller; it saves no signal mask, TLS or fiber ownership.
+   The target must be a still-live frame on the current stack (a thread's stack or its current fiber).
+   It saves no signal mask, TLS or fiber ownership; darwin_fiber.c owns scheduling and nonlocal-slot lifetime.
 
    buf is the existing 32-pointer slot, aligned to 8 bytes: x19-x28 at 0-72, x29/x30 at 80/88, SP at 96,
    d8-d15 at 112-168, FPCR/FPSR at 176/184. No access needs 16-byte buffer alignment. SP stays 16-byte aligned. */

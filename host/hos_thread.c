@@ -19,6 +19,9 @@
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
 #endif
+#if defined(__APPLE__)
+#include "posix/darwin_prof.h"
+#endif
 #ifdef __EMSCRIPTEN__
 #include <sched.h>
 #include <stdatomic.h>
@@ -95,6 +98,11 @@ static void pin_by_core(HosThread *t) {
     static int on = -1;
     if (on < 0) on = env_on("HOS_PIN_BY_CORE");
     if (on && t->handle) SetThreadAffinityMask(t->handle, (DWORD_PTR)1 << (2 * hos_thread_core(t)));
+#elif defined(__APPLE__)
+    (void)t;
+    static volatile LONG noted;
+    if (env_on("HOS_PIN_BY_CORE") && !InterlockedCompareExchange(&noted, 1, 0))
+        hos_log("threads: HOS_PIN_BY_CORE is unavailable on Darwin: the OS does not expose CPU-binding masks");
 #else
     (void)t;
 #endif
@@ -106,7 +114,7 @@ void hos_thread_affinity(HosThread *t, int ideal, uint64_t mask) {
 }
 uint64_t hos_thread_mask(HosThread *t) { return t->core_mask; }
 void hos_thread_boost(int level) {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if (defined(_WIN32) || defined(__APPLE__)) && !defined(__EMSCRIPTEN__)
     static int off = -1;
     if (off < 0) off = env_on("HOS_NO_PRIORITIES");
     if (!off) SetThreadPriority(GetCurrentThread(), level >= 2 ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_ABOVE_NORMAL);
@@ -400,6 +408,23 @@ int hos_thread_handles(HANDLE *out, const char **names, int max) {
     return n;
 }
 
+#if defined(__APPLE__)
+int hos_darwin_guest_thread_name(uint64_t id, char *out, size_t cap) {
+    if (!out || !cap) return 0;
+    int found = 0;
+    out[0] = 0;
+    AcquireSRWLockShared(&threads_lock);
+    for (int i = 0; i < nthreads; i++) {
+        if (!threads[i]->handle || darwin_thread_id(threads[i]->handle) != id) continue;
+        snprintf(out, cap, "%s", threads[i]->name);
+        found = 1;
+        break;
+    }
+    ReleaseSRWLockShared(&threads_lock);
+    return found;
+}
+#endif
+
 /* (mkw-recomp) Every guest thread's name and guest registers as of its last call out of lifted code, with its
    frame chain from x29: what each thread of a stalled game waits in (mkw_glue.c, HOS_STATS_AFTER). */
 void hos_thread_dump(void) {
@@ -515,6 +540,13 @@ Ctx *hos_boot_main_thread(uint64_t stack_size) {
 static DWORD WINAPI thread_main(void *p) {
     HosThread *t = (HosThread *)p;
     cur = t;
+#if defined(__APPLE__)
+    wchar_t label[48];
+    AcquireSRWLockShared(&threads_lock);
+    MultiByteToWideChar(CP_UTF8, 0, t->name, -1, label, 48);
+    ReleaseSRWLockShared(&threads_lock);
+    SetThreadDescription(GetCurrentThread(), label);   /* Darwin's kernel name can only be set by the target pthread. */
+#endif
     Ctx *c = &t->ctx;
     c->x[0] = t->arg;
     c->x[30] = 0;
@@ -654,6 +686,20 @@ int64_t hos_spin_ns(void) {
 }
 
 void hos_thread_set_name(HosThread *t, const char *name) {
+#if defined(__APPLE__)
+    char label[sizeof t->name];
+    AcquireSRWLockExclusive(&threads_lock);
+    snprintf(t->name, sizeof t->name, "%s", name);
+    snprintf(label, sizeof label, "%s", t->name);
+    __atomic_store_n(&t->serial, serial_name(label), __ATOMIC_RELAXED);
+    ReleaseSRWLockExclusive(&threads_lock);
+    if (t->handle) {
+        wchar_t w[48];
+        MultiByteToWideChar(CP_UTF8, 0, label, -1, w, 48);
+        SetThreadDescription(t->handle, w);
+        hos_thread_pin(t->handle, label);
+    }
+#else
     snprintf(t->name, sizeof t->name, "%s", name);
     __atomic_store_n(&t->serial, serial_name(t->name), __ATOMIC_RELAXED);   /* (atomic: SetThreadName may name another thread) */
     if (t->handle) {
@@ -662,6 +708,7 @@ void hos_thread_set_name(HosThread *t, const char *name) {
         SetThreadDescription(t->handle, w);
         hos_thread_pin(t->handle, t->name);
     }
+#endif
 }
 
 /* HOS_PIN=<name part>=<hex mask>,...[,*=<hex mask>] (experiment): host CPU affinity by thread name (game threads as
@@ -967,6 +1014,12 @@ static uint64_t last_fastest_core(int *cores) {
 }
 #endif
 uint64_t hos_reserved_cpus(void) {
+#if defined(__APPLE__)
+    static volatile LONG noted;
+    if (!InterlockedCompareExchange(&noted, 1, 0))
+        hos_log("vk: Darwin has no supported logical-CPU binding mask: no physical core is reserved (HOS_RESERVE_CORE/MASK unavailable)");
+    return 0;
+#else
     static uint64_t mask = ~0ull;
     if (mask != ~0ull) return mask;
     mask = 0;
@@ -1029,6 +1082,7 @@ uint64_t hos_reserved_cpus(void) {
     if (logical >= 8) mask = last;
     hos_log("vk: reserved core mask (fallback): %#llx", (unsigned long long)mask);
     return mask;
+#endif
 }
 
 void hos_thread_pin(void *h, const char *name) {
@@ -1055,7 +1109,14 @@ void hos_thread_pin(void *h, const char *name) {
     }
     ReleaseSRWLockExclusive(&lk);
     const NameSpec *p = match_name_spec(pins, npins, name);
-    if (p && p->value) SetThreadAffinityMask(h, (DWORD_PTR)p->value);
+    if (p && p->value) {
+        const DWORD_PTR previous = SetThreadAffinityMask(h, (DWORD_PTR)p->value);
+#if defined(__APPLE__)
+        if (!previous) hos_log("threads: cannot apply HOS_PIN for %s on Darwin (error %lu)", name, (unsigned long)GetLastError());
+#else
+        (void)previous;
+#endif
+    }
     static const int levels[5] = {THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_BELOW_NORMAL, THREAD_PRIORITY_NORMAL,
                                   THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST};
     if ((p = match_name_spec(prios, nprios, name)) && p->value >= -2 && p->value <= 2)

@@ -67,6 +67,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 extern char** environ;
+#if defined(__APPLE__)
+#include "../../host/posix/darwin_process.h"
+#endif
 #endif
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 #ifndef LONGSHOT_VERSION   // (nx2/build.py gives it to this file: nx2/version.py)
@@ -2100,6 +2103,43 @@ std::string share_downloads(std::string* words) {
 #ifndef _WIN32
 /// A program of the desktop's (xdg-open, wl-copy, ...), not waited for: false when it cannot start. input: its standard input
 bool share_spawn(std::vector<std::string> argv, const std::string* input = nullptr) {
+#if defined(__APPLE__)
+    if (argv.empty() || argv[0].empty()) return false;
+    for (const auto& arg : argv) if (arg.find('\0') != std::string::npos) return false;
+    int pipefd[2] = {-1, -1};
+    if (input && darwin_pipe_cloexec(pipefd)) return false;
+    const int nullfd = open("/dev/null", O_RDWR | O_CLOEXEC);
+    if (nullfd < 0) {
+        if (input) close(pipefd[0]), close(pipefd[1]);
+        return false;
+    }
+    const int standard[3] = {input ? pipefd[0] : nullfd, nullfd, nullfd};
+    std::vector<char*> args;
+    args.reserve(argv.size() + 1);
+    for (std::string& arg : argv) args.push_back(arg.data());
+    args.push_back(nullptr);
+    pid_t pid = 0;
+    const int err = darwin_spawn(&pid, args[0], args.data(), environ, standard, 0);
+    close(nullfd);
+    if (input) close(pipefd[0]);
+    if (err) {
+        if (input) close(pipefd[1]);
+        return false;
+    }
+    if (!input) return darwin_reap_child(pid) == 0;
+    bool wrote = true;
+    for (size_t at = 0; at < input->size();) {
+        const size_t count = std::min(input->size() - at, size_t(1u << 20));
+        const ssize_t n = write(pipefd[1], input->data() + at, count);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { wrote = false; break; }
+        at += (size_t)n;
+    }
+    close(pipefd[1]);
+    int status = 0;
+    const int waited = darwin_wait_child(pid, &status);
+    return wrote && !waited && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#else
     int fds[2] = {-1, -1};
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
@@ -2156,6 +2196,7 @@ bool share_spawn(std::vector<std::string> argv, const std::string* input = nullp
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
     return wrote && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#endif
 }
 #endif
 bool share_clipboard(const std::string& text) {
@@ -2176,6 +2217,8 @@ bool share_clipboard(const std::string& text) {
     }
     CloseClipboard();
     return ok;
+#elif defined(__APPLE__)
+    return share_spawn({"/usr/bin/pbcopy"}, &text);
 #else
     const char* wl = getenv("WAYLAND_DISPLAY");
     const char* x = getenv("DISPLAY");
@@ -2199,6 +2242,8 @@ bool share_open(const std::string& what, bool select = false) {
         return (INT_PTR)shell_execute(nullptr, L"open", explorer.c_str(), (L"/select,\"" + w + L"\"").c_str(), nullptr, SW_SHOWNORMAL) > 32;
     }
     return (INT_PTR)shell_execute(nullptr, L"open", w.c_str(), nullptr, nullptr, SW_SHOWNORMAL) > 32;
+#elif defined(__APPLE__)
+    return select ? share_spawn({"/usr/bin/open", "-R", "--", what}) : share_spawn({"/usr/bin/open", "--", what});
 #else
     (void)select;
     return share_spawn({"xdg-open", what});

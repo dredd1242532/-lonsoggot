@@ -18,11 +18,20 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
+#if defined(__APPLE__)
+#include <sys/ucontext.h>   /* signal context types only; Darwin fibers do not use the deprecated routines */
+#else
 #include <ucontext.h>
+#endif
 #if defined(__APPLE__)
 #include "darwin_mem.h"
 #include "darwin_fault.h"
 #include "darwin_vulkan.h"
+#include "darwin_fiber.h"
+#include "darwin_process.h"
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#include <mach-o/dyld.h>
 #endif
 
 /* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
@@ -118,10 +127,12 @@ static long futex(volatile uint32_t *a, int op, uint32_t v, const struct timespe
     return syscall(SYS_futex, a, op, v, ts, NULL, 0);
 }
 #endif
+#if !defined(__APPLE__)
 static struct timespec rel_ms(DWORD ms) {
     struct timespec ts = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000L};
     return ts;
 }
+#endif
 void WakeConditionVariable(CONDITION_VARIABLE *cv) {
     __atomic_add_fetch(&cv->seq, 1, __ATOMIC_SEQ_CST);
 #if defined(__APPLE__)
@@ -234,10 +245,19 @@ BOOL SetWaitableTimerEx(HANDLE h, const LARGE_INTEGER *due, LONG period, void *f
 }
 
 /* ---- threads ---- */
-typedef struct {
+typedef struct HThread {
     HObj h;
     pthread_t th;
+#if defined(__APPLE__)
+    uint64_t tid;                   /* Darwin's real thread ID is 64 bits. */
+    thread_t port;                 /* The 32-bit Win32 ID is this task's Mach port name, not a truncated tid. */
+    int ready, init_error;
+    FILETIME created, exited;
+    uint64_t user_ns, kernel_ns;
+    struct HThread *next;
+#else
     volatile pid_t tid;
+#endif
     pthread_mutex_t mu;
     pthread_cond_t cv;
     int done, priority;
@@ -248,8 +268,57 @@ typedef struct {
     char name[64];
 } HThread;
 static __thread HThread *self_thread;
+#if defined(__APPLE__)
+static pthread_mutex_t threads_mu = PTHREAD_MUTEX_INITIALIZER;
+static HThread *host_threads;
+static pthread_key_t thread_key;
+static pthread_once_t thread_key_once = PTHREAD_ONCE_INIT;
+static int thread_key_error;
+static void thread_finish(DWORD code);
+static void thread_destructor(void *p) { self_thread = p; thread_finish(0); }
+static void thread_key_init(void) { thread_key_error = pthread_key_create(&thread_key, thread_destructor); }
+static int thread_attach(HThread *t) {
+    pthread_once(&thread_key_once, thread_key_init);
+    if (thread_key_error) return thread_key_error;
+    t->th = pthread_self();
+    int e = pthread_threadid_np(t->th, &t->tid);
+    if (e) return e;
+    const thread_t port = pthread_mach_thread_np(t->th);
+    if (!port || mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, 1) != KERN_SUCCESS) return ESRCH;
+    t->port = port;
+    e = pthread_setspecific(thread_key, t);
+    if (e) { mach_port_deallocate(mach_task_self(), t->port); t->port = 0; return e; }
+    GetSystemTimeAsFileTime(&t->created);
+    pthread_mutex_lock(&threads_mu);
+    t->next = host_threads;
+    host_threads = t;
+    pthread_mutex_unlock(&threads_mu);
+    return 0;
+}
+static int thread_cpu(HThread *t) {
+    thread_basic_info_data_t info;
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    if (thread_info(t->port, THREAD_BASIC_INFO, (thread_info_t)&info, &count) != KERN_SUCCESS) return ESRCH;
+    t->user_ns = (uint64_t)info.user_time.seconds * 1000000000ULL + (uint64_t)info.user_time.microseconds * 1000;
+    t->kernel_ns = (uint64_t)info.system_time.seconds * 1000000000ULL + (uint64_t)info.system_time.microseconds * 1000;
+    return 0;
+}
+#endif
 static void thread_unref(HThread *t) {
+#if defined(__APPLE__)
+    pthread_mutex_lock(&threads_mu);
+    const int last = __atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL) == 0;
+    if (last) {
+        HThread **at = &host_threads;
+        while (*at && *at != t) at = &(*at)->next;
+        if (*at) *at = t->next;
+    }
+    pthread_mutex_unlock(&threads_mu);
+    if (last) {
+        if (t->port) mach_port_deallocate(mach_task_self(), t->port);
+#else
     if (__atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL) == 0) {
+#endif
         pthread_mutex_destroy(&t->mu);
         pthread_cond_destroy(&t->cv);
         free(t);
@@ -257,6 +326,7 @@ static void thread_unref(HThread *t) {
 }
 static HThread *thread_new(void) {
     HThread *t = (HThread *)calloc(1, sizeof *t);
+    if (!t) { last_error = ERROR_NOT_ENOUGH_MEMORY; return NULL; }
     t->h.type = H_THREAD;
     monitor_init(&t->mu, &t->cv);
     return t;
@@ -264,9 +334,16 @@ static HThread *thread_new(void) {
 static HThread *thread_self(void) {
     if (!self_thread) {   /* (a thread this file did not start: the main thread, a library's) */
         HThread *t = thread_new();
+        if (!t) return NULL;
+        t->refs = 1;   /* (kept for the thread's life) */
+#if defined(__APPLE__)
+        const int e = thread_attach(t);
+        if (e) { thread_unref(t); last_error = error_of(e); return NULL; }
+        t->ready = 1;
+#else
         t->th = pthread_self();
         t->tid = (pid_t)syscall(SYS_gettid);
-        t->refs = 1;   /* (kept for the thread's life) */
+#endif
         self_thread = t;
     }
     return self_thread;
@@ -280,6 +357,11 @@ static void thread_finish(DWORD code) {
     HThread *t = self_thread;
     if (!t) return;
     pthread_mutex_lock(&t->mu);
+#if defined(__APPLE__)
+    (void)thread_cpu(t);
+    GetSystemTimeAsFileTime(&t->exited);
+    if (!thread_key_error && t->port) pthread_setspecific(thread_key, NULL);
+#endif
     t->done = 1, t->code = code;
     pthread_cond_broadcast(&t->cv);
     pthread_mutex_unlock(&t->mu);
@@ -289,15 +371,45 @@ static void thread_finish(DWORD code) {
 static void *thread_entry(void *p) {
     HThread *t = (HThread *)p;
     self_thread = t;
+#if defined(__APPLE__)
+    pthread_mutex_lock(&t->mu);
+    t->init_error = thread_attach(t);
+    t->ready = 1;
+    pthread_cond_broadcast(&t->cv);
+    pthread_mutex_unlock(&t->mu);
+    thread_finish(t->init_error ? (DWORD)t->init_error : t->fn(t->arg));
+#else
     t->tid = (pid_t)syscall(SYS_gettid);
     thread_finish(t->fn(t->arg));
+#endif
     return NULL;
 }
 HANDLE CreateThread(void *attr, SIZE_T stack, LPTHREAD_START_ROUTINE fn, void *arg, DWORD flags, DWORD *id) {
     (void)attr;
+#if defined(__APPLE__)
+    if (!fn || flags & ~(DWORD)STACK_SIZE_PARAM_IS_A_RESERVATION) {
+        last_error = flags & CREATE_SUSPENDED ? ERROR_NOT_SUPPORTED : ERROR_INVALID_PARAMETER;
+        return NULL;                /* never start a requested suspended thread at once */
+    }
+    const long page = sysconf(_SC_PAGESIZE);
+    if (page <= 0 || stack > SIZE_MAX - (size_t)page) { last_error = ERROR_INVALID_PARAMETER; return NULL; }
+#endif
     HThread *t = thread_new();
+    if (!t) return NULL;
     t->fn = fn, t->arg = arg, t->refs = 2;   /* (the handle's and the thread's own) */
     pthread_attr_t a;
+#if defined(__APPLE__)
+    int r = pthread_attr_init(&a);
+    if (!r) {
+        const size_t size = stack ? (stack + (size_t)page - 1) / (size_t)page * (size_t)page : (8u << 20);
+        r = pthread_attr_setstacksize(&a, size);
+        if (!r) r = pthread_attr_setguardsize(&a, (size_t)page);
+        if (!r) r = pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+        pthread_t th;
+        if (!r) r = pthread_create(&th, &a, thread_entry, t);
+        pthread_attr_destroy(&a);
+    }
+#else
     pthread_attr_init(&a);
     /* (Windows' default is the executable's: 8 MB here, as longshot.exe's /stack; guest threads ask 64 MB) */
     pthread_attr_setstacksize(&a, stack ? (stack + 0xFFFF) & ~(SIZE_T)0xFFFF : (8u << 20));
@@ -305,30 +417,87 @@ HANDLE CreateThread(void *attr, SIZE_T stack, LPTHREAD_START_ROUTINE fn, void *a
     if (flags & CREATE_SUSPENDED) fprintf(stderr, "[win32] CreateThread: CREATE_SUSPENDED is not supported: started at once\n");
     const int r = pthread_create(&t->th, &a, thread_entry, t);
     pthread_attr_destroy(&a);
+#endif
     if (r) {
+        pthread_mutex_destroy(&t->mu);
+        pthread_cond_destroy(&t->cv);
         free(t);
         last_error = error_of(r);
         return NULL;
     }
+#if defined(__APPLE__)
+    pthread_mutex_lock(&t->mu);
+    while (!t->ready) pthread_cond_wait(&t->cv, &t->mu);
+    const int init_error = t->init_error;
+    if (id) *id = t->port;
+    pthread_mutex_unlock(&t->mu);
+    if (init_error) { thread_unref(t); last_error = error_of(init_error); return NULL; }
+#else
     if (id) {
         while (!t->tid) sched_yield();
         *id = (DWORD)t->tid;
     }
+#endif
     return t;
 }
 HANDLE GetCurrentThread(void) { return PSEUDO_THREAD; }
-DWORD GetCurrentThreadId(void) { return (DWORD)thread_self()->tid; }
+DWORD GetCurrentThreadId(void) {
+    HThread *t = thread_self();
+    if (!t) return 0;
+#if defined(__APPLE__)
+    return t->port;
+#else
+    return (DWORD)t->tid;
+#endif
+}
 DWORD GetThreadId(HANDLE h) {
     HThread *t = thread_of(h);
-    if (!t) return 0;
+    if (!t) { last_error = ERROR_INVALID_HANDLE; return 0; }
+#if defined(__APPLE__)
+    return t->port;
+#else
     while (!t->tid && !t->done) sched_yield();
     return (DWORD)t->tid;
+#endif
 }
+#if defined(__APPLE__)
+uint64_t darwin_thread_id(HANDLE h) {
+    HThread *t = thread_of(h);
+    return t ? t->tid : 0;
+}
+int darwin_thread_name(uint64_t tid, char *out, size_t cap) {
+    if (!out || !cap) return 0;
+    out[0] = 0;
+    pthread_mutex_lock(&threads_mu);
+    for (HThread *t = host_threads; t; t = t->next) {
+        if (t->tid != tid) continue;
+        pthread_mutex_lock(&t->mu);
+        snprintf(out, cap, "%s", t->name);
+        pthread_mutex_unlock(&t->mu);
+        break;
+    }
+    pthread_mutex_unlock(&threads_mu);
+    return out[0] != 0;
+}
+#endif
 DWORD GetProcessId(HANDLE p) { (void)p; return (DWORD)getpid(); }
 HANDLE OpenThread(DWORD access, BOOL inherit, DWORD id) {
+#if defined(__APPLE__)
+    (void)access;
+    if (inherit) { last_error = ERROR_NOT_SUPPORTED; return NULL; }
+    if (id == pthread_mach_thread_np(pthread_self())) (void)thread_self();
+    pthread_mutex_lock(&threads_mu);
+    HThread *t = host_threads;
+    while (t && t->port != id) t = t->next;
+    if (t) __atomic_add_fetch(&t->refs, 1, __ATOMIC_ACQ_REL);
+    pthread_mutex_unlock(&threads_mu);
+    if (!t) last_error = ERROR_INVALID_PARAMETER;
+    return t;
+#else
     (void)access, (void)inherit, (void)id;
     last_error = ERROR_NOT_SUPPORTED;
     return NULL;
+#endif
 }
 BOOL DuplicateHandle(HANDLE sp, HANDLE src, HANDLE tp, HANDLE *out, DWORD access, BOOL inherit, DWORD options) {
     (void)sp, (void)tp, (void)access, (void)inherit, (void)options;
@@ -342,18 +511,45 @@ BOOL DuplicateHandle(HANDLE sp, HANDLE src, HANDLE tp, HANDLE *out, DWORD access
 BOOL SetThreadPriority(HANDLE h, int p) {
     HThread *t = thread_of(h);
     if (!t) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
+#if defined(__APPLE__)
+    if (p != THREAD_PRIORITY_IDLE && p != THREAD_PRIORITY_TIME_CRITICAL && (p < -2 || p > 2)) {
+        last_error = ERROR_INVALID_PARAMETER;
+        return FALSE;
+    }
+    const thread_precedence_policy_data_t policy = {p};
+    pthread_mutex_lock(&t->mu);
+    const kern_return_t r = t->done ? KERN_TERMINATED : thread_policy_set(t->port, THREAD_PRECEDENCE_POLICY,
+        (thread_policy_t)&policy, THREAD_PRECEDENCE_POLICY_COUNT);
+    if (r == KERN_SUCCESS) t->priority = p;
+    pthread_mutex_unlock(&t->mu);
+    if (r != KERN_SUCCESS) { last_error = r == KERN_TERMINATED ? ERROR_INVALID_HANDLE : ERROR_ACCESS_DENIED; return FALSE; }
+    return TRUE;                    /* relative precedence, not a real-time or CPU-placement promise */
+#else
     t->priority = p;
     const int nice = p <= THREAD_PRIORITY_IDLE ? 19 : p <= THREAD_PRIORITY_LOWEST ? 10 : p == THREAD_PRIORITY_BELOW_NORMAL ? 5 : 0;
     if (nice && t->tid) setpriority(PRIO_PROCESS, (id_t)t->tid, nice);
     return TRUE;
+#endif
 }
 int GetThreadPriority(HANDLE h) {
     HThread *t = thread_of(h);
+#if defined(__APPLE__)
+    if (!t) { last_error = ERROR_INVALID_HANDLE; return INT_MAX; }
+    pthread_mutex_lock(&t->mu);
+    const int p = t->priority;
+    pthread_mutex_unlock(&t->mu);
+    return p;
+#else
     return t ? t->priority : 0;
+#endif
 }
 DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask) {
     HThread *t = thread_of(h);
     if (!t || !mask) { last_error = ERROR_INVALID_PARAMETER; return 0; }
+#if defined(__APPLE__)
+    last_error = ERROR_NOT_SUPPORTED;   /* Darwin affinity tags are cache hints, not logical-CPU masks. */
+    return 0;
+#else
     cpu_set_t old, want;
     CPU_ZERO(&old);
     pthread_getaffinity_np(t->th, sizeof old, &old);
@@ -363,12 +559,14 @@ DWORD_PTR SetThreadAffinityMask(HANDLE h, DWORD_PTR mask) {
     DWORD_PTR r = 0;
     for (int i = 0; i < 64; i++) if (CPU_ISSET(i, &old)) r |= (DWORD_PTR)1 << i;
     return r ? r : 1;
+#endif
 }
 /* The process's affinity as the process started: Windows keeps a process mask apart from its threads' masks, Linux has
    only the threads'. Read from the asking thread each time, it was that thread's own mask, which shrank once hos_thread_pin
    pinned it off the reserved core: the Presentation Thread's pin, asked for from a game thread kept off that core, then
    saw no reserved core in the "process" mask and kept the Presentation Thread off it too, against render_thread_on_reserved
    (host/hos_thread.c; Ryzen 9 9950X3D, 2026-11-09). Taken once, before main, when no thread is pinned yet. */
+#if !defined(__APPLE__)
 static DWORD_PTR process_affinity;
 __attribute__((constructor)) static void init_process_affinity(void) {
     cpu_set_t s;
@@ -376,13 +574,21 @@ __attribute__((constructor)) static void init_process_affinity(void) {
     if (sched_getaffinity(0, sizeof s, &s) == 0)
         for (int i = 0; i < 64; i++) if (CPU_ISSET(i, &s)) process_affinity |= (DWORD_PTR)1 << i;
 }
+#endif
 BOOL GetProcessAffinityMask(HANDLE p, DWORD_PTR *proc, DWORD_PTR *sys) {
     (void)p;
+#if defined(__APPLE__)
+    if (proc) *proc = 0;
+    if (sys) *sys = 0;
+    last_error = ERROR_NOT_SUPPORTED;
+    return FALSE;
+#else
     if (!process_affinity) init_process_affinity();   /* (the constructor did not run, or the call failed then) */
     long n = sysconf(_SC_NPROCESSORS_CONF);
     *proc = process_affinity;
     *sys = n >= 64 ? ~(DWORD_PTR)0 : (((DWORD_PTR)1 << n) - 1);
     return TRUE;
+#endif
 }
 int WideCharToMultiByte(UINT cp, DWORD flags, LPCWSTR w, int n, LPSTR s, int cap, LPCSTR def, BOOL *used) {
     (void)cp, (void)flags, (void)def;
@@ -428,19 +634,46 @@ int MultiByteToWideChar(UINT cp, DWORD flags, LPCSTR s, int n, LPWSTR w, int cap
 HRESULT SetThreadDescription(HANDLE h, PCWSTR name) {
     HThread *t = thread_of(h);
     if (!t) return (HRESULT)0x80070006;
+#if defined(__APPLE__)
+    if (!name) return (HRESULT)0x80070057;
+    char utf8[sizeof t->name];
+    const int need = WideCharToMultiByte(CP_UTF8, 0, name, -1, NULL, 0, NULL, NULL);
+    if (need <= 0 || (size_t)need > sizeof utf8) return (HRESULT)0x8007007A;
+    WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof utf8, NULL, NULL);
+    pthread_mutex_lock(&t->mu);
+    memcpy(t->name, utf8, (size_t)need);
+    const int current = pthread_equal(t->th, pthread_self());
+    const int e = current ? pthread_setname_np(utf8) : 0;
+    pthread_mutex_unlock(&t->mu);
+    if (e) return (HRESULT)(0x80070000u | (unsigned)error_of(e));
+    /* Only the target pthread can set Darwin's kernel name. The complete label is still available to
+       GetThreadDescription and our profiler; S_FALSE distinguishes that from a kernel-name update. */
+    return current ? S_OK : S_FALSE;
+#else
     WideCharToMultiByte(CP_UTF8, 0, name, -1, t->name, sizeof t->name - 1, NULL, NULL);
     t->name[sizeof t->name - 1] = 0;
     char shortname[16];
     snprintf(shortname, sizeof shortname, "%s", t->name);   /* (the kernel keeps 15 characters) */
     pthread_setname_np(t->th, shortname);
     return S_OK;
+#endif
 }
 HRESULT GetThreadDescription(HANDLE h, PWSTR *name) {
     HThread *t = thread_of(h);
     if (!t) return (HRESULT)0x80070006;
+#if defined(__APPLE__)
+    if (!name) return (HRESULT)0x80070057;
+    pthread_mutex_lock(&t->mu);
+#endif
     const int n = MultiByteToWideChar(CP_UTF8, 0, t->name, -1, NULL, 0);
     *name = (PWSTR)calloc((size_t)n + 1, sizeof(wchar_t));
+#if defined(__APPLE__)
+    if (!*name) { pthread_mutex_unlock(&t->mu); return (HRESULT)0x8007000E; }
+#endif
     MultiByteToWideChar(CP_UTF8, 0, t->name, -1, *name, n);
+#if defined(__APPLE__)
+    pthread_mutex_unlock(&t->mu);
+#endif
     return S_OK;
 }
 void *LocalFree(void *p) { free(p); return NULL; }
@@ -450,12 +683,27 @@ static void filetime_ns(FILETIME *ft, int64_t ns) {
 }
 BOOL GetThreadTimes(HANDLE h, FILETIME *create, FILETIME *exit_, FILETIME *kernel, FILETIME *user) {
     HThread *t = thread_of(h);
+#if defined(__APPLE__)
+    if (!t || !create || !exit_ || !kernel || !user) { last_error = ERROR_INVALID_PARAMETER; return FALSE; }
+    pthread_mutex_lock(&t->mu);
+    const int e = t->done ? 0 : thread_cpu(t);
+    if (!e) {
+        *create = t->created;
+        *exit_ = t->exited;
+        filetime_ns(kernel, (int64_t)t->kernel_ns);
+        filetime_ns(user, (int64_t)t->user_ns);
+    }
+    pthread_mutex_unlock(&t->mu);
+    if (e) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
+    return TRUE;
+#else
     clockid_t clk;
     struct timespec ts;
     if (!t || t->done || pthread_getcpuclockid(t->th, &clk) || clock_gettime(clk, &ts)) { last_error = ERROR_INVALID_HANDLE; return FALSE; }
     filetime_ns(create, 0), filetime_ns(exit_, 0), filetime_ns(kernel, 0);
     filetime_ns(user, (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec);
     return TRUE;
+#endif
 }
 /* (no suspending another thread: the samplers that do it find nothing to sample) */
 DWORD SuspendThread(HANDLE h) { (void)h; last_error = ERROR_NOT_SUPPORTED; return (DWORD)-1; }
@@ -471,6 +719,9 @@ BOOL GetExitCodeThread(HANDLE h, DWORD *code) {
     return TRUE;
 }
 void ExitThread(DWORD code) {
+#if defined(__APPLE__)
+    darwin_fiber_before_thread_exit(code);
+#endif
     thread_finish(code);
     pthread_exit(NULL);
 }
@@ -584,6 +835,37 @@ DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL all, DWORD ms) {
 }
 
 /* ---- fibers ---- */
+#if defined(__APPLE__)
+void *ConvertThreadToFiberEx(void *param, DWORD flags) {
+    if (flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) { last_error = ERROR_INVALID_PARAMETER; return NULL; }
+    void *f = darwin_fiber_convert(param, ExitThread);
+    if (!f) last_error = error_of(errno);
+    return f;
+}
+void *ConvertThreadToFiber(void *param) { return ConvertThreadToFiberEx(param, 0); }
+BOOL ConvertFiberToThread(void) {
+    const int e = darwin_fiber_unconvert();
+    if (e) last_error = error_of(e);
+    return !e;
+}
+void *CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags, LPFIBER_START_ROUTINE fn, void *param) {
+    if (flags & ~(DWORD)FIBER_FLAG_FLOAT_SWITCH) { last_error = ERROR_INVALID_PARAMETER; return NULL; }
+    void *f = darwin_fiber_create(reserve > commit ? reserve : commit, fn, param);
+    if (!f) last_error = error_of(errno);
+    return f;
+}
+void *CreateFiber(SIZE_T stack, LPFIBER_START_ROUTINE fn, void *param) { return CreateFiberEx(stack, stack, 0, fn, param); }
+void SwitchToFiber(void *fiber) {
+    const int e = darwin_fiber_switch(fiber);
+    if (e) last_error = error_of(e);
+}
+void DeleteFiber(void *fiber) {
+    const int e = darwin_fiber_delete(fiber);
+    if (e) last_error = error_of(e);
+}
+void *GetCurrentFiber(void) { return darwin_fiber_current(); }
+void *GetFiberData(void) { return darwin_fiber_data(); }
+#else
 typedef struct {
     ucontext_t uc;
     void *param, *stack;
@@ -645,8 +927,10 @@ void DeleteFiber(void *p) {
 }
 void *GetCurrentFiber(void) { return cur_fiber; }
 void *GetFiberData(void) { return cur_fiber ? cur_fiber->param : NULL; }
+#endif
 
 /* ---- processors ---- */
+#if !defined(__APPLE__)
 static int read_int(const char *path) {
     FILE *f = fopen(path, "r");
     int v = -1;
@@ -656,7 +940,14 @@ static int read_int(const char *path) {
     }
     return v;
 }
+#endif
 BOOL GetLogicalProcessorInformation(SYSTEM_LOGICAL_PROCESSOR_INFORMATION *info, DWORD *len) {
+#if defined(__APPLE__)
+    (void)info;
+    if (len) *len = 0;
+    last_error = ERROR_NOT_SUPPORTED;   /* public sysctls give counts, not a logical-CPU/cache mapping */
+    return FALSE;
+#else
     /* one RelationProcessorCore entry per physical core, its logical processors (SMT siblings) in the mask */
     int core_of[64], pkg_of[64], n = 0;
     long cpus = sysconf(_SC_NPROCESSORS_CONF);
@@ -685,10 +976,15 @@ BOOL GetLogicalProcessorInformation(SYSTEM_LOGICAL_PROCESSOR_INFORMATION *info, 
     }
     *len = need;
     return TRUE;
+#endif
 }
 void GetSystemInfo(SYSTEM_INFO *si) {
     memset(si, 0, sizeof *si);
-    si->wProcessorArchitecture = 9;   /* (PROCESSOR_ARCHITECTURE_AMD64) */
+#if defined(__APPLE__) && defined(__aarch64__)
+    si->wProcessorArchitecture = 12;  /* PROCESSOR_ARCHITECTURE_ARM64 */
+#else
+    si->wProcessorArchitecture = 9;   /* PROCESSOR_ARCHITECTURE_AMD64 */
+#endif
     si->dwPageSize = (DWORD)sysconf(_SC_PAGESIZE);
     si->dwAllocationGranularity = 0x10000;
     si->dwNumberOfProcessors = (DWORD)sysconf(_SC_NPROCESSORS_ONLN);
@@ -857,9 +1153,15 @@ SIZE_T VirtualQuery(const void *addr, MEMORY_BASIC_INFORMATION *mbi, SIZE_T size
 
 /* ---- modules ---- */
 static void exe_path(char *out, size_t cap) {
+#if defined(__APPLE__)
+    const int e = darwin_executable_path(out, cap);
+    if (e) { if (cap) out[0] = 0; last_error = error_of(e); }
+#else
     const ssize_t n = readlink("/proc/self/exe", out, cap - 1);
     out[n > 0 ? n : 0] = 0;
+#endif
 }
+#if !defined(__APPLE__)
 /* a Windows library name, as the Linux one: SDL3.dll -> libSDL3.so.0, SDL2.dll -> libSDL2-2.0.so.0,
    vulkan-1.dll -> libvulkan.so.1, x.dll -> x.so */
 static const char *linux_name(const char *base) {
@@ -869,13 +1171,69 @@ static const char *linux_name(const char *base) {
         if (!strcasecmp(base, map[i][0])) return map[i][1];
     return NULL;
 }
+#endif
 static __thread char load_error[512];   /* (dlerror()'s text for the last failure: hos_load_error) */
+#if defined(__APPLE__)
+/* dlopen handles are opaque on Darwin: never reinterpret one as a Linux link_map. Keep the actual
+   successful load request for our handles; address-derived HMODULEs are Mach-O bases (dladdr). */
+typedef struct LoadedModule {
+    HMODULE handle;
+    unsigned refs;
+    char path[PATH_MAX];
+    struct LoadedModule *next;
+} LoadedModule;
+static pthread_mutex_t modules_mu = PTHREAD_MUTEX_INITIALIZER;
+static LoadedModule *loaded_modules;
+static HMODULE load_darwin_library(char *path) {
+    char local[PATH_MAX];
+    if (!strchr(path, '/') && !darwin_executable_path(local, sizeof local)) {
+        char *base = strrchr(local, '/');
+        const size_t prefix = (size_t)(base + 1 - local);
+        if (prefix + strlen(path) < sizeof local) {
+            strcpy(local + prefix, path);
+            /* A broken packaged library must fail visibly, not silently load an installed version. */
+            if (access(local, F_OK) == 0) strcpy(path, local);
+        }
+    }
+    HMODULE handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        last_error = ERROR_FILE_NOT_FOUND;
+        const char *why = dlerror();
+        snprintf(load_error, sizeof load_error, "%s", why ? why : "");
+        return NULL;
+    }
+    pthread_mutex_lock(&modules_mu);
+    if (handle) {
+        LoadedModule *m = loaded_modules;
+        while (m && m->handle != handle) m = m->next;
+        if (!m) {
+            m = calloc(1, sizeof *m);
+            if (m) {
+                m->handle = handle;
+                if (!realpath(path, m->path)) snprintf(m->path, sizeof m->path, "%s", path);
+                m->next = loaded_modules;
+                loaded_modules = m;
+            }
+        }
+        if (m) m->refs++;
+        else {
+            pthread_mutex_unlock(&modules_mu);
+            dlclose(handle);         /* constructors/destructors may call the loader: never under modules_mu */
+            last_error = ERROR_NOT_ENOUGH_MEMORY;
+            return NULL;
+        }
+    }
+    pthread_mutex_unlock(&modules_mu);
+    return handle;
+}
+#endif
 HMODULE LoadLibraryA(LPCSTR name) {
     load_error[0] = 0;
     if (!name) return NULL;
     char path[PATH_MAX];
 #if defined(__APPLE__)
     if (!hos_darwin_library_path(name, path, sizeof path)) { last_error = ERROR_FILE_NOT_FOUND; return NULL; }
+    return load_darwin_library(path);
 #else
     snprintf(path, sizeof path, "%s", name);
     for (char *p = path; *p; p++) if (*p == '\\') *p = '/';
@@ -901,10 +1259,33 @@ HMODULE LoadLibraryA(LPCSTR name) {
     return m;
 }
 const char *hos_load_error(void) { return load_error; }
-BOOL FreeLibrary(HMODULE m) { return m && dlclose(m) == 0; }
-FARPROC GetProcAddress(HMODULE m, LPCSTR name) { return m ? (FARPROC)dlsym(m, name) : NULL; }
+BOOL FreeLibrary(HMODULE m) {
+#if defined(__APPLE__)
+    pthread_mutex_lock(&modules_mu);
+    LoadedModule **at = &loaded_modules;
+    while (*at && (*at)->handle != m) at = &(*at)->next;
+    const int known = *at != NULL;
+    if (known && !--(*at)->refs) { LoadedModule *old = *at; *at = old->next; free(old); }
+    pthread_mutex_unlock(&modules_mu);
+    const int ok = known && dlclose(m) == 0;
+    if (!ok) last_error = ERROR_INVALID_HANDLE;
+    return ok;
+#else
+    return m && dlclose(m) == 0;
+#endif
+}
+FARPROC GetProcAddress(HMODULE m, LPCSTR name) {
+#if defined(__APPLE__)
+    if (m == (HMODULE)_dyld_get_image_header(0)) return (FARPROC)dlsym(RTLD_MAIN_ONLY, name);
+#endif
+    return m ? (FARPROC)dlsym(m, name) : NULL;
+}
 HMODULE GetModuleHandleA(LPCSTR name) {
+#if defined(__APPLE__)
+    if (!name) return (HMODULE)_dyld_get_image_header(0);   /* the executable, even when called from the renderer */
+#else
     if (!name) return dlopen(NULL, RTLD_NOW);
+#endif
     return NULL;   /* (Windows' own modules: none here) */
 }
 BOOL GetModuleHandleExA(DWORD flags, LPCSTR name, HMODULE *out) {
@@ -919,6 +1300,30 @@ BOOL GetModuleHandleExA(DWORD flags, LPCSTR name, HMODULE *out) {
     return TRUE;
 }
 DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD cap) {
+#if defined(__APPLE__)
+    if (!out || !cap) { last_error = ERROR_INVALID_PARAMETER; return 0; }
+    char path[PATH_MAX] = "";
+    if (!m || m == (HMODULE)_dyld_get_image_header(0)) exe_path(path, sizeof path);
+    else {
+        pthread_mutex_lock(&modules_mu);
+        for (LoadedModule *it = loaded_modules; it; it = it->next)
+            if (it->handle == m) { snprintf(path, sizeof path, "%s", it->path); break; }
+        pthread_mutex_unlock(&modules_mu);
+        if (!path[0]) {
+            Dl_info info;
+            if (dladdr(m, &info) && info.dli_fbase == m && info.dli_fname) {
+                if (!realpath(info.dli_fname, path)) snprintf(path, sizeof path, "%s", info.dli_fname);
+            }
+        }
+    }
+    if (!path[0]) { out[0] = 0; last_error = ERROR_INVALID_HANDLE; return 0; }
+    const size_t n = strlen(path);
+    const size_t copy = n < cap - 1 ? n : cap - 1;
+    memcpy(out, path, copy);
+    out[copy] = 0;
+    if (n >= cap) { last_error = ERROR_INSUFFICIENT_BUFFER; return cap; }
+    return (DWORD)n;
+#else
     char path[PATH_MAX] = "";
     Dl_info di;
     if (!m) {
@@ -941,6 +1346,7 @@ DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD cap) {
     memcpy(out, path, k);
     out[k] = 0;
     return (DWORD)k;
+#endif
 }
 static void slashes(char *dst, size_t cap, const char *src) {
     snprintf(dst, cap, "%s", src);

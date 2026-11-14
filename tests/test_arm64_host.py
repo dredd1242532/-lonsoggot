@@ -103,6 +103,15 @@ def check(args, out):
                 failed += 1
                 continue
             jump_objects.append(str(obj))
+        fiber = source / "host/posix/darwin_fiber.c"
+        if fiber.is_file():
+            obj = target / "darwin_fiber.o"
+            code, _ = run([args.cc, *flags, "-Wall", "-Wextra", "-Werror", "-c", str(fiber), "-o", str(obj)],
+                          source, env, target, "darwin_fiber")
+            if code:
+                failed += 1
+                continue
+            jump_objects.append(str(obj))
         executable = target / "host_cpu_test"
         code, _ = run([args.cc, *flags, "-Wall", "-Wextra", "-Werror", str(ROOT / "tests/arm64_host_test.c"),
                        str(ROOT / "tests/arm64_host_registers.S"), *jump_objects, "-o", str(executable)],
