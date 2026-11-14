@@ -142,7 +142,8 @@ int main(void) {
        picture, its icon as it is, Longshot #82) */
     drawn_size(fpane, &fw, &fh), drawn_size(ficon, &iw, &ih);
     CHECK(near(fw * hos_ui_qx, 3840.0f) && fh == 2160.0f && iw == 160.0f && ih == 160.0f);
-    CHECK(near(ix, 1650 + e) && iy == -880);   /* (its icon at the screen's corner, as the HUD's) */
+    /* (its icon left in the middle 16:9: beside it, the centred modes' sides cover the picture while the world is not drawn) */
+    CHECK(ix == 1650 && iy == -880);
     hos_wide_keep_mask = 0xf;   /* (Full width: the fade's screen kept whole, over the whole picture already: its icon stays) */
     at(2560.0f / 1080.0f);
     CHECK(ix == 1650 && iy == -880 && near(hx, -1500 - e));
@@ -151,7 +152,7 @@ int main(void) {
     CHECK(fw == 3840.0f && fh == 2160.0f);
     hos_wide_keep_mask = 0;
     at(2560.0f / 1080.0f);
-    CHECK(near(ix, 1650 + e));
+    CHECK(ix == 1650);
 
     at(3440.0f / 1440.0f);   /* 3440x1440: still to the screen's sides */
     r = 3440.0f / 1440.0f, e = 1920.0f * (r / G - 1.0f);
@@ -204,6 +205,7 @@ int main(void) {
         for (int s = 0; s < (int)(sizeof shapes / sizeof shapes[0]); s++) {
             at(shapes[s]);
             CHECK((ix + 80.0f) * hos_ui_qx <= 1920.5f && (-iy + 80.0f) * hos_ui_qy <= 1080.5f);
+            if (shapes[s] > G) CHECK(ix == 1650 && ix + 80.0f <= 1920.0f);   /* (wider: in the middle 16:9, never beside it) */
         }
         at(4.0f / 3.0f);
     }

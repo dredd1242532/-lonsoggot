@@ -64,11 +64,13 @@ static volatile float ui_ex, ui_ey, ui_wx = 1.0f, ui_fit = 1.0f;
 /* (the loading fade's pane that spans its canvas, drawn the whole picture: ui_fill_x wider (a wider screen, its layout in the
    middle 16:9), ui_fill_y taller (a narrower one, its layout at the HUD's size). Longshot #82,
    https://github.com/NotRexed/Hookshot/issues/2220: in the centred Ultrawide menus modes the fade covered the middle 16:9
-   alone, the world still showing beside it. While its screen is not kept whole (fade_planned), the rest of its layout, the
-   loading icon, is placed as the HUD's: at the screen's corner, at the HUD's size. Left where the 16:9 canvas has it, the
-   icon was cut off at the right on a narrower screen, where the canvas at the HUD's size is wider than the screen) */
+   alone, the world still showing beside it. While its screen is not kept whole (fade_planned) on a narrower screen
+   (fade_icon_planned), the rest of its layout, the loading icon, is placed as the HUD's: at the screen's corner, at the HUD's
+   size. Left where the 16:9 canvas has it, the icon was cut off at the right there, where the canvas at the HUD's size is
+   wider than the screen. On a wider screen it stays in the middle 16:9: the centred modes' blurred or black sides
+   (gpu/vk/vk_framegen.cpp wide_sides, fg_scale.comp) cover what is beside it once the world is not drawn, as while loading) */
 static volatile float ui_fill_x = 1.0f, ui_fill_y = 1.0f;
-static volatile int fade_planned;
+static volatile int fade_planned, fade_icon_planned;
 
 /* A pane seen, by its guest address: its parent, kind, and place across the canvas without the moves (x0, x1 its rectangle,
    ox its origin); plan, how far the plan moves it (its own move);
@@ -481,7 +483,7 @@ static void plan(void) {
             int top = i;
             for (int d = 0; parent_of[top] >= 0 && d < 64; d++) top = parent_of[top];
             as_menu_new[top] = (uint8_t)(nodes[top].hud && in_tab(nodes[top].layout));
-            nodes[i].in_hud = (nodes[top].hud && !as_menu_new[top]) || (nodes[top].fade && fade_planned);
+            nodes[i].in_hud = (nodes[top].hud && !as_menu_new[top]) || (nodes[top].fade && fade_icon_planned);
         }
         /* (the roots: a HUD layout's root pane, each walked as the canvas's root; the map page's, drawn as a menu's, is not) */
         FOR_USED(i)
@@ -580,7 +582,7 @@ void hos_wide_ui_tick(void) {
     const float now[8] = {ex, ey, fit, (float)on, r, fill_x, fill_y, (float)fade_free};
     if (memcmp(now, last, sizeof now)) {
         ui_ex = ex, ui_ey = ey, ui_wx = 1.0f + ex / CANVAS_HALF, ui_fit = fit, ui_fill_x = fill_x, ui_fill_y = fill_y, ui_on = on;
-        fade_planned = fade_free;
+        fade_planned = fade_free, fade_icon_planned = fade_free && r > 0.0f && r < GAME * 0.999f;   /* (narrower only) */
         nodes_clear();   /* (every pane placed again, noted afresh) */
         hos_wide_ui_force = 3;   /* (a few frames: the layouts not drawn this frame catch up when they are) */
         log_left = log_each;
