@@ -810,10 +810,54 @@ health. A lethal request can exceed the remaining life. Protect hearts can prese
 reports the request. The native aggregate can include several sources: it is not a weapon-versus-Link damage table.
 The actual committed loss remains the only amount sent in a version-1 HIT observation; pre-clamp samples stay local.
 
-Native worker hooks only validate and copy bounded scalar records. They do not wait on the observer lock, log,
-allocate, send packets or retain a guest pointer. The present-thread drain prints the trace and submits diagnostic
-observations. Busy/full queues report dropped records; such a trace cannot establish complete attack counts.
-The fixed local queue and recipient-charged send budget do not replace EVENT's shared transport limits or ACKs.
+The local **trace-v2** has independent loss, activation and optional-detail lanes. A loss record includes every
+validated successful native life update with a negative pre-clamp delta, a requested reduction or a committed
+reduction, including protected and overkill requests. It retains receiver-clock `at_ms`, native request, committed
+amount, invocation and owner. Positive updates clamped at maximum health use the optional non-loss lane instead.
+
+An `activation` header preserves **every** validated native setup completion and explicit ID renewal, even repeated
+IDs. It carries time, operation, native IDs, owner and slot; `player attribution unknown` is intentional. It is an
+activation request, not a new-swing count, proven physical sensor state, sword-owner mapping or contact. Full
+`setup` power/multiplier details and sensor-off details are optional. A still player's game can produce unrelated
+setup traffic. Match a visible sword swing to its time window without treating all those headers as sword strikes.
+
+Native workers reserve bounded static storage with atomics. They never wait on the room/observer mutex, log,
+allocate, send packets or retain a guest pointer. Losses cannot consume activation capacity or vice versa;
+optional detail and network queue/lock pressure cannot drop either complete lane. From empty, the independent
+rings guarantee **1024 loss/request records and 16384 activation headers outstanding**: for example16 loss
+requests/s and256 setup/renewal requests/s for60s without any drain. These are observer loads, not measured
+swings/s. Each present drains at most256 per lane; ongoing operation must stay inside the outstanding bounds.
+A delayed producer remains pending until published; the consumer never reads an unfinished record.
+Optional setup/non-loss/off lanes each keep64 outstanding records and count every additional valid offer as
+not kept. Counts are cumulative, exact through the64-bit counter bound; exhaustion is explicit and invalidates
+completeness. Any loss/activation overflow is **sticky for this process**, never forgiven by draining or rejoining.
+With tracing off there is no trace recording, draining or logging; with observation/sharing/policy all off the
+cached gate returns before any clock, guest read, membership scan or lock. No new per-frame hook is installed.
+
+The log prints a versioned enabled/capacity line, then cumulative lane summaries at least once per second of
+present-thread progress and on a newly observed critical overflow. Records may drain across multiple presents.
+`offered = recorded + not-kept + pending`; `recorded` means printed, not merely reserved. Setup/non-loss/off
+`complete no` means optional detail was sampled, **not** that loss/activation evidence was lost.
+For a no-loss S13 interval, retain both games' whole logs, the enabled line and matching-time summaries before
+and after the swings (allow the final publications/drain to finish):
+
+```text
+coop: hit: trace-v2 losses at_ms T offered L recorded L not-kept 0 pending 0 complete yes counters exact
+coop: hit: trace-v2 activations at_ms T offered A recorded A not-kept 0 pending 0 complete yes counters exact
+coop: hit: trace-v2 setup-details at_ms T offered S recorded K not-kept D pending 0 complete no counters exact
+coop: hit: trace-v2 player committed-losses 0 amount 0 at_ms T; native life hook only
+```
+
+Letters stand for observed decimal values, not literal expected text; optional detail can also be complete.
+Require both critical lanes complete/exact with no pending records after the interval, and no increase in
+`player committed-losses` or `amount` across it (zero throughout a fresh no-loss proof). Require visible actual
+swings, new activation headers in their windows, a still peer, before/after HUDs and final summaries later than
+the last swing; retain the dedicated after-swings captures. This establishes no committed player loss **through
+the instrumented native life path in that interval**, not native victim mapping, shield correctness or playable PvP.
+An empty loss list, unchanged HUD alone, no warnings, only optional setup lines, a missing/old final summary,
+pending records, `complete no` on either critical lane, counter exhaustion or a truncated log is a false pass.
+Do not compare cumulative counters across process restarts. Network HIT8 remains separately consented and
+bounded by its existing pending/send/transport budgets; its delivery is not a completeness receipt.
 
 `oot_coop_hit_admit` retains the wire-independent receiver admission gate: accepted current session, explicit signed
 permission, local and session-bound peer consent, safe context, bounded age/class/amount/rate and replay checks.
@@ -827,8 +871,11 @@ kit readiness, receiver collision and the duel ledger are separate work. No nume
 shipped by these observations.
 
 The game-free `tests/test_oot_coop_hits.py` executes the production observer and generated hook code on synthetic
-memory: native setup/renewal/off, overkill, protected loss, successful/failed CAS, ownership, bounded queues,
-consent and replay. Its old-patch and mutation modes must fail behaviorally; they do not require game files.
+memory: native setup/renewal/off, overkill, protected loss, successful/failed CAS, ownership, queue independence,
+exact counters, delayed publication, concurrent producers, advertised minute/backlog bounds and overflow.
+`--replay-log <retained-v1-log>` reoffers every retained native record without drains; missing old records cannot
+be recovered. Synthetic floods additionally inject a real-hook player loss in their middle. Mutation modes must
+compile then fail behaviorally, including silent overflow, shared-capacity regressions and disabled tracing.
 
 ## Child bodies in the world
 

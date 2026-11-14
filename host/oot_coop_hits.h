@@ -87,6 +87,17 @@ typedef struct {
 int hos_oot_hits_bind(const OotCoopLifePolicy *policy);
 void hos_oot_hits_policy_on(int on);
 
+/* Local trace v2 storage bounds, independent of setup detail, room locks and network queues:
+   from empty, 1024 loss/request records and 16384 setup/renewal activation headers can be outstanding.
+   This covers 16 loss requests/s and 256 activation requests/s for 60s without a drain. Every repeated
+   setup counts, not just distinct IDs or player swings. Each present drains at most 256 per lane.
+   Optional setup/non-loss/off detail keeps 64 per kind; not-kept counts are exact until uint64 exhaustion.
+   Any complete-lane overflow/counter exhaustion stays incomplete for the process lifetime. Pending is
+   reported separately: complete=yes alone does not mean all offered records have reached the log.
+   Producers reserve with atomics (no observer mutex, logging, allocation or network); no guest pointer
+   survives. Disabled hooks only test the cached switch; disabled drains do no clock/guest/lock work. */
+enum { OOT_HIT_TRACE_LOSSES = 1024, OOT_HIT_TRACE_ACTIVATIONS = 16384, OOT_HIT_TRACE_DETAILS = 64 };
+
 extern int hos_oot_hits_active;
 uint64_t hos_oot_hits_begin(void);
 uint32_t hos_oot_hits_before(Ctx *c, uint64_t token, unsigned path);

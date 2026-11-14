@@ -138,19 +138,33 @@ int oot_coop_hit_admit(OotCoopHitGate *g, const OotCoopHitContext *v, const OotC
 enum { HIT_LIFE_OWNER = 24, HIT_LIFE_VALUE = 7184, HIT_VALUE_CURRENT = 8, HIT_ACTOR_NUMBER = 24 };
 int hos_oot_is_player(Ctx *c, uint64_t component);
 int hos_oot_hits_active, hos_oot_attack_observe;
-static uint64_t hit_invocation, hit_busy_drops;
+static uint64_t hit_invocation;
 static const OotCoopLifePolicy *hit_policy;
 
-enum { HIT_PENDING = 64, HIT_BATCH = 8, HIT_LIFETIME_MS = 1000, HIT_RATE = 4096 };
+enum { HIT_PENDING = 64, HIT_BATCH = 8, HIT_LIFETIME_MS = 1000, HIT_RATE = 4096, HIT_TRACE_BATCH = 256 };
 enum { NATIVE_LIFE, NATIVE_SETUP, NATIVE_RENEW, NATIVE_OFF };
 typedef struct {
-    uint64_t invocation;
+    uint64_t invocation, at_ms;
     int64_t delta;
     uint32_t owner, before, requested, after, primary, secondary, layer;
     int32_t power;
     float multiplier;
     unsigned kind, path, player;
 } HitNative;
+/* MPSC rings, one present-thread consumer. Reservation never takes H.lock. A stalled producer leaves a
+   pending slot, not a missing record; the consumer never reads it before release publication. */
+typedef struct { HitNative sample; unsigned ready; } HitTraceSlot;
+typedef struct {
+    uint64_t offered, write, read, not_kept;
+    unsigned exhausted;
+} HitTrace;
+static struct {
+    HitTrace loss, activation, setup, nonloss, off;
+    HitTraceSlot losses[OOT_HIT_TRACE_LOSSES], activations[OOT_HIT_TRACE_ACTIVATIONS];
+    HitTraceSlot setups[OOT_HIT_TRACE_DETAILS], nonlosses[OOT_HIT_TRACE_DETAILS], offs[OOT_HIT_TRACE_DETAILS];
+    uint64_t report_at, reported_missing, player_losses, player_amount;
+    int reported;
+} T;
 typedef struct {
     uint8_t bytes[OOT_HIT_BYTES];
     uint64_t at, sessions[COOP_MAX_MEMBERS + 1];
@@ -164,10 +178,9 @@ static struct {
     uint64_t sessions[COOP_MAX_MEMBERS + 1], area, epoch, budget_at;
     char map[COOP_POS_TEXT + 1];
     int started, known, trace, share, policy_on, playing;
-    unsigned tokens, accepted, native_count;
-    uint64_t received, dropped, native_dropped;
+    unsigned tokens, accepted;
+    uint64_t received, dropped;
     HitPending pending[HIT_PENDING];
-    HitNative native[HIT_PENDING];
 } H = {.lock = SRWLOCK_INIT};
 
 static void hit_active_locked(void) {
@@ -192,7 +205,13 @@ uint64_t hos_oot_hits_begin(void) {
     if (!__atomic_load_n(&hos_oot_hits_active, __ATOMIC_ACQUIRE)) return 0;
     uint64_t old = __atomic_load_n(&hit_invocation, __ATOMIC_RELAXED);
     do {
-        if (old == (UINT64_MAX >> 1)) return 0;
+        if (old == (UINT64_MAX >> 1)) {
+            if (__atomic_load_n(&hos_oot_attack_observe, __ATOMIC_ACQUIRE)) {
+                __atomic_store_n(&T.loss.exhausted, 1, __ATOMIC_RELEASE);
+                __atomic_store_n(&T.activation.exhausted, 1, __ATOMIC_RELEASE);
+            }
+            return 0;
+        }
     } while (!__atomic_compare_exchange_n(&hit_invocation, &old, old + 1, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
     return old + 1;
 }
@@ -220,16 +239,52 @@ uint32_t hos_oot_hits_before(Ctx *c, uint64_t token, unsigned path) {
     return desired;
 }
 
-static int hit_try_lock(void) {
-    if (TryAcquireSRWLockExclusive(&H.lock)) return 1;
-    __atomic_fetch_add(&hit_busy_drops, 1, __ATOMIC_RELAXED);
-    return 0;
+/* Saturation is sticky and fails completeness closed; counters never silently wrap. */
+static int hit_trace_increment(uint64_t *value, HitTrace *q) {
+    uint64_t old = __atomic_load_n(value, __ATOMIC_RELAXED);
+    do {
+        if (old == UINT64_MAX) {
+            __atomic_store_n(&q->exhausted, 1, __ATOMIC_RELEASE);
+            return 0;
+        }
+    } while (!__atomic_compare_exchange_n(value, &old, old + 1, 1, __ATOMIC_RELEASE, __ATOMIC_RELAXED));
+    return 1;
 }
 
-static void hit_trace_locked(const HitNative *sample) {
-    if (!H.trace) return;
-    if (H.native_count == HIT_PENDING) { H.native_dropped++; return; }
-    H.native[H.native_count++] = *sample;
+static void hit_trace_offer(HitTrace *q, HitTraceSlot *slots, unsigned capacity, const HitNative *sample) {
+    if (!hit_trace_increment(&q->offered, q)) return;
+    uint64_t write = __atomic_load_n(&q->write, __ATOMIC_RELAXED);
+    for (;;) {
+        const uint64_t read = __atomic_load_n(&q->read, __ATOMIC_ACQUIRE);
+        /* Another producer and the consumer may have passed our stale write snapshot. */
+        if (write < read) { write = __atomic_load_n(&q->write, __ATOMIC_RELAXED); continue; }
+        if (write - read >= capacity || write == UINT64_MAX) {
+            hit_trace_increment(&q->not_kept, q);
+            return;
+        }
+        if (__atomic_compare_exchange_n(&q->write, &write, write + 1, 1, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) break;
+    }
+    HitTraceSlot *slot = &slots[write % capacity];
+    slot->sample = *sample;
+    __atomic_store_n(&slot->ready, 1, __ATOMIC_RELEASE);
+}
+
+static void hit_trace(const HitNative *sample) {
+    if (!__atomic_load_n(&hos_oot_attack_observe, __ATOMIC_ACQUIRE)) return;
+    if (sample->kind == NATIVE_LIFE) {
+        /* Include protected/overkill requests, not the frequent positive attempt clamped at maximum life. */
+        if (sample->delta < 0 || sample->requested < sample->before || sample->after < sample->before)
+            hit_trace_offer(&T.loss, T.losses, OOT_HIT_TRACE_LOSSES, sample);
+        else
+            hit_trace_offer(&T.nonloss, T.nonlosses, OOT_HIT_TRACE_DETAILS, sample);
+    } else if (sample->kind == NATIVE_SETUP || sample->kind == NATIVE_RENEW) {
+        /* Every setup/renewal header survives independently of optional setup detail, including repeated IDs.
+           These are native activation requests, NOT a count of sword swings or attributed player attacks. */
+        hit_trace_offer(&T.activation, T.activations, OOT_HIT_TRACE_ACTIVATIONS, sample);
+        if (sample->kind == NATIVE_SETUP) hit_trace_offer(&T.setup, T.setups, OOT_HIT_TRACE_DETAILS, sample);
+    } else {
+        hit_trace_offer(&T.off, T.offs, OOT_HIT_TRACE_DETAILS, sample);
+    }
 }
 
 void hos_oot_hits_committed(Ctx *c, uint64_t token, unsigned path, uint32_t requested) {
@@ -241,11 +296,12 @@ void hos_oot_hits_committed(Ctx *c, uint64_t token, unsigned path, uint32_t requ
     const int player = hos_oot_is_player(c, change.component);
     const uint32_t owner = (uint32_t)recomp_load32(c, change.owner + HIT_ACTOR_NUMBER);
     const uint64_t now = coop_now_ms();
-    if (!hit_try_lock()) return;
-    const HitNative sample = {.kind = NATIVE_LIFE, .invocation = token, .owner = owner, .player = player,
+    const HitNative sample = {.kind = NATIVE_LIFE, .invocation = token, .at_ms = now, .owner = owner, .player = player,
         .before = change.before, .requested = requested, .after = change.after, .delta = change.delta, .path = path};
-    hit_trace_locked(&sample);
-    if (!H.share || !H.playing || H.view.state != COOP_JOINED || !H.area || change.after >= change.before ||
+    hit_trace(&sample);
+    /* Network observations remain best-effort and consented; their lock/budget cannot affect local evidence. */
+    if (change.after >= change.before || !TryAcquireSRWLockExclusive(&H.lock)) return;
+    if (!H.share || !H.playing || H.view.state != COOP_JOINED || !H.area ||
         change.before - change.after > UINT32_MAX / 256u) { ReleaseSRWLockExclusive(&H.lock); return; }
     OotCoopHit hit = {.phase = OOT_HIT_OBSERVATION, .target_kind = player ? OOT_HIT_PLAYER : OOT_HIT_LOCAL,
         .target_member = (uint8_t)H.view.self, .origin_session = H.view.session,
@@ -295,9 +351,9 @@ void hos_oot_hits_attack(Ctx *c, uint64_t sensor, uint64_t record) {
     memcpy(&sample.multiplier, &bits, sizeof bits);
     if (!sample.primary || !sample.secondary || !isfinite(sample.multiplier) || sample.multiplier < 0) return;
     sample.invocation = hos_oot_hits_begin();
-    if (!sample.invocation || !hit_try_lock()) return;
-    hit_trace_locked(&sample);
-    ReleaseSRWLockExclusive(&H.lock);
+    if (!sample.invocation) return;
+    sample.at_ms = coop_now_ms();
+    hit_trace(&sample);
 }
 
 void hos_oot_hits_attack_id(Ctx *c, uint64_t record) {
@@ -306,9 +362,9 @@ void hos_oot_hits_attack_id(Ctx *c, uint64_t record) {
         .secondary = (uint32_t)recomp_load32(c, record + 360)};
     if (!sample.secondary) return;
     sample.invocation = hos_oot_hits_begin();
-    if (!sample.invocation || !hit_try_lock()) return;
-    hit_trace_locked(&sample);
-    ReleaseSRWLockExclusive(&H.lock);
+    if (!sample.invocation) return;
+    sample.at_ms = coop_now_ms();
+    hit_trace(&sample);
 }
 
 void hos_oot_hits_attack_off(Ctx *c, uint64_t sensor, unsigned layer) {
@@ -316,9 +372,9 @@ void hos_oot_hits_attack_off(Ctx *c, uint64_t sensor, unsigned layer) {
     HitNative sample = {.kind = NATIVE_OFF, .layer = layer};
     if (!hit_sensor_owner(c, sensor, &sample.owner)) return;
     sample.invocation = hos_oot_hits_begin();
-    if (!sample.invocation || !hit_try_lock()) return;
-    hit_trace_locked(&sample);
-    ReleaseSRWLockExclusive(&H.lock);
+    if (!sample.invocation) return;
+    sample.at_ms = coop_now_ms();
+    hit_trace(&sample);
 }
 
 static void hit_on_view(const CoopView *v, void *user) {
@@ -371,15 +427,80 @@ void hos_oot_hits_room(const CoopRules *rules, int accepted) {
     ReleaseSRWLockExclusive(&H.lock);
 }
 
+static void hit_trace_drain(HitTrace *q, HitTraceSlot *slots, unsigned capacity, int activation) {
+    uint64_t read = __atomic_load_n(&q->read, __ATOMIC_RELAXED);
+    const uint64_t end = __atomic_load_n(&q->write, __ATOMIC_RELAXED);
+    for (unsigned n = 0; read < end && n < HIT_TRACE_BATCH; n++, read++) {
+        HitTraceSlot *slot = &slots[read % capacity];
+        if (!__atomic_load_n(&slot->ready, __ATOMIC_ACQUIRE)) break;
+        const HitNative *p = &slot->sample;
+        if (activation) {
+            hos_log("coop: attack: activation at_ms %llu operation %s owner %u ids %u/%u slot %u (sample %llu); player attribution unknown",
+                (unsigned long long)p->at_ms, p->kind == NATIVE_SETUP ? "setup" : "renew", p->owner,
+                p->primary, p->secondary, p->path, (unsigned long long)p->invocation);
+        } else if (p->kind == NATIVE_LIFE) {
+            const uint32_t loss = p->after < p->before ? p->before - p->after : 0;
+            hos_log("coop: hit: native %s %u -> %u requested %u pre-clamp delta %lld (invocation %llu, path %u) at_ms %llu owner %u committed-loss %u",
+                p->player ? "player" : "actor", p->before, p->after, p->requested, (long long)p->delta,
+                (unsigned long long)p->invocation, p->path, (unsigned long long)p->at_ms, p->owner, loss);
+            if (p->player && loss) {
+                T.player_losses++;
+                if (T.player_amount > UINT64_MAX - loss) __atomic_store_n(&T.loss.exhausted, 1, __ATOMIC_RELEASE);
+                else T.player_amount += loss;
+            }
+        } else {
+            hos_log("coop: attack: %s owner %u ids %u/%u slot %u layer %u power %d multiplier %.9g (sample %llu) at_ms %llu; observation only",
+                p->kind == NATIVE_SETUP ? "setup" : "off", p->owner, p->primary, p->secondary, p->path,
+                p->layer, p->power, (double)p->multiplier, (unsigned long long)p->invocation, (unsigned long long)p->at_ms);
+        }
+        __atomic_store_n(&slot->ready, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&q->read, read + 1, __ATOMIC_RELEASE);
+    }
+}
+
+static void hit_trace_report(const char *name, HitTrace *q, uint64_t now) {
+    const uint64_t recorded = __atomic_load_n(&q->read, __ATOMIC_RELAXED);
+    const uint64_t missing = __atomic_load_n(&q->not_kept, __ATOMIC_ACQUIRE);
+    /* Offered precedes reservation/publication. Reading it last includes producers still filling a slot. */
+    const uint64_t offered = __atomic_load_n(&q->offered, __ATOMIC_RELAXED);
+    const unsigned exhausted = __atomic_load_n(&q->exhausted, __ATOMIC_ACQUIRE);
+    hos_log("coop: hit: trace-v2 %s at_ms %llu offered %llu recorded %llu not-kept %llu pending %llu complete %s counters %s",
+        name, (unsigned long long)now, (unsigned long long)offered, (unsigned long long)recorded,
+        (unsigned long long)missing, (unsigned long long)(offered - recorded - missing),
+        missing || exhausted ? "no" : "yes", exhausted ? "EXHAUSTED" : "exact");
+}
+
+static void hit_trace_frame(uint64_t now) {
+    if (!__atomic_load_n(&hos_oot_attack_observe, __ATOMIC_ACQUIRE)) return;
+    hit_trace_drain(&T.loss, T.losses, OOT_HIT_TRACE_LOSSES, 0);
+    hit_trace_drain(&T.activation, T.activations, OOT_HIT_TRACE_ACTIVATIONS, 1);
+    hit_trace_drain(&T.setup, T.setups, OOT_HIT_TRACE_DETAILS, 0);
+    hit_trace_drain(&T.nonloss, T.nonlosses, OOT_HIT_TRACE_DETAILS, 0);
+    hit_trace_drain(&T.off, T.offs, OOT_HIT_TRACE_DETAILS, 0);
+    const uint64_t missing = __atomic_load_n(&T.loss.not_kept, __ATOMIC_RELAXED) +
+                             __atomic_load_n(&T.activation.not_kept, __ATOMIC_RELAXED);
+    if (!T.reported || now - T.report_at >= 1000 || missing != T.reported_missing ||
+        __atomic_load_n(&T.loss.exhausted, __ATOMIC_ACQUIRE) || __atomic_load_n(&T.activation.exhausted, __ATOMIC_ACQUIRE)) {
+        T.reported = 1; T.report_at = now; T.reported_missing = missing;
+        hit_trace_report("losses", &T.loss, now);
+        hit_trace_report("activations", &T.activation, now);
+        hit_trace_report("setup-details", &T.setup, now);
+        hit_trace_report("nonloss-details", &T.nonloss, now);
+        hit_trace_report("off-details", &T.off, now);
+        hos_log("coop: hit: trace-v2 player committed-losses %llu amount %llu at_ms %llu; native life hook only",
+            (unsigned long long)T.player_losses, (unsigned long long)T.player_amount, (unsigned long long)now);
+    }
+}
+
 /* Present-thread drain: native workers never wait for the socket, print, allocate or retain guest pointers. */
 void hos_oot_hits_frame(const char *area, int playing) {
     if (!__atomic_load_n(&hos_oot_hits_active, __ATOMIC_ACQUIRE)) return;
     const uint64_t now = coop_now_ms();
+    hit_trace_frame(now);
     unsigned accepted = 0;
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++) if (coop_member_accepted(id)) accepted |= 1u << id;
-    HitNative native[HIT_PENDING];
     HitPending batch[HIT_BATCH];
-    unsigned count, n = 0;
+    unsigned n = 0;
     if (!TryAcquireSRWLockExclusive(&H.lock)) return;
     H.playing = playing && area && *area;
     H.accepted = accepted;
@@ -392,11 +513,6 @@ void hos_oot_hits_frame(const char *area, int playing) {
         if (H.epoch != UINT64_MAX) H.epoch++;
         memset(H.pending, 0, sizeof H.pending);
     }
-    count = H.native_count;
-    memcpy(native, H.native, count * sizeof *native);
-    H.native_count = 0;
-    const uint64_t dropped = H.native_dropped + __atomic_exchange_n(&hit_busy_drops, 0, __ATOMIC_RELAXED);
-    H.native_dropped = 0;
     if (!H.budget_at || now - H.budget_at >= 1000) H.tokens = HIT_RATE, H.budget_at = now;
     for (unsigned i = 0; i < HIT_PENDING && n < HIT_BATCH; i++) {
         HitPending *p = &H.pending[i];
@@ -414,19 +530,6 @@ void hos_oot_hits_frame(const char *area, int playing) {
         p->recipients = 0;
     }
     ReleaseSRWLockExclusive(&H.lock);
-    if (dropped) hos_log("coop: hit: trace incomplete: %llu native records dropped", (unsigned long long)dropped);
-    for (unsigned i = 0; i < count; i++) {
-        const HitNative *p = &native[i];
-        if (p->kind == NATIVE_LIFE)
-            hos_log("coop: hit: native %s %u -> %u requested %u pre-clamp delta %lld (invocation %llu, path %u)",
-                p->player ? "player" : "actor", p->before, p->after, p->requested, (long long)p->delta,
-                (unsigned long long)p->invocation, p->path);
-        else
-            hos_log("coop: attack: %s owner %u ids %u/%u slot %u layer %u power %d multiplier %.9g (sample %llu); observation only",
-                p->kind == NATIVE_SETUP ? "setup" : p->kind == NATIVE_RENEW ? "renew" : "off",
-                p->owner, p->primary, p->secondary, p->path, p->layer, p->power, (double)p->multiplier,
-                (unsigned long long)p->invocation);
-    }
     for (unsigned i = 0; i < n; i++) for (int id = 1; id <= COOP_MAX_MEMBERS; id++)
         if (batch[i].recipients & (1u << id))
             if (coop_send_event(id, COOP_K_HIT, batch[i].bytes, OOT_HIT_BYTES) != COOP_EVENT_QUEUED)
@@ -452,4 +555,6 @@ void hos_oot_hits_start(void) {
     }
     CoopView view; coop_view_get(&view); hit_on_view(&view, NULL);
     AcquireSRWLockExclusive(&H.lock); hit_active_locked(); ReleaseSRWLockExclusive(&H.lock);
+    if (trace) hos_log("coop: hit: trace-v2 enabled loss-capacity %u activation-capacity %u detail-capacity %u; native observations only",
+        OOT_HIT_TRACE_LOSSES, OOT_HIT_TRACE_ACTIVATIONS, OOT_HIT_TRACE_DETAILS);
 }
