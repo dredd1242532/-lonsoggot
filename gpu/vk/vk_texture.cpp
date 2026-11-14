@@ -2748,11 +2748,18 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
                            // moves more than its ranges name, and only the first is a saving.)
             uint64_t part = 0;
             if (gpu_partial) for (const auto& r : dirty) part += r.second - r.first;
-            const uint64_t whole = tex->guest_size;
+            const uint64_t whole = tex->guest_size, ranges = gpu_partial ? part : whole;
             const uint64_t n = st_gw_events.fetch_add(1, std::memory_order_relaxed) + 1;
             st_gw_moved_kb.fetch_add(gw_moved >> 10, std::memory_order_relaxed);
-            st_gw_dirty_kb.fetch_add((gpu_partial ? part : whole) >> 10, std::memory_order_relaxed);
+            st_gw_dirty_kb.fetch_add(ranges >> 10, std::memory_order_relaxed);
             st_gw_whole_kb.fetch_add(whole >> 10, std::memory_order_relaxed);
+            // (RX_VK_GPU_WRITE_LOG=1: one line per event, so a short scene or a single burst tells you the same
+            // story as the running tally - the tally only speaks again every 50 events)
+            static const bool gw_each = env_on("RX_VK_GPU_WRITE_LOG");
+            if (gw_each)
+                logf("vk: gpu-write upload #%u: %llu KB taken by the path, %llu KB of written ranges, %llu KB whole (%s)",
+                     tex->id, (unsigned long long)(gw_moved >> 10), (unsigned long long)(ranges >> 10),
+                     (unsigned long long)(whole >> 10), gpu_partial ? "the part" : "whole");
             if (n == 1 || n % 50 == 0)
                 logf("vk: gpu-write uploads: %llu (%llu MB taken by the upload path, %llu MB of written ranges, the "
                      "whole image would have been %llu MB), %s",

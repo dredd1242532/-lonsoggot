@@ -198,6 +198,7 @@ def main():
         ("if (gpu_partial) {", "the CPU's writes since a GPU write are not taken into the same part"),
         ("if (texture_dirty(*tex, since, cpu))", "the CPU's writes since a GPU write are not looked for"),
         ("join_ranges(dirty, cpu)", "the CPU's writes since a GPU write do not join the part"),
+        ('static const bool gw_each = env_on("RX_VK_GPU_WRITE_LOG")', "a gpu-write event cannot be logged one by one for a short run"),
         ("const bool up_ok = upload(*tex, up_part ? &dirty : nullptr, &gw_moved);", "the upload does not take the part"),
         ("st_gw_moved_kb.fetch_add(gw_moved >> 10", "the gpu-write tally does not count what the upload path took"),
     ]:
