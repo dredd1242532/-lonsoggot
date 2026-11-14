@@ -437,7 +437,19 @@ static void test_modules(void) {
     CHECK(GetModuleFileNameA(base, loaded, sizeof loaded) && !strcmp(path, loaded));
     HMODULE again = LoadLibraryA(path);
     CHECK(again == m && FreeLibrary(again) && marker() == 314 && FreeLibrary(m));
-    puts("modules executable=dyld_path truncated=reported opaque_handle=recorded address_base=dladdr packaged_alias=preferred");
+    /* hos_load_error (host/rx_backend.c logs it): dlerror()'s text for a library that did not load, cleared by the next call */
+    strcpy(name + 1, "absent_vk.dll");
+    CHECK(!LoadLibraryA(path) && GetLastError() == ERROR_FILE_NOT_FOUND);
+    strcpy(name + 1, "absent_vk.dylib");
+    CHECK(hos_load_error()[0] && strstr(hos_load_error(), path));
+    CHECK(!LoadLibraryA("kernel32.dll") && GetLastError() == ERROR_FILE_NOT_FOUND && !hos_load_error()[0]);
+    strcpy(name + 1, "absent_vk.dll");
+    CHECK(!LoadLibraryA(path) && hos_load_error()[0]);
+    strcpy(name + 1, "libSDL2-2.0.0.dylib");
+    m = LoadLibraryA(path);
+    CHECK(m && !hos_load_error()[0] && FreeLibrary(m));
+    puts("modules executable=dyld_path truncated=reported opaque_handle=recorded address_base=dladdr packaged_alias=preferred "
+         "load_error=dlerror_text");
 }
 static void test_memory(void) {
     PROCESS_MEMORY_COUNTERS_EX memory;
