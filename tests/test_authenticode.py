@@ -12,6 +12,7 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -289,6 +290,19 @@ class Authenticode(unittest.TestCase):
         self.assertLess(package.index("Check packaged Authenticode"), package.index("- id: upload_1"))
         self.assertIn("if: steps.upload_1.outcome == 'failure'", package)
         self.assertIn("linux-signing", (ROOT / ".forgejo/actionlint.yaml").read_text(encoding="utf-8"))
+
+    def test_forgejo_call_keeps_supported_keys_and_only_named_secrets(self):
+        windows = (ROOT / ".forgejo/workflows/build-windows.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".forgejo/workflows/release.yml").read_text(encoding="utf-8")
+        call = windows.split("\n  workflow_call:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertLessEqual(set(re.findall(r"^    (\w+):", call, re.M)), {"inputs", "outputs"},
+                             "Forgejo 17 rejects declarations under on.workflow_call.secrets")
+        caller = release.split("\n  windows:\n", 1)[1].split("\n  publish:\n", 1)[0]
+        forwarded = caller.split("\n    secrets:\n", 1)[1]
+        names = ("AUTHENTICODE_CERTIFICATE_PEM", "AUTHENTICODE_KEY_URI", "AUTHENTICODE_TOKEN_PIN")
+        self.assertEqual(re.findall(r"^      (\w+): (.+)$", forwarded, re.M),
+                         [(name, "${{ secrets." + name + " }}") for name in names])
+        self.assertNotIn("secrets: inherit", release)
 
     def test_pinned_root_or_system_bundle_and_never_a_silent_fallback(self):
         with auth.trust_anchor({}) as ca_file:

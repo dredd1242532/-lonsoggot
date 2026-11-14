@@ -38,16 +38,6 @@ on:
         description: sign on the isolated release runner when the certificate secret is configured
         type: boolean
         default: false
-    secrets:
-      AUTHENTICODE_CERTIFICATE_PEM:
-        description: public code-signing certificate chain, leaf first (never a private key)
-        required: false
-      AUTHENTICODE_KEY_URI:
-        description: PKCS11 key selector, without credentials
-        required: false
-      AUTHENTICODE_TOKEN_PIN:
-        description: optional token PIN, sent to the signer on stdin
-        required: false
 
 permissions:
   contents: read

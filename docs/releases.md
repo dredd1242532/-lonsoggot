@@ -184,6 +184,12 @@ To enable the **PKCS#11 token/service route**:
    `secrets: inherit`. Workflow guards and the Python decision require the build ref to equal the triggering commit.
    PRs, `pull_request_target`, fork pushes, other branches and manual build dispatches never sign.
 
+Forgejo 17 accepts only `inputs` and `outputs` under `on.workflow_call`; a `secrets` declaration there prevents the
+workflow from being parsed, even for an event it would not run on. The three signing secrets are instead supplied
+by the existing explicit `jobs.windows.secrets` mapping in `release.yml`, as described in the
+[Forgejo 17 reference](https://forgejo.org/docs/v17.0/user/actions/reference/#jobsjob_idsecrets).
+Keep that named mapping, not `secrets: inherit`; the signing guards and the secret-free runner check are unchanged.
+
 `scripts/authenticode.py` pins **osslsigncode 2.15**, its Linux x86-64 archive's size and SHA-256, using the same
 tuple and `scripts/tools.py` `Tool`/`fetch` convention as `builder_package.py`'s `LINUX_LLVM_MINGW`.
 It extracts anew from the checked archive, not an old unpacked executable. This release-only tool is not added to
