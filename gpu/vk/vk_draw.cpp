@@ -3164,12 +3164,14 @@ VkDescriptorBufferInfo uniform_range(const NvnState& s, const Stage& st, uint32_
         const uint64_t want = used ? std::max<uint64_t>(used, 16) : std::max<uint64_t>(u.size, 16);
         const uint64_t n = std::min<uint64_t>(std::min<uint64_t>(want, u.size ? std::max<uint64_t>(u.size, 16) : want),
                                               dev.props.limits.maxUniformBufferRange);
-        // (longshot) most 0x90-byte vertex blocks are 3D matrices, not canvases. The replay's negative tail memo avoids
-        // rereading them while their pages, captures and inline updates are unchanged. Canvas candidates still get the
-        // full signature and current-window refit; no program is permanently classified from its first binding.
+        // (longshot) most 0x90-byte vertex blocks are 3D matrices, not canvases. Probe the canvas's small tail before
+        // copying its projection. ub_read sees submitted captures and inline updates; never cache a rejection by program
+        // or address, since either can later bind a canvas. Only candidates pay for the full signature in oot_ui_squeeze.
         if (window_fit_active() && st.nvn_stage == 0 && u.size == OOT_UI_BLOCK_BYTES && n <= OOT_UI_BLOCK_BYTES) {
             uint8_t block[OOT_UI_BLOCK_BYTES];
-            if (ub_canvas_candidate(u.addr + OOT_UI_BLOCK_BYTES - 16) &&
+            float tail[4];
+            if (ub_read(u.addr + OOT_UI_BLOCK_BYTES - sizeof tail, tail, sizeof tail) &&
+                tail[0] == 3840.0f && tail[1] == 2160.0f && tail[2] == 3840.0f && tail[3] == 2160.0f &&
                 ub_read(u.addr, block, sizeof block) && ui_squeeze(block, sizeof block)) {
                 if (stream_reserve(n, align))
                     if (const uint64_t at = stream_alloc(n, align); at != UINT64_MAX) {

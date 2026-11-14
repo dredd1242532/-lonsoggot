@@ -113,7 +113,5 @@ std::string state_list_snapshot(bool* present);
 uint64_t ub_overlay(uint64_t addr, uint64_t n, uint8_t* base, const std::function<uint64_t(uint64_t)>& alloc);
 /// Guest memory as the stream's place sees it: as submitted, the stream's uniform updates before it over it
 bool ub_read(uint64_t addr, void* dst, uint64_t n);
-/// Window canvas tail at tail_addr: reject unchanged non-canvas blocks without another submitted-memory read.
-bool ub_canvas_candidate(uint64_t tail_addr);
 
 } // namespace mkwvk

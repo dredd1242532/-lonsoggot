@@ -29,15 +29,8 @@ def main():
     args = parser.parse_args()
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text()
     probe = block(draw, "if (window_fit_active() && st.nvn_stage == 0 && u.size == OOT_UI_BLOCK_BYTES")
-    replay = (ROOT / "gpu/vk/vk_replay.cpp").read_text()
-    start = replay.index("struct UiCanvasReject")
-    candidate = replay[start:replay.index("\nnamespace {", start)]
     source = r'''
 #include <cassert>
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <vector>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -70,15 +63,6 @@ template<class Alloc> static uint64_t ub_overlay(uint64_t addr, uint64_t n, uint
 }
 static bool stream_reserve(uint64_t, uint64_t) { return true; }
 static uint64_t stream_alloc(uint64_t, uint64_t) { return 0; }
-static uint32_t page_stamp=1, end_page_stamp=1;
-static uint64_t capture_view=1, rec_value_now=1;
-static size_t ub_limit=1;
-static std::vector<int> ub_updates{0,0};
-static std::atomic<uint64_t> ub_list_epoch{1};
-static uint32_t memory_page_stamp(uint64_t addr) { return addr == 4239 ? end_page_stamp : page_stamp; }
-static uint64_t memory_capture_view() { return capture_view; }
-static uint32_t ub_word_index(uint64_t addr) { return (addr >> 2) & 127; }
-CANDIDATE
 struct Descriptor { int buffer; uint64_t at,n; };
 static Descriptor probe(int stage=0, uint64_t size=144, uint64_t n=64) {
     const struct { int nvn_stage; } st{stage};
@@ -97,20 +81,11 @@ static void canvas(float* f) {
     f[32]=f[34]=3840;f[33]=f[35]=2160;
 }
 int main() {
-    // The same known non-canvas 3D block, repeatedly: no full projection copy.
+    // The same non-canvas 3D block: no full projection copy, but still one submitted tail read per call.
     for(int i=0;i<1000;++i) assert(probe().buffer==0);
-    assert(full_reads==0 && overlays==0 && tail_reads==1);
-    // Every way the replay's submitted answer can change forces one new read.
-    ++page_stamp; assert(probe().buffer==0 && tail_reads==2);
-    ++end_page_stamp; assert(probe().buffer==0 && tail_reads==3);
-    ++capture_view; assert(probe().buffer==0 && tail_reads==4);
-    ++ub_list_epoch; assert(probe().buffer==0 && tail_reads==5);
-    ++rec_value_now; assert(probe().buffer==0 && tail_reads==6);
-    ++ub_limit; assert(probe().buffer==0 && tail_reads==7);
-    for(int i=0;i<1000;++i) assert(probe().buffer==0);
-    assert(tail_reads==7);
+    assert(full_reads==0 && overlays==0 && tail_reads==1000);
     // The same address can become a canvas through submitted inline updates.
-    canvas(updated);has_update=true;++ub_list_epoch;
+    canvas(updated);has_update=true;
     assert(probe().buffer==7);
     float f[36]{};std::memcpy(f,stream,64);
     assert(std::fabs(f[5]-(2.0f/2160)*(aspect/(16.0f/9))) < 1e-8);
@@ -126,11 +101,9 @@ int main() {
     assert(probe(1).buffer==0 && probe(0,128).buffer==0);
     assert(full_reads+tail_reads==before);
     readable=false;assert(probe().buffer==0);
-    before=tail_reads;assert(probe().buffer==0);assert(tail_reads==before+1);
-    readable=true;assert(probe().buffer==0); // a failed read never creates a rejection
-    puts("PASS: 1000 non-canvas blocks need one tail read; all replay invalidations and live canvas resizes preserved");
+    puts("PASS: non-canvas blocks skip full copies; submitted updates and live canvas resizes preserved");
 }
-'''.replace("BRANCH", probe).replace("CANDIDATE", candidate)
+'''.replace("BRANCH", probe)
     with tempfile.TemporaryDirectory(prefix="window-uniform-") as temp:
         path = Path(temp)
         cpp, exe = path / "probe.cpp", path / "probe"

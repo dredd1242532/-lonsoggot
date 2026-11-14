@@ -1111,31 +1111,6 @@ bool ub_read(uint64_t addr, void* dst, uint64_t n) {
     return true;
 }
 
-// Window's canvas-tail rejection is valid only for this submitted view. A program or address alone is not an identity:
-// either can later bind a canvas. Keep only negative answers, and include both pages for an unaligned tail crossing 4 KB.
-struct UiCanvasReject {
-    std::array<uint64_t, 7> key{};
-    bool rejected = false;
-};
-thread_local UiCanvasReject ui_canvas_rejects[512];
-bool ub_canvas_candidate(uint64_t tail_addr) {
-    const auto stamp = [&] {
-        const size_t lim = ub_limit ? std::min(ub_limit, ub_updates.size()) : 0;
-        return std::array<uint64_t, 7>{tail_addr, memory_page_stamp(tail_addr), memory_page_stamp(tail_addr + 15),
-                                      memory_capture_view(), ub_list_epoch.load(std::memory_order_relaxed), rec_value_now, lim};
-    };
-    const auto key = stamp();
-    UiCanvasReject& cached = ui_canvas_rejects[ub_word_index(tail_addr) | ((tail_addr >> 11) & 384)];
-    if (cached.rejected && cached.key == key) return false;
-    float tail[4];
-    // As with ub_read's other callers: all updates before this replay position, including when RX_VK_UB_CUR_ONLY
-    // asks the normal GPU-binding overlay for the current recording only. A failed submitted read is not cached.
-    if (!ub_read(tail_addr, tail, sizeof tail)) return false;
-    if (tail[0] == 3840.0f && tail[1] == 2160.0f && tail[2] == 3840.0f && tail[3] == 2160.0f) return true;
-    if (stamp() == key) cached = {key, true};
-    return false;
-}
-
 namespace {
 
 /// The recording's uniform updates into guest memory (after its draws: the ones that came after an update read
