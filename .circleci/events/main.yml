@@ -6,15 +6,13 @@ workflows:
       - third-party
       - test-linux:
           requires: [lint]
-      - builder-cli:
-          requires: [lint]
       - spirv-fixtures:
           requires: [lint]
       - linux-appimage:
           requires: [lint, test-linux, spirv-fixtures]
           filters: pipeline.parameters.linux or pipeline.parameters.full
       - windows-builder:
-          requires: [lint, builder-cli]
+          requires: [lint]
           filters: pipeline.parameters.windows or pipeline.parameters.full
       - windows-vulkan:
           requires: [lint, spirv-fixtures]
@@ -32,7 +30,6 @@ workflows:
             - lint
             - third-party
             - test-linux
-            - builder-cli
             - spirv-fixtures
             - linux-appimage
             - windows-builder
@@ -61,7 +58,6 @@ workflows:
             - lint
             - third-party
             - test-linux
-            - builder-cli
             - spirv-fixtures
             - linux-appimage
             - windows-builder
