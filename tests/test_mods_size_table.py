@@ -180,7 +180,8 @@ POSIX_PIECES = ["static DWORD error_of(int e) {", "static void slashes(char *dst
                 "DWORD GetFileAttributesA(LPCSTR name) {", "static BOOL find_next(HFind *f, WIN32_FIND_DATAA *fd) {",
                 "HANDLE FindFirstFileA(LPCSTR pattern, WIN32_FIND_DATAA *fd) {",
                 "BOOL FindNextFileA(HANDLE h, WIN32_FIND_DATAA *fd) {", "BOOL FindClose(HANDLE h) {",
-                "BOOL CreateDirectoryA(LPCSTR name, void *attr) {"]   # (prompts.c makes cache/prompts)
+                "BOOL CreateDirectoryA(LPCSTR name, void *attr) {",   # (prompts.c makes cache/prompts)
+                "BOOL DeleteFileA(LPCSTR name) {", "BOOL MoveFileExA(LPCSTR from, LPCSTR to, DWORD flags) {"]   # (and moves its files in)
 
 
 def routing_checks(cc, tmp, zstandard, host):
