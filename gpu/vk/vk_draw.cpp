@@ -1411,6 +1411,16 @@ VkComputePipelineCreateInfo compute_pipeline_info(const Program& q, bool noopt) 
     if (noopt && noopt_on) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
     return ci;
 }
+/// (longshot) Before play on Intel's one-at-a-time builds (precompile_run, precompile_warm): ci asked without the optimizer, the
+/// pipeline a dispatch's first build asks for (Intel quick compute builds), so that a dispatch finds it in the cache. With the
+/// optimizer, one of the game's compute pipelines took Intel's compiler up to 389.5 s on a UHD Graphics (i3-1115G4), past the
+/// shader preparation's 300 s with nothing finished: the preparation was stopped (longshot_prepare_skipped) and every later
+/// start built each shader when first drawn. true: asked so (the optimized build is then owed to its first dispatch)
+bool precompile_compute_quick(VkComputePipelineCreateInfo& ci) {
+    if (!serial_builds_on() || !intel_quick_compute() || (ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) return false;
+    ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    return true;
+}
 /// (longshot) That pipeline asked of the caches without compiling (create_cached: the driver's own, then the start's): null when
 /// neither has it, and where the driver cannot be asked that way
 VkPipeline compute_pipeline_cached(const Program& q, bool noopt) {
@@ -8936,7 +8946,8 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         program_cache_borrow(computes[i], [&](Program& p) {
             if (!p.compute || p.failed || p.stages.empty() || !p.stages[0].module || prepare_stopped() || taau_key(p.key)) return;
             ensure_layout(p);
-            const VkComputePipelineCreateInfo ci = compute_pipeline_info(p, true);   // (as a dispatch and a load ask for it)
+            VkComputePipelineCreateInfo ci = compute_pipeline_info(p, true);   // (as a dispatch and a load ask for it)
+            precompile_compute_quick(ci);
             VkPipeline made = VK_NULL_HANDLE;
             if (cached_compute(&ci, &made) == VK_SUCCESS && made) {
                 vkDestroyPipeline(dev.device, made, nullptr);
@@ -9139,16 +9150,23 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
             if (i >= total) return;
             if (i < computes.size()) {
                 Program& p = *computes[i];
-                const VkComputePipelineCreateInfo ci = compute_pipeline_info(p, false);
+                VkComputePipelineCreateInfo ci = compute_pipeline_info(p, false);
                 // (asked of the caches first, as a dispatch asks: the prepare left it there, and the log's line can then say how
                 // many were compiled now. Where the driver cannot say, each is just made, and counted as compiled)
                 VkPipeline made = compute_pipeline_cached(p, false);
-                if (made) pre->computes_cached++;
-                else if (cached_compute(&ci, &made) == VK_SUCCESS && made) pre->computes_compiled++;
-                else made = VK_NULL_HANDLE, pre->computes_failed++;
+                bool quick = false;
+                if (made) {
+                    pre->computes_cached++;
+                } else {
+                    quick = precompile_compute_quick(ci);
+                    if (cached_compute(&ci, &made) == VK_SUCCESS && made) pre->computes_compiled++;
+                    else made = VK_NULL_HANDLE, pre->computes_failed++;
+                }
                 std::lock_guard lk(pre->mu);
-                if (!pre->abandoned) p.compute_pipeline = made;
-                else if (made) vkDestroyPipeline(dev.device, made, nullptr);   // (the game went on: it builds its own)
+                if (!pre->abandoned) {
+                    p.compute_pipeline = made;
+                    if (made && quick) p.optimize_owed.store(true, std::memory_order_release);
+                } else if (made) vkDestroyPipeline(dev.device, made, nullptr);   // (the game went on: it builds its own)
             } else if (i < computes.size() + fallbacks.size()) {
                 // (a program a draw is already building is left to it: compute_state, as in fallback_pipelines_ready)
                 Program& p = *fallbacks[i - computes.size()];
@@ -9976,6 +9994,10 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     dump_ssbos(cmd, p, "before");
     if (!p.dispatched.load(std::memory_order_relaxed)) compute_variant_note(p.key, p.variant);   // (which variant: this install's own)
     if (!p.dispatched.exchange(true, std::memory_order_relaxed)) compute_note(p.key), state_record_compute(p.key);
+    if (p.optimize_owed.load(std::memory_order_relaxed) && p.optimize_owed.exchange(false, std::memory_order_acq_rel)) {
+        Program* q = &p;
+        jobs_push_serial([q] { compute_optimize(*q); });
+    }
     const VkPipeline optimized = p.compute_optimized.load(std::memory_order_acquire);   // (compute_optimize)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, optimized ? optimized : p.compute_pipeline);
     if (!bind_descriptors(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p)) SKIP_HERE();

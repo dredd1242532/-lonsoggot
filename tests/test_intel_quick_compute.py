@@ -53,6 +53,33 @@ def main():
     shader = (ROOT / "gpu/vk/vk_shader.h").read_text(encoding="utf-8")
     need("std::atomic<VkPipeline> compute_optimized{VK_NULL_HANDLE};" in shader, "Program has no slot for the optimized pipeline")
 
+    # (before play, the same: the preparation at the build and a start's precompile ask for the pipeline the dispatch's first
+    # build asks for. With the optimizer one build took 389.5 s, past the preparation's 300 s with nothing finished: it was
+    # stopped, longshot_prepare_skipped left, and every later start built each shader in play)
+    quick = block(draw, "bool precompile_compute_quick(VkComputePipelineCreateInfo& ci) {")
+    need("if (!serial_builds_on() || !intel_quick_compute() || (ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) return false;"
+         in quick and "ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;" in quick,
+         "the precompile's quick build is not limited to the serial builds and the row")
+    warm = block(draw, "void precompile_warm(void (*progress)(size_t done, size_t total)) {")
+    warm_computes = warm[warm.index("program_cache_borrow(computes[i]"):]
+    need(warm_computes.index("compute_pipeline_info(p, true)") < warm_computes.index("precompile_compute_quick(ci);") <
+         warm_computes.index("cached_compute(&ci, &made)"), "the warm builds the optimized pipeline on Intel")
+    run = block(draw, "void precompile_run(void (*progress)(size_t done, size_t total)) {")
+    run_computes = run[run.index("Program& p = *computes[i];"):run.index("} else if (i < computes.size() + fallbacks.size()) {")]
+    need(run_computes.index("VkPipeline made = compute_pipeline_cached(p, false);") <
+         run_computes.index("quick = precompile_compute_quick(ci);") < run_computes.index("cached_compute(&ci, &made)"),
+         "the precompile does not take a cached optimized pipeline before building a quick one")
+    owed = run_computes[run_computes.index("if (!pre->abandoned) {"):]
+    need("if (made && quick) p.optimize_owed.store(true, std::memory_order_release);" in owed and
+         owed.index("p.optimize_owed") < owed.index("} else if (made) vkDestroyPipeline"),
+         "the precompile's quick pipeline owes no optimized build, or owes it once abandoned")
+    need("jobs_push" not in run_computes, "the precompile queues optimized builds for programs never dispatched")
+    need("std::atomic<bool> optimize_owed{false};" in shader, "Program has no flag for the owed optimized build")
+    first = dispatch[dispatch.index("if (p.optimize_owed.load(std::memory_order_relaxed)"):]
+    need(first.index("p.optimize_owed.exchange(false, std::memory_order_acq_rel)") < first.index(
+         "jobs_push_serial([q] { compute_optimize(*q); });") < first.index("const VkPipeline optimized ="),
+         "the first dispatch of a precompiled quick pipeline does not queue its optimized build once, before binding")
+
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     need('{TAB_DEBUG, "Intel quick compute builds", &opts.intel_quick, 0, 1, 1, tx_onoff,' in menu, "no Intel quick compute builds row")
     need("(v != &opts.intel_quick || intel_compiler_row())" in block(menu, "bool row_shown(int i) {"),
