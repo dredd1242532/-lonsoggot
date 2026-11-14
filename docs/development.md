@@ -614,6 +614,11 @@ Insert always releases the latch. Text fields use physical pad edges, not latche
 or shoulder does not commit or add another character when editing starts. Fresh presses and D-pad repeats still edit,
 and keyboard editing keys reach the field while the game receives none.
 
+Custom output size's restart state tracks the actual width and height, not just the custom choice's list index.
+Audio output keeps its separate channel-layout state: Mono and Stereo share a restart value, so switching between
+them does not renew a size change's declined restart prompt. Choosing a different channel layout still does.
+`tests/test_menu_text_field.py` exercises these changes together, including restoring the original size.
+
 | Key | Values |
 |---|---|
 | `quality_preset` | 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+) |

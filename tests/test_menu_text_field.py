@@ -71,9 +71,9 @@ enum { HOS_MOUSE_LEFT = 1, HOS_MOUSE_RIGHT = 2 };
 @@TEXT_ENUMS@@
 struct { int output_res, preset, ultrawide, handheld, audio_output; } opts;
 struct Row { int* value; int hi; bool restart; };
-Row rows[] = {{&opts.ultrawide, 0, true}, {&opts.output_res, 0, true}};
-constexpr int kRows = 2;
-int restart_slot[kRows] = {0, 1};
+Row rows[] = {{&opts.ultrawide, 0, true}, {&opts.output_res, 0, true}, {&opts.audio_output, 3, true}};
+constexpr int kRows = 3;
+int restart_slot[kRows] = {0, 1, 2};
 namespace mr = menu_restart;
 struct RestartState : mr::State {
     int noted = 0;
@@ -316,6 +316,39 @@ void test_monitor_shape() {
     screen_w = 1920, screen_h = 1080;
     std::puts("PASS: test_monitor_shape: 21:9 and 32:9 keep the monitor's shape for typed 2048x1152");
 }
+void test_audio_restart_with_custom_size() {
+    opts.audio_output = 1;
+    startup("1920x800");
+    opts.audio_output = 3;   // Stereo and Mono share the startup channel layout.
+    int now[mr::kMax] = {};
+    restart_values(now);
+    CHECK(!restart_state.pending(now) && !restart_changed(rows[2]));
+    CHECK(apply("1920x808") == nullptr);
+    restart_values(now);
+    CHECK((restart_state.pending(now) & 2u) && !(restart_state.pending(now) & 4u));
+    CHECK(restart_changed(rows[1]) && !restart_changed(rows[2]));
+    restart_state.choose_later(now);
+    opts.audio_output = 1;
+    restart_values(now);
+    CHECK(!restart_state.ask(now));   // A live mix switch does not renew the declined size prompt.
+    opts.audio_output = 2;
+    restart_values(now);
+    CHECK(restart_state.ask(now) && (restart_state.pending(now) & 4u));
+    CHECK(apply("1920x800") == nullptr);
+    restart_values(now);
+    CHECK(restart_state.pending(now) == 4u);   // Restoring the size does not clear a channel-layout change.
+    opts.audio_output = 3;
+    restart_values(now);
+    CHECK(!restart_state.pending(now));
+    startup("1920x800");   // The reverse live transition, from a Mono startup.
+    opts.audio_output = 1;
+    restart_values(now);
+    CHECK(!restart_state.pending(now));
+    opts.audio_output = 0;
+    restart_values(now);
+    CHECK(restart_state.pending(now) == 4u);   // Auto is not assumed to share the stereo layout.
+    std::puts("PASS: test_audio_restart_with_custom_size: live Mono/Stereo, size edits and layout changes keep separate slots");
+}
 int main() {
     test_toggle_text_isolation();
     test_pad_only_entry();
@@ -324,6 +357,7 @@ int main() {
     test_edit_wheel();
     test_full_width();
     test_monitor_shape();
+    test_audio_restart_with_custom_size();
     TextField f;
     text_set(f, "");
     CHECK(is(f, "", 0));
