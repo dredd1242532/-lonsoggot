@@ -1013,6 +1013,8 @@ def compile_one(job):
     lease = GATE.enter(c_src) if GATE else None
     t = time.time()
     try:
+        print("@@work %s %d %s" % (os.path.basename(src), os.path.getsize(src) >> 20,
+                                  threading.current_thread().name), flush=True)
         with subprocess.Popen([cc] + fl + ["-c", c_src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
             no_throttle(getattr(p, "_handle", None))
             if GATE:
