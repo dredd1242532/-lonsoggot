@@ -4295,7 +4295,7 @@ void texture_frame(uint64_t completed) {
             if (reserved < 8ull << 30) reserved = 8ull << 30;
 
             uint64_t available = system_ram > reserved ? system_ram - reserved : 0;
-            uint64_t driver_budget = own;  // 'own' already has the 70% calculation applied
+            uint64_t driver_budget = own;  // (the dedicated cards' share of the allowance above: 45% of it up to 8.5 GB, else 70%)
             uint64_t budget = std::min(available, driver_budget);
 
             // Hard caps based on system RAM
@@ -4319,9 +4319,12 @@ void texture_frame(uint64_t completed) {
 
             if (!told) {
                 told = true;
-                logf("vk: integrated GPU texture budget: %llu MB (system RAM %llu GB, driver allows %llu MB, reserved %llu GB)",
+                // (the allowance itself, not the share: "driver allows 3331 MB" was read as the limit on a UHD Graphics allowed 7402)
+                logf("vk: integrated GPU texture budget: %llu MB (system RAM %llu GB, driver allows %llu MB, its share for textures "
+                     "%llu MB, reserved %llu GB)",
                      (unsigned long long)(own >> 20),
                      (unsigned long long)(system_ram >> 30),
+                     (unsigned long long)((known ? allowed : 0) >> 20),
                      (unsigned long long)(driver_budget >> 20),
                      (unsigned long long)(reserved >> 30));
             }
