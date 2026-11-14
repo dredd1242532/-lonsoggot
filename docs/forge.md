@@ -51,8 +51,8 @@ So sign in with Discord on one machine only, and give the others a **personal ac
    it in place of the Discord sign-in, and sets up git as above.
 
 `whoami` then adds `(personal access token)`. When Forgejo refuses the token (you deleted it, or it expired), forge.py
-and git say so: make a new one and run `login --token-stdin` again. `logout` forgets it on this machine (delete it on
-the site too if you no longer need it), and `login --again` goes back to the Discord sign-in.
+says so, and git too from its next try: make a new one and run `login --token-stdin` again. `logout` forgets it on this
+machine (delete it on the site too if you no longer need it), and `login --again` goes back to the Discord sign-in.
 
 The team chat keeps its own sign-in, and the token leaves it as it is. On a token machine, don't run plain
 `team_chat.py login`: it is the Discord sign-in, and it would save itself over the token. With no chat session yet,
