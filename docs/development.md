@@ -422,6 +422,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_DESC_REUSE=0/1/never` | Over the Descriptor reuse row for a run, with its values: 0 its Off (a draw keeps the descriptors of the draw before it while no registration at all was made), 1 its On (through registrations of slots it does not sample, the default); `never`: every draw builds its own |
 | `RX_VK_DESC_COUNTS=0` | A/B switch: a draw's descriptor build (`build_descriptors`, `gpu/vk/vk_draw.cpp`) counts the program's descriptors before every build, as before; by default the three counts are taken once and kept with the program (`Program::desc_counts`), once it is ready. The same writes and reserves either way |
 | `RX_VK_NAN_GUARD=0` | No NaN guard on float colour outputs (on by default on every card: one NaN texel spreads through bloom into glowing blocks) |
+| `RX_VK_VB_RANGE=0` | A/B switch: a draw whose vertex streams changed binds all 16 bindings again, as before, instead of only the ones that differ from what the command buffer has (`vertex_bind_range`, `gpu/vk/vk_draw.cpp`) |
 | `RX_VK_FIFO=1`, `RX_VK_IMMEDIATE=1` | V-Sync On (FIFO) or Off (immediate) for one run, over the menu's V-Sync row |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
 
