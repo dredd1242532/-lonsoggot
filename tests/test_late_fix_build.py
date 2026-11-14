@@ -168,9 +168,16 @@ int vk_part_wait(uint64_t part, uint64_t) {
     return part_wait_result;
 }
 bool late_fix_pipe_ready() { return late_fix_pipe.tried = true; }   // (its pipeline made)
+// (the write-back's forget: vk_memory.cpp's lists of the pages the CPU wrote, and the shadows' bytes)
+std::mutex shadow_written_mu;
+std::vector<uint32_t> shadow_written_pages, shadow_written_collected_list, shadow_written_by_replay;
+bool shadow_written_all = false;
+int64_t st_wbd_known_game = 0, st_wbd_known_collected = 0, st_wbd_known_replay = 0;
+uint64_t shadow_bytes = 1;
 @BUILD@
 @SHADOWS_FREED@
 @CPUREAD@
+@FORGET@
 
 // ---- the test's pools and captures ----
 constexpr uint64_t kLo = 0x1000000;                      // (16 MB: pool A, 1 MB, shadowed and mirrored)
@@ -194,6 +201,7 @@ void reset() {
     part_waits.clear(), while_part_waiting = nullptr, part_wait_result = 1, st_lf_part_waits = st_lf_part_fell = 0;
     for (int64_t& f : st_lf_fell) f = 0;
     st_lf_cpu_reads = 0, st_lfx = LateStats{}, shadow_forgotten_last.clear(), shadow_synced.clear();
+    shadow_written_pages.clear(), shadow_written_collected_list.clear(), shadow_written_by_replay.clear(), shadow_written_all = false;
     mem_rec_value = mem_completed = 0;
 }
 Capture cap(std::vector<uint32_t> pages, uint64_t late_done = 0) {   // (every page copied and late)
@@ -573,6 +581,30 @@ int main() {
         CHECK((known[i >> 6] >> (i & 63) & 1) && (known[j >> 6] >> (j & 63) & 1));   // (both known: the sync left them so)
         CHECK(st_lfx.sync_known == 2 && st_lfx.sync_known_again == 1 && shadow_synced.empty());
     }
+    // (q) a page the replay or the collection wrote after the capture a mirror sync copied into the shadow: the write-back's forget
+    // clears it (guest memory has newer words than the shadow), and the sync's "known" afterwards must not set it again (the shadow
+    // rests on knowing a page equals guest memory: wb_diff.comp then writes the mirror's words of a span whole over the newer
+    // ones, and the late pages' fix reads that shadow). The pages the capture holds alone are known after the sync, as before
+    {
+        reset();
+        const uint64_t a = pg, b = pg + 1, c = pg + 2, d = pg + 3;   // (a: the replay wrote it after the capture, c: the collection)
+        Pool& pool = imported[kLo];
+        std::fill(pool.shadow_known.begin(), pool.shadow_known.end(), ~0ull);
+        std::vector<VkBufferCopy> rs{{0, a * 4096 - kLo, 4 * 4096}};   // (a to d, one copy)
+        shadow_sync_copy(1, kCapBuf, pool, rs);
+        shadow_written_pages = {(uint32_t)a, (uint32_t)b, (uint32_t)c, (uint32_t)d};   // (the capture's pages: the CPU wrote them)
+        shadow_written_by_replay = {(uint32_t)a};
+        shadow_written_collected_list = {(uint32_t)c};
+        shadows_forget_written();
+        for (uint64_t p : {a, b, c, d}) CHECK(!(pool.shadow_known[(p - (kLo >> kPageShift)) >> 6] >> ((p - (kLo >> kPageShift)) & 63) & 1));
+        shadow_synced_known();
+        const auto is_known = [&](uint64_t p) {
+            const uint64_t i = p - (kLo >> kPageShift);
+            return (pool.shadow_known[i >> 6] >> (i & 63) & 1) != 0;
+        };
+        CHECK(is_known(b) && is_known(d));                  // (synced from the capture, not written since: as the sync left them)
+        CHECK(!is_known(a) && !is_known(c));                // (written since: guest memory has newer words, refilled at the write-back)
+    }
     std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots, their ranges and slots, and a CPU read of a fixed late page");
 }
 '''
@@ -600,7 +632,8 @@ def main():
                .replace('@BUILD@', block(text, 'bool late_fix_build(Capture& c) {'))
                .replace('@SHADOWS_FREED@', block(text, 'void late_fix_shadows_freed() {'))
                .replace('@CPUREAD@', section(text, 'constexpr uint64_t kPartWaitGuard', 'void late_fix_cpu_read(')
-                        + block(text, 'void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {')))
+                        + block(text, 'void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {'))
+               .replace('@FORGET@', block(text, 'void shadows_forget_written() {')))
     env = {k: v for k, v in os.environ.items()
            if k not in ('RX_VK_LATE_FIX', 'RX_VK_PARALLEL', 'RX_VK_NO_READBACK_WAIT', 'RX_VK_SHADOW_FOLLOWS_SYNC')}
     with tempfile.TemporaryDirectory(prefix='late-fix-build-') as tmp:
