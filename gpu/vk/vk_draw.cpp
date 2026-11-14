@@ -27,9 +27,13 @@
 #include <set>
 #include <utility>
 #include <vector>
+#include <list>
 #include <thread>
 #include <setjmp.h>
 #include <signal.h>
+#if defined(__GLIBC__)
+#include <malloc.h>   // (malloc_trim: compute_gate.h trims)
+#endif
 
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 
@@ -72,6 +76,7 @@
 #include "vk_programs.h"
 #include "vk_pipelines.h"
 #include "warm_bounded.h"
+#include "compute_gate.h"
 #include "compute_pin.h"
 #include "vk_work.h"   // (after the others: counts the commands that do GPU work, for full_barrier)
 
@@ -222,10 +227,28 @@ bool compute_pin_needed(const Program& p) {
     const bool known = !p.stages.empty();
     return compute_pin::needed(mode, known, known ? compute_program_uses(p, p.stages[0]) : compute_pin::Uses{});
 }
-/// (longshot) A game compute program's stage: held to 32 lanes where the GPU can and the program needs it. Every maker of a compute program's pipeline comes through here (compute_pipeline_info), so that each asks the
+/// (longshot) The program whose compute pipeline this thread described last (compute_pipeline_info, the mesh fallback's stages):
+/// what a compile under way is logged by (ComputeTurn)
+struct ComputeDescribed {
+    uint64_t key = 0;
+    compute_pin::Uses uses;
+    uint32_t workgroup[3] = {0, 0, 0};
+    bool fallback = false;
+    uint32_t phis = 0;   // (its SPIR-V's: Stage::phis, for its weight at the gate)
+};
+thread_local ComputeDescribed compute_described;
+void compute_describe(const Program& p, const Stage& st) {
+    compute_described.key = p.key, compute_described.uses = compute_program_uses(p, st);
+    for (int i = 0; i < 3; i++) compute_described.workgroup[i] = p.workgroup[i];
+    compute_described.fallback = p.fallback;
+    compute_described.phis = st.phis;
+}
+/// (longshot) A game compute program's stage: held to 32 lanes where the GPU can and the program needs it, and described for
+/// the log. Every maker of a compute program's pipeline comes through here (compute_pipeline_info), so that each asks the
 /// caches for the pipeline the others built
 void pin_compute(VkPipelineShaderStageCreateInfo& st, const Program& p) {
     if (compute_pin_needed(p)) pin_subgroup(st, p.workgroup[0]);
+    compute_describe(p, p.stages[0]);
 }
 
 inline uint64_t mix(uint64_t h, uint64_t v) {
@@ -1418,7 +1441,175 @@ VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl)
     if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_graphics_held, ci, pl);
 }
+/// (longshot) The driver's compute compiles, as many at once as the memory holds (compute_gate.h): on Mesa's Intel driver each
+/// of the game's large compute programs holds gigabytes while it compiles, and the preparation's workers ran one each, which
+/// an Iris Xe PC with 32 GB did not hold. RX_VK_COMPUTE_AT_ONCE=<n>: at most n on any GPU, 0: no limit, as before
+uint64_t memory_available_mb() {
+#ifdef _WIN32
+    MEMORYSTATUSEX m{};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? (uint64_t)(m.ullAvailPhys >> 20) : compute_gate::kUnknownMB;
+#else
+    FILE* f = fopen("/proc/meminfo", "r");
+    if (!f) return compute_gate::kUnknownMB;
+    unsigned long long kb = 0, v = 0;
+    char key[64];
+    bool found = false;
+    while (!found && fscanf(f, "%63s %llu kB\n", key, &v) == 2)
+        if (!strcmp(key, "MemAvailable:")) kb = v, found = true;
+    fclose(f);
+    return found ? (uint64_t)(kb >> 10) : compute_gate::kUnknownMB;
+#endif
+}
+compute_gate::Gate& compute_compiles() {
+    static compute_gate::Gate gate;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const char* e = getenv("RX_VK_COMPUTE_AT_ONCE");
+        if (e && *e) {
+            const unsigned n = (unsigned)std::clamp(atoi(e), 0, 64);
+            gate.set(n, false);
+            if (n) logf("vk: compute pipelines: at most %u compiled at once (RX_VK_COMPUTE_AT_ONCE)", n);
+            else logf("vk: compute pipelines: no limit on how many are compiled at once (RX_VK_COMPUTE_AT_ONCE=0)");
+        } else if (dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA) {
+            const uint64_t avail = memory_available_mb();
+            const uint64_t budget = compute_gate::budget_for(avail);
+            gate.set(0, true, budget);
+            if (!budget)
+                logf("vk: compute pipelines: one compiled at a time (Mesa's Intel compiler holds a lot for a large one, and %s; "
+                     "RX_VK_COMPUTE_AT_ONCE=<n> or 0 says otherwise)",
+                     avail == compute_gate::kUnknownMB ? "the system does not say how much memory is available"
+                                                       : "little memory is available");
+            else
+                logf("vk: compute pipelines: as many compiled at once as %llu MB hold (%llu MB available now, %llu left to the PC), "
+                     "%llu MB for one held to 32 lanes (%llu MB with %u phis or more) and %llu MB for another, at most %u "
+                     "(Mesa's Intel compiler; RX_VK_COMPUTE_AT_ONCE=<n> or 0 says otherwise)", (unsigned long long)budget,
+                     (unsigned long long)avail, (unsigned long long)compute_gate::kReserveMB,
+                     (unsigned long long)compute_gate::kPinnedMB, (unsigned long long)compute_gate::kHeavyMB,
+                     compute_gate::kHeavyPhis, (unsigned long long)compute_gate::kFreeMB, compute_gate::kMost);
+        }
+    });
+    return gate;
+}
+/// (longshot) The driver's compute compiles under way, by their program: a preparation that stands still says which program the
+/// driver is on and for how long (compute_compiles_log), and a compile that took kSlowS seconds or more is named when it ends.
+/// Before, a stall said only "waiting on the GPU driver": on an Iris Xe it was one program at 32 lanes for over five minutes,
+/// and nothing said which. RX_VK_COMPUTE_LOG_MS=<ms>: every compile that long is named when it ends, however many
+struct ComputeCompiling {
+    ComputeDescribed of;
+    bool pinned;
+    std::chrono::steady_clock::time_point began;
+};
+std::mutex compiling_mu;
+std::list<ComputeCompiling> compiling;
+bool compute_pinned(const VkComputePipelineCreateInfo& ci) {
+    for (auto n = (const VkBaseInStructure*)ci.stage.pNext; n; n = n->pNext)
+        if (n->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO) return true;
+    return false;
+}
+void compute_compiled_log(const ComputeCompiling& c, int64_t ms) {
+    static const int asked_ms = getenv("RX_VK_COMPUTE_LOG_MS") ? std::max(0, atoi(getenv("RX_VK_COMPUTE_LOG_MS"))) : -1;
+    static std::atomic<int> told{0};
+    constexpr int64_t kSlowMs = 10000;
+    if (asked_ms >= 0 ? ms < asked_ms : ms < kSlowMs || told++ >= 60) return;
+    const compute_pin::Uses& u = c.of.uses;
+    const bool ops = compute_pin::sees_lanes_ops(u);
+    logf("vk: compute pipeline of %016llx%s: the driver compiled it in %.1f s (%s; workgroup %ux%ux%u, shared memory %u bytes)",
+         (unsigned long long)c.of.key, c.of.fallback ? " (mesh fallback)" : "", ms / 1000.0,
+         !c.pinned ? "at the lanes the driver chose" : ops ? "held to 32 lanes, for its subgroup operations"
+         : u.shared_memory ? "held to 32 lanes, for its shared memory in one warp" : "held to 32 lanes",
+         c.of.workgroup[0], c.of.workgroup[1], c.of.workgroup[2], u.shared_memory);
+    if (asked_ms >= 0) {   // (diagnosis: when it ended, by the boot clock /proc/uptime reads, to match memory samples to it)
+#ifndef _WIN32
+        timespec ts{};
+        clock_gettime(CLOCK_BOOTTIME, &ts);
+        logf("vk: compute pipeline of %016llx: ended at %.2f after %.2f s", (unsigned long long)c.of.key, ts.tv_sec + ts.tv_nsec / 1e9,
+             ms / 1000.0);
+#endif
+    }
+    if (asked_ms >= 0)   // (diagnosis: what of it tells its lanes)
+        logf("vk: compute pipeline of %016llx: uses%s%s%s%s%s%s%s", (unsigned long long)c.of.key, u.vote ? " votes" : "",
+             u.mask ? " lane-masks" : "", u.invocation_id ? " lane-index" : "", u.shuffles ? " shuffles" : "",
+             u.quad_shuffles ? " quad-shuffles" : "", u.matrix ? " matrices" : "", u.fswzadd ? " fswzadd" : "");
+}
+/// The compiles that have run over_s seconds or more, in one line, at most once every 10 s (the preparation's steps call it
+/// as they wait)
+void compute_compiles_log(int64_t over_s = 30) {
+    static const bool asked = getenv("RX_VK_COMPUTE_LOG_MS") != nullptr;   // (diagnosis: from 5 s)
+    if (asked) over_s = std::min<int64_t>(over_s, 5);
+    static std::atomic<int64_t> next_ms{0};
+    const auto now = std::chrono::steady_clock::now();
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    int64_t due = next_ms.load(std::memory_order_relaxed);
+    if (now_ms < due || !next_ms.compare_exchange_strong(due, now_ms + 10000)) return;
+    char line[1024];
+    int n = 0, long_ones = 0;
+    size_t running = 0;
+    {
+        std::lock_guard lk(compiling_mu);
+        running = compiling.size();
+        for (const ComputeCompiling& c : compiling) {
+            const int64_t s = std::chrono::duration_cast<std::chrono::seconds>(now - c.began).count();
+            if (s < over_s) continue;
+            if (long_ones++ < (asked ? 24 : 6) && n < (int)sizeof line - 64)
+                n += snprintf(line + n, sizeof line - n, "%s%016llx %lld s%s", n ? ", " : "", (unsigned long long)c.of.key,
+                              (long long)s, c.pinned ? " (32 lanes)" : "");
+        }
+    }
+    if (long_ones)
+        logf("vk: compute pipelines: the driver is compiling %zu, %d of them for %lld s or longer: %s%s", running, long_ones,
+             (long long)over_s, line, long_ones > 6 ? ", ..." : "");
+}
+/// A compile's turn at the gate, for as long as it lives. A create call that only asks the caches compiles nothing and takes
+/// none. ok(): false when the preparation was stopped (the window closed) while this one waited: it is not compiled.
+/// A long compile hands the memory it freed back to the system as it leaves (compute_gate.h trims)
+struct ComputeTurn {
+    explicit ComputeTurn(const VkComputePipelineCreateInfo& ci)
+        : gate((ci.flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT) ? nullptr : &compute_compiles()),
+          weight(compute_gate::weight(compute_pinned(ci), compute_described.phis)) {
+        if (gate && !gate->enter(weight, memory_available_mb, [] { return prepare_stopped(); })) gate = nullptr, stopped = true;
+        began = std::chrono::steady_clock::now();   // (the turn is taken: the compile starts)
+        if (gate) {
+            std::lock_guard lk(compiling_mu);
+            compiling.push_front({compute_described, compute_pinned(ci), began});
+            mine = compiling.begin();
+        }
+    }
+    ~ComputeTurn() {
+        if (!gate) return;
+        const int64_t held_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - began).count();
+        ComputeCompiling was;
+        {
+            std::lock_guard lk(compiling_mu);
+            was = *mine;
+            compiling.erase(mine);
+        }
+        compute_compiled_log(was, held_ms);
+        const bool gated = gate->on();
+        gate->leave(weight);
+#if defined(__GLIBC__)
+        // (after the turn is given back: the next compile does not wait for it)
+        if (compute_gate::trims(gated, held_ms)) malloc_trim(0);
+#else
+        (void)gated, (void)held_ms;
+#endif
+    }
+    ComputeTurn(const ComputeTurn&) = delete;
+    ComputeTurn& operator=(const ComputeTurn&) = delete;
+    bool ok() const { return !stopped; }
+
+private:
+    compute_gate::Gate* gate;
+    uint64_t weight;
+    bool stopped = false;
+    std::chrono::steady_clock::time_point began;
+    std::list<ComputeCompiling>::iterator mine;
+};
 VkResult cached_compute(const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
+    // (the turn first, Intel's lock inside it: a worker that held the lock while it waited for a turn would block the compiles
+    // that have theirs, and those hold the memory it waits for)
+    const ComputeTurn turn(*ci);
+    if (!turn.ok()) return *pl = VK_NULL_HANDLE, VK_ERROR_OUT_OF_HOST_MEMORY;   // (stopped while it waited: not compiled)
     IntelDriverGate gate(compiles_nothing(ci->flags));
     if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_compute_held, ci, pl);
@@ -6679,6 +6870,7 @@ bool fallback_compute_pipelines(Program& p) {
         si.module = st.module;
         si.pName = "main";
         pin_subgroup(si);
+        compute_describe(p, st);
         VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
         ci.stage = si;
         ci.layout = p.layout;
@@ -8766,11 +8958,14 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
         VkPipeline pl = VK_NULL_HANDLE;
         // (into the app's pipeline cache, saved to longshot_vk_pipelines.bin: without it the next start compiled them again in play
         // where the driver's own cache missed them, AMD's 15 s culling compiles each time)
-        IntelDriverGate gate;
-        if (guarded_compute_held(pcache, &ci, &pl) == VK_SUCCESS && pl) {
-            vkDestroyPipeline(dev.device, pl, nullptr);
-            libs++;
-            pcache_built_since_save++;
+        {
+            const ComputeTurn turn(ci);   // (as cached_compute: as many of the driver's compiles at once as the memory holds)
+            IntelDriverGate gate;   // (inside the turn, as cached_compute)
+            if (turn.ok() && guarded_compute_held(pcache, &ci, &pl) == VK_SUCCESS && pl) {
+                vkDestroyPipeline(dev.device, pl, nullptr);
+                libs++;
+                pcache_built_since_save++;
+            }
         }
         if (p.layout) vkDestroyPipelineLayout(dev.device, p.layout, nullptr), p.layout = VK_NULL_HANDLE;
         if (p.set_layout) vkDestroyDescriptorSetLayout(dev.device, p.set_layout, nullptr), p.set_layout = VK_NULL_HANDLE;
@@ -8824,6 +9019,7 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     for (unsigned i = 0; i < workers; i++) threads.emplace_back(worker);
     while (done.load() < total && !prepare_stopped()) {
         if (progress) progress(done.load() / 3, programs);   // (in programs, as the log counts them, not programs times variants)
+        compute_compiles_log();
         Sleep(100);
         if (next.load() >= total + threads.size()) break;
     }
@@ -8882,6 +9078,7 @@ void prepare_progress_log(const char* what, size_t done, size_t total, std::chro
     const double left = done ? s * (double)(total - std::min(done, total)) / (double)done : 0.0;
     if (done) logf("vk: %s: %zu of %zu pipelines in %.0f s, about %.0f s left", what, done, total, s, left);
     else logf("vk: %s: 0 of %zu pipelines in %.0f s (the driver compiles the first ones)", what, total, s);
+    compute_compiles_log();
 }
 /// (longshot, RX_VK_LOAD=create) The first start after a preparation: every noted pipeline built into the pipeline cache and let
 /// go, so that the loads at the programs' create calls find each one there and never meet a pipeline the prepare should have
