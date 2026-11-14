@@ -334,6 +334,16 @@ memory and are not always faster. **Build memory**: Automatic keeps the free-mem
 `LONGSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free now (the ones that always run,
 up to 4 on Windows, still run under a smaller number). The builders' `--cli` passes both on as it finds them.
 
+On macOS, the compile gate reads `HOST_VM_INFO64` through `ctypes`, using the host's page size. Its available-RAM
+estimate counts free, file-backed and volatile purgeable pages, with the speculative file cache counted only once.
+It does not treat all inactive pages as free: those include anonymous memory that may need swapping. Wired memory,
+compressed memory and swap are not added. File-backed pages may need writeback or reloading, so this is not an allocation
+guarantee; the existing 1.5 GB reserve and one-compiler floor still apply. `proc_pidinfo` supplies resident bytes and
+`proc_listchildpids` walks the compiler's descendants without starting `ps`. Unreadable available memory remains `None`
+(the jobs limit decides); an exited or unreadable process counts as zero (its unmet estimate stays reserved).
+The Python builder runs natively even when cross-compiling an x86-64 game for Rosetta. These readers alone do not make
+the rest of the build pipeline support macOS.
+
 Source-checkout builds keep the button prompts when their source, fonts, game assets, button tables, image overrides,
 Python, package/library versions and generation options still match, and every generated file still has its recorded
 size and content hash. The inputs are checked before and after generation; changed or unreadable inputs leave no reusable

@@ -345,8 +345,11 @@ COMPILER_MB = 1500
 
 
 def free_mb():
-    """The memory free now (MemAvailable on Linux, the available physical memory on Windows), in MB; None: not known"""
+    """The memory available now in MB (macOS: reclaimable RAM estimate); None: not known"""
     try:
+        if sys.platform == "darwin":
+            import darwin_memory
+            return darwin_memory.free_mb()
         if os.name == "nt":
             m = MemoryStatus()
             m.len = ctypes.sizeof(MemoryStatus)
@@ -433,6 +436,9 @@ def rss_mb(proc):
         # A retained Popen can outlive its driver while PID counters still remain.
         if proc.poll() is not None:
             return 0
+        if sys.platform == "darwin":
+            import darwin_memory
+            return darwin_memory.tree_rss(proc.pid) >> 20
         if os.name == "nt":
             return tree_ws(proc.pid) >> 20
         return tree_rss(proc.pid) >> 20
