@@ -47,7 +47,7 @@ static BOOL move_fixture(LPCWSTR from, LPCWSTR to) {
     code += source[source.rfind("typedef struct", 0, part_end):part_end] + "\n"
     for marker in ("static int home_path(", "static void rmtree_at(", "static void rmtree(", "static void mkdirs(", "static void read_small(",
                    "static int part_folder(", "static int copy_tree_at(", "static int copy_part_tree(", "static int publish_install(",
-                   "static int reuse_part("):
+                   "static int note_reused(", "static int reuse_part("):
         code += function(source, marker) + "\n"
     code += r'''
 int wmain(int argc, wchar_t **argv) {
@@ -120,6 +120,7 @@ int wmain(int argc, wchar_t **argv) {
         standard_candidate = versions / "standard.part"
         run(5, versions, standard_candidate, 1)
         assert not old.exists() and (standard_candidate / "LongshotBuilder/tools/python/keep").read_text() == "original reusable part"
+        assert (standard_candidate / "reused.txt").read_text() == "LongshotBuilder/tools/python\n"   # (restore_reused's list)
         # (a folder copied into itself or under itself, as --portable's home once was the zip's own LongshotBuilder: refused
         # before anything is written, whatever the case or a trailing \; a sibling that only starts with its name is copied)
         builder = root / "zip" / "LongshotBuilder"

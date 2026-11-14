@@ -16,6 +16,7 @@ import argparse
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -35,6 +36,8 @@ def module(name, path):
 
 def function(source, marker):
     start = source.index(marker)
+    while source.find(";", start) < source.find("{", start):   # (a declaration ahead of its definition)
+        start = source.index(marker, start + 1)
     end = source.index("{", start) + 1
     depth = 1
     while depth:
@@ -75,8 +78,10 @@ typedef const wchar_t *LPCWSTR;
 #define ERROR_NO_MORE_FILES 18
 #define ERROR_ALREADY_EXISTS 183
 #define GENERIC_READ 0x80000000ul
+#define FILE_APPEND_DATA 4
 #define FILE_SHARE_READ 1
 #define OPEN_EXISTING 3
+#define OPEN_ALWAYS 4
 typedef struct { DWORD dwFileAttributes; wchar_t cFileName[MAX_PATH]; } WIN32_FIND_DATAW;
 typedef struct { wchar_t root[MAX_PATH]; int portable; } HbHome;
 static DWORD last_error;
@@ -151,11 +156,14 @@ static int CompareStringOrdinal(const wchar_t *a, int na, const wchar_t *b, int 
 static HANDLE CreateFileW(LPCWSTR path, DWORD access, DWORD share, void *sa, DWORD how, DWORD flags, HANDLE t) {
     char p[4 * MAX_PATH]; (void)access, (void)share, (void)sa, (void)how, (void)flags, (void)t;
     u8(path, p);
-    int fd = open(p, O_RDONLY);
+    int fd = access == FILE_APPEND_DATA ? open(p, O_WRONLY | O_CREAT | O_APPEND, 0644) : open(p, O_RDONLY);
     return fd < 0 ? (failed(), INVALID_HANDLE_VALUE) : (HANDLE)(intptr_t)(fd + 1);
 }
 static BOOL ReadFile(HANDLE h, void *buf, DWORD n, DWORD *got, void *o) {
     (void)o; ssize_t r = read((int)(intptr_t)h - 1, buf, n); *got = r > 0 ? (DWORD)r : 0; return r >= 0;
+}
+static BOOL WriteFile(HANDLE h, const void *buf, DWORD n, DWORD *put, void *o) {
+    (void)o; ssize_t r = write((int)(intptr_t)h - 1, buf, n); *put = r > 0 ? (DWORD)r : 0; return r >= 0;
 }
 static BOOL CloseHandle(HANDLE h) { return close((int)(intptr_t)h - 1) == 0; }
 static int hb_home_join(wchar_t *out, size_t cap, const wchar_t *root, const wchar_t *name) {
@@ -182,14 +190,17 @@ WINDOWS_HEAD = r'''
 HARNESS = r'''
 static HbHome g_home;
 static void fail(const wchar_t *format, ...) { (void)format; exit(90); }
-/* place <from> <to> <expected> | reuse <versions> <staged install> <portable> <sha> <expected> */
+/* place <from> <to> <expected> | reuse <versions> <staged install> <portable> <sha> <expected> [dest] |
+   restore <versions> <staged install> */
 static int run(int argc, wchar_t **argv) {
     if (argc == 5 && !wcscmp(argv[1], L"place")) return place_tool(argv[2], argv[3]) == _wtoi(argv[4]) ? 0 : 21;
-    if (argc == 7 && !wcscmp(argv[1], L"reuse")) {
+    if (argc == 4 && !wcscmp(argv[1], L"restore")) return restore_reused(argv[2], "v-new", argv[3]), 0;
+    if ((argc == 7 || argc == 8) && !wcscmp(argv[1], L"reuse")) {
         Part part;
         memset(&part, 0, sizeof part);
         wcstombs(part.sha, argv[5], sizeof part.sha - 1);
         strcpy(part.dest, "LongshotBuilder/tools/third_party"), strcpy(part.from, "third_party");
+        if (argc == 8) wcstombs(part.dest, argv[7], sizeof part.dest - 1), strcpy(part.from, "-");
         strcpy(part.url, "https://invalid.example/third-party.zip");
         g_home.portable = _wtoi(argv[4]);
         return reuse_part(argv[2], "v-new", &part, argv[3]) == _wtoi(argv[6]) ? 0 : 22;
@@ -220,9 +231,10 @@ def harness(source):
     code = (WINDOWS_HEAD if WINDOWS else POSIX_WIN32 + '#include "long_path.h"\n#define _wtoi(s) ((int)wcstol((s), NULL, 10))\n')
     code += source[source.rfind("typedef struct", 0, part_end):part_end] + "\n"
     code += "static HbHome g_home;\nstatic void fail(const wchar_t *format, ...);\n"
-    for marker in ("static int home_path(", "static void rmtree_at(", "static void rmtree(", "static void mkdirs(", "static void read_small(",
-                   "static int part_folder(", "static int copy_tree_at(", "static int copy_part_tree(", "static int place_tool(",
-                   "static int reuse_part("):
+    for marker in ("static char *next_line(", "static int list_name_ok(", "static int home_path(", "static void rmtree_at(",
+                   "static void rmtree(", "static void mkdirs(", "static void read_small(", "static int part_folder(",
+                   "static int copy_tree_at(", "static int copy_part_tree(", "static int place_tool(", "static int note_reused(",
+                   "static void read_small_all(", "static int reuse_part(", "static void restore_reused("):
         code += function(source, marker) + "\n"
     return code + HARNESS.replace("static HbHome g_home;\n", "").replace("#define _wtoi(s) ((int)wcstol((s), NULL, 10))\n", "")
 
@@ -334,8 +346,56 @@ def main():
         bare.mkdir()
         run("reuse", versions, bare, 1, third.sha256, 1)
         assert (bare / "LongshotBuilder/tools/third_party/a64-kit/lift/a64emit.dll").read_bytes() == b"MZ a64emit"
+
+        # 5. an ordinary (not portable) update moves an unchanged part out of the installed version; when the update fails
+        # or is stopped before it is published, the installed version gets it back
+        versions = root / "upd/versions"
+        python_sha = "ab" * 32
+        python = "LongshotBuilder/tools/python"
+        old_python = versions / "v-old" / python
+        old_python.mkdir(parents=True)
+        (old_python / "python.exe").write_bytes(b"MZ python, v-old")
+        (old_python / "Lib").mkdir()
+        (old_python / "Lib/os.py").write_bytes(b"# os\n")
+        old_files = tree(old_python)
+        (versions / "current.txt").write_text("v-old\n")
+        (versions / "v-old/parts.txt").write_text(python_sha + "\n")
+        staged = versions / "v-new.part"
+        staged.mkdir()
+        run("reuse", versions, staged, 0, python_sha, 1, python)
+        assert not old_python.exists() and tree(staged / python) == old_files, "the part was not moved over"
+        assert (staged / "reused.txt").read_text() == python + "\n"
+        # (a) the failure path: fail() moves it back
+        run("restore", versions, staged)
+        assert tree(old_python) == old_files, "after a failed update the installed version has no Python"
+        assert not (staged / python).exists()
+        # (b) a second attempt moves it over again, no download
+        run("reuse", versions, staged, 0, python_sha, 1, python)
+        assert not old_python.exists() and tree(staged / python) == old_files
+        # (c) the setup stopped there: the next start moves it back, then removes the staging, as work() does
+        run("restore", versions, staged)
+        shutil.rmtree(staged)
+        assert tree(old_python) == old_files, "after a stopped update and the next start's cleanup the installed version has no Python"
+        # (d) a part this attempt unpacked, not moved over: stays in the staging and goes with it
+        staged.mkdir()
+        shutil.move(str(old_python), str(root / "upd/python-aside"))
+        (staged / python).mkdir(parents=True)
+        (staged / python / "python.exe").write_bytes(b"MZ half unpacked")
+        run("restore", versions, staged)
+        assert not old_python.exists() and (staged / python / "python.exe").exists()
+        # (e) named in reused.txt, but its move failed and the installed version still has it: nothing replaces it
+        shutil.move(str(root / "upd/python-aside"), str(old_python))
+        (staged / "reused.txt").write_text(python + "\n")
+        run("restore", versions, staged)
+        assert tree(old_python) == old_files and (staged / python / "python.exe").read_bytes() == b"MZ half unpacked"
+        shutil.rmtree(staged)
+        # (f) a portable home copies, as before: the installed version keeps its folder, nothing is listed
+        staged.mkdir()
+        run("reuse", versions, staged, 1, python_sha, 1, python)
+        assert tree(old_python) == old_files and tree(staged / python) == old_files
+        assert not (staged / "reused.txt").exists()
     print("setup tool merge: the third-party tool merged into the builder zip's third_party; clashes, links and a reused "
-          "folder refused; a fresh dest moved whole")
+          "folder refused; a fresh dest moved whole; an update that fails gives the installed version its moved folders back")
 
 
 if __name__ == "__main__":

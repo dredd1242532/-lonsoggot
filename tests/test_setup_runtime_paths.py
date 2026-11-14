@@ -40,6 +40,7 @@ def fixture(source):
 #include <setjmp.h>
 #include <stdarg.h>
 static struct { wchar_t root[MAX_PATH]; int portable; } g_home;
+[[maybe_unused]] static const wchar_t *g_staged;   // (fail()'s restore: not part of this fixture)
 static wchar_t last_error[2048];
 static int moves, markers, receipts;
 static jmp_buf failed;

@@ -96,12 +96,22 @@ static void status(const wchar_t *fmt, ...) {
     PostMessageW(g_win, WM_STATUS, 0, 0);
 }
 
+/* (set while an ordinary install's update is staged: a failure gives the installed version back the folders moved from it) */
+static const wchar_t *g_staged, *g_staged_versions;
+static const char *g_staged_tag;
+static void restore_reused(const wchar_t *versions, const char *tag, const wchar_t *install);
+
 static void fail(const wchar_t *fmt, ...) {
     wchar_t msg[1024];
     va_list ap;
     va_start(ap, fmt);
     vswprintf(msg, 1024, fmt, ap);
     va_end(ap);
+    if (g_staged) {
+        const wchar_t *staged = g_staged;
+        g_staged = NULL;   /* (once: a failure inside the restore does not come back here) */
+        restore_reused(g_staged_versions, g_staged_tag, staged);
+    }
     if (g_headless) say_error(msg), ExitProcess(1);
     MessageBoxW(g_win, msg, L"Longshot Builder setup", MB_OK | MB_ICONERROR);
     PostMessageW(g_win, WM_DONE, 1, 0);
@@ -458,6 +468,32 @@ static int place_tool(const wchar_t *from, const wchar_t *to) {
     return ok;
 }
 
+/* A part's folder named in the staged version's reused.txt before reuse_part moves it there, so that restore_reused can move it
+   back (a setup stopped between the two leaves a name whose folder is still in the installed version: nothing moves). 0 when
+   it could not be written: the part is downloaded instead */
+static int note_reused(const wchar_t *install, const char *dest) {
+    wchar_t list[MAX_PATH];
+    char line[300];
+    home_path(list, L"%ls\\reused.txt", install);
+    const int n = snprintf(line, sizeof line, "%s\n", dest);
+    if (n <= 0 || n >= (int)sizeof line) return 0;
+    HANDLE f = CreateFileW(list, FILE_APPEND_DATA, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    DWORD put = 0;
+    const int ok = WriteFile(f, line, (DWORD)n, &put, NULL) && put == (DWORD)n;
+    return CloseHandle(f) && ok;
+}
+/* a whole small text file (read_small stops at its first line), 0-terminated; empty when it cannot be read */
+static void read_small_all(const wchar_t *path, char *out, int n) {
+    out[0] = 0;
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD got = 0;
+    if (!ReadFile(f, out, (DWORD)n - 1, &got, NULL)) got = 0;
+    CloseHandle(f);
+    out[got] = 0;
+}
+
 static int reuse_part(const wchar_t *versions, const char *tag, const Part *p, const wchar_t *install) {
     wchar_t rel[MAX_PATH], cur[MAX_PATH], list[MAX_PATH], from[MAX_PATH], to[MAX_PATH], parent[MAX_PATH];
     char was[128];
@@ -484,10 +520,40 @@ static int reuse_part(const wchar_t *versions, const char *tag, const Part *p, c
     wcscpy(parent, to);
     wchar_t *slash = wcsrchr(parent, L'\\');
     if (slash) *slash = 0, mkdirs(parent);
-    if (!g_home.portable) return MoveFileW(from, to) != 0;
+    if (!g_home.portable) return note_reused(install, p->dest) && MoveFileW(from, to) != 0;
     if (copy_part_tree(from, to)) return 1;
     rmtree(to);   /* only this attempt's derived part destination, never the source */
     return 0;
+}
+
+/* The folders reuse_part moved out of the installed version into the staged one (install), moved back: an update that failed or
+   was stopped before its version was published leaves the installed one whole, and the next attempt moves them over again
+   instead of downloading them. Only folders named in reused.txt go back, and only where the installed version has none: a part
+   this attempt downloaded and unpacked (perhaps half) never goes into it */
+static void restore_reused(const wchar_t *versions, const char *tag, const wchar_t *install) {
+    wchar_t cur[MAX_PATH], old[MAX_PATH], list[MAX_PATH], rel[MAX_PATH], from[MAX_PATH], to[MAX_PATH], parent[MAX_PATH];
+    char was[128], buf[8192];
+    home_path(cur, L"%ls\\current.txt", versions);
+    read_small(cur, was, sizeof was);
+    if (!was[0] || !strcmp(was, tag) || !list_name_ok(was, 0)) return;
+    home_path(old, L"%ls\\%hs", versions, was);
+    const DWORD there = GetFileAttributesW(old);
+    if (there == INVALID_FILE_ATTRIBUTES || !(there & FILE_ATTRIBUTE_DIRECTORY)) return;
+    home_path(list, L"%ls\\reused.txt", install);
+    read_small_all(list, buf, sizeof buf);
+    for (char *next = buf, *line; (line = next_line(&next)) != NULL;) {
+        Part p;
+        if (strlen(line) >= sizeof p.dest || !list_name_ok(line, 1)) continue;
+        strcpy(p.dest, line);
+        if (!part_folder(&p, rel, MAX_PATH)) continue;
+        home_path(from, L"%ls\\%ls", install, rel);
+        home_path(to, L"%ls\\%ls", old, rel);
+        if (GetFileAttributesW(from) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(to) != INVALID_FILE_ATTRIBUTES) continue;
+        wcscpy(parent, to);
+        wchar_t *slash = wcsrchr(parent, L'\\');
+        if (slash) *slash = 0, mkdirs(parent);
+        MoveFileW(from, to);
+    }
 }
 
 /* The checksums of the parts this version holds in folders of their own (reuse_part reads them at the next update) */
@@ -668,9 +734,11 @@ static DWORD WINAPI work(LPVOID unused) {
     if (GetFileAttributesW(marker) == INVALID_FILE_ATTRIBUTES || !builder_ready(exe)) {
         /* (unpacked into <tag>.part and renamed once complete: a setup stopped half way never leaves a version that looks installed) */
         home_path(install, L"%ls\\%ls.part", versions, wtag);
+        restore_reused(versions, tag, install);   /* (a stopped update's: the installed version whole again before its staging goes) */
         rmtree(install);
         if (!g_home.portable) rmtree(final_dir);
         mkdirs(install);
+        g_staged_versions = versions, g_staged_tag = tag, g_staged = install;
         {   /* (the builder the zip carries, beside this setup) */
             wchar_t app[MAX_PATH];
             status(L"Copying the Longshot Builder...");
@@ -792,7 +860,13 @@ static DWORD WINAPI work(LPVOID unused) {
             fail(L"The Builder or its self-contained .NET runtime is incomplete after unpacking (%ls). Your antivirus may have quarantined files from %ls. Check its quarantine/history, then run the setup again. No complete installation was published.", staged_exe, install);
         if (!publish_install(install, final_dir, g_home.portable))
             fail(L"Could not finish installing into %ls. A preserved repair backup, if restoration was blocked, is beside it as .rollback-*.", final_dir);
+        g_staged = NULL;
         wcscpy(install, final_dir);
+        {
+            wchar_t reused[MAX_PATH];
+            home_path(reused, L"%ls\\reused.txt", install);
+            DeleteFileW(reused);
+        }
         write_small(marker, tag);
         write_parts(install, parts, nparts);
     }
