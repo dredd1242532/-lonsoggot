@@ -18,9 +18,11 @@ import hashlib
 import importlib.util
 import io
 import json
+import ntpath
 import os
 from pathlib import Path
 import platform
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -74,7 +76,11 @@ def command_space(source, system="darwin", name="posix", mingw=False, arch="arm6
         env.update(RX_TARGET="windows", LONGSHOT_MINGW="/fixture/llvm-mingw")
     if extras:
         env.update(RX_RELEASE="1", RX_PGO="gen", RX_MTUNE="znver2", LONGSHOT_SYSROOT="/fixture/sysroot")
-    osproxy = os_view(name, env)
+    host_os = os_view(name, env)
+    osproxy = types.SimpleNamespace(**vars(host_os))
+    if not real:
+        # The frozen command inputs use a virtual /fixture tree on every test host.
+        osproxy.path = posixpath
     tc = load_file("build_flags_toolchain", source / "third_party/a64-kit/tools/toolchain.py")
     tc.os = osproxy
     tc.sys = types.SimpleNamespace(platform=system)
@@ -96,7 +102,7 @@ def command_space(source, system="darwin", name="posix", mingw=False, arch="arm6
     if (source / "nx2/darwin_build.py").exists():
         with mock.patch.dict(sys.modules, {"toolchain": tc}):
             darwin = load_file("build_flags_darwin", source / "nx2/darwin_build.py")
-        darwin.os = osproxy
+        darwin.os = host_os   # real discovery and temporary-directory fixtures keep their host's paths
         if not real:
             darwin.order_file = lambda path: path + ".macos"
         ns["darwin_build"] = darwin
@@ -144,12 +150,12 @@ def snapshot(ns, tree, old=False, extras=False):
         ns["win_manifest"] = types.SimpleNamespace(write=lambda p: p)
         def expression(node):
             return eval(compile(ast.Expression(node), "main-command", "eval"), ns)
-        with mock.patch.object(os.path, "exists", side_effect=lambda p: p.endswith("hot_order.txt") or (extras and p.endswith("longshot.res"))):
+        with mock.patch.object(ns["os"].path, "exists", side_effect=lambda p: p.endswith("hot_order.txt") or (extras and p.endswith("longshot.res"))):
             return {"target": ns["target"](), "lifted": ns["flags"](values["gen"], values["rt64"], "O1", True),
                     "host": expression(host), "renderer": expression(renderer),
                     "executable_link": expression(cmds[0 if ns["LINUX"] else 1]),
                     "renderer_link": expression(links[0 if ns["LINUX"] else 1])}
-    with mock.patch.object(os.path, "exists", return_value=True):
+    with mock.patch.object(ns["os"].path, "exists", return_value=True):
         return {"target": ns["target"](), "lifted": ns["flags"](values["gen"], values["rt64"], "O1", True),
                 "host": ns["host_flags"](values["gen"], values["rt64"]),
                 "renderer": ns["renderer_flags"](values["vk"], values["spirv_headers"], values["vk_headers"], values["vma_headers"], values["gen_dir"]),
@@ -168,6 +174,26 @@ class CommandContracts(unittest.TestCase):
                 with self.subTest(key):
                     ns, tree = command_space(SOURCE, system, name, mingw, extras=extras)
                     self.assertEqual(snapshot(ns, tree, old="executable_link" not in ns, extras=extras), frozen["routes"][key])
+
+    def test_frozen_arrays_on_a_windows_path_host(self):
+        frozen = json.loads((ROOT / "tests/build_flags_main.json").read_text())
+        host = os_view("nt", {})
+        host.path, host.sep, host.altsep, host.pathsep = ntpath, ntpath.sep, ntpath.altsep, ntpath.pathsep
+        # Replace this test module's host view, not the real os module used by pathlib/importlib.
+        # This also makes snapshot's former global os.path point at ntpath, distinct from /fixture's path object.
+        with mock.patch.dict(command_space.__globals__, {"os": host}):
+            for label, system, name, mingw in ROUTES:
+                for extras in (False, True):
+                    key = label + ("-full" if extras else "-plain")
+                    with self.subTest(key):
+                        ns, tree = command_space(SOURCE, system, name, mingw, extras=extras)
+                        self.assertEqual(snapshot(ns, tree, old="executable_link" not in ns, extras=extras), frozen["routes"][key])
+                        if "darwin_build" in ns:
+                            self.assertIs(ns["darwin_build"].os.path, ntpath)
+            real, _ = command_space(SOURCE, real=True)
+            self.assertIs(real["os"].path, ntpath)
+            self.assertIs(os_view("posix", {}).path, ntpath)
+        self.assertIs(host.path, ntpath)
 
     def test_mac_is_not_linux(self):
         for arch in ("arm64", "x86_64"):
