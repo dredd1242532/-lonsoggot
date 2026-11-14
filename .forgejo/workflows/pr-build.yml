@@ -1,0 +1,66 @@
+# A pull request's builders, for testers (docs/releases.md, "Pull request builds"; issue #337): each pull request that is not a
+# draft (no WIP: or [WIP] title) builds the Linux AppImage and the Windows builder of its head, named pr-<number>-<first 8 hex
+# of the head>, as this run's artifacts (build-linux.yml, build-windows.yml). Nothing here is signed or published: a fork's run
+# has a read-only token and no secret. pr-publish.yml, which runs main's code alone, takes the artifacts of a run that passed,
+# signs them with the pull request key and publishes them (scripts/pr_builds.py publish).
+#
+#   opened, reopened, a push    builds the head (a draft builds nothing)
+#   edited                      builds the head only when it has no build yet: taking WIP: off builds it once, and editing
+#                               the description afterwards builds nothing (Forgejo's payload does not say what was edited)
+#
+# A newer push cancels the build of the one before it; an edit waits for the build that runs, then finds it and builds nothing.
+name: Pull request build
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: pr-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: The version
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.name.outputs.tag }}
+      ref: ${{ steps.name.outputs.ref }}
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: name
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          tag=$(python3 -I scripts/pr_builds.py name "$GITHUB_EVENT_PATH")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ref=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          if [[ -n $tag ]]; then
+            echo "$tag, from $HEAD_SHA"
+          else
+            echo "::notice::nothing to build: a draft, or an edit of a head that has its build already"
+          fi
+
+  linux:
+    name: Linux builder
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.forgejo/workflows/build-linux.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.ref }}
+
+  windows:
+    name: Windows builder
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.forgejo/workflows/build-windows.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ref: ${{ needs.version.outputs.ref }}

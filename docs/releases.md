@@ -19,6 +19,7 @@ GitHub, and nothing is compatible with Hookshot's 2.x updates (NotRexed/Hookshot
 | **tools.lock** | The builders' build tools, Windows' and Linux's, are not in Longshot's releases: `tools.lock` names each one (URLs, SHA-256, size) |
 | **Tags, not release PRs** | A maintainer releases by pushing a tag. CI checks the number against the commits, builds, signs and publishes. Notes by git-cliff |
 | **Updates** | The launcher installs and updates the builder of each build, and updates itself, from these releases. The builders and the game look for no update themselves |
+| **Pull request builds** | A pull request that may be tested is built as a pre-release `pr-<number>-<commit>` on no channel, signed with a second key, the **pull request key**. The launcher installs one when a player picks it to help test, never as an update ([below](#pull-request-builds)) |
 
 ## What a release is
 
@@ -206,6 +207,7 @@ Both repositories have the same workflows in `.forgejo/workflows/`, on Forgejo A
 | `ci.yml` | every pull request and push to main: the PR title, every game-free check (`tests/run_all.py`, on Linux) | the PR title, compile, `test_launcher_core.py`, `test_release.py` |
 | `release.yml` | tags `v*` and pushes to main: the version, the two builders (`build-linux.yml`, `build-windows.yml`), sign and publish | tags `v*` and pushes to main: the version, the launcher (`scripts/package.sh`), sign and publish |
 | `third-party.yml` | the third_party rule (`scripts/check_third_party.py`) | (none) |
+| `pr-build.yml`, `pr-publish.yml` | a pull request that is not a draft: its builders; every 15 minutes, the ones that passed, signed and published ([Pull request builds](#pull-request-builds)) | (none) |
 
 Longshot also keeps `build-linux.yml` and `build-windows.yml` (also run on pull requests that change code) and
 `vulkan-dlss.yml` (the upscalers' build checks). A tag on a commit CI has released already (its nightly, or a stable's
@@ -290,6 +292,49 @@ makers). Until then a player can add a downloaded zip or AppImage to RecompLaunc
 So there are two ways to install: **the Longshot Launcher** (recommended: it follows channels, checks signatures and
 updates everything), or **RecompLauncher**, with the same builder files.
 
+## Pull request builds
+
+A tester helps with a pull request from the launcher: *Build another version > A pull request*, then its number or words of its
+title. The launcher installs that pull request's builder and builds the game with it, beside the player's other versions
+([issue 337](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/337)).
+
+**What CI makes** (`.forgejo/workflows/pr-build.yml`, `pr-publish.yml`, `scripts/pr_builds.py`). Each pull request that is
+**not a draft** (no `WIP:` or `[WIP]` title) builds its head in its own run, `pr-build.yml`: the Linux AppImage and the
+Windows builder named `pr-<number>-<first 8 hex of its head>` (`pr-222-1a2b3c4d`), as that run's artifacts. A new push builds
+again and cancels the build before it; taking `WIP:` off builds once; editing the description builds nothing. That run is the
+pull request's, a fork's: a read-only token and no secret, so nothing in it is signed or published.
+
+Every 15 minutes `pr-publish.yml`, which runs **main's code alone**, publishes what those runs made: for each open pull request
+that is not a draft and whose head has a run that passed with both builders, it takes the two files from the run's artifacts
+and `tools.lock` from the head, writes `SHA256SUMS`, signs it with the **pull request key** (organization secret
+`PR_SIGNING_KEY`; never the release key), checks it with the keys of `scripts/release_keys.json`'s `pull_request_keys`, and
+publishes a Forgejo **pre-release** with that tag, on no channel. It then deletes the builds of pull requests closed, merged
+or back to draft, each one's past its newest 2, and drafts a failed run left. Without the secret it publishes nothing and
+says so.
+
+A fork's run that Forgejo holds for a maintainer's approval builds nothing until it is approved. Anything a pull request's
+code makes is that code's: the key says *CI built this pull request at this commit*, not that anyone reviewed it, which the
+launcher says before installing one.
+
+**What the launcher takes** (`Core/PullRequests.cs`, `Releases`, `ReleaseKeys.PullRequestCurrent`):
+
+- A `pr-` tag only with a pull request key, and a channel's version only with a release key: neither stands in for the other.
+  The launcher's own releases have no pull request builds. A launcher with no pull request key built in lists the pull
+  requests but installs none, and says so. `LONGSHOT_LAUNCHER_PR_TRUST=<public key .pem>` trusts one more, for a test key.
+- The open pull requests from `GET /api/v1/repos/MagicBeanDev/Longshot/pulls?state=open` (public, no sign-in), matched on the
+  player's PC: a number (`332`, `#332`), or words of the title or the author, as typed or as letters in order (`rendr targts`).
+  *Testing wanted* (on by default) keeps those with the label. Each shows its build: **ready** (a build of its head), **built
+  from an earlier push**, or none (not installable, with the reason). *Read* opens it on git.magicbean.dev.
+- A pull request's build is a version of its own (`Versions.PullRequest`, "pr"), on no channel: no channel's version is
+  offered to it, and it is offered to none. Its only update is a newer build of the same pull request (a new push), which the
+  update check finds in the release list it reads anyway, and installs in place: one build per pull request. The home says
+  when its pull request was merged (nightly has the change) or closed; its build stays until the player deletes it.
+- Its saves are the ones every version shares. The picker says to export them first.
+
+**Not yet.** The pull request key: a maintainer makes it with `scripts/release.py keygen` and lists it in the launcher's
+`ReleaseKeys.PullRequestBuiltIn` and in Longshot's `scripts/release_keys.json` (`pull_request_keys`), and sets the secret
+(RELEASING.md, The pull request key). Until then `pr-build.yml` builds and nothing is published.
+
 ## Why this design
 
 - **Forgejo releases, not a package store and pointer files.** A release is what Forgejo already shows people: a tag, notes
@@ -303,6 +348,10 @@ updates everything), or **RecompLauncher**, with the same builder files.
   across versions; and a release holds only Longshot's own files.
 - **Tags and computed numbers, not release PRs.** A maintainer tags; CI checks the number against what was merged and
   writes the notes. Nothing is committed back to `main`, so there is no release branch or bot commit to review.
+- **Pull request builds as signed pre-releases, with their own key.** The launcher installs them through the path every
+  version takes (signed `SHA256SUMS`, then each file's SHA-256), so a pull request build is checked as a release is. A key of
+  their own keeps a leak or a mistake on that side, where unreviewed code is built, away from the players' channels; CI artifacts
+  instead would need a sign-in to download and expire, and would be trusted by nothing.
 - **The builders do not update themselves.** One updater, the launcher's, with one set of rules, instead of three (the
   game, the Windows builder, the Linux builder). The builders have no window any more; their `--cli --update <folder>`
   rebuilds a game with their own tools.

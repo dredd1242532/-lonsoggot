@@ -1,0 +1,53 @@
+# Pull requests' builds, published (docs/releases.md, "Pull request builds"; issue #337): every 15 minutes, main's
+# scripts/pr_builds.py finds each open pull request that is not a draft whose head pr-build.yml built (a run that passed, with
+# both builders' artifacts), takes the two builders from that run and tools.lock from the head, signs SHA256SUMS with the pull
+# request key, and publishes a pre-release pr-<number>-<first 8 hex of the head> on no channel. It then deletes the builds of
+# pull requests closed, merged or back to draft, and each one's past its newest 2.
+#
+# No pull request's code runs here: this job checks out main, and only reads the builders a pull request's own run made. The
+# job's token (forgejo.token, a scheduled run's: write access to this repository) makes and deletes the releases.
+#
+# Secret (RELEASING.md, The pull request key): PR_SIGNING_KEY, the pull request key's private PEM; never the release key.
+# Without it nothing is published, and the run says so. Variable: RELEASE_UPLOAD_API, as release.yml's.
+name: Publish pull request builds
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: pr-publish
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: Sign and publish
+    runs-on: quick  # (a quick job: the runner kept free for these takes it, or any runner with room)
+    timeout-minutes: 60
+    env:
+      RELEASE_TOKEN: ${{ forgejo.token }}
+      FORGEJO_UPLOAD_API: ${{ vars.RELEASE_UPLOAD_API }}
+    steps:
+      - uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sign and publish
+        env:
+          KEY: ${{ secrets.PR_SIGNING_KEY }}
+        run: |
+          if [[ -z $KEY ]]; then
+            echo "::notice::no PR_SIGNING_KEY secret: no pull request build is published (RELEASING.md, The pull request key)"
+            python3 -I scripts/pr_builds.py pending
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/pr-key.pem"
+          trap 'rm -f "$RUNNER_TEMP/pr-key.pem"' EXIT
+          python3 -I scripts/pr_builds.py publish --key "$RUNNER_TEMP/pr-key.pem" --work "$RUNNER_TEMP/pr-builds"
+      - name: Prune
+        if: ${{ !cancelled() }}
+        run: python3 -I scripts/pr_builds.py prune --keep 2

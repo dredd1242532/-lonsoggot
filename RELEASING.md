@@ -233,6 +233,24 @@ Uploads over 100 MB (llvm-mingw, both emsdk) go to the address without Cloudflar
 setup, the upload address), from a machine that reaches it. The next release uses the new line; installed versions keep
 theirs. Packages are never pruned, so older versions' tools stay downloadable.
 
+## The pull request key (Longshot)
+
+Pull requests' builds (docs/releases.md, "Pull request builds") are signed with a key of their own, never the release key:
+the launcher takes a `pr-` build with it alone, and a channel's version never with it. Until it is set up, `pr-build.yml`
+builds each pull request and `pr-publish.yml` publishes nothing (it says so in its run).
+
+1. On a PC you trust: `python -I scripts/release.py keygen <safe folder>`, then rename the two files `pr.pem` and
+   `pr.pub.pem` so they are never mistaken for the release key's.
+2. Put the printed base64 in Longshot's `scripts/release_keys.json` under `pull_request_keys`, and as a
+   `ReleaseKey.FromSpki("...")` line in the launcher's `ReleaseKeys.PullRequestBuiltIn` (`Core/ReleaseTrust.cs`): a pull
+   request to each. Release the launcher, so testers' launchers trust it.
+3. The secret (MagicBeanDev > *Settings* > *Actions* > *Secrets*): `PR_SIGNING_KEY`, the text of `pr.pem`.
+4. Run *Publish pull request builds* by hand (*Actions*), or wait 15 minutes: the open pull requests that are not drafts and
+   built get their `pr-` pre-release.
+
+Rotating it is the release key's way (below), with these names. It signs code nobody has reviewed: if it leaks, nothing on a
+channel is at risk, but replace it at once.
+
 ## Rotate the key
 
 When the key may have leaked, or on a schedule:
