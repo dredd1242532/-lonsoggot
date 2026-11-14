@@ -144,6 +144,7 @@ void hos_hostcall_stats(void) {}
 /* HOS_LOG */
 /* HOS_FATAL */
 void rx_close_asked(void) {}
+void coop_shutdown(void) {}   /* (host/coop.c: a co-op room's BYE and LEAVE; control.c's game_quit and the window's exit say it before the clean end) */
 /* CONTROL_QUIT */
 static int relaunch_asked = 1;
 static void relaunch(void) { assert(marker == NO_FILE && !ready); }
