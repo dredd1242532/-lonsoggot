@@ -123,7 +123,10 @@ static int veto,race;
 static uint32_t policy_before(const OotCoopLifeChange *ch,void*user) {
     CHECK(user==(void*)1 && ch->owner==OWNER && ch->component==LIFE && ch->cell==CELL);
     before_calls++;
-    CHECK(ch->requested == hos_oot_damage(ch->before, (uint32_t)((int64_t)ch->before + ch->delta)));
+    const int64_t native = (int64_t)ch->before + ch->delta;
+    const uint32_t next = native < 0 ? 0 : native > 100 ? 100 : (uint32_t)native; /* synthetic guest's clamp */
+    const uint32_t hit = ch->path ? ch->before - next : (uint32_t)-ch->delta;
+    CHECK(ch->requested == hos_oot_damage(ch->before, next, hit));
     if(!first_token)first_token=ch->invocation;else CHECK(first_token==ch->invocation);
     if(race){race=0;__atomic_store_n((uint32_t*)GP(CELL),ch->before-1,__ATOMIC_SEQ_CST);}
     return veto ? ch->before : ch->requested;
@@ -205,6 +208,20 @@ static void native(void) {
         frame();CHECK(sends==1);
         OotCoopHit scaled_hit={0};CHECK(oot_coop_hit_parse(sent[0],112,&scaled_hit));
         CHECK(scaled_hit.before==10 && scaled_hit.after==scaled[setting]);
+    }
+    /* The damage CAS scales the full overkill hit; the healing CAS keeps its guarded delta. */
+    for (unsigned path=0;path<2;path++) {
+        fresh();trace_on=1;joined();damage_setting=0;
+        CHECK(hos_oot_hits_bind(&policy));hos_oot_hits_policy_on(1);
+        Ctx lethal=context(path);lethal.x[9]=path?(uint32_t)-4:4;lethal.x[10]=2;store32(CELL,2);
+        f_804bd8c0(&lethal);
+        const uint32_t after=path?1:0;
+        CHECK(recomp_load32(&lethal,CELL)==after && before_calls==1 && commit_calls==1);
+        CHECK(T.loss.write==1 && T.losses[0].sample.before==2 && T.losses[0].sample.delta==-4 &&
+              T.losses[0].sample.requested==0 && T.losses[0].sample.after==after);
+        frame();CHECK(sends==1);
+        OotCoopHit hit={0};CHECK(oot_coop_hit_parse(sent[0],112,&hit));
+        CHECK(hit.before==2 && hit.after==after);
     }
     fresh();trace_on=1;joined();Ctx c=context(0);c.x[9]=10;c.x[10]=3;store32(CELL,3);f_804bd8c0(&c);
     CHECK(T.loss.write==1 && T.losses[0].sample.delta==-10 && T.losses[0].sample.before==3 && T.losses[0].sample.after==0);
