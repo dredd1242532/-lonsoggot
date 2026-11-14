@@ -96,28 +96,44 @@ trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags
 
 ### macOS guest-memory groundwork
 
-`host/posix/darwin_mem.c` supplies the memory primitives for macOS, targeting 14.4 or later. It reserves the
-512 GiB guest window at its fixed address without replacing an occupant. The window is readable/writable and
-demand-paged; a 64 KiB guest commit preserves existing bytes. This is memory groundwork, not a complete macOS build:
-the macOS source lists must link this file wherever they link `host/posix/win32_posix.c`, including the renderer.
+`host/posix/darwin_mem.c` supplies the memory primitives for macOS, targeting 14.4 or later. It keeps no state, and
+the macOS source lists link it wherever they link `host/posix/win32_posix.c`, including the renderer. The executable
+alone links `host/posix/darwin_guest_mem.c`, the one owner of the guest window: it reserves the 512 GiB window at its
+fixed address without replacing an occupant, and holds the import pins and the watch states. The window is
+readable/writable and demand-paged; a 64 KiB guest commit preserves existing bytes, and a commit that fails is fatal.
+Each copy of `win32_posix.c` finds the owner's commit, discard and protect once through `dlsym(RTLD_MAIN_ONLY, ...)`
+and refuses guest changes without them; it cannot reserve or release a range inside the window itself.
 
 The low-level discard zeroes exactly the requested bytes. Complete interior host pages get fresh anonymous backing;
 partial host-page edges are zeroed in place, so adjacent live 4 KiB guest pages survive a free on native 16 KiB hosts.
 The Win32 layer retains its existing guest-page contracts: MEM_DECOMMIT rounds outward to 4 KiB, and MEM_RESET
 discards only complete 4 KiB pages inside the request. The Darwin helper adapts that range to the host granule.
 `MADV_DONTNEED` is not used for zero-on-free on Darwin. Host allocation and protection use the process's real page
-size (16 KiB on native Apple Silicon, 4 KiB under Rosetta), not the guest's granule. Guest dirty tracking is unchanged.
+size (16 KiB on native Apple Silicon, 4 KiB under Rosetta), not the guest's granule.
 
-The caller must own writable anonymous memory and serialize its lifetime. Existing GPU-import checks still select
-in-place zeroing: replacing imported backing is not safe, and GPU sharing is not qualified by these CPU tests.
-Heap shrink still zeroes without reclaiming, and optional write-watch and general `VirtualQuery` are separate work.
-The byte-preservation guarantee does not repair the address-region allocator's existing unlock-before-discard race.
+Frees keep their range until its bytes are gone: the address-region and page frees zero or discard under the
+allocator's lock, so an allocation cannot get the range back while the free still writes it, and a page allocation
+over pages already in use keeps their bytes (`HOS_ZERO_ALL_PAGES=1` still clears them). A free that fails returns its
+error (`0xCA01`), or is fatal for an address region, and the pages it did not free stay counted as mapped. A GPU
+import pins its whole host-page backing with `hos_posix_guest_import_pin(lo, hi)` until its last owner is gone
+(`hos_posix_guest_import_unpin`); duplicate and overlapping pins each count, and a free under a pin zeroes in place
+instead of replacing the backing. Asking the renderer whether a range is imported is no pin, so the frees no longer
+ask: the renderer's pins are its own change. Heap shrink still zeroes without reclaiming.
 
-`python -I -B tests/test_darwin_guest_memory.py --cc clang` compiles the real helper and text-extracted callers for
+`VirtualQuery` reads the real Mach regions, holes and protections included, and `VirtualProtect` returns the real
+previous protection. Protection is per host page, not per 4 KiB guest page. The `RX_NVN_WATCH_TEXELS_SRC` write watch
+covers whole host pages: a fault marks every 4 KiB dirty page of its host page, the handler takes no lock and
+allocates nothing, and the log line comes later from the rearm thread, with the fault's PC. The dirty-page scan reads
+the write marks with byte atomics, as they are written. All of this is macOS only: Windows and Linux keep their code
+as it was (issue #432 is the version for every platform).
+
+`python -I -B tests/test_darwin_guest_memory.py --cc clang` compiles the real helpers and text-extracted callers for
 the current native architecture. On Apple Silicon, add `--arch arm64 --arch x86_64` for explicit two-route acceptance
 (the latter requires Rosetta; the test never installs it). It uses no game or graphics device, checks collision
-refusal, neighboring subpages, byte-exact helper discard, guest-rounded wrappers, errors, and resident memory before
-readback. `--source <tree>` runs the same check against another source tree.
+refusal, neighboring subpages, byte-exact helper discard, guest-rounded wrappers, errors, import pins, a free racing
+an allocation or a pin, real write faults through the vectored handler, protection failures, and resident memory
+before readback. `--behavior-only` leaves out the resident-memory experiment, `--watch-protection-only` runs only the
+watch and protection checks, and `--source <tree>` runs the same check against another source tree.
 
 ## Switches for testing and debugging
 
