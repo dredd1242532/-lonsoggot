@@ -794,6 +794,21 @@ open progress, pools, hits or any other event handler.
 Presence acceptance on a temporary copy cannot fill that download mask, and downloading cannot fill the
 presence mask. Explicit checkpoint-transfer actions retain their existing separate consent and refusal rules.
 
+On a temporary copy, the save bridge reads the same signed room offer as the Co-op tab: the maker's
+fingerprint, the other members' verified identities, the terms and their epoch. The room engine owns
+this state and the separate consent scopes; there is no transfer-only identity cache or implied acceptance.
+The copy's network tick must continue exchanging identities and rules and publishing that offer even
+though progress scanning, sections, pools and durable writers remain closed. Before the offer arrives,
+with an unidentified member, or after its terms change, an old download confirmation cannot start a transfer.
+Read the new offer and explicitly consent again; see-and-talk acceptance is neither required nor sufficient.
+
+`tests/test_coop_save_copy.py` runs that engine-to-host-publication-to-save-bridge path using an actual
+temporary-profile restart ticket and authored checkpoints, then repeats the transfer on a normal profile.
+It covers a non-maker's explicit slot approval, exact signed manifest acceptance, stale terms and independent
+presentation/progress refusals. A deliberately restored copy-only empty-offer return must fail even when
+both identities and the signed charter already exist in the engine. The existing save/profile tests retain
+their transport, cancellation, filesystem and mount refusal coverage; these fixtures are not a two-game proof.
+
 Only `progress.sav` and `caption.sav` leave the owner's captured checkpoint.
 The owner signature binds both identities and sessions, the room context and
 charter epoch, generation, supported game/version, lengths, per-file and package
