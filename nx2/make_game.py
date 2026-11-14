@@ -1523,6 +1523,19 @@ def copy_writable(src, dst):
     shutil.copyfile(src, dst)
 
 
+def check_romfs_folder(romfs):
+    """A chosen romfs folder holds what the build reads from it (prompt_assets.py, shader_census.py: Pack/ZsDic.pack.zs and
+    System/Resource), said before the game folder is made. Issue 467: another tool's packed copy (index.json and one romfs.bin) was
+    built for 15 minutes into 27 GB, and the game stopped at boot without its system files"""
+    folder = long_path(romfs)   # (a dump's deepest paths pass 260 characters: #1468)
+    missing = next((name for name, there in (("Pack/ZsDic.pack.zs", os.path.isfile), ("System/Resource", os.path.isdir))
+                    if not there(os.path.join(folder, *name.split("/")))), None)
+    if missing:
+        packed = (" It holds a romfs.bin, a packed copy of the game's files: extract it first."
+                  if os.path.isfile(os.path.join(folder, "romfs.bin")) else "")
+        fail("The romfs folder %s does not hold the game's files (no %s): choose the extracted RomFS.%s" % (romfs, missing, packed))
+
+
 def refuse_dump_links(folder):
     """An extracted dump holds only files and folders: a link in it was followed, and hard-linked or copied the file it
     names (anywhere on this PC) into the game folder. The folder itself may be one. (Walked as a long path: #1468)"""
@@ -2155,6 +2168,8 @@ def main(a=None):
         a.out = a.update
     if not a.out or not (a.update or a.nup or (a.romfs and a.exefs)):
         fail("needs --out, and --nup or --romfs with --exefs")
+    if not (a.update or a.nup):
+        check_romfs_folder(a.romfs)
     out = os.path.abspath(a.out)
     work = os.path.abspath(a.work)
     a.language = build_language(a, out)   # (now: the folder's own language.txt is still the one the player left)
