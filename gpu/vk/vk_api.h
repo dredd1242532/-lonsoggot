@@ -60,6 +60,9 @@ enum { HOS_OPT_HOLD_TOGGLE = 54 };
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* (longshot) Achievements paused (host/oot_achievements.c): 1 once the Debug tools have been on in this run (vk_menu.cpp
+   menu_achievements_paused), so their inventory editor and teleport hand none out. The existing option callback. */
+enum { HOS_OPT_ACHIEVEMENTS_PAUSED = 58 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:

@@ -1,5 +1,6 @@
-"""The overlays (the start-up screen, the menu, the FPS counter) over the window's image: menu_record draws them with Dear ImGui
-in one frame and one recording, the start-up screen under the menu and the counter over both; nothing at all (no ImGui frame,
+"""The overlays (the start-up screen, the menu, the FPS counter, an achievement's pop-up) over the window's image: menu_record
+draws them with Dear ImGui in one frame and one recording, the start-up screen under the menu, the counter over both and the
+pop-up over all (never over the start-up screen); nothing at all (no ImGui frame,
 no render pass, only ui::idle letting old textures go) while none shows (but one frame that bakes the glyphs after a resize), and no "0 FPS" over the start-up screen.
 
 python -I -B tests/test_fps_overlay_order.py [--cxx g++] [--source path/to/vk_menu.cpp]
@@ -60,16 +61,21 @@ bool prebake_needed(uint32_t, uint32_t) { return resized; }
 void draw_startup(ui::Ctx&) { calls += "s"; }
 void draw_menu(ui::Ctx&) { calls += "m"; }
 void draw_fps(ui::Ctx&, bool under_banner) { calls += under_banner ? "F" : "f"; }
+bool toast_on = false;   // (an achievement's pop-up due: drawn over everything, never over the start-up screen)
+bool achievement_toast_due(int64_t now) { CHECK(now == 1000); return toast_on; }
+void draw_achievement_toast(ui::Ctx&, int64_t now) { CHECK(now == 1000); calls += "a"; }
 ''' + fn + r'''
 int main() {
-    for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true}) for (bool can : {true, false}) {
+    for (bool startup : {false, true}) for (bool fps : {false, true}) for (bool menu : {false, true}) for (bool can : {true, false})
+    for (bool toast : {false, true}) {
         opts.show_fps = fps;
         open_now = menu;
         startup_on = startup;
         can_draw = can;
+        toast_on = toast;
         calls.clear();
         menu_record(1, 2, 640, 360);
-        if (!startup && !fps && !menu) {   // (nothing shows: no ImGui frame at all, only the reaping; after a resize, one bake)
+        if (!startup && !fps && !menu && !toast) {   // (nothing shows: no ImGui frame at all, only the reaping; after a resize, one bake)
             CHECK(calls == "i");
             calls.clear(), resized = true;
             menu_record(1, 2, 640, 360);
@@ -82,6 +88,7 @@ int main() {
         if (startup) want += "s";
         if (menu) want += "m";
         if (fps && !startup) want += menu ? "F" : "f";
+        if (toast && !startup) want += "a";   // (last: over the menu and the counter)
         want += "dr";   // (the recorder boundary right before the recording)
         CHECK(calls == want);
     }

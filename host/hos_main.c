@@ -657,10 +657,16 @@ static void oot_inventory_refresh(Ctx *c, int64_t now) {
     if (now < next) return;
     next = now + 500000000LL;
     int loaded = 0;   /* (a save's counts read: the first item's is not -1) */
+    int counts[OOT_ITEM_COUNT];
     for (unsigned i = 0; i < OOT_ITEM_COUNT; i++) {
         const int count = oot_item_count(c, oot_item_names[i]);
         if (!i) loaded = count >= 0;
+        counts[i] = count;
         rx_option_set(OOT_CHEAT_ITEM_BASE + (int)i, count);
+    }
+    {   /* the achievements, from the same counts (host/oot_achievements.c): no reads of their own */
+        void hos_oot_achievements_check(const char *const *names, const int *counts, int n, int loaded);
+        hos_oot_achievements_check(oot_item_names, counts, (int)OOT_ITEM_COUNT, loaded);
     }
     {   /* Link's age for the Debug tab's Switch age row: 0 child, 1 adult, -1 no save loaded (Sequence_IsChildhood) */
         int child = 1;

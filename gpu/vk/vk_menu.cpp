@@ -35,6 +35,7 @@
 #include "vk_draw.h"   // (pipeline_cache_save: Restart now keeps what was built)
 #include "vk_texture.h"   // (the FPS counter's Dev level: texture_count, texture_bytes, texture_stats)
 #include "oot_cheat_items.h"
+#include "oot_achievements.h"   // (longshot) the achievements' list (host/oot_achievements.c unlocks them)
 #include "vk_progress.h"   // (StartupView, version_text: the start-up screen)
 #include "vk_ui.h"
 #include "vk_menu_keys.h"   // (which gamepad buttons confirm and go back: those A and B are bound to)         // (how it looks: Dear ImGui, vk_imgui.h)
@@ -1296,6 +1297,10 @@ Row rows[] = {
     {TAB_GAMEPLAY, "Skip opening", &opts.skip_opening, 0, 1, 1, tx_onoff,
      "Skips the new-game opening (the story movie and Navi waking Link) and leaves later cutscenes, the Deku Tree "
      "meeting, and the title screen alone.", nullptr, false, true},
+    // (longshot) the achievements' pop-up (oot_achievements.h, host/oot_achievements.c): they are earned and kept whatever this says
+    {TAB_GAMEPLAY, "Achievement alerts", &opts.achievement_popups, 0, 1, 1, tx_onoff,
+     "Shows a short pop-up when you earn an achievement. Achievements are earned and kept in user/achievements.txt either "
+     "way. None are earned in a run where the Debug tools have been on.", nullptr, false, true},
 
     // Controls (12 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
@@ -1551,6 +1556,52 @@ constexpr ItemSections make_item_sections() {
 }
 constexpr ItemSections item_sections = make_item_sections();
 std::atomic<int> item_counts[kItems];   // (-1 until the game side reports: OOT_CHEAT_ITEM_BASE + i)
+
+// ---- (longshot) achievements (oot_achievements.h; host/oot_achievements.c unlocks them, docs/achievements.md) ----
+#define OOT_ACH_TITLE(id, title, description, mode, a, b, c) title,
+#define OOT_ACH_TEXT(id, title, description, mode, a, b, c) description,
+constexpr const char* achievement_titles[] = {OOT_ACHIEVEMENTS(OOT_ACH_TITLE)};
+constexpr const char* achievement_texts[] = {OOT_ACHIEVEMENTS(OOT_ACH_TEXT)};
+#undef OOT_ACH_TITLE
+#undef OOT_ACH_TEXT
+constexpr int kAchievements = sizeof achievement_titles / sizeof achievement_titles[0];
+std::atomic<int> achievement_unlocked[kAchievements];   // (1 once the game side says so: OOT_ACHIEVEMENT_BASE + i)
+// (the pop-ups waiting, from the game's thread, and the one showing, drawn on the present's: toast_mu keeps them apart. More
+// than kToastBurst at once, as when a late save is first loaded, show as one pop-up that counts them)
+constexpr int kToastQueue = 16, kToastBurst = 3;
+constexpr int64_t kToastNs = 4000000000LL, kToastFadeNs = 300000000LL;
+std::mutex toast_mu;
+int toast_queue[kToastQueue], toast_queued = 0, toast_extra = 0;
+int toast_shown = -1, toast_shown_count = 0;   // (the one showing: an index, or -2 the count of toast_shown_count at once)
+int64_t toast_since = 0;
+int achievements_unlocked_count() {
+    int n = 0;
+    for (const auto& a : achievement_unlocked) n += a.load(std::memory_order_relaxed) > 0;
+    return n;
+}
+/// The pop-up to show at now, taking the next one when the last is over: false when none shows
+bool achievement_toast_due(int64_t now) {
+    std::lock_guard lk(toast_mu);
+    if (toast_shown != -1 && now - toast_since < kToastNs) return true;
+    toast_shown = -1;
+    if (!toast_queued && !toast_extra) return false;
+    if (toast_queued + toast_extra > kToastBurst) {
+        toast_shown = -2, toast_shown_count = toast_queued + toast_extra;
+        toast_queued = toast_extra = 0;
+    } else {
+        toast_shown = toast_queue[0];
+        for (int i = 1; i < toast_queued; ++i) toast_queue[i - 1] = toast_queue[i];
+        --toast_queued;
+    }
+    toast_since = now;
+    return true;
+}
+void achievement_toast_ask(int index) {   // (the game's thread: OOT_ACHIEVEMENT_TOAST_ID)
+    if (index < 0 || index >= kAchievements || !opts.achievement_popups) return;
+    std::lock_guard lk(toast_mu);
+    if (toast_queued < kToastQueue) toast_queue[toast_queued++] = index;
+    else ++toast_extra;
+}
 int item_choice = 0;
 int inventory_columns = 1, inventory_capacity = 1;   // (as last drawn: the cards in a row, on a page)
 int inventory_filter = 0;   // (All, then the item sections)
@@ -3814,6 +3865,61 @@ struct Tab {
     }
 };
 
+/// (longshot) The achievement pop-up: a dark plate at the top centre of the safe area with a gold edge and medal, "Achievement
+/// unlocked" over the title and its description (or the count of several at once), faded in and out. Over the game and the
+/// menu alike, under nothing: drawn last
+void draw_achievement_toast(ui::Ctx& c, int64_t now) {
+    int shown, count;
+    int64_t since;
+    {
+        std::lock_guard lk(toast_mu);
+        shown = toast_shown, count = toast_shown_count, since = toast_since;
+    }
+    if (shown == -1) return;
+    const int64_t age = now - since;
+    const float fade = std::clamp(std::min((float)age, (float)(kToastNs - age)) / (float)kToastFadeNs, 0.0f, 1.0f);
+    if (fade <= 0) return;
+    const float s = c.s;
+    char head[64], title[96];
+    const char* text = nullptr;
+    if (shown >= 0) {
+        snprintf(head, sizeof head, "%s", "Achievement unlocked");
+        snprintf(title, sizeof title, "%s", achievement_titles[shown]);
+        text = achievement_texts[shown];
+    } else {
+        snprintf(head, sizeof head, "%s", "Achievements unlocked");
+        snprintf(title, sizeof title, "%d achievements", count);
+    }
+    char total[32];
+    snprintf(total, sizeof total, "%d of %d", achievements_unlocked_count(), kAchievements);
+    const float medal = 22 * s, pad = 16 * s, gap = 14 * s;
+    float tw = std::max(ui::size_of(c.f.body, 14 * s, head).x + 12 * s + ui::size_of(c.f.body, 14 * s, total).x,
+                        ui::size_of(c.f.strong, 20 * s, title).x);
+    if (text) tw = std::max(tw, ui::size_of(c.f.body, 15 * s, text).x);
+    const float W = std::min(c.w - 2 * c.safe, pad + medal * 2 + gap + tw + pad), H = (text ? 86 : 66) * s;
+    const float slide = (1 - fade) * 12 * s;
+    const ImVec2 p((c.w - W) * 0.5f, c.safe + 8 * s - slide), q(p.x + W, p.y + H);
+    ui::shadow(c, p, q, 24 * s, 0.9f * fade, 6 * s);
+    c.d->AddRectFilled(p, q, ui::alpha(ui::kBox, fade), 6 * s);
+    c.d->AddRect(p, q, ui::alpha(ui::kGoldHi, fade), 6 * s, 0, std::max(1.0f, 1.5f * s));
+    const ImVec2 m(p.x + pad + medal, p.y + H * 0.5f);   // (the medal: a gold disc, a darker ring and a star-like spark)
+    c.d->AddCircleFilled(m, medal, ui::alpha(ui::kGold, fade));
+    c.d->AddCircle(m, medal * 0.72f, ui::alpha(ui::kGoldInk, 0.6f * fade), 0, std::max(1.0f, 2 * s));
+    for (int k = 0; k < 4; ++k) {
+        const float a = k * 1.5707963f + 0.7853982f, r0 = medal * 0.18f, r1 = medal * 0.5f;
+        c.d->AddLine(ImVec2(m.x + std::cos(a) * r0, m.y + std::sin(a) * r0), ImVec2(m.x + std::cos(a) * r1, m.y + std::sin(a) * r1),
+                     ui::alpha(ui::kInkBright, fade), std::max(1.0f, 2 * s));
+    }
+    const float x = m.x + medal + gap, right = q.x - pad;
+    c.d->PushClipRect(ImVec2(x, p.y), ImVec2(right, q.y), true);
+    const float y0 = p.y + (text ? 20 : 22) * s;
+    ui::text_mid(c, c.f.body, 14 * s, x, y0, ui::alpha(ui::kAccent, fade), head);
+    ui::text_mid(c, c.f.body, 14 * s, right - ui::size_of(c.f.body, 14 * s, total).x, y0, ui::alpha(ui::kSoft, fade), total);
+    ui::text_mid(c, c.f.strong, 20 * s, x, y0 + 23 * s, ui::alpha(ui::kInkBright, fade), title);
+    if (text) ui::text_mid(c, c.f.body, 15 * s, x, y0 + 46 * s, ui::alpha(ui::kInk, fade), text);
+    c.d->PopClipRect();
+}
+
 /// The FPS counter, in the corner the FPS counter position row chooses (the safe area's; under the banner at the top right
 /// while the menu is open, unless it fits beside the menu's column on a very wide window). The number as it always looked:
 /// green outlined bold, "FPS" small beside it, the frame generation line under them, no plate (#1957, v2.0.14's paint_fps).
@@ -4331,6 +4437,11 @@ int menu_player_flight() { return cheats_on() ? player_flight.load(std::memory_o
 int menu_free_camera() { return cheats_on() ? free_camera.load(std::memory_order_relaxed) : 0; }
 int menu_link_speed() { return cheats_on() ? link_speeds[std::clamp(link_speed.load(std::memory_order_relaxed), 0, kLinkSpeeds - 1)] : 100; }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
+int menu_achievements_paused() {   // (once the tools are on, for the rest of the run: what they handed out stays in the save)
+    static std::atomic<bool> seen{false};
+    if (cheats_on()) seen.store(true, std::memory_order_relaxed);
+    return seen.load(std::memory_order_relaxed) ? 1 : 0;
+}
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
 
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h) {
@@ -4435,6 +4546,14 @@ std::recursive_mutex menu_mu;
 void menu_option_set(int id, int value) {
     if (id == OOT_CHEAT_AGE_ID) {   // (Link's age: the Switch age row shows it)
         if (link_age.exchange(value, std::memory_order_relaxed) != value && page == 0 && cur_tab == TAB_DEBUG) menu_refresh = true;
+        return;
+    }
+    if (id >= OOT_ACHIEVEMENT_BASE && id < OOT_ACHIEVEMENT_BASE + kAchievements) {   // (an achievement unlocked)
+        achievement_unlocked[id - OOT_ACHIEVEMENT_BASE].store(value, std::memory_order_relaxed);
+        return;
+    }
+    if (id == OOT_ACHIEVEMENT_TOAST_ID) {   // (its pop-up)
+        achievement_toast_ask(value);
         return;
     }
     if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + kItems) {   // (the game side's inventory counts)
@@ -5255,7 +5374,9 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     const bool start = startup_on.load(std::memory_order_acquire);
     const bool fps = opts.show_fps && !start;   // (no game frames yet: not "0 FPS" over the start-up screen)
     const bool open = open_now.load(std::memory_order_relaxed);
-    if (!start && !fps && !open) {   // (nothing shows: no ImGui frame, no render pass)
+    const int64_t toast_now = prof_now();
+    const bool toast = !start && achievement_toast_due(toast_now);   // (longshot: an achievement's pop-up)
+    if (!start && !fps && !open && !toast) {   // (nothing shows: no ImGui frame, no render pass)
         // (but a new window size or Menu size since the last bake: one frame with nothing drawn that bakes the menu's glyphs
         // and measures its page for the new size, so the next open has no hitch whatever was resized while nothing showed)
         if (prebake_needed(w, h) && ui::begin(w, h)) {
@@ -5280,18 +5401,23 @@ void menu_record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h) {
     if (start) draw_startup(c);   // (under the menu)
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
+    if (toast) draw_achievement_toast(c, toast_now);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record(cmd, index, w, h);
 }
 
 void menu_record_image(VkCommandBuffer cmd, VkImage image, VkImageView view, uint32_t w, uint32_t h) {
     const bool open = open_now.load(std::memory_order_relaxed);
-    const bool fps = opts.show_fps && !startup_on.load(std::memory_order_acquire);
-    if (!open && !fps) return;
+    const bool start = startup_on.load(std::memory_order_acquire);
+    const bool fps = opts.show_fps && !start;
+    const int64_t toast_now = prof_now();
+    const bool toast = !start && achievement_toast_due(toast_now);   // (longshot: an achievement's pop-up)
+    if (!open && !fps && !toast) return;
     if (!ui::begin(w, h)) return;
     ui::Ctx c = ui_ctx(w, h);
     if (open) draw_menu(c);
     if (fps) draw_fps(c, open);
+    if (toast) draw_achievement_toast(c, toast_now);
     ::mkwvk::rec::boundary(::mkwvk::rec::B_DIRECT);   // (Dear ImGui records into cmd directly, its backend through its own pointers: what this thread recorded through vk_work.h reaches cmd first)
     ui::record_to(cmd, image, view, w, h);
 }
