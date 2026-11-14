@@ -52,7 +52,7 @@ def main():
     wait = block(glue, "static int commit_wait(void *p, SIZE_T size)")
     if "Sleep(50)" not in wait or "ERROR_COMMITMENT_LIMIT" not in wait or "i < 100" not in wait:
         raise SystemExit("FAIL: commit_wait does not retry for up to 5 s while the limit refuses")
-    commit = block(glue, "void hos_commit(uint64_t addr, uint64_t size)")
+    commit = block(glue, "int hos_commit(uint64_t addr, uint64_t size)")
     if "err == ERROR_COMMITMENT_LIMIT && commit_wait(" not in commit or "commit_refused(" not in commit:
         raise SystemExit("FAIL: hos_commit does not wait at the commit limit before it reports the failure")
     touch = block(glue, "static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info)")
