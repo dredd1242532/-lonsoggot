@@ -404,12 +404,16 @@ For a reviewer: what is derived from what, what each datagram carries and what a
 `host/coop_proto.c` (C) and `scripts/coop_relay.py` (the relay's side, Python); `tests/coop_vectors.txt` holds byte
 vectors of every message that both are checked against (`tests/test_coop_proto.py`, `tests/test_coop_relay.py`).
 
-**Library.** Monocypher 4.0.2 (`third_party/monocypher/`, two files, unmodified, BSD-2-Clause, dual-licensed with CC0)
+**Library.** Monocypher 4.0.3 (`third_party/monocypher/`, two files, unmodified, BSD-2-Clause, dual-licensed with CC0)
 for BLAKE2b, XChaCha20-Poly1305 and EdDSA. It is small, has no dependencies, builds the same on Windows and Linux, and
 its primitives are standard (RFC 7693, the XChaCha20-Poly1305 construction of the IETF draft, EdDSA over Curve25519).
 It is used only in `coop_proto.c`, behind `coop_room_keys`, `coop_seal`, `coop_open`, the datagram tags and, for what
 one player signs, `coop_sign_keypair`, `coop_sign`, `coop_sign_check` and `coop_blake2b`, so another library can replace
 it there. The relay needs no library: it uses Python's own BLAKE2b.
+The 4.0.3 refresh addresses the compiler-dependent public-key timing leak noted on
+[Monocypher's download page](https://monocypher.org/download/); its public declarations and this protocol's wire
+constants are unchanged. The release source, checksums and later layered co-op consumers are recorded in
+`third_party/monocypher/PROVENANCE.md`.
 
 **The secret.** 18 symbols, each drawn uniformly from 27 (bytes from the operating system's random source, a byte
 below 243 taken modulo 27): log2(27^18) = 85.6 bits. It is made by the game that creates the room and never sent to
