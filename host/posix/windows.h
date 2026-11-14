@@ -446,6 +446,10 @@ typedef struct _EXCEPTION_RECORD {
     DWORD NumberParameters;
     ULONG_PTR ExceptionInformation[EXCEPTION_MAXIMUM_PARAMETERS];
 } EXCEPTION_RECORD, *PEXCEPTION_RECORD;
+#if defined(__APPLE__)
+/* Darwin arm64 uses Rip/Rsp as host PC/SP; all x64-only slots below are zero.
+   darwin_fault.h documents the signal-only context contract. */
+#endif
 typedef struct {
     DWORD64 Rax, Rcx, Rdx, Rbx, Rsp, Rbp, Rsi, Rdi, R8, R9, R10, R11, R12, R13, R14, R15, Rip;
     DWORD EFlags, ContextFlags;
