@@ -1,22 +1,32 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""A word past a program's end that reads as a branch outside it ends the capture there; it no longer refuses the program.
+"""A word past a program's end that reads as a branch outside it ends the capture there, and a program over 1 MiB translates.
 
 parse_code (gpu/vk/vk_shader.cpp) reads an NVN2 stage's Ampere instructions until ProgramCaptureState says the program
 ended. Its end rules are narrower than the lowering's: a loop left only by predicated EXITs ends at its closing branch to
 itself, which the lowering takes as the end and the capture does not, so the capture read on past the end. A word there
-that decodes as a branch to before the start, between two instructions or 1 MiB or more on refused the whole program
-("the branch at instruction N (+X) goes outside the program"): compute program 79116b290d46542f, on every platform. Now
-the capture ends before that word, and the program is refused for it only if the code before it does not lower.
+that decodes as a branch to before the start, between two instructions or past the largest program refused the whole
+program ("the branch at instruction N (+X) goes outside the program"). Now the capture ends before that word, and the
+program is refused for it only if the code before it does not lower.
+
+The largest program was 65,536 instructions (1 MiB) in the capture, the lowering and the native address map. Compute
+program 79116b290d46542f has 0x104680 bytes of code, and its branch at instruction 16404 goes to past 1 MiB: refused on
+every platform. The GPU has no such limit (a 32-bit program offset; an Ampere BRA's offset has 50 bits), so the limit is
+now the largest code area the renderer reads, 16 MiB. A lowered branch past the 8 MiB reach of Maxwell's BRA, CAL and BRX
+takes their absolute forms, JMP, JCAL and JMX.
 
 Compiled from the real source: vk_shader.cpp's hash_bytes, Code, code_key and parse_code, with the recompiler's headers,
 over packages (control section and code area) built here:
 - a loop left by predicated EXITs, its closing branch to itself, padding, then a word that reads as a branch outside
-  every program: a BRA between two instructions (at instruction 16404, +0x40140), past 1 MiB or before the start, a
-  BSSY before the start, a CALL between two instructions; the same in a graphics stage, after its 128-byte header. Each
-  translates, to the same Maxwell code as the program without what follows it, with one line in the log for it however
-  often it is read;
+  every program: a BRA between two instructions (at instruction 16404, +0x40140), 16 MiB or more on or before the
+  start, a BSSY before the start, a CALL between two instructions; the same in a graphics stage, after its 128-byte
+  header. Each translates, to the same Maxwell code as the program without what follows it, with one line in the log
+  for it however often it is read;
 - a program that branches over such a word to code after it: still refused, the message naming the word as before;
-- programs the capture ends itself, or that reach the code's end: unchanged.
+- programs the capture ends itself, or that reach the code's end: unchanged;
+- a program of 0x104680 bytes whose @P0 BRA at instruction 16404 goes to its EXIT, past 1 MiB, and back: it translates,
+  each branch lands on its target, and the address map finds both;
+- 12.8 MB programs whose branches and call are more than 8 MiB of lowered code apart: JMP and JCAL, each holding its
+  target's address, the predicate kept.
 Then the four other copies of the capture loop (the WebGPU renderer, the bake tools, shadertool) end before the word
 too, not at it.
 
@@ -140,6 +150,32 @@ static size_t lines_with(const std::string& text) {
     for (const std::string& l : logged) n += l.find(text) != std::string::npos;
     return n;
 }
+// the first Maxwell word native instruction `at` lowered to, and its address, through the program's native address map
+static bool lowered_at(const Code& c, uint32_t at, uint32_t* address, uint64_t* word) {
+    const auto a = Shader::Ampere::NativeProgramAddress(c.code, at * 16);
+    if (!a || *a / 8 >= c.code.size()) return false;
+    *address = *a, *word = c.code[*a / 8];
+    return true;
+}
+// native instruction `at` lowered to opcode `op` (BRA 0xe24) with predicate `pred`, whose 24-bit offset (bits 20-43)
+// lands on what native instruction `to` lowered to
+static bool near(const Code& c, uint32_t at, uint32_t to, uint64_t op, uint32_t pred) {
+    uint32_t from = 0, target = 0;
+    uint64_t word = 0, unused = 0;
+    if (!lowered_at(c, at, &from, &word) || !lowered_at(c, to, &target, &unused)) return false;
+    const int64_t relative = static_cast<int64_t>(word << 20) >> 40;
+    return (word >> 52) == op && ((word >> 16) & 15) == pred && relative == int64_t{target} - from - 8;
+}
+// the same with an absolute form (JMP 0xe21, JCAL 0xe22): the target's address in bits 20-51, the flow test kept, and
+// the target out of a 24-bit offset's reach
+static bool far(const Code& c, uint32_t at, uint32_t to, uint64_t op, uint32_t pred) {
+    uint32_t from = 0, target = 0;
+    uint64_t word = 0, unused = 0;
+    if (!lowered_at(c, at, &from, &word) || !lowered_at(c, to, &target, &unused)) return false;
+    const int64_t distance = int64_t{target} - from - 8;
+    return (word >> 52) == op && ((word >> 16) & 15) == pred && ((word >> 20) & 0xffffffffu) == target &&
+           (word & 0x1f) == 0xf && (distance > 0x7fffff || distance < -0x800000);
+}
 
 int main() {
     // the program: a loop that leaves only by @P0 EXIT, its jump back and NVIDIA's closing branch to itself
@@ -147,7 +183,7 @@ int main() {
     struct Word { const char* name; uint32_t at; Instruction word; };
     const Word words[] = {
         {"a BRA between two instructions", 16404, branch(0x947, 8)},
-        {"a BRA 1 MiB or more on", 7, branch(0x947, 0x100000)},
+        {"a BRA 16 MiB or more on", 7, branch(0x947, 16 << 20)},
         {"a BRA to before the start", 7, branch(0x947, -0x100)},
         {"a BSSY to before the start", 9, branch(0x945, -0x200)},
         {"a CALL between two instructions", 5, branch(0x944, 4)},
@@ -191,8 +227,41 @@ int main() {
         check(reach.ok && reach.code == parse(package(5, loop)).code, "a loop padded to the code's end: as before", reach.why);
         check(logged.size() == before, "no log line for them", logged.size() > before ? logged.back() : std::string());
     }
+    {   // a program over 1 MiB: 79116b29's size, a @P0 BRA at instruction 16404 to the EXIT at its end, a @P1 BRA back
+        const uint32_t n = 0x104680 / 16;
+        std::vector<Instruction> code(n, nop);
+        code[16404] = bra(16404, n - 2, 0);
+        code[n - 3] = bra(n - 3, 1, 1);
+        code[n - 2] = exit_pt;
+        const Code c = parse(package(5, code));
+        check(c.ok, "0x104680 bytes, a branch at instruction 16404 to past 1 MiB: translates", c.why);
+        check(near(c, 16404, n - 2, 0xe24, 0) && near(c, n - 3, 1, 0xe24, 1),
+              "0x104680 bytes: each BRA lands on its target, the address map finds both ends");
+    }
+    {   // more than 8 MiB of lowered code between a branch and its target: JMP (and back)
+        const uint32_t n = 800000;
+        std::vector<Instruction> code(n, nop);
+        code[0] = bra(0, n - 2, 0);
+        code[n - 3] = bra(n - 3, 1, 1);
+        code[n - 2] = exit_pt;
+        const Code c = parse(package(5, code));
+        check(c.ok, "12.8 MB, branches more than 8 MiB of lowered code apart: translates", c.why);
+        check(far(c, 0, n - 2, 0xe21, 0) && far(c, n - 3, 1, 0xe21, 1), "12.8 MB: each branch is a JMP to its target");
+    }
+    {   // and a call: MOV R10, its return address; CALL.REL.NOINC to a function at the end; EXIT; the function's RET R10
+        const uint32_t n = 800000, f = n - 2;
+        std::vector<Instruction> code(n, nop);
+        code[0] = insn(0x00007802 | (10u << 16), 2 * 16, 0xf00, 0x000fe200);
+        const uint64_t to_f = static_cast<uint64_t>(int64_t{f} * 16 - 2 * 16), back = static_cast<uint64_t>(-(int64_t{f} + 1) * 16);
+        code[1] = insn(0x00007944, static_cast<uint32_t>(to_f), 0x03c00000 | static_cast<uint32_t>((to_f >> 32) & 0x3ffff), 0x000fea00);
+        code[2] = exit_pt;
+        code[f] = insn(0x0a007950, static_cast<uint32_t>(back), 0x03c00000 | static_cast<uint32_t>((back >> 32) & 0x3ffff), 0x000fea00);
+        const Code c = parse(package(5, code));
+        check(c.ok, "12.8 MB, a call more than 8 MiB of lowered code away: translates", c.why);
+        check(far(c, 1, f, 0xe22, 7), "12.8 MB: the call is a JCAL to the function");
+    }
     std::printf(failures ? "FAIL: %d checks\n" : "PASS: a word past the program's end that reads as a branch outside it "
-                "ends the capture\n", failures);
+                "ends the capture; programs over 1 MiB translate\n", failures);
     return failures ? 1 : 0;
 }
 """

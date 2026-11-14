@@ -212,13 +212,12 @@ Code parse_code(const uint8_t* ctl, const std::vector<uint8_t>& area) {
     std::vector<Instruction> native;
     Shader::Ampere::ProgramCaptureState capture;
     // (longshot) A word the capture reads as a branch that would leave every program (to before its start, between two
-    // instructions, or 1 MiB or more on) is no instruction of this one. The capture's end rules are narrower than the
-    // lowering's (a loop left only by predicated EXITs, a library function that ends the shader), so it can read on past
-    // the program's end into what follows it there. The program ends before that word: the lowering, which takes a
-    // program only to its own end with every branch inside it (an indirect one's targets when it translates), says
-    // whether it does, and only if it does not is the program refused, naming the word as before. (Refused at the word
-    // itself, compute program 79116b290d46542f was left out on every platform: "the branch at instruction 16404
-    // (+0x40140) goes outside the program")
+    // instructions, or past the largest program, 16 MiB: program_address_map.h) is no instruction of this one. The
+    // capture's end rules are narrower than the lowering's (a loop left only by predicated EXITs, a library function that
+    // ends the shader), so it can read on past the program's end into what follows it there. The program ends before
+    // that word: the lowering, which takes a program only to its own end with every branch inside it (an indirect one's
+    // targets when it translates), says whether it does, and only if it does not is the program refused, naming the word
+    // as before.
     uint32_t outside = ~0u;   // (that word's instruction number)
     for (uint32_t i = 0; hdr + (i + 1) * sizeof(Instruction) <= len; i++) {
         Instruction& insn = native.emplace_back();
