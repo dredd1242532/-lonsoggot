@@ -352,8 +352,20 @@ bool create_device() {
     if (!getenv("RX_VK_CHECKPOINTS") || strcmp(getenv("RX_VK_CHECKPOINTS"), "0") != 0)
         optional(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME, dev.checkpoints);
     // (asked for only: a marker written twice a draw, where the NV ones are not there to hide a race)
-    if (const char* c = getenv("RX_VK_CHECKPOINTS"); !dev.checkpoints && c && strcmp(c, "0") != 0 && strcmp(c, "ext") != 0)
+    // (longshot) and on AMD's integrated GPUs on Windows, one before every command the GPU runs (vk_work.h fine_mark), as
+    // RX_VK_CHECKPOINTS=all. A Ryzen 9 7900X's Radeon Graphics (2 CUs, driver 26.10.1, no mesh shaders) lost the device in
+    // six runs of six within seconds of Kokiri Forest loading, without markers and with one before each draw and dispatch
+    // (RX_VK_CHECKPOINTS=1); with one before every command it kept it for 110 minutes, Kokiri Forest in them. When it was
+    // lost, every marker the GPU had reached had its earlier work done: it stood between commands, on none of them. Like
+    // the NV ones above, they hide a race not found yet. RX_VK_CHECKPOINTS=0: off
+    bool fine_default = false;
+#ifdef _WIN32
+    fine_default = dev.props.vendorID == 0x1002 && dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+#endif
+    const char* cp = getenv("RX_VK_CHECKPOINTS");
+    if (!dev.checkpoints && (cp ? strcmp(cp, "0") != 0 && strcmp(cp, "ext") != 0 : fine_default))
         optional(VK_AMD_BUFFER_MARKER_EXTENSION_NAME, dev.buffer_marker);
+    dev.fine_markers = dev.buffer_marker && (cp ? strcmp(cp, "all") == 0 : fine_default);
     optional(VK_EXT_DEVICE_FAULT_EXTENSION_NAME, dev.device_fault);
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
     // (longshot) the GPU's own float add on storage buffers: the game's RED/ATOM.ADD.F32 become one OpAtomicFAddEXT instead

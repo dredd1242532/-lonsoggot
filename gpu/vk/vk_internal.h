@@ -57,6 +57,7 @@ struct Device {
          conditional_rendering = false, occlusion_precise = false, host_query_reset = false, provoking_vertex = false, vertex_divisor = false, stencil_export = false, memory_budget = false,
          checkpoints = false,   // (RX_VK_CHECKPOINTS: VK_NV_device_diagnostic_checkpoints)
          buffer_marker = false, // (RX_VK_CHECKPOINTS=1 without the NV extension: VK_AMD_buffer_marker, AMD and Intel)
+         fine_markers = false,  // (RX_VK_CHECKPOINTS=all, AMD's integrated GPUs on Windows by default: one before every command)
          device_fault = false,  // (VK_EXT_device_fault: what a lost device faulted on)
          sparse_images = false, // (sparse resident 2D images on the queue: the terrain's huge arrays)
          sparse_buffers = false, // (sparse-bound buffers on the queue: a pool imported as several dma-bufs)
@@ -222,7 +223,8 @@ void checkpoints_report();
 void buffer_markers_init();
 void coopmat_init();   // vk_coopmat.cpp (once the device is made)
 /// A marker of another kind of GPU work (m: mirror sync, b: write-back, u: texture upload, g: GPU unswizzle; key: its
-/// pool or texture), RX_VK_CHECKPOINTS
+/// pool or texture; s: a recording's commands begin, key: its timeline value; p: the present's copy, key: the swapchain
+/// image; the other commands' own kinds (vk_work.h fine_mark) where dev.fine_markers), RX_VK_CHECKPOINTS
 void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind);
 
 /// Parallel replay (vk_replay.cpp, RX_VK_PARALLEL): while segments of a submission are recorded on several threads,

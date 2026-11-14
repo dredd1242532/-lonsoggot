@@ -145,7 +145,9 @@ def check_sources():
         problems.append("vk_work.h's macros and RX_REC_CALLS differ: only in vk_work.h %s, only in vk_recorder.h %s"
                         % (sorted(set(macros) - set(calls)), sorted(set(calls) - set(macros))))
     for f, body in macros.items():
-        if "::mkwvk::rec::rx_%s(__VA_ARGS__)" % f not in body:
+        # (directly, or through the lambda that puts a marker before it, vk_work.h fine_mark: its arguments taken once)
+        marked = "[&](auto&&... a_) { ::mkwvk::fine_mark('" in body and "::mkwvk::rec::rx_%s(a_...); }(__VA_ARGS__))" % f in body
+        if "::mkwvk::rec::rx_%s(__VA_ARGS__)" % f not in body and not marked:
             problems.append("vk_work.h: %s does not call its packer: %s" % (f, body))
         if "::vkx::" in body:
             problems.append("vk_work.h: %s calls the driver directly" % f)

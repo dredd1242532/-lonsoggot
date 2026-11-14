@@ -41,6 +41,8 @@ extern "C" __declspec(dllimport) int __stdcall GetThreadTimes(void*, void*, void
 namespace mkwvk {
 std::atomic<uint64_t> work_epoch{0};
 std::atomic<bool> par_active{false};
+bool checkpoint_fine() { return false; }   // (vk_work.h fine_mark: no markers here)
+void checkpoint_mark(VkCommandBuffer, uint64_t, char) {}
 void logf(const char* fmt, ...) {   // (the renderer's log: printed, for test_recorder_sync.py to count)
     char b[1024];
     va_list a;

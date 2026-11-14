@@ -4222,7 +4222,7 @@ bool bind_descriptors(VkCommandBuffer cmd, VkPipelineBindPoint bp, const Program
 
 // ---- RX_VK_CHECKPOINTS: a marker before each draw and dispatch (VK_NV_device_diagnostic_checkpoints); when the
 // device is lost, the markers the GPU reached say which program it was running ----
-struct Checkpoint { uint64_t prog; uint64_t frame; uint32_t seq; char kind; };
+struct Checkpoint { uint64_t prog; uint64_t frame; uint32_t seq; char kind; VkCommandBuffer cmd; };
 Checkpoint checkpoints[1 << 16];
 std::atomic<uint32_t> checkpoint_n{0};
 
@@ -4250,13 +4250,18 @@ void set_checkpoint(VkCommandBuffer cmd, uint32_t i, uint32_t seq) {
 void checkpoint(VkCommandBuffer cmd, const Program& p, char kind) {
     if (!checkpoints_on()) return;
     const uint32_t seq = ++checkpoint_n, i = (seq - 1) & 0xFFFF;
-    checkpoints[i] = {p.key, texture_frame_no(), seq, kind};
+    checkpoints[i] = {p.key, texture_frame_no(), seq, kind, cmd};
     set_checkpoint(cmd, i, seq);
 }
 const char* checkpoint_kind(char c) {
     return c == 'd' ? "draw of program" : c == 'c' ? "dispatch of program" : c == 'i' ? "INDIRECT dispatch of program"
          : c == 'm' ? "mirror sync of pool"
          : c == 'b' ? "write-back of pool" : c == 'u' ? "upload of texture" : c == 'g' ? "GPU unswizzle of texture"
+         : c == 's' ? "start of recording" : c == 'p' ? "present's copy into swapchain image"
+         : c == 'B' ? "barrier" : c == 'R' ? "begin rendering" : c == 'E' ? "end rendering" : c == 'C' ? "copy buffer"
+         : c == 'I' ? "copy buffer to image" : c == 'O' ? "copy image to buffer" : c == 'Y' ? "copy image" : c == 'L' ? "blit"
+         : c == 'V' ? "resolve" : c == 'K' ? "clear color image" : c == 'Z' ? "clear depth image" : c == 'A' ? "clear attachments"
+         : c == 'F' ? "fill buffer" : c == 'U' ? "update buffer" : c == 'Q' ? "begin query" : c == 'q' ? "end query"
          : "?";
 }
 
@@ -4328,9 +4333,10 @@ void device_fault_report() {
 void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind) {
     if (!checkpoints_on()) return;
     const uint32_t seq = ++checkpoint_n, i = (seq - 1) & 0xFFFF;
-    checkpoints[i] = {key, texture_frame_no(), seq, kind};
+    checkpoints[i] = {key, texture_frame_no(), seq, kind, cmd};
     set_checkpoint(cmd, i, seq);
 }
+bool checkpoint_fine() { return dev.fine_markers && marker_words && checkpoint_markers(); }
 
 void buffer_markers_init() {
     if (!vkCmdWriteBufferMarkerAMD) return;
@@ -4369,7 +4375,9 @@ void buffer_markers_init() {
     std::memset(words, 0, size);
     marker_buffer = buffer;
     marker_words = (volatile uint32_t*)words;
-    logf("vk: RX_VK_CHECKPOINTS: VK_AMD_buffer_marker, a marker before each draw and dispatch (memory type %u)", type);
+    logf("vk: RX_VK_CHECKPOINTS: VK_AMD_buffer_marker, a marker before %s (memory type %u)",
+         dev.fine_markers ? "every command (RX_VK_CHECKPOINTS=all, or AMD's integrated GPUs on Windows; =0: off)"
+                          : "each draw and dispatch", type);
 }
 
 namespace {
@@ -4397,6 +4405,26 @@ void buffer_markers_report() {
     const uint32_t end = std::max(start, stuck.empty() ? start + 8 : std::min(stuck.front(), start + 16));
     for (uint32_t s = start; s && s <= end && s <= n; s++) line(s == last_done ? "RUNNING after" : "running", s);
     for (size_t j = 0; j < stuck.size() && j < 12; j++) line("reached, earlier work unfinished", stuck[j]);
+    // (by command buffer: the markers of different ones interleave in number, an upload's among its recording's draws. Where
+    // each stopped: its last marker done, then its first not reached)
+    struct Front { VkCommandBuffer cmd; uint32_t done, next; };
+    std::vector<Front> fronts;
+    const uint32_t from = n > 4000 ? std::max(first, n - 4000) : first;
+    for (uint32_t s = from; s && s <= n; s++) {
+        const uint32_t i = (s - 1) & 0xFFFF;
+        const Checkpoint& k = checkpoints[i];
+        auto f = std::find_if(fronts.begin(), fronts.end(), [&](const Front& x) { return x.cmd == k.cmd; });
+        if (f == fronts.end()) fronts.push_back({k.cmd, 0, 0}), f = fronts.end() - 1;
+        if (marker_words[2 * i + 1] == s) f->done = s, f->next = 0;
+        else if (marker_words[2 * i] != s && f->done && !f->next) f->next = s;
+    }
+    for (const Front& f : fronts) {
+        if (!f.done || !f.next) continue;
+        logf("vk:   command buffer %p stopped:", (void*)f.cmd);
+        for (uint32_t s = f.done > 3 ? f.done - 3 : 1; s <= f.done; s++)
+            if (checkpoints[(s - 1) & 0xFFFF].cmd == f.cmd) line("  done", s);
+        line("  NOT REACHED", f.next);
+    }
 }
 } // namespace
 

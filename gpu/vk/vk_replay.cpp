@@ -716,6 +716,7 @@ Recording& begin_recording(uint64_t value) {
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(r.cmd, &bi);
         vkBeginCommandBuffer(r.upload, &bi);
+        checkpoint_mark(r.cmd, value, 's');
     }
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
@@ -4596,6 +4597,7 @@ void present_image(VkImage src, uint32_t sw, uint32_t sh, const int crop[4], VkI
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(f.cmd, &bi) == VK_ERROR_DEVICE_LOST) device_lost();
     VkImage dst = dev.swap_images[index];
+    checkpoint_mark(f.cmd, index, 'p');
     full_barrier(f.cmd);   // (after the game's work for the frame: earlier submits on this queue)
     image_barrier(f.cmd, dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     const PresentAspect aspect{src && host && host->aspect_ratio ? host->aspect_ratio() : 0.0f};

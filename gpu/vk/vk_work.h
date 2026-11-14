@@ -10,6 +10,13 @@
 #include "vk_recorder.h"   // (RX_VK_RECORDER: each macro below calls its packer, which calls the driver directly when the recorder is off)
 
 namespace mkwvk {
+void checkpoint_mark(VkCommandBuffer cmd, uint64_t key, char kind);   // (vk_draw.cpp, RX_VK_CHECKPOINTS)
+bool checkpoint_fine();                                               // (vk_draw.cpp: dev.fine_markers, vk_main.cpp)
+// (longshot) A marker before each command below that is not a draw or a dispatch (those have their own), where dev.fine_markers:
+// the macros take their arguments once, through a lambda, and pass them on
+template <class... A> inline void fine_mark(char kind, VkCommandBuffer cmd, A&&...) {
+    if (checkpoint_fine()) checkpoint_mark(cmd, 0, kind);
+}
 extern std::atomic<uint64_t> work_epoch;   // (vk_texture.cpp)
 inline void note_work() {
     // (an add, not a load and a store: a thread preempted between the two would store a stale count over another thread's, which could
@@ -18,9 +25,9 @@ inline void note_work() {
 }
 } // namespace mkwvk
 
-#define vkCmdPipelineBarrier2(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdPipelineBarrier2(__VA_ARGS__))
-#define vkCmdBeginRendering(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdBeginRendering(__VA_ARGS__))
-#define vkCmdEndRendering(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdEndRendering(__VA_ARGS__))
+#define vkCmdPipelineBarrier2(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('B', a_...); return ::mkwvk::rec::rx_vkCmdPipelineBarrier2(a_...); }(__VA_ARGS__))
+#define vkCmdBeginRendering(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('R', a_...); return ::mkwvk::rec::rx_vkCmdBeginRendering(a_...); }(__VA_ARGS__))
+#define vkCmdEndRendering(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('E', a_...); return ::mkwvk::rec::rx_vkCmdEndRendering(a_...); }(__VA_ARGS__))
 #define vkCmdDraw(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDraw(__VA_ARGS__))
 #define vkCmdDrawIndexed(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDrawIndexed(__VA_ARGS__))
 #define vkCmdDrawIndirect(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDrawIndirect(__VA_ARGS__))
@@ -32,19 +39,19 @@ inline void note_work() {
 #define vkCmdDrawMeshTasksIndirectCountEXT(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDrawMeshTasksIndirectCountEXT(__VA_ARGS__))
 #define vkCmdDispatch(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDispatch(__VA_ARGS__))
 #define vkCmdDispatchIndirect(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdDispatchIndirect(__VA_ARGS__))
-#define vkCmdCopyBuffer(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdCopyBuffer(__VA_ARGS__))
-#define vkCmdCopyBufferToImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdCopyBufferToImage(__VA_ARGS__))
-#define vkCmdCopyImageToBuffer(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdCopyImageToBuffer(__VA_ARGS__))
-#define vkCmdCopyImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdCopyImage(__VA_ARGS__))
-#define vkCmdBlitImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdBlitImage(__VA_ARGS__))
-#define vkCmdResolveImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdResolveImage(__VA_ARGS__))
-#define vkCmdClearColorImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdClearColorImage(__VA_ARGS__))
-#define vkCmdClearDepthStencilImage(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdClearDepthStencilImage(__VA_ARGS__))
-#define vkCmdClearAttachments(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdClearAttachments(__VA_ARGS__))
-#define vkCmdFillBuffer(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdFillBuffer(__VA_ARGS__))
-#define vkCmdUpdateBuffer(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdUpdateBuffer(__VA_ARGS__))
-#define vkCmdBeginQuery(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdBeginQuery(__VA_ARGS__))
-#define vkCmdEndQuery(...) (::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdEndQuery(__VA_ARGS__))
+#define vkCmdCopyBuffer(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('C', a_...); return ::mkwvk::rec::rx_vkCmdCopyBuffer(a_...); }(__VA_ARGS__))
+#define vkCmdCopyBufferToImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('I', a_...); return ::mkwvk::rec::rx_vkCmdCopyBufferToImage(a_...); }(__VA_ARGS__))
+#define vkCmdCopyImageToBuffer(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('O', a_...); return ::mkwvk::rec::rx_vkCmdCopyImageToBuffer(a_...); }(__VA_ARGS__))
+#define vkCmdCopyImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('Y', a_...); return ::mkwvk::rec::rx_vkCmdCopyImage(a_...); }(__VA_ARGS__))
+#define vkCmdBlitImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('L', a_...); return ::mkwvk::rec::rx_vkCmdBlitImage(a_...); }(__VA_ARGS__))
+#define vkCmdResolveImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('V', a_...); return ::mkwvk::rec::rx_vkCmdResolveImage(a_...); }(__VA_ARGS__))
+#define vkCmdClearColorImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('K', a_...); return ::mkwvk::rec::rx_vkCmdClearColorImage(a_...); }(__VA_ARGS__))
+#define vkCmdClearDepthStencilImage(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('Z', a_...); return ::mkwvk::rec::rx_vkCmdClearDepthStencilImage(a_...); }(__VA_ARGS__))
+#define vkCmdClearAttachments(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('A', a_...); return ::mkwvk::rec::rx_vkCmdClearAttachments(a_...); }(__VA_ARGS__))
+#define vkCmdFillBuffer(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('F', a_...); return ::mkwvk::rec::rx_vkCmdFillBuffer(a_...); }(__VA_ARGS__))
+#define vkCmdUpdateBuffer(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('U', a_...); return ::mkwvk::rec::rx_vkCmdUpdateBuffer(a_...); }(__VA_ARGS__))
+#define vkCmdBeginQuery(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('Q', a_...); return ::mkwvk::rec::rx_vkCmdBeginQuery(a_...); }(__VA_ARGS__))
+#define vkCmdEndQuery(...) (::mkwvk::note_work(), [&](auto&&... a_) { ::mkwvk::fine_mark('q', a_...); return ::mkwvk::rec::rx_vkCmdEndQuery(a_...); }(__VA_ARGS__))
 
 // (RX_VK_RECORDER) the calls that set state, bind or mark: not work (no count), but in the command buffer in order with the work, so
 // through the recorder too

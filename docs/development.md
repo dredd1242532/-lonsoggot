@@ -238,7 +238,8 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | Switch | What it does |
 |---|---|
 | `RX_VK_VALIDATION` (set) | The Khronos validation layer |
-| `RX_VK_CHECKPOINTS=0` | No NVIDIA checkpoints (on by default; after a lost device they name the draw it stopped at) |
+| `RX_VK_CHECKPOINTS=0` | No NVIDIA checkpoints (on by default; after a lost device they name the draw it stopped at), and none of the AMD markers below |
+| `RX_VK_CHECKPOINTS=1` or `all` | Where the NVIDIA ones are missing, `VK_AMD_buffer_marker`'s: before each draw and dispatch (`1`), or before every command, barriers, render passes, copies and clears too (`all`). After a lost device the log names, for each command buffer, the last marker done and the first not reached. `all` is the default on AMD's integrated GPUs on Windows, where it keeps the device from being lost in Kokiri Forest (a Ryzen 9 7900X's Radeon Graphics) |
 | `RX_VK_HANG_DUMP=<file>` | Every thread's stack to the file once no frame was shown for `RX_VK_HANG_SEC` seconds (20) (Windows) |
 | `RX_VK_GPU_HANG_SEC=<s>` | Work sent to the GPU that finishes nothing for this long (30) is a hang: the lost-device report, then the game ends. `0`: the stall is logged and the game waits |
 | `RX_VK_NOOPT` (set) | Pipelines built without the driver's optimisations |

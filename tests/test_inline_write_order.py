@@ -45,6 +45,7 @@ std::atomic<int64_t> st_barriers_left_out{0}, st_barriers_made{0};
 VkCommandBuffer last_barrier_cmd{};
 uint64_t last_barrier_epoch = 0;
 bool env_on(const char*) { return false; }
+template <class... A> void fine_mark(char, VkCommandBuffer, A&&...) {}
 struct GprofSpan { GprofSpan(VkCommandBuffer, const char*) {} };
 struct BufferRef { VkBuffer buffer; uint64_t offset; explicit operator bool() const { return buffer != VK_NULL_HANDLE; } };
 BufferRef gpu_buffer_bind(uint64_t gpu, uint64_t n, bool write) {
@@ -135,7 +136,7 @@ def main():
     source = PREFIX + note + "\n}\n" + "\n".join(wrappers) + "\nnamespace mkwvk {\n" + declarations[0] + "\n" + barrier + write + SUFFIX
     variants = [("current", source, 0),
                 ("missing_barrier", source.replace("full_barrier(cmd);", ""), 1),
-                ("missing_work_count", source.replace("::mkwvk::note_work(), ::mkwvk::rec::rx_vkCmdUpdateBuffer", "::mkwvk::rec::rx_vkCmdUpdateBuffer"), 1)]
+                ("missing_work_count", source.replace("#define vkCmdUpdateBuffer(...) (::mkwvk::note_work(), ", "#define vkCmdUpdateBuffer(...) ("), 1)]
     with tempfile.TemporaryDirectory(prefix="inline-write-") as tmp:
         for name, text, expected in variants:
             if name != "current" and text == source:
