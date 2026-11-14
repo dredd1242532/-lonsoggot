@@ -44,6 +44,16 @@ FIXTURE = r"""
 #include <cstring>
 #include <iterator>
 #include <mutex>   // (save() locks since the control bridge, #926)
+#include <cerrno>   // (save(): what failed, the options file's mode, its move)
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <string>
 #include "longshot_env.h"   // (gpu/vk/compat: env_value_off, the switches' rule)
 #include "hos_wide_size.h"   // (host/: the output sizes the menu accepts, hos_output_size_valid)
@@ -88,6 +98,7 @@ constexpr int HOS_KEY_OC_NOTE_L = 1, HOS_KEY_OC_NOTE_X = 1;   /* (the note rows:
 const char* const bind_names[1] = {"a"};
 struct Host { int (*binding)(int, int, int); } host_value{nullptr}, *host = &host_value;
 bool can_bind() { return host->binding != nullptr; }
+void logf(const char*, ...) {}   // (save()'s line when the file cannot be written)
 /* INI_KEY */
 /* SAVE */
 void env_part() {

@@ -20,6 +20,7 @@
 #include <cmath>
 #include <utility>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <mutex>
@@ -63,6 +64,7 @@
 #include <csignal>
 #include <cerrno>
 #include <pthread.h>
+#include <sys/stat.h>   // (save: the options file's mode)
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -2002,7 +2004,7 @@ void save() {
         }
         fclose(f);
     }
-    if (FILE* f = fopen(ini_path().c_str(), "w")) {
+    const auto write_lines = [&](FILE* f) {
         for (const Row& r : rows) {
             if (r.value == &opts.output_res) {   // (the size itself: host/nn_applet.c reads it)
                 const int v = saved_value(r.value);
@@ -2042,8 +2044,79 @@ void save() {
             if (i < HOS_SW_N) fprintf(f, "toggle_%s=%d\n", bind_names[i], (opts.hold_toggle >> i) & 1);
             fprintf(f, "key_%s=%d,%d\n", bind_names[i], host->binding(HOS_BIND_KEY, i, 0), host->binding(HOS_BIND_KEY, i, 1));
         }
-        fclose(f);
+    };
+    // (written beside its target, a link followed so that a synced file stays linked, as <name>.new, and moved over it once
+    // whole: written in place, a full disk or a close mid-write left it cut short, and the next start took the defaults past
+    // the cut, or, cut to nothing, chose Auto (this PC) over the player's preset. Where nothing can be made beside it or moved
+    // over it (a game folder that is not writable, the file held open by another program), in place as before. A read-only
+    // file is kept. Each failure is logged once a run: a save comes with every arrow press)
+    static bool told[5];
+    const auto say_once = [](int k, const std::string& what) {
+        if (!told[k]) told[k] = true, logf("menu: %s", what.c_str());
+    };
+#ifdef _WIN32
+    const auto why = [] { return "Windows error " + std::to_string(GetLastError()); };
+#else
+    const auto why = [] { return std::string(strerror(errno)); };
+#endif
+    std::string path = ini_path();
+    bool in_place = false;
+#ifdef _WIN32
+    const DWORD attrs = GetFileAttributesA(path.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY)) {
+        say_once(0, "longshot_options.ini is read-only: the settings are not saved");
+        return;
     }
+    in_place = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT);   // (a link: written through it)
+#else
+    if (char* real = realpath(path.c_str(), nullptr)) path = real, free(real);
+    struct stat st{};
+    const bool exists = stat(path.c_str(), &st) == 0;
+    if (exists && access(path.c_str(), W_OK) != 0) {
+        say_once(0, "longshot_options.ini cannot be written (" + why() + "): the settings are not saved");
+        return;
+    }
+#endif
+    const std::string part = path + ".new";
+    if (!in_place) {
+        FILE* f = fopen(part.c_str(), "w");
+        if (!f) {
+            say_once(1, "longshot_options.ini.new cannot be made beside it (" + why() + "): the file is written in place");
+            in_place = true;
+        } else {
+#ifndef _WIN32
+            if (exists) (void)fchmod(fileno(f), st.st_mode & 07777);   // (its permissions, not the umask's)
+#endif
+            write_lines(f);
+            const bool whole = fflush(f) == 0 && !ferror(f);
+            std::string failed = whole ? std::string() : why();
+            if (fclose(f) != 0 && failed.empty()) failed = why();
+            if (!failed.empty()) {   // (not whole: the old file stays as it was)
+                remove(part.c_str());
+                say_once(2, "longshot_options.ini.new could not be written whole (" + failed + "): longshot_options.ini is kept as it was");
+                return;
+            }
+#ifdef _WIN32
+            if (MoveFileExA(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) return;
+#else
+            if (rename(part.c_str(), path.c_str()) == 0) return;
+#endif
+            const std::string moved = why();
+            remove(part.c_str());
+            say_once(3, "longshot_options.ini.new could not be moved over it (" + moved + "): the file is written in place");
+            in_place = true;
+        }
+    }
+    FILE* f = fopen(path.c_str(), "w");
+    if (!f) {
+        say_once(4, "longshot_options.ini could not be opened to write (" + why() + "): the settings are not saved");
+        return;
+    }
+    write_lines(f);
+    const bool whole = fflush(f) == 0 && !ferror(f);
+    std::string failed = whole ? std::string() : why();
+    if (fclose(f) != 0 && failed.empty()) failed = why();
+    if (!failed.empty()) say_once(4, "longshot_options.ini could not be written in place (" + failed + ")");
 }
 
 /// (longshot) The Button prompts row: a new face shows at once where the game has every part of the prompts from
