@@ -107,8 +107,11 @@ translator's own sources, as `nx2/translator_files.py` names them (`gpu/vk/{eden
 included, has every player translate every program again at their next start, so what the translator does not read belongs
 elsewhere. The build reads its own from the
 environment. The README has the ones players are asked to try (`RX_VK_ASTC_RGBA8`, `RX_VK_LOW_SPEC`,
-`RX_VK_MOVIE_UPSCALE`, `RX_VK_SKIP_CODE`, `HOS_OOT_CHEATS`). A pull request that adds or changes a switch lists it in its description's
-*Flags and settings* table (CONTRIBUTING.md) and documents it here. There are several hundred more, most of them one-off
+`RX_VK_MOVIE_UPSCALE`, `RX_VK_SKIP_CODE`, `HOS_OOT_CHEATS`). A change that should be possible to A/B, turn off or roll
+back gets a switch, and the switch ships at its recommended value: on by default when that is the recommendation and it
+was measured, off when it is only for testing; never off just because it is new ([CONTRIBUTING.md](../CONTRIBUTING.md#code-and-data-conventions)).
+A pull request that adds or changes one lists it in its description's *Flags and settings* (its value before and after,
+and the recommendation) and documents it here. There are several hundred more, most of them one-off
 experiments: `grep -rnE '(getenv|env_on)\("' host gpu/vk` lists them, and the comment where each is read says what it
 does. An on/off switch ("(set)" below) is on for `1` or any other value, and off when it is unset, empty, `0`, `false`,
 `off` or `no` (`env_on` in `gpu/vk/compat/longshot_env.h`, `kit.env_on` in Python); it used to be that any value turned
