@@ -16,8 +16,8 @@ will. That includes:
 
 - the `.nup`, `romfs`, `exefs`, `.nso`, `.nca`, `.nsp`, `.xci` or `.nsz`/`.xcz` files, and any title keys;
 - `work/` and everything in it: the extracted dump, `image.bin`, the lifted C, test builds, runs and screenshots;
-- `longshot.exe`, `longshot_vk.dll`, `longshot_programs.bin` (and `longshot_programs.idx`), `longshot_pipelines.bin`,
-  `mkw_vk_pipelines.bin` and other build output;
+- `longshot.exe`, `longshot_vk.dll` and other build output, and the game folder's `cache/` (`longshot_programs.bin` and
+  its `.idx`, `longshot_pipelines.bin`, `longshot_vk_pipelines.bin`);
 - saves (`user/`), `longshot_options.ini`, `longshot_env.txt` and `language.txt`.
 
 Don't ask in an issue, a pull request or the chat where to get the game, how to decrypt it, or for someone else's

@@ -258,7 +258,8 @@ def main():
         game = str(game_path) + os.sep
         sep = "\\" if windows else "/"
         home_as = "%USERPROFILE%" if windows else "~"
-        now_log = game_path / "longshot_log.txt"
+        (game_path / "logs").mkdir()   # (the game folder's logs/: host/game_layout.c)
+        now_log = game_path / "logs" / "longshot_log.txt"
         now_log.write_text(
             "[hos host] longshot " + VERSION + "\n"
             "[hos sead::MainThread] fs: mounted content: -> " + home + sep + "Games" + sep + "Longshot" + sep + "romfs\n"
@@ -267,7 +268,7 @@ def main():
             "[hos Main] map: KokiriForest_Child (child)\n"
             "[hos host] Malice and alice123 stay, as /x/alice123/ does\n"
             "[hos Main] map: HyruleField_Child (child)\n", encoding="utf-8")
-        (game_path / "longshot_log.1.txt").write_text(
+        (game_path / "logs" / "longshot_log.1.txt").write_text(
             "[hos host] longshot v2.0.14\n"
             "[hos sead::MainThread] fs: mounted content: -> " + home + sep + "Games" + sep + "Longshot" + sep + "romfs\n"
             "[hos Main] map: Market_Child (child)\n"

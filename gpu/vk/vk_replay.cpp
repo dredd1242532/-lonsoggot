@@ -36,7 +36,7 @@
 #include "vk_antilag.h"
 #include "vk_draw.h"
 #include "vk_dump.h"
-#include "vk_paths.h"   // (game_module_path: the frame trace beside the game)
+#include "vk_paths.h"   // (log_path: the frame trace in the game folder's logs/)
 #include "vk_gprof.h"
 #include "vk_framegen.h"
 #include "vk_dlss.h"   // (longshot: dlss_fg_idle)
@@ -116,6 +116,27 @@ const bool rec_thread_hook = (::mkwvk::rec::g_thread_start_hook = [] {
     ::mkwvk::logf("vk: RX_VK_RECORDER_PIN=%s: the recorder %s %#llx (reserved %#llx)", pin, ok ? "pinned to" : "NOT pinned, mask",
                   (unsigned long long)m, (unsigned long long)reserved);
 }, true);
+// (RX_VK_RECORDER_IDLE=wait: the recorder's idle waits on its ring counter. Windows: from kernelbase.dll, without linking
+// Synchronization.lib; Linux: host/posix's, a futex)
+const bool rec_wait_hooks = [] {
+#ifdef _WIN32
+    using WaitFn = BOOL(WINAPI*)(volatile VOID*, PVOID, SIZE_T, DWORD);
+    using WakeFn = VOID(WINAPI*)(PVOID);
+    static WaitFn wait = nullptr;
+    static WakeFn wake = nullptr;
+    if (const HMODULE k = GetModuleHandleA("kernelbase.dll")) {
+        wait = (WaitFn)(void*)GetProcAddress(k, "WaitOnAddress");
+        wake = (WakeFn)(void*)GetProcAddress(k, "WakeByAddressSingle");
+    }
+    if (!wait || !wake) return false;
+    ::mkwvk::rec::g_wait_on_address = [](volatile void* a, void* c, size_t n, uint32_t ms) { return wait(a, c, n, ms) != 0; };
+    ::mkwvk::rec::g_wake_by_address = [](void* a) { wake(a); };
+#else
+    ::mkwvk::rec::g_wait_on_address = [](volatile void* a, void* c, size_t n, uint32_t ms) { return WaitOnAddress(a, c, n, ms) != 0; };
+    ::mkwvk::rec::g_wake_by_address = [](void* a) { WakeByAddressSingle(a); };
+#endif
+    return true;
+}();
 // (RX_VK_BATCH: see queue_flush_locked)
 VkSemaphore batch_tl = VK_NULL_HANDLE;
 uint64_t batch_next = 0, batch_flushed = 0;
@@ -154,6 +175,7 @@ struct Recording {
 // replay waited ~1.5 ms a frame for a slot the GPU still had)
 constexpr int kRecordings = 48;   // (test: 24 before; with RX_VK_BATCH the ring came round to held submits once a frame)
 Recording recordings[kRecordings];
+uint64_t rec_end_pos[kRecordings];   // (RX_VK_RECORDER_OWN: the recorder ring's position after each slot's last end, vk_recorder.h)
 int recording_index = 0;
 
 /// (a recording slot's last submit done: before it is used again)
@@ -238,6 +260,8 @@ void queue_flush_locked() {   // (dev.present_mu held)
     si.pSignalSemaphoreInfos = sig;
     PROF(PROF_QSUBMIT);
     si.pNext = reflex_submit_id(nullptr, pend.reflex);   // (NVIDIA Reflex: the game frame of the batch's first command buffer)
+    VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
+    if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
     const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, VK_NULL_HANDLE);
     static int failures;
     if (res != VK_SUCCESS && failures++ < 8) logf("vk: batched submit %llu failed (%d)", (unsigned long long)batch_next, (int)res);
@@ -683,12 +707,16 @@ Recording& begin_recording(uint64_t value) {
         gpu_time_collect(r);
         gprof_collect(r.slot);
     }
-    vkResetCommandPool(dev.device, r.pool, 0);
-    vkResetCommandPool(dev.device, r.upload_pool, 0);
-    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(r.cmd, &bi);
-    vkBeginCommandBuffer(r.upload, &bi);
+    rec::slot_begin(rec_end_pos[r.slot]);   // (RX_VK_RECORDER_OWN: the slot's own resets below and in draw_begin_recording)
+    {
+        rec::OwnSlot own;
+        vkResetCommandPool(dev.device, r.pool, 0);
+        vkResetCommandPool(dev.device, r.upload_pool, 0);
+        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(r.cmd, &bi);
+        vkBeginCommandBuffer(r.upload, &bi);
+    }
     gpu_time_begin(r);
     gprof_begin_recording(r.slot, r.cmd, r.upload);
     r.value = value;
@@ -697,6 +725,7 @@ Recording& begin_recording(uint64_t value) {
     memory_recording_value(value, completed());
     texture_begin_recording(r.upload, value);
     draw_begin_recording(r.slot, r.cmd, value);
+    rec::slot_done();
     return r;
 }
 void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at = 0) {
@@ -706,6 +735,7 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     gpu_time_end(r);
     vkEndCommandBuffer(r.upload);
     vkEndCommandBuffer(r.cmd);
+    rec_end_pos[r.slot] = rec::produced();   // (the ends waited for the recorder: it is past this)
     VkSemaphoreSubmitInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
     signal.semaphore = timeline;
     signal.value = signal_at ? signal_at : r.value;
@@ -777,6 +807,8 @@ void submit_recording(Recording& r, bool signal_value = true, uint64_t signal_at
     }
     PROF(PROF_QSUBMIT);
     si.pNext = reflex_submit_id(nullptr);   // (NVIDIA Reflex: the frame being made)
+    VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
+    if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
     const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, r.fence);
     r.submitted = res == VK_SUCCESS;
     static int failures;
@@ -1840,6 +1872,7 @@ void record_segment(VkCommandBuffer& cmd, const Segment& g) {
 /// replay's init command buffer that could not be ended: images already made and published lost their first layout
 /// change, and any later submission may use them
 [[noreturn]] void replay_fatal(const char* why) {
+    // The host's crash/freeze records read this prefix (host/hos_report_prefixes.h); keep it stable.
     logf("vk: FATAL: %s", why);
     if (host && host->log_flush) host->log_flush();
     std::fprintf(stderr, "vk: FATAL: %s\n", why);
@@ -2055,6 +2088,8 @@ const uint8_t* replay_handle(VkCommandBuffer& cmd, const uint8_t* h, bool may_st
         std::lock_guard lk(dev.present_mu);
         queue_flush_locked();
         si.pNext = reflex_submit_id(nullptr);   // (NVIDIA Reflex: the frame being made; after the flush, which tags its own)
+        VkSemaphoreSubmitInfo sparse_wait;   // (longshot: after the sparse mirrors' binds, RX_VK_MIRROR_SPARSE)
+        if (memory_sparse_wait(&sparse_wait)) si.waitSemaphoreInfoCount = 1, si.pWaitSemaphoreInfos = &sparse_wait;
         const VkResult res = vkQueueSubmit2(dev.queue, 1, &si, j->r->fence);
         j->r->submitted = res == VK_SUCCESS;
         if (res != VK_SUCCESS) logf("vk: segment submit %llu failed (%d)", (unsigned long long)j->r->value, (int)res);
@@ -2429,11 +2464,10 @@ void finish_recording(uint64_t value) {
 // RX_VK_REPLAY_PIN=0: off. (Only preferring the core, as the thread's ideal processor with every processor allowed, gained
 // nothing there: the pin is what helps)
 bool async_on();
-// (Windows only: on Linux a thread inherits the affinity of the one that makes it, and the back end's threads made on
-// first use inside a replay (the capture's copy helpers, the shader workers, the pool imports...) would all have stayed on
-// the reserved core. Windows gives a new thread the process's)
+// (On Linux pthread_create inherits the calling thread's affinity, so win32_posix.c's thread_self and thread_entry
+// apply process_affinity when a new thread registers via CreateThread or GetCurrentThread in SetThreadDescription,
+// keeping helper threads made on first use inside a replay off the reserved core, as Windows does)
 uint64_t replay_pin_mask() {
-#if defined(_WIN32)
     static const uint64_t m = [] {
         const char* e = getenv("RX_VK_REPLAY_PIN");
         const uint64_t r = !(e && atoi(e) == 0) && host->reserved_cpus ? host->reserved_cpus() : 0;
@@ -2441,9 +2475,6 @@ uint64_t replay_pin_mask() {
         return r;
     }();
     return m;
-#else
-    return 0;
-#endif
 }
 thread_local int replay_pin_depth = 0;
 thread_local DWORD_PTR replay_pin_prev = 0;
@@ -3610,13 +3641,23 @@ void log_frame_stats() {
         l_sync_b = sync_b, l_sync_c = sync_c, l_wb_b = wb_b;
         static int64_t l_d, l_sk, l_di, l_pass, l_sub, l_up, l_upb, l_bar, l_ubu, l_ubo, l_wait;
         logf("vk: %lld presents, %.1f fps; a frame: %.0f draws (%.0f skipped), %.0f dispatches, %.0f passes, %.0f "
-             "barriers, %.0f submits, %.1f uploads (%.1f MB), %.0f ub updates (%.0f overlays), GPU-bound wait %.1f ms; "
+             "barriers, %.0f submits, %.1f uploads (%.1f MB), %.0f ub updates (%.0f overlays), GPU-bound wait %.1f ms (recording slots only); "
              "%lld pipelines (%.0f ms), %lld programs (%lld failed), %zu textures (%llu MB)",
              (long long)presents, 120.0 / secs, (d - l_d) / 120.0, (sk - l_sk) / 120.0, (di - l_di) / 120.0,
              (passes - l_pass) / 120.0, (st_barriers - l_bar) / 120.0, (st_submits - l_sub) / 120.0,
              (up - l_up) / 120.0, (upb - l_upb) / 120.0 / 1048576.0, (st_ub_updates - l_ubu) / 120.0,
              (st_ub_overlays - l_ubo) / 120.0, (st_wait_ns - l_wait) / 120.0 / 1e6, (long long)pl, pms,
              (long long)tr, (long long)fl, texture_count(), (unsigned long long)(texture_bytes() >> 20));
+        {
+            const auto waits = gpu_wait_stats::counters.take();
+            const double scale = 1.0 / (120.0 * 1e6);
+            logf("vk: host time in GPU resource waits: %.2f ms a frame (fences %.2f, timelines %.2f, idle %.2f, queries %.2f; "
+                 "sum across threads, not frame time; excludes pacing and driver submit/present blocking)",
+                 (waits[gpu_wait_stats::kFence] + waits[gpu_wait_stats::kTimeline] + waits[gpu_wait_stats::kIdle] +
+                  waits[gpu_wait_stats::kQuery]) * scale,
+                 waits[gpu_wait_stats::kFence] * scale, waits[gpu_wait_stats::kTimeline] * scale,
+                 waits[gpu_wait_stats::kIdle] * scale, waits[gpu_wait_stats::kQuery] * scale);
+        }
         draw_skip_report(120.0);
         {   // (longshot: the full barriers recorded and the ones left out as the second of two in a row, RX_VK_BARRIER_DEDUPE_OFF=1)
             static int64_t l_made, l_left;
@@ -3682,10 +3723,7 @@ void status_tick() {
     // pipeline compiles, the GPU behind. RX_VK_FRAME_LOG has the frame times alone)
     static FILE* trace = [] {
         if (!getenv("RX_VK_FRAME_TRACE") || !atoi(getenv("RX_VK_FRAME_TRACE"))) return (FILE*)nullptr;
-        char exe[MAX_PATH];
-        const DWORD n = game_module_path(exe, MAX_PATH);
-        std::string dir(exe, n);
-        FILE* f = fopen((dir.substr(0, dir.find_last_of("\\/") + 1) + "longshot_frames.csv").c_str(), "w");
+        FILE* f = fopen(log_path("longshot_frames.csv").c_str(), "w");   // (the game folder's logs/: vk_paths.h)
         if (f) fprintf(f, "frame,ms,pipe_waits,pipe_wait_ms,left_out,translate_ms,uploads,upload_mb,textures,memsync_ms,pipelines_ms,"
                           "uploads_ms,programs_ms,slot_wait_ms,gpu_behind_ms,draw_ms,desc_ms,cmds_ms,tex_lookup_ms,textures_gone,"
                           "late_wait_ms,readback_wait_ms,tex_frame_ms\n");
@@ -5497,6 +5535,8 @@ void fill_replay_table(MkwVkRenderer& t) {
     t.nvn_event_signal = event_signal_queued;
     t.option = [](int id) -> int {   // (3: the fixed path's scale in 1/10000, vk_menu.cpp; DLAA: full scale, vk_dlss.cpp)
         if (id == 11) return opts.stick_dead_zone;
+        if (id == HOS_OPT_WALK_MODE) return opts.walk_mode;
+        if (id == HOS_OPT_WALK_SPEED) return opts.walk_speed;
         if (id == HOS_OPT_CHEAT_HEARTS) return menu_heart_protection();
         if (id == HOS_OPT_CHEAT_FLIGHT) return menu_player_flight();
         if (id == HOS_OPT_CHEAT_ACTION) return menu_take_cheat_action();
@@ -5519,6 +5559,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_SKIP_OPENING) return opts.skip_opening;
         if (id == HOS_OPT_FPS_CAP) return opts.fps_cap;
         if (id == HOS_OPT_HOLD_TOGGLE) return opts.hold_toggle;
+        if (id == HOS_OPT_SKIP_TITLE) return opts.skip_title != 0;
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) : 0;
