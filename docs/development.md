@@ -47,6 +47,16 @@ for or install another version (the Longshot Launcher does).
 
 Run everything with `python -I` from this folder.
 
+The game-free checks also run on **macOS 14.4 or newer**: `python -I -B tests/run_all.py --jobs 6`, with Python 3, the
+repository's Python requirements and Apple's Command Line Tools. Vulkan/SPIR-V headers come from `RX_CPM` or the
+`LONGSHOT_*_HEADERS` variables; optional checks need `spirv-val`, glslang or dav1d (found through `pkg-config` on macOS).
+Missing tools are reported as skips (`--strict` makes them failures). The runner reports `macos` and keeps separate
+timing estimates. Windows-native setup/Builder checks, game/GPU checks, the Linux AppImage package bootstrap and the
+Linux ELF symbol fixture are skipped with reasons; portable source/POSIX checks still run, including ones that expose
+unfinished macOS support. Use a short `TMPDIR` for Unix sockets; `--jobs` bounds the runner's pool, not nested builders.
+Naming a check or using `--no-skip` overrides platform exclusions, including game/GPU checks. These results do not
+establish a working macOS game or renderer.
+
 | Command | What |
 |---|---|
 | `python -I nx2/nup.py <file.nup> --extract work/dump` | the `.nup` dump package to `work/dump/exefs` + `romfs` (newest title; ZBIC NSOs made plain by `nx2/unpack.py`) |

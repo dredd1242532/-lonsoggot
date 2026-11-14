@@ -9,6 +9,7 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -124,7 +125,99 @@ class Reader(unittest.TestCase):
 
     def test_unknown_os(self):
         self.bad('RUN_ALL_SKIP = {"win32": "why"}\n', "unknown OS 'win32'", "linux, windows")
-        self.bad('RUN_ALL_SKIP = {"windows": "why", "macos": "why"}\n', "'macos'")
+        self.bad('RUN_ALL_SKIP = {"windows": "why", "freebsd": "why"}\n', "unknown OS 'freebsd'")
+
+    def test_macos_is_accepted_alone_and_with_the_existing_systems(self):
+        self.assertEqual(self.read('RUN_ALL_SKIP = {"macos": "needs a device"}\n')["skip"],
+                         {"macos": "needs a device"})
+        reasons = {"linux": "Linux reason", "windows": "Windows reason", "macos": "Mac reason"}
+        self.assertEqual(self.read("RUN_ALL_SKIP = %r\n" % reasons)["skip"], reasons)
+
+    def test_macos_still_requires_a_nonempty_reason(self):
+        for reason in ("", "  ", None, 1):
+            self.bad("RUN_ALL_SKIP = %r\n" % {"macos": reason}, "dict of OS -> reason")
+
+
+def platform_runner(name, platform):
+    """Load the runner itself with the platform values, not a copy of its detection expression."""
+    spec = importlib.util.spec_from_file_location("run_all_platform", ROOT / "tests" / "run_all.py")
+    module = importlib.util.module_from_spec(spec)
+    with mock.patch.object(os, "name", name), mock.patch.object(sys, "platform", platform):
+        spec.loader.exec_module(module)
+    return module
+
+
+class Platforms(unittest.TestCase):
+    def test_linux_and_windows_detection_is_unchanged(self):
+        for name, platform, expected, windows in (("posix", "linux", "linux", False),
+                                                  ("nt", "win32", "windows", True)):
+            with self.subTest(platform=platform):
+                runner = platform_runner(name, platform)
+                self.assertEqual((runner.OS, runner.WINDOWS), (expected, windows))
+
+    def test_darwin_is_macos_not_linux(self):
+        runner = platform_runner("posix", "darwin")
+        self.assertEqual((runner.OS, runner.WINDOWS), ("macos", False))
+
+    def test_find_tools_keeps_each_platforms_choices(self):
+        available = {name: "/tools/" + name for name in ("custom++", "clang++", "g++", "c++", "spirv-val", "glslang", "dotnet")}
+        for name, platform in (("posix", "linux"), ("nt", "win32"), ("posix", "darwin")):
+            runner = platform_runner(name, platform)
+            for compiler in ("custom++", "not-installed"):
+                with self.subTest(platform=platform, compiler=compiler), \
+                        mock.patch.dict(os.environ, {"CXX": compiler}, clear=True), \
+                        mock.patch.object(runner.shutil, "which", side_effect=available.get), \
+                        mock.patch.object(runner, "header_dir", side_effect=lambda env, package, probe: "/headers/" + package), \
+                        mock.patch.object(runner, "dav1d_prefix", return_value="/dav1d") as dav1d:
+                    tools = runner.find_tools()
+                    self.assertEqual(tools, {
+                        "cxx": available["custom++" if compiler == "custom++" else "clang++"],
+                        "spirv_val": available["spirv-val"], "glslang": available["glslang"], "dotnet": available["dotnet"],
+                        "spirv_headers": "/headers/spirv-headers", "vulkan_headers": "/headers/vulkanheaders",
+                        "dav1d": None if name == "nt" else "/dav1d",
+                    })
+                    self.assertEqual(dav1d.call_count, 0 if name == "nt" else 1)
+
+    def test_darwin_dav1d_uses_pkg_config_only_after_existing_roots(self):
+        prefix = os.path.join("sdk", "dav1d")
+        header = os.path.join(prefix, "include", "dav1d", "dav1d.h")
+        reply = subprocess.CompletedProcess([], 0, prefix + "\n")
+        with mock.patch.object(sys, "platform", "darwin"), mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(run_all.os.path, "isdir", return_value=False), \
+                mock.patch.object(run_all.os.path, "exists", side_effect=lambda p: p == header), \
+                mock.patch.object(run_all, "which", return_value="/tools/pkg-config"), \
+                mock.patch.object(run_all.subprocess, "run", return_value=reply) as command:
+            self.assertEqual(run_all.dav1d_prefix(), prefix)
+            command.assert_called_once_with(["/tools/pkg-config", "--variable=prefix", "dav1d"],
+                                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                                            text=True, timeout=5)
+            command.reset_mock()
+            with mock.patch.dict(os.environ, {"LONGSHOT_DAV1D": prefix}):
+                self.assertEqual(run_all.dav1d_prefix(), prefix)
+            command.assert_not_called()
+
+    def test_missing_dav1d_stays_missing_without_breaking_discovery(self):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(run_all.os.path, "isdir", return_value=False), \
+                mock.patch.object(run_all.os.path, "exists", return_value=False), \
+                mock.patch.object(run_all, "which", return_value="/tools/pkg-config"), \
+                mock.patch.object(run_all.subprocess, "run") as command:
+            for platform in ("linux", "win32"):
+                with self.subTest(platform=platform), mock.patch.object(sys, "platform", platform):
+                    self.assertIsNone(run_all.dav1d_prefix())
+                    command.assert_not_called()
+            with mock.patch.object(sys, "platform", "darwin"):
+                for failure in (OSError("unavailable"), subprocess.TimeoutExpired("pkg-config", 5)):
+                    command.side_effect = failure
+                    self.assertIsNone(run_all.dav1d_prefix())
+                command.side_effect = None
+                for code, prefix in ((1, ""), (0, ""), (0, "/missing")):
+                    command.return_value = subprocess.CompletedProcess([], code, prefix)
+                    self.assertIsNone(run_all.dav1d_prefix())
+                command.reset_mock()
+                with mock.patch.object(run_all, "which", return_value=None):
+                    self.assertIsNone(run_all.dav1d_prefix())
+                command.assert_not_called()
 
 
 class Runner(unittest.TestCase):
@@ -168,7 +261,7 @@ class Runner(unittest.TestCase):
                 os.mkdir(os.path.join(root, d))
             with open(os.path.join(root, "tests", "test_broken.py"), "w", encoding="utf-8") as f:
                 f.write('RUN_ALL_SKIP = {"windows": "why"\n')
-            for os_name in ("linux", "windows"):
+            for os_name in ("linux", "windows", "macos"):
                 with mock.patch.object(run_all, "OS", os_name), \
                         mock.patch.object(run_all, "compile_all", lambda: run_all.Result(0, b"")):
                     rc, out, err = self.run_main(root, "test_broken")
@@ -185,6 +278,80 @@ class Runner(unittest.TestCase):
         self.assertIn("tests/test_new.py: declare it in the test: RUN_ALL_ARGS = ['--cxx', '{cxx}']", err)
         self.assertIn("tests/test_new.py: declare it in the test: RUN_ALL_SKIP = {'windows': 'why'}", err)
         self.assertEqual(out, "")
+
+    def test_platform_skip_overrides_and_step_summary(self):
+        for os_name in ("linux", "windows", "macos"):
+            with self.subTest(os=os_name), tempfile.TemporaryDirectory() as root:
+                for d in ("tests", "nx2"):
+                    os.mkdir(os.path.join(root, d))
+                reason = "only the other platform has this subject"
+                Path(root, "tests", "test_platform.py").write_text(
+                    "RUN_ALL_SKIP = %r\nraise SystemExit(19)\n" % {os_name: reason}, encoding="utf-8")
+                summary = Path(root, "summary.txt")
+                for flags, code, passed, failed, skipped in (((), 0, 1, 0, 1),
+                                                            (("--no-skip",), 1, 1, 1, 0),
+                                                            (("test_platform",), 1, 0, 1, 0)):
+                    summary.write_text("", encoding="utf-8")
+                    with self.subTest(flags=flags), mock.patch.object(run_all, "OS", os_name), \
+                            mock.patch.object(run_all, "find_tools", return_value=TOOLS), \
+                            mock.patch.object(run_all, "cpp_checks", return_value=([], [])), \
+                            mock.patch.object(run_all, "load_times", return_value={}), \
+                            mock.patch.object(run_all, "compile_all", lambda: run_all.Result(0, b"")), \
+                            mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary), "GITHUB_ACTIONS": "false"}):
+                        rc, out, err = self.run_main(root, "--jobs", "1", *flags)
+                        self.assertEqual(rc, code, out + err)
+                        self.assertEqual(err, "")
+                        head = out.strip().splitlines()[-1]
+                        self.assertRegex(head, r"^%d passed, %d failed, %d skipped in \d+ s \(%s, 1 at once\)$"
+                                         % (passed, failed, skipped, os_name))
+                        step = summary.read_text(encoding="utf-8")
+                        self.assertIn("### Tests (%s): %s" % (os_name, head), step)
+                        self.assertIn("`tests/test_platform.py`", step)
+                        if skipped:
+                            self.assertIn("| skip |  | `tests/test_platform.py` | " + reason + " |", step)
+                        else:
+                            self.assertIn("| **FAIL** |", step)
+                            self.assertNotIn(reason, step)
+
+    def test_no_skip_does_not_supply_missing_tools(self):
+        for os_name in ("linux", "windows", "macos"):
+            with self.subTest(os=os_name), tempfile.TemporaryDirectory() as root:
+                for d in ("tests", "nx2"):
+                    os.mkdir(os.path.join(root, d))
+                Path(root, "tests", "test_tool.py").write_text(
+                    'RUN_ALL_ARGS = ["--tool", "{glslang}"]\nRUN_ALL_SKIP = %r\n'
+                    'raise RuntimeError("the missing-tool child must not run")\n' % {os_name: "platform reason"},
+                    encoding="utf-8")
+                for flags, code, result in ((("--strict",), 0, "platform reason"),
+                                             (("--no-skip",), 0, "not found here: glslang"),
+                                             (("--no-skip", "--strict"), 1, "not found: glslang (--strict)")):
+                    with self.subTest(flags=flags), mock.patch.object(run_all, "OS", os_name), \
+                            mock.patch.object(run_all, "find_tools", return_value=TOOLS), \
+                            mock.patch.object(run_all, "cpp_checks", return_value=([], [])), \
+                            mock.patch.object(run_all, "compile_all", lambda: run_all.Result(0, b"")), \
+                            mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}):
+                        rc, out, err = self.run_main(root, "--jobs", "1", *flags)
+                        self.assertEqual(rc, code, out + err)
+                        self.assertIn(result, out)
+                        self.assertNotIn("the missing-tool child must not run", out)
+
+    def test_macos_repository_excludes_only_absent_subjects(self):
+        expected = {
+            "nx2/test_bc_storage_views.py", "nx2/test_dll.py", "nx2/test_insn.py", "nx2/test_leaf.py",
+            "tests/test_present_aspect_vulkan.py", "tests/test_fs_path_utf8.py", "tests/test_log_batch.py",
+            "tests/test_portable_builder_home.py", "tests/test_portable_builder_startup.py",
+            "tests/test_portable_setup_paths.py", "tests/test_portable_setup_start.py", "tests/test_portable_setup_transaction.py",
+            "tests/test_precompile_compute_guard.py", "tests/test_setup_runtime.py", "tests/test_setup_runtime_paths.py",
+            "tests/test_appimage_package_retry.py", "tests/test_prof_symbols.py",
+        }
+        skipped = set()
+        for d in ("tests", "nx2"):
+            for path in sorted((ROOT / d).glob("test_*.py")):
+                rel = d + "/" + path.name
+                if run_all.read_declarations(str(path), rel, TOOLS)["skip"].get("macos"):
+                    skipped.add(rel)
+        # In particular, no skip for control, cache files, memory queries, low-memory notices or timing failures.
+        self.assertEqual(skipped, expected)
 
     def test_this_repository(self):
         self.assertEqual((run_all.ARGS, run_all.MODULES, run_all.SKIP), ({}, {}, {}),

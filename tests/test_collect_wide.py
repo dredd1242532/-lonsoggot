@@ -27,6 +27,9 @@ static uint8_t a64_dirty[A64_DIRTY_PAGES];
 static uint64_t guest_size = A64_DIRTY_PAGES << 12;
 static uint64_t hos_guest_size(void) { return guest_size; }
 static int clear_calls;
+#if defined(__APPLE__)
+#undef memcpy   /* (the SDK's fortified macro: this fixture counts the real copies below) */
+#endif
 #define memcpy(d, s, n) (clear_calls += (n) == 256, memcpy(d, s, n))
 
 @MARKS_CLEAR@

@@ -12,7 +12,10 @@ import traceback
 
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ALL_ARGS = ["--dotnet", "{dotnet}"]
-RUN_ALL_SKIP = {"linux": "Windows Builder startup (a win-x64 self-contained program)"}
+RUN_ALL_SKIP = {
+    "linux": "Windows Builder startup (a win-x64 self-contained program)",
+    "macos": "Windows Builder startup (a win-x64 self-contained program)",
+}
 
 
 def main():

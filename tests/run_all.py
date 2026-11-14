@@ -15,11 +15,11 @@ no arguments and its own defaults.
 
     RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]   # its command-line arguments
     RUN_ALL_MODULES = ["zstandard"]                                       # Python packages it imports
-    RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows") -> why it is skipped
+    RUN_ALL_SKIP = {"windows": "needs spirv-val: checked on Linux"}       # OS ("linux", "windows", "macos") -> reason
 
 {name} in an argument is a tool or folder find_tools looks for (cxx, vulkan_headers, spirv_headers, spirv_val, glslang,
 dotnet, dav1d); a check whose tool, compiler (the word after --cc or --cxx) or module is missing here is skipped, or fails
-with --strict. A check skipped on both OSes (a GPU, the game) names both. A declaration that is not a plain literal of
+with --strict. A check skipped on every OS (a GPU, the game) names all three. A declaration that is not a plain literal of
 that shape, names an unknown placeholder or OS, or any other RUN_ALL_ name, stops the run with the file and line; so
 does one set or changed anywhere but its own top-level line (inside an if or a try, .append(...), +=, a subscript).
 Only the tests a run picks (by name) are read: a bad declaration elsewhere does not stop it. A test that does not parse
@@ -46,6 +46,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WINDOWS = os.name == "nt"
 OS = "windows" if WINDOWS else "linux"
+if sys.platform == "darwin":
+    OS = "macos"
 
 # What a check needs is declared in the test file itself, as top-level literals the runner reads with ast (the test is
 # never imported): see the docstring above and read_declarations below.
@@ -53,7 +55,7 @@ DECLARATIONS = ("RUN_ALL_ARGS", "RUN_ALL_MODULES", "RUN_ALL_SKIP")
 # (a list's or a dict's methods that change it in place: a declaration changed that way is not what the runner reads)
 MUTATORS = {"append", "extend", "insert", "remove", "pop", "clear", "update", "setdefault", "popitem", "sort",
             "reverse", "__setitem__", "__delitem__", "__iadd__", "__ior__"}
-OSES = ("linux", "windows")
+OSES = ("linux", "windows", "macos")
 
 # (each OS's measured seconds per check, for the order and the --shard split: see the docstring)
 TIMES = os.path.join(ROOT, "tests", "run_all_times.json")
@@ -99,6 +101,17 @@ def dav1d_prefix():
     for r in roots:
         if r and os.path.exists(os.path.join(r, "include", "dav1d", "dav1d.h")):
             return r
+    if sys.platform == "darwin":
+        pkg_config = which("pkg-config")
+        if pkg_config:
+            try:
+                p = subprocess.run([pkg_config, "--variable=prefix", "dav1d"], stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            prefix = p.stdout.strip()
+            if p.returncode == 0 and prefix and os.path.exists(os.path.join(prefix, "include", "dav1d", "dav1d.h")):
+                return prefix
     return None
 
 

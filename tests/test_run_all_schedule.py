@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("run_all", ROOT / "tests" / "run_all.py")
@@ -63,6 +64,39 @@ class Schedule(unittest.TestCase):
                 data = json.load(f)
             self.assertEqual(data[run_all.OS], {"x": 2.0, "z": 12.3})   # (under TIMES_MIN left out)
             self.assertEqual(data["other"], {"a": 9})                   # (the other OS kept)
+
+    def test_each_system_keeps_its_own_times_and_shard_split(self):
+        names = ["a", "b", "c", "d"]
+        original = {"linux": {"b": 6.0}, "windows": {"c": 9.0}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "times.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(original, f)
+            with mock.patch.object(run_all, "OS", "macos"):
+                # No Mac measurement yet: alphabetical, not the Linux measurements borrowed under another name.
+                times = run_all.load_times(path)
+                self.assertEqual(times, {})
+                self.assertEqual(run_all.by_time(names, times), names)
+                self.assertEqual(run_all.shard_of(names, times, 2), {"a": 0, "b": 1, "c": 0, "d": 1})
+                ran = run_all.Check("d", None)
+                ran.secs = 12.34
+                run_all.write_times([ran], path)
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data, {**original, "macos": {"d": 12.3}})
+
+            for os_name, slow in (("linux", "b"), ("windows", "c"), ("macos", "d")):
+                with self.subTest(os=os_name), mock.patch.object(run_all, "OS", os_name):
+                    times = run_all.load_times(path)
+                    self.assertEqual(times, data[os_name])
+                    self.assertEqual(run_all.by_time(names, times), [slow] + [n for n in names if n != slow])
+                    self.assertEqual(run_all.shard_of(names, times, 2), {n: 0 if n == slow else 1 for n in names})
+                    ran = run_all.Check(slow, None)
+                    ran.secs = 3.45
+                    run_all.write_times([ran], path)
+                    data[os_name] = {slow: 3.5}
+                    with open(path, encoding="utf-8") as f:
+                        self.assertEqual(json.load(f), data)   # Every other system's measurements are unchanged.
 
     def test_this_repository(self):
         with open(run_all.TIMES, encoding="utf-8") as f:

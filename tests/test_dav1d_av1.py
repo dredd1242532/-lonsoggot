@@ -14,6 +14,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}", "--dav1d", "{dav1d}"]
@@ -129,6 +130,8 @@ def main():
         lib = [str(static), "-static"]
     else:
         lib = [str(static), "-lpthread", "-lm"] if static.exists() and str(prefix) != "/usr" else ["-ldav1d"]
+        if sys.platform == "darwin" and lib == ["-ldav1d"]:
+            lib = ["-L" + str(prefix / "lib"), "-Wl,-rpath," + str(prefix / "lib"), *lib]
     with tempfile.TemporaryDirectory() as d:
         src, exe = Path(d) / "t.c", Path(d) / ("t.exe" if args.cross else "t")
         src.write_text(FIXTURE_C, encoding="utf-8")

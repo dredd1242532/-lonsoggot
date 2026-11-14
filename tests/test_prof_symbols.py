@@ -15,6 +15,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+RUN_ALL_SKIP = {"macos": "the native symbol fixture needs Linux ELF, link.h and dl_iterate_phdr; macOS uses Mach-O"}
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 

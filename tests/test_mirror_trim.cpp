@@ -12,6 +12,9 @@ struct GuestPool {
 
 int main() {
     using namespace mirror_trim;
+#if defined(__APPLE__)
+    using mirror_trim::wait;   // (do not consider the SDK's wait(int*) for wait(0))
+#endif
     const uint64_t MB = 1ull << 20, chunk = 4 * MB;
     {   // the Market entered from Hyrule Field: the field's 224 MB import with the Market's 45 MB pool inside it
         const uint64_t lo = 0x108c000000, hi = 0x109a000000;

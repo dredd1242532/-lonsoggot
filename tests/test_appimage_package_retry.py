@@ -14,7 +14,10 @@ import tempfile
 import unittest
 
 # (Linux only)
-RUN_ALL_SKIP = {"windows": "the AppImage package bootstrap is POSIX shell; exercised on Linux"}
+RUN_ALL_SKIP = {
+    "windows": "the AppImage package bootstrap is POSIX shell; exercised on Linux",
+    "macos": "the Linux AppImage's apt/PPA bootstrap and GNU timeout are not a macOS package installer",
+}
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ("base_update", "prerequisites")
