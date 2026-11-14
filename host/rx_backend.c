@@ -71,7 +71,8 @@ int hos_gpu_guest_ranges(uint64_t (*out)[2], int max);
 /* The soft write watch's marks (rt/a64.h A64_MARK, hos_mark_written) over the GPU-visible ranges, read and cleared:
    the Vulkan back end's own collection (gpu/render's rx_collect_written works only with the WebGPU renderer started).
    One consumer: with Vulkan the WebGPU renderer never runs. */
-/* Writers publish individual atomic bytes. Bulk memcpy/word loads race those
+#if defined(__APPLE__)
+/* (macOS) Writers publish individual atomic bytes. Bulk memcpy/word loads race those
    stores in the C memory model, even on hosts with naturally atomic word loads.
    Keep the wide zero-skip, but read at the writer's exact atomic granule. */
 static inline int marks_clear(const uint8_t *m, size_t n) {
@@ -79,6 +80,16 @@ static inline int marks_clear(const uint8_t *m, size_t n) {
         if (__atomic_load_n(&m[i], __ATOMIC_RELAXED)) return 0;
     return 1;
 }
+#else
+/* (256 marks, none set? Read as 32 words in one pass the compiler makes four AVX2 loads of: most of the ranges hold no
+   mark at a submit, and at 32 marks a step the walk itself, not the memory, was what a scan cost) */
+static inline int marks_clear_256(const uint8_t *m) {
+    uint64_t w[32], any = 0;
+    memcpy(w, m, sizeof w);
+    for (int i = 0; i < 32; i++) any |= w[i];
+    return !any;
+}
+#endif
 static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **pages) {
     /* (HOS_COLLECT_WIDE=0: 32 marks a step at most, as before; the pages found are the same either way) */
     static int wide = -1;
@@ -88,13 +99,18 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
     }
     size_t n = 0, cap = 4096;
     uint32_t *out = malloc(cap * sizeof *out);
+#if defined(__APPLE__)
     if (!out) { hos_fatal(NULL, "mem: dirty-page collection allocation failed"); *pages = NULL; return -1; }
+#endif
     for (int r = 0; r < nranges; r++) {
         const uint64_t lo = ranges[r][0], hi = ranges[r][1] < hos_guest_size() ? ranges[r][1] : hos_guest_size();
-        if (lo >= hi) continue;
+#if defined(__APPLE__)
+        if (lo >= hi) continue;   /* (an empty range consumes no mark) */
+#endif
         uint64_t p1 = (hi + 4095) >> 12;
         if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
         for (uint64_t p = lo >> 12; p < p1;) {
+#if defined(__APPLE__)
             if (wide && !(p & 255) && p + 256 <= p1 && marks_clear(&a64_dirty[p], 256)) {
                 p += 256;
                 continue;
@@ -107,13 +123,39 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
                 p += 8;
                 continue;
             }
+#else
+            if (wide && !(p & 255) && p + 256 <= p1 && marks_clear_256(&a64_dirty[p])) {   /* (256 pages at a time while none is marked) */
+                p += 256;
+                continue;
+            }
+            if (!(p & 31) && p + 32 <= p1) {   /* (32 pages at a time while none is marked) */
+                uint64_t w[4];
+                memcpy(w, &a64_dirty[p], 32);
+                if (!(w[0] | w[1] | w[2] | w[3])) {
+                    p += 32;
+                    continue;
+                }
+            }
+            if (!(p & 7) && p + 8 <= p1) {   /* (eight pages a load while none is marked) */
+                uint64_t w;
+                memcpy(&w, &a64_dirty[p], 8);
+                if (!w) {
+                    p += 8;
+                    continue;
+                }
+            }
+#endif
             if (__atomic_load_n(&a64_dirty[p], __ATOMIC_RELAXED) && __atomic_exchange_n(&a64_dirty[p], 0, __ATOMIC_ACQUIRE)) {
+#if defined(__APPLE__)
                 if (n == cap) {
                     uint32_t *next = realloc(out, (cap * 2) * sizeof *out);
                     if (!next) { hos_fatal(NULL, "mem: dirty-page collection growth failed"); free(out); *pages = NULL; return -1; }
                     out = next;
                     cap *= 2;
                 }
+#else
+                if (n == cap) out = realloc(out, (cap *= 2) * sizeof *out);
+#endif
                 out[n++] = (uint32_t)p;
             }
             p++;
@@ -125,20 +167,22 @@ static int64_t collect_in(const uint64_t (*ranges)[2], int nranges, uint32_t **p
 static int64_t host_collect(uint32_t **pages) {
     static uint64_t (*ranges)[2];
     if (!ranges) ranges = malloc(sizeof *ranges * 4096);
-    if (!ranges) { hos_fatal(NULL, "mem: GPU range collection allocation failed"); *pages = NULL; return -1; }
 #if defined(__APPLE__)
+    if (!ranges) { hos_fatal(NULL, "mem: GPU range collection allocation failed"); *pages = NULL; return -1; }
     hos_posix_guest_watch_mark();
 #endif
     return collect_in(ranges, hos_gpu_guest_ranges(ranges, 4096), pages);
 }
 /* (only within the given guest ranges: the submit-time capture of the mirrored pools, a small part of the 20 ms the
    whole collection takes) */
-static int64_t host_collect_in(const uint64_t (*ranges)[2], int n, uint32_t **pages) {
 #if defined(__APPLE__)
+static int64_t host_collect_in(const uint64_t (*ranges)[2], int n, uint32_t **pages) {
     hos_posix_guest_watch_mark();
-#endif
     return collect_in(ranges, n, pages);
 }
+#else
+static int64_t host_collect_in(const uint64_t (*ranges)[2], int n, uint32_t **pages) { return collect_in(ranges, n, pages); }
+#endif
 #else
 static int64_t host_collect(uint32_t **pages) {
     int64_t n = -1;
@@ -160,10 +204,10 @@ static void host_mark_written(const void *p, uint64_t n) {
    zeroed; the region allocator never hands it to the game) */
 static uint64_t host_guest_alloc(uint64_t size) {
     const uint64_t a = hos_region_alloc(size, 0x10000);
-    if (a) {
-        memset(hos_guest_base() + a, 0, size);
-        HOS_WRITTEN(hos_guest_base() + a, size);
-    }
+    if (a) memset(hos_guest_base() + a, 0, size);
+#if defined(__APPLE__)
+    if (a) HOS_WRITTEN(hos_guest_base() + a, size);   /* (zeroed is written: the dirty scan sends those bytes to the GPU) */
+#endif
     return a;
 }
 

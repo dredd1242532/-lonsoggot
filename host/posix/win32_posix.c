@@ -20,8 +20,8 @@
 #include "darwin_fault.h"
 #endif
 
-/* The guest window (rt/a64.h A64_HOST_BASE, hos.h HOS_GUEST_SPACE). Darwin
-   queries the real kernel mappings and resolves mutations to the host owner. */
+/* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
+   readable and writable, which VirtualQuery reports as committed without asking the kernel */
 #define GUEST_LO 0x100000000000ULL
 #define GUEST_HI (GUEST_LO + (1ULL << 39))
 
@@ -708,7 +708,7 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
         return addr;
     }
     if (addr && (type & MEM_COMMIT) && !(type & MEM_RESERVE)) {
-        /* (inside a reservation: made accessible; the guest window is committed already) */
+        /* (inside a reservation: made accessible; the guest window is accessible already) */
 #if defined(__APPLE__)
         if (touches_guest(addr, size)) {
             if (!guest_memory_services() || guest_commit(addr, size)) { fail_errno(); return NULL; }
@@ -742,14 +742,16 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
     size = (size + mask) & ~mask;
 #endif
     pthread_mutex_lock(&regions_mu);
+#if defined(__APPLE__)
     int recorded = 0;
     for (int i = 0; i < 256; i++)
         if (!regions[i].base) { regions[i].base = (uintptr_t)p, regions[i].size = size; recorded = 1; break; }
     pthread_mutex_unlock(&regions_mu);
-#if defined(__APPLE__)
     if (!recorded) { munmap(p, size); last_error = ERROR_NOT_ENOUGH_MEMORY; return NULL; }
 #else
-    (void)recorded;
+    for (int i = 0; i < 256; i++)
+        if (!regions[i].base) { regions[i].base = (uintptr_t)p, regions[i].size = size; break; }
+    pthread_mutex_unlock(&regions_mu);
 #endif
     return p;
 }
@@ -806,7 +808,11 @@ BOOL VirtualProtect(void *addr, SIZE_T size, DWORD protect, DWORD *old) {
 #endif
 }
 SIZE_T VirtualQuery(const void *addr, MEMORY_BASIC_INFORMATION *mbi, SIZE_T size) {
+#if defined(__APPLE__)
     if (!mbi || size < sizeof *mbi) { last_error = ERROR_INVALID_PARAMETER; return 0; }
+#else
+    if (size < sizeof *mbi) return 0;
+#endif
     memset(mbi, 0, sizeof *mbi);
 #if defined(__APPLE__)
     DarwinMemInfo info;

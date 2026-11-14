@@ -3,7 +3,9 @@
 collect_in and its 256-mark test are cut out of the source and compiled against a small mark array. For random marks
 and ranges (aligned or not, short, empty, past the guest's end, past the array's end) the pages found, their order and
 the marks left must be those of a plain walk, with the wide step on and with HOS_COLLECT_WIDE=0. The fixture also
-checks that the wide step is really taken (a range of 4096 clear marks is walked in 16 steps).
+checks that the wide step is really taken (a range of 4096 clear marks is walked in 16 steps). On macOS the marks are
+read with byte atomics (marks_clear) and an empty range consumes nothing; elsewhere with word loads (marks_clear_256):
+the fixture compiles the one the platform builds.
 
 python -I -B tests/test_collect_wide.py [--cc gcc]
 """
@@ -27,15 +29,25 @@ static uint8_t a64_dirty[A64_DIRTY_PAGES];
 static uint64_t guest_size = A64_DIRTY_PAGES << 12;
 static uint64_t hos_guest_size(void) { return guest_size; }
 static int clear_calls;
+#if defined(__APPLE__)
 static void hos_fatal(void *ctx, const char *message) {
     (void)ctx; fprintf(stderr, "%s\n", message); abort();
 }
 
 @MARKS_CLEAR@
 #define marks_clear(m, n) (clear_calls += (n) == 256, marks_clear(m, n))
+#else
+#define memcpy(d, s, n) (clear_calls += (n) == 256, memcpy(d, s, n))
+
+@MARKS_CLEAR_256@
+#endif
 @COLLECT_IN@
 
+#if defined(__APPLE__)
 #undef marks_clear
+#else
+#undef memcpy
+#endif
 
 static uint64_t rng = 0x9E3779B97F4A7C15ull;
 static uint64_t rnd(void) {
@@ -49,7 +61,9 @@ static size_t plain(const uint64_t (*ranges)[2], int n, const uint8_t *marks, ui
     memcpy(left, marks, A64_DIRTY_PAGES);
     for (int r = 0; r < n; r++) {
         const uint64_t hi = ranges[r][1] < guest_size ? ranges[r][1] : guest_size;
+#if defined(__APPLE__)
         if (ranges[r][0] >= hi) continue;
+#endif
         uint64_t p1 = (hi + 4095) >> 12;
         if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
         for (uint64_t p = ranges[r][0] >> 12; p < p1; p++)
@@ -127,6 +141,7 @@ def main():
     a = p.parse_args()
     src = (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8")
     fixture = (FIXTURE.replace("@MARKS_CLEAR@", block(src, "static inline int marks_clear("))
+               .replace("@MARKS_CLEAR_256@", block(src, "static inline int marks_clear_256("))
                .replace("@COLLECT_IN@", block(src, "static int64_t collect_in(")))
     with tempfile.TemporaryDirectory(prefix="collect-wide-") as tmp:
         c = Path(tmp) / "fixture.c"
