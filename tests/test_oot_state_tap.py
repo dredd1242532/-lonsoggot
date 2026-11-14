@@ -16,6 +16,7 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1224,9 +1225,11 @@ def main():
         src.write_text(FIXTURE_HEAD + body + FIXTURE_MAIN, encoding="utf-8")
         warnings = ["-Wno-format-truncation"] if "clang" not in Path(args.cc).name else []
         libraries = ["-ladvapi32", "-lm"] if windows else ["-lpthread", "-lm"]
+        # (macOS: the bridge's Unix socket calls are host/posix/darwin_control_sockets.c's, as in tests/test_control.py)
+        darwin = [str(root / "host" / "posix" / "darwin_control_sockets.c")] if sys.platform == "darwin" else []
         subprocess.run([args.cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
                         "-D_GNU_SOURCE", "-D_CRT_SECURE_NO_WARNINGS", "-DHOS_CONTROL_NO_GAME", "-I", str(root / "host"), str(src),
-                        str(bridge_src), "-o", str(exe)] + warnings + libraries, check=True)
+                        str(bridge_src)] + darwin + ["-o", str(exe)] + warnings + libraries, check=True)
         address = "longshot-oot-test-%d" % os.getpid() if windows else str(tmp / "control.sock")
         env = dict(os.environ)
         env.pop("HOS_CONTROL_MEM", None)
