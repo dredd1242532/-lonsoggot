@@ -34,7 +34,8 @@ GOTO = re.compile(r"\bgoto (L_[0-9a-f]+);")
 TAIL = re.compile(r"\bTAILCALL\((\w+)\);")
 RETURN_OK = re.compile(r"\breturn\b(?! \d+;)")
 INNER_LABEL = re.compile(r"\bL_[0-9a-f]+\s*:(?!:)")        # (a label anywhere but at the start of a top-level line)
-OTHER_GOTO = re.compile(r"\bgoto\b(?!\s+L_[0-9a-f]+;)")    # (computed gotos, gotos to other labels)
+ANY_GOTO = re.compile(r"\bgoto\b(?:\s+([A-Za-z_]\w*)\s*;)?")   # (group 1 None: a computed goto or another shape)
+TOP_LABEL = re.compile(r"L_[0-9a-f]+")
 DECL = re.compile(r"^\s*(?:const\s+|static\s+|volatile\s+|unsigned\s+|signed\s+|register\s+)*"
                   r"(?:u?int(?:8|16|32|64)_t|u?intptr_t|int|unsigned|long|short|char|float|double|_Bool|bool|size_t|"
                   r"void\s*\*|Ctx|GuestContext)\b(?!\s*\))")
@@ -77,6 +78,20 @@ def _braces(line, depth):
     return depth
 
 
+def _local_gotos(text):
+    """A statement's gotos are to the function's own top-level labels (L_<hex>), or to a label of another name defined
+    inside this same statement, which stays whole in one piece (PR #38's fast float regions: `{ if (...) { ... goto
+    L_ff_<pc>; ... } <exact copy> L_ff_<pc>:; }`); anything else (a computed goto, a label elsewhere) refuses"""
+    for m in ANY_GOTO.finditer(text):
+        t = m.group(1)
+        if t is None:
+            raise Refuse("a goto of another shape")
+        if TOP_LABEL.fullmatch(t):
+            continue
+        if not re.search(r"(?<![\w.])%s\s*:(?!:)" % re.escape(t), text):
+            raise Refuse("a goto of another shape")
+
+
 def items_of(body_lines):
     """The body as top-level items: (label, None) for each label, (None, text) for each statement (one or more lines)"""
     items, cur, depth = [], [], 0
@@ -89,20 +104,22 @@ def items_of(body_lines):
                 if rest.strip():
                     if _braces(rest, 0):
                         raise Refuse("a block opened after a label")
-                    if INNER_LABEL.search(rest) or OTHER_GOTO.search(rest):
+                    if INNER_LABEL.search(rest):
                         raise Refuse("a label inside a block")
+                    _local_gotos(rest)
                     items.append((None, rest.lstrip()))
                 continue
             if DECL.match(ln):
                 raise Refuse("a top-level declaration")
         if "L_" in ln and INNER_LABEL.search(ln):
             raise Refuse("a label inside a block")
-        if "goto" in ln and OTHER_GOTO.search(ln):
-            raise Refuse("a goto of another shape")
         cur.append(ln)
         depth = _braces(ln, depth)
         if depth == 0:
-            items.append((None, "\n".join(cur)))
+            text = "\n".join(cur)
+            if "goto" in text:
+                _local_gotos(text)
+            items.append((None, text))
             cur = []
     if cur or depth:
         raise Refuse("unbalanced body")

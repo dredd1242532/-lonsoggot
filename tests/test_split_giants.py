@@ -58,6 +58,12 @@ def gen_function(name, rng, blocks=60):
                            % (rng.randint(0, 7), rng.randint(0, 9), rng.randint(0, 7)))
             elif k < 0.87:
                 out.append("    { uint64_t _a=c->x[%d], _b=c->x[%d]; uint64_t _r=_a-_b; c->n=(int64_t)_r<0; c->z=_r==0; c->c=_a>=_b; c->v=0; }" % (n, m))
+            elif k < 0.89:   # (PR #38's fast float region: one statement with its own label and a goto to it)
+                r_ = rng.randint(0, 27)
+                lab_ff = "L_ff_%08x" % (0x5000 + 4 * i + 0x100 * _)
+                out.append("    { if (c->x[%d] & 1) { const uint64_t _ffx%d = c->x[%d]; c->x[%d] += 7;\n"
+                           "if (__builtin_expect((c->x[%d] & 2) != 0, 1)) goto %s;\nc->x[%d] = _ffx%d; }\n"
+                           "    c->x[%d] ^= 5;\n%s:; }" % (n, r_, r_, r_, r_, lab_ff, r_, r_, r_, lab_ff))
             elif k < 0.92:
                 out.append("    c->x[30] = 0x%xULL; f_callee(c);" % (0x2000 + i))
             else:
@@ -98,13 +104,15 @@ def text_checks():
     check("TAILCALL" not in out.split("\nvoid f_00001000(")[0], "no tail call left in a piece")
     check("return;" not in out.split("\nvoid f_00001000(")[0], "no bare return left in a piece")
     check("A64_POLL(c); return " in out or "A64_POLL(c); goto" in out, "polls kept on back edges")
+    check("L_ff_" in fn and out.count(":; }") == fn.count(":; }"), "fast float regions kept whole, their labels inside them")
     whole, st2 = SG.split_text(src, piece_kb=1, min_kb=1024)
     check(whole == src and not st2["functions_split"], "a function below the size asked stays as it is")
     for bad, why in (("    uint64_t x8_ = c->x[8];", "a top-level declaration"),
                      ('    hos_log(c, "a{");', "literal"),
                      ("    { if (c->z) { L_0000dead:; } }", "label inside a block"),
                      ("    if (c->z) { goto L_ffffffff; }", "label the function does not have"),
-                     ("    if (c->z) { goto *c; }", "goto of another shape")):
+                     ("    if (c->z) { goto *c; }", "goto of another shape"),
+                     ("    if (c->z) { goto L_ff_00000001; }\n    { c->x[1] = 0; L_ff_00000001:; }", "goto of another shape")):
         lines = fn.split("\n")
         lines.insert(len(lines) // 2, bad)
         notes = []
