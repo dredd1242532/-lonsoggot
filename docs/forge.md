@@ -25,6 +25,41 @@ It prints a link and opens it: click **Sign in with Discord** and approve. Then 
 The sign-in is saved in your config folder (Linux `~/.config/longshot/`, Windows `%APPDATA%\Longshot\`), readable by
 you only, never in the repository. `python -I scripts/forge.py whoami` shows who is signed in, and `logout` undoes it.
 
+## Two machines
+
+Forgejo keeps **one Discord sign-in per person** for the app `forge.py` signs in with. Each time a machine signs in or
+renews its token, the other machines' tokens can no longer be renewed: Forgejo answers "token was already used", and
+they are signed out within about an hour. Signing in again there does the same to the first machine. (Forgejo's
+`routers/web/auth/oauth.go`: a sign-in reuses the person's one grant, every token issued moves the grant's counter on,
+and a refresh token from an older count is refused.)
+
+So sign in with Discord on one machine only, and give the others a **personal access token**, which is never renewed:
+
+1. Make one on git.magicbean.dev, Settings → Applications → Generate new token
+   ([git.magicbean.dev/user/settings/applications](https://git.magicbean.dev/user/settings/applications)), with the
+   scopes forge.py's commands use:
+   - **write:repository**: your fork, `git push`, pull requests and reviews;
+   - **write:issue**: issues, comments, labels and pictures in comments;
+   - **read:user**: who you are.
+2. On the other machine, from the repository folder:
+
+   ```
+   python -I scripts/forge.py login --token-stdin
+   ```
+
+   Paste the token and press Enter (it isn't shown), or pipe it in. forge.py asks git.magicbean.dev whose it is, saves
+   it in place of the Discord sign-in, and sets up git as above.
+
+`whoami` then adds `(personal access token)`. When Forgejo refuses the token (you deleted it, or it expired), forge.py
+and git say so: make a new one and run `login --token-stdin` again. `logout` forgets it on this machine (delete it on
+the site too if you no longer need it), and `login --again` goes back to the Discord sign-in.
+
+The team chat keeps its own sign-in, and the token leaves it as it is. On a token machine, don't run plain
+`team_chat.py login`: it is the Discord sign-in, and it would save itself over the token. With no chat session yet,
+`team_chat.py` first asks the team's sign-in service with the token; if that is refused, sign in with
+`python -I scripts/team_chat.py login --access-token-stdin` and an access token from Element (Settings, Help & About,
+Access token).
+
 ## Set up pushing
 
 Reading, building and testing need only the sign-in. When you have something to send:
@@ -160,6 +195,10 @@ Longshot.
 
 ## If something goes wrong
 
-- `not signed in`, or git asks for a password: run `python -I scripts/forge.py login --again`.
+- `not signed in`, or git asks for a password: run `python -I scripts/forge.py login --again` (on a machine with a
+  personal access token: `login --token-stdin` with a new token).
+- `could not be renewed (... token was already used)`, about an hour after signing in on another machine: see
+  [Two machines](#two-machines).
+- `refused the saved personal access token`: make a new token and run `python -I scripts/forge.py login --token-stdin`.
 - `no branch ... on <you>/Longshot`: push the branch to `forge-fork` first.
 - A push to `forge` is refused: that is Longshot itself. Push to `forge-fork` and open a pull request.

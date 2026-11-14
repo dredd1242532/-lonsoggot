@@ -52,7 +52,9 @@ Five minutes, then a first build.
    Click **Sign in with Discord** (or sign in with the email account you made on git.magicbean.dev) and approve. That
    one sign-in covers git.magicbean.dev (git signs in by itself from then on, and the remote `forge` points at
    Longshot), the team chat and [test requests](docs/test-requests.md). The first time creates your account.
-   [docs/forge.md](docs/forge.md) has the details and the other commands.
+   [docs/forge.md](docs/forge.md) has the details and the other commands. On a second machine, sign in with a personal
+   access token instead (`python -I scripts/forge.py login --token-stdin`): a Discord sign-in on two machines signs the
+   other one out within the hour ([Two machines](docs/forge.md#two-machines)).
 
 3. **Check the game-free tests run** (no game needed):
 

@@ -13,7 +13,9 @@ link (and opens it unless --no-browser), and one trip through the browser signs 
 git.magicbean.dev (for pushing; see forge.py). The session is saved to the config folder (Linux:
 $XDG_CONFIG_HOME/longshot, default ~/.config/longshot; Windows: %APPDATA%\\Longshot; LONGSHOT_TEAM_CHAT_DIR overrides
 it) as team_chat.json, readable by you only. The first sign-in creates the account. --access-token-stdin saves a token copied
-from Element (Settings, Help & About, Access token) instead.
+from Element (Settings, Help & About, Access token) instead. That is the way in on a machine signed in to
+git.magicbean.dev with a personal access token (forge.py login --token-stdin) when the chat can't be signed in from that
+token: plain login is the Discord sign-in, which would save itself over the token.
 
 post refuses, with exit code 3, a message sent less than the minimum interval after the last one (60 minutes; the
 config's min_interval_minutes changes it) and the same text twice in a row. --force skips the interval only: use it

@@ -3,6 +3,7 @@ Standard library only (Windows and Linux), so any agent can use it; people may p
 (docs/forge.md has both).
 
     python -I scripts/forge.py login [--no-browser] [--again]      sign in, set up git
+    python -I scripts/forge.py login --token-stdin                 the same with a personal access token (a 2nd machine)
     python -I scripts/forge.py fork                                 set up pushing: your fork and its remote
     python -I scripts/forge.py whoami
     python -I scripts/forge.py logout
@@ -37,6 +38,16 @@ the same when it hasn't been done. pr create opens a pull request from BRANCH on
 the branch to your fork first: jj git push --remote forge-fork -b BRANCH, or git push forge-fork BRANCH). git calls
 this script as "forge.py credential get|store|erase".
 
+login --token-stdin signs in with a Forgejo personal access token instead, for a second machine: Forgejo keeps one
+Discord (OAuth) sign-in per person for this app, and a sign-in or renewal on one machine signs the others out within
+the hour (docs/forge.md, Two machines). Make the token at git.magicbean.dev/user/settings/applications with the scopes
+write:repository (your fork, git push, pull requests, reviews), write:issue (issues, comments, labels, pictures) and
+read:user (who you are). login reads it from standard input (typed or pasted, it isn't shown), checks it with
+Forgejo, saves it as the sign-in and sets up git as above. It is never renewed: when Forgejo refuses it (deleted or
+expired), forge.py says to make a new one. whoami names the kind; logout forgets it (delete it on the site too). The
+team chat keeps its own sign-in: on that machine, sign in to it with team_chat.py login --access-token-stdin, since
+plain team_chat.py login is the Discord sign-in, which would save it over the token.
+
 A pull request is work in progress until it is measured and ready for review (CONTRIBUTING.md, Commits and pull
 requests): a title starting with "WIP: ", Forgejo's draft mark. pr create opens it so, with the description started
 from .forgejo/pull_request_template.md when no --body or --body-file is given; --ready opens it ready, when the
@@ -63,6 +74,7 @@ missing file and an attach: with no file of its name are refused before anything
 there, with no retry: the error names the comment, what went up and what didn't, and the comment shows those that did.
 """
 import argparse
+import getpass
 import json
 import os
 import re
@@ -106,9 +118,13 @@ def me():
 
 
 def api(method, path, body=None):
+    state = token()
     try:
-        return auth.forge_request(method, BASE + "/api/v1" + path, token=token()["access_token"], body=body)
+        return auth.forge_request(method, BASE + "/api/v1" + path, token=state["access_token"], body=body)
     except auth.LoginError as e:
+        if e.status == 401 and state.get("kind") == auth.TOKEN_KIND:
+            auth.forge_expire()   # (deleted or expired: the next use says so too, before trying it again)
+            raise ForgeError(auth.TOKEN_REFUSED)
         raise ForgeError(str(e))
 
 
@@ -218,19 +234,35 @@ def ensure_fork(login):
 
 # --- commands ------------------------------------------------------------------------------------------------------
 
+def read_token():
+    """One line of standard input, stripped; a terminal doesn't show it as it is typed or pasted"""
+    if sys.stdin.isatty():
+        return getpass.getpass("Personal access token for %s (not shown): " % HOST).strip()
+    return sys.stdin.readline().strip()
+
+
 def cmd_login(args):
-    state = None if args.again else auth.forge_session()
-    if state:
-        print("Signed in to %s as %s (--again to sign in anew)." % (HOST, state["login"]))
+    if args.token_stdin:   # (a second machine: never renewed, so it leaves the Discord sign-in's grant alone)
+        state = auth.token_sign_in(read_token())
+        print("Signed in to %s as %s with a personal access token (never renewed, so it no longer signs your other "
+              "machines out)." % (HOST, state["login"]))
+        print("Forgejo checked whose it is, not its scopes; it needs %s." % auth.TOKEN_SCOPES)
     else:
-        try:
-            done = auth.sign_in(no_browser=args.no_browser)
-        except auth.LoginError as e:
-            raise ForgeError(str(e))
-        if "forge" not in done:
-            raise ForgeError("not signed in to %s" % HOST)
-        print("Signed in as %s (the team chat too: %s)." % (done["forge"], done.get("matrix", "no")))
-        state = auth.forge_session()
+        state = None if args.again else auth.forge_session()
+        if state and state.get("kind") == auth.TOKEN_KIND:
+            print("Signed in to %s as %s with a personal access token (--token-stdin to give a new one, --again to "
+                  "sign in with Discord instead)." % (HOST, state["login"]))
+        elif state:
+            print("Signed in to %s as %s (--again to sign in anew)." % (HOST, state["login"]))
+        else:
+            try:
+                done = auth.sign_in(no_browser=args.no_browser)
+            except auth.LoginError as e:
+                raise ForgeError(str(e))
+            if "forge" not in done:
+                raise ForgeError("not signed in to %s" % HOST)
+            print("Signed in as %s (the team chat too: %s)." % (done["forge"], done.get("matrix", "no")))
+            state = auth.forge_session()
     git("config", "--global", "--replace-all", HELPER_KEY, "")   # (no other helper for this host)
     git("config", "--global", "--add", HELPER_KEY, helper_command())
     print("git signs in to %s with this script (global git config, this host only)." % HOST)
@@ -254,22 +286,27 @@ def cmd_fork(args):
 
 def cmd_whoami(args):
     state = auth.forge_session()
-    print(state["login"] if state else "not signed in (run: python -I scripts/forge.py login)")
+    kind = " (personal access token)" if state and state.get("kind") == auth.TOKEN_KIND else ""
+    print(state["login"] + kind if state else "not signed in (run: python -I scripts/forge.py login)")
     return 0 if state else 1
 
 
 def cmd_logout(args):
+    state = auth.forge_load()
     try:
         os.remove(auth.forge_path())
     except FileNotFoundError:
         pass
     git("config", "--global", "--unset-all", HELPER_KEY, check=False)
     print("Signed out of %s (the team chat stays signed in: team_chat.py logout)." % HOST)
+    if state and state.get("kind") == auth.TOKEN_KIND:
+        print("The personal access token itself works until you delete it: %s" % auth.TOKENS_PAGE)
 
 
 def cmd_credential(args):
     """git's credential protocol on standard input. get answers for this host only; erase (git found the password
-    wrong) makes the next get renew the token; store has nothing to do."""
+    wrong) makes the next get renew the token, or, for a personal access token, say to sign in again; store has nothing
+    to do."""
     fields = dict(line.split("=", 1) for line in sys.stdin.read().splitlines() if "=" in line)
     if fields.get("host") != HOST or fields.get("protocol", "https") != "https":
         return 0
@@ -917,10 +954,15 @@ def main(argv=None):
     unicode_output()
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("login", help="sign in with Discord, set up git")
+    s = sub.add_parser("login", help="sign in with Discord (or a personal access token), set up git")
     s.add_argument("--upstream", default="forge", help="remote name for MagicBeanDev/Longshot (default forge)")
     s.add_argument("--no-browser", action="store_true", help="print the link only")
     s.add_argument("--again", action="store_true", help="sign in anew even when signed in")
+    s.add_argument("--token-stdin", action="store_true",
+                   help="sign in with a Forgejo personal access token read from standard input (not shown when typed) "
+                   "instead of Discord, for a second machine: Discord sign-ins on two machines sign each other out "
+                   "(docs/forge.md, Two machines). Make it at %s with the scopes %s. The team chat signs in on its "
+                   "own: team_chat.py login --access-token-stdin" % (auth.TOKENS_PAGE, auth.TOKEN_SCOPES))
     s = sub.add_parser("fork", help="set up pushing: your fork of Longshot and its remote")
     s.add_argument("--remote", default="forge-fork", help="remote name for your fork (default forge-fork)")
     sub.add_parser("whoami")

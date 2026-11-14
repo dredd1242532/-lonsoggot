@@ -8,7 +8,8 @@ with a one-minute login for the Matrix server.
 
 Saved in the config folder (Linux: $XDG_CONFIG_HOME/longshot, default ~/.config/longshot; Windows: %APPDATA%\\Longshot;
 LONGSHOT_TEAM_CHAT_DIR overrides it), readable by you only: forge.json (the Forgejo token, renewed by itself when it
-runs out) and team_chat.json (the Matrix session; made again from the Forgejo token when it is missing).
+runs out; or a personal access token from forge.py login --token-stdin, never renewed) and team_chat.json (the Matrix
+session; made again from the Forgejo token when it is missing).
 
     python -I scripts/magicbean_login.py login [--no-browser]     (the same as team_chat.py login)
     python -I scripts/magicbean_login.py whoami
@@ -39,7 +40,9 @@ LOGIN_TIMEOUT = 300
 
 
 class LoginError(Exception):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status   # (the HTTP status the server answered with, when it answered)
 
 
 def config_dir():
@@ -65,6 +68,22 @@ def write_private(path, value):
 
 
 # --- the git token -------------------------------------------------------------------------------------------------
+
+# A personal access token (forge.py login --token-stdin), for a second machine. Forgejo keeps one OAuth grant per person
+# and application, and each token it issues, at a sign-in or a renewal, makes the grant's older refresh tokens refused
+# ("token was already used": routers/web/auth/oauth.go 161-162, 617 and 827-831 in Forgejo v17.0.1). So a second
+# machine signing in with Discord signs the first out within the hour. A personal access token has no refresh token and
+# is never renewed: saved with "kind": "token", it is used as it is until Forgejo refuses it.
+TOKEN_KIND = "token"
+# The scopes it needs for the calls forge.py and test_requests.py make (Forgejo's routers/api/v1/api.go: /user is the
+# user scope; a repository's pulls, forks, branches, commits and collaborators, and git over HTTPS, the repository
+# scope; its issues, comments, labels and comment attachments the issue scope; write includes read)
+TOKEN_SCOPES = ("write:repository (your fork, git push, pull requests, reviews), write:issue (issues, comments, "
+                "labels, pictures) and read:user (who you are)")
+TOKENS_PAGE = FORGE + "/user/settings/applications"
+TOKEN_REFUSED = ("%s refused the saved personal access token (deleted or expired): make a new one at %s and sign in "
+                 "again: python -I scripts/forge.py login --token-stdin" % (FORGE_HOST, TOKENS_PAGE))
+
 
 def forge_path():
     return os.path.join(config_dir(), "forge.json")
@@ -94,7 +113,7 @@ def forge_request(method, url, form=None, token=None, body=None):
             return json.loads(r.read() or b"null")
     except urllib.error.HTTPError as e:
         raise LoginError("%s %s: HTTP %d %s" % (method, url.split("?")[0], e.code,
-                                                e.read()[:200].decode("utf-8", "replace")))
+                                                e.read()[:200].decode("utf-8", "replace")), e.code)
     except (urllib.error.URLError, OSError) as e:
         raise LoginError("cannot reach %s: %s" % (FORGE_HOST, e))
 
@@ -139,17 +158,23 @@ class _SessionLock:
 
 def forge_session():
     """The saved git sign-in with an access token good for at least a minute (renewed with the refresh token, which
-    Forgejo replaces each time), or None."""
+    Forgejo replaces each time), or None. A personal access token is used as it is, never renewed; once Forgejo refused
+    it (forge_expire), None, with a note to sign in again."""
     state = forge_load()
     if not state:
         return None
+    if state.get("kind") == TOKEN_KIND:
+        if state.get("refused"):
+            print(TOKEN_REFUSED, file=sys.stderr)
+            return None
+        return state
     if state["expires_at"] - 60 >= time.time():
         return state
     with _SessionLock():
         state = forge_load()   # (read again under the lock: another process may have renewed it meanwhile)
         if not state:
             return None
-        if state["expires_at"] - 60 >= time.time():
+        if state.get("kind") == TOKEN_KIND or state["expires_at"] - 60 >= time.time():   # (or saved a token instead)
             return state
         if not state.get("refresh_token"):
             return None
@@ -163,12 +188,40 @@ def forge_session():
 
 
 def forge_expire():
-    """The saved token was refused: the next use renews it first."""
+    """The saved token was refused: the next use renews it first. A personal access token can't be renewed: it is marked
+    refused, so the next use says to make a new one and sign in again."""
     with _SessionLock():
         state = forge_load()
         if state:
-            state["expires_at"] = 0
+            if state.get("kind") == TOKEN_KIND:
+                state["refused"] = True
+            else:
+                state["expires_at"] = 0
             write_private(forge_path(), state)
+
+
+def token_sign_in(token):
+    """Sign in to git.magicbean.dev with a personal access token instead of Discord: checked with GET /api/v1/user
+    (whose it is), then saved as the sign-in with no refresh token and no expiry. Returns the saved state."""
+    if not token:
+        raise LoginError("no token on standard input: make one at %s with the scopes %s" % (TOKENS_PAGE, TOKEN_SCOPES))
+    if any(c.isspace() or not c.isprintable() for c in token):
+        raise LoginError("that is not one token (it has spaces or control characters in it): give the token alone")
+    try:
+        user = forge_request("GET", FORGE + "/api/v1/user", token=token)
+    except LoginError as e:
+        if e.status == 401:
+            raise LoginError("token refused: %s does not take it (HTTP 401); copy it whole, or make a new one at %s"
+                             % (FORGE_HOST, TOKENS_PAGE)) from None
+        if e.status == 403:
+            raise LoginError("the token lacks a scope (%s): it needs %s" % (e, TOKEN_SCOPES)) from None
+        raise
+    if not isinstance(user, dict) or not user.get("login"):
+        raise LoginError("%s answered with no login for the token" % FORGE_HOST)
+    state = {"kind": TOKEN_KIND, "login": user["login"], "access_token": token}
+    with _SessionLock():   # (not in the middle of another process's renewal of the sign-in it replaces)
+        write_private(forge_path(), state)
+    return state
 
 
 # --- the browser trip ----------------------------------------------------------------------------------------------
@@ -253,7 +306,9 @@ def browser_trip(no_browser=False, out=print):
 
 def matrix_from_forge(server=SERVER, chat=None):
     """The team chat's session from the saved Forgejo token, no browser: the team's sign-in service turns the token into
-    a one-minute JWT, which logs in to Matrix at once. Saved by team_chat; returns the user ID."""
+    a one-minute JWT, which logs in to Matrix at once. Saved by team_chat; returns the user ID. Whether the service
+    takes a personal access token too depends on how it asks Forgejo whose token it is, which is not in this
+    repository; when it refuses one, the error says how to sign in to the chat without the Discord sign-in."""
     if chat is None:
         import team_chat as chat
     state = forge_session()
@@ -263,6 +318,10 @@ def matrix_from_forge(server=SERVER, chat=None):
     try:
         reply = forge_request("POST", base + "/_magicbean/matrix-login", token=state["access_token"], body={})
     except LoginError as e:
+        if state.get("kind") == TOKEN_KIND:
+            raise LoginError("team chat sign-in with the personal access token: %s. Sign in to the chat with python -I "
+                             "scripts/team_chat.py login --access-token-stdin instead (plain team_chat.py login is the "
+                             "Discord sign-in, and would save it over the token)" % e)
         raise LoginError("team chat sign-in: %s" % e)
     return chat.finish_jwt(server, base, reply["token"])
 
