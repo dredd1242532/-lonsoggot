@@ -14,9 +14,19 @@ python -I -B tests/test_recorder_own_idle.py --headers <Vulkan-Headers/include> 
      last end the recorder has not run (the guard, logged once) all wait for the packet;
    - RX_VK_RECORDER_IDLE: unset, WaitOnAddress is never called; =wait without the functions, turned off and logged at the start;
      the recorder waiting on W is woken by a publish; a publish between sleeping set and the wait (the wake made to do nothing)
-     makes the wait return at once on the changed W.
+     makes the wait return at once on the changed W;
+   - own_slots: two slots with their own command pools, command buffers, descriptor pools, extra pools and sets; slot 1's binds held
+     in the recorder while slot 0 comes round, its GPU work completing late: slot 0's own calls reach the driver while slot 1's
+     packets are held, and the fakes, which know which object each held packet names, find no reset, begin or destruction of an
+     object in use and no slot reused before its GPU work completed. _wrong (slot 1's pool reset) and _early (slot 0 reused before
+     its GPU work completed) show the fakes catch each;
+   - real_ (Windows; skipped elsewhere): vk_replay.cpp's own WaitOnAddress adapter (rec_wait_hooks, cut from the source): a publish
+     wakes the recorder asleep on W; with no wake the 2 ms timeout brings it back; a publish just before the wait with the wake off;
+     stop while asleep; both switches together. Each ends with vkDestroyDevice's teardown (the recorder stopped and joined) and a
+     normal return.
 3. The test has teeth: vk_recorder.h with vkEndCommandBuffer among the slot's own calls, the guard removed, the switch ignored,
-   OwnSlot ignoring slot_begin(), the wait's compare taken from W instead of the r it last saw, or the wake removed, must fail it.
+   OwnSlot ignoring slot_begin(), the wait's compare taken from W instead of the r it last saw, the wake removed, or (Windows) the
+   wait's timeout taken out, must fail it.
 """
 import argparse
 import concurrent.futures
@@ -86,6 +96,15 @@ def source_problems(replay, draw, others):
     for call in ("gpu_time_begin", "texture_begin_recording", "draw_begin_recording"):
         if call in own:
             p.append("begin_recording: %s within the OwnSlot (only the slot's own resets and begins)" % call)
+    if not (0 <= begin.find("recording_wait(r);") < begin.find("rec::slot_begin(")):
+        p.append("begin_recording: recording_wait(r) (the slot's GPU work done) must come before rec::slot_begin()")
+    if not (0 <= draw_begin.find("RecordingRes& r = res[slot];") < draw_begin.find("rec::OwnSlot")):
+        p.append("draw_begin_recording: the OwnSlot's calls must be on res[slot], the slot's own")
+    dblock = draw_begin[draw_begin.find("rec::OwnSlot"):]
+    dblock = dblock[:dblock.find("}")]
+    for call in ("vkResetDescriptorPool(dev.device, r.pool, 0);", "for (VkDescriptorPool p : r.extra) vkDestroyDescriptorPool(dev.device, p,"):
+        if call not in dblock:
+            p.append("draw_begin_recording: %s not within the OwnSlot" % call)
     ends = [m.start() for m in re.finditer(r"vkEndCommandBuffer\(r\.(cmd|upload)\);", submit)]
     keep = submit.find("rec_end_pos[r.slot] = rec::produced();")
     if len(ends) != 2 or keep < max(ends):
@@ -112,12 +131,31 @@ def test_sources():
     print("PASS sources: OwnSlot only at the slot's own resets and begins, after slot_begin(); the end position kept after both ends")
 
 
+HOOKS = "const bool rec_wait_hooks = [] {\n"
+
+
+def wait_hooks():
+    """the body of vk_replay.cpp's WaitOnAddress installation (rec_wait_hooks), for the real_ cases"""
+    replay = (VK / "vk_replay.cpp").read_text(encoding="utf-8")
+    if replay.count(HOOKS) != 1:
+        raise SystemExit("vk_replay.cpp: the anchor %r must appear once" % HOOKS.strip())
+    at = replay.index(HOOKS) + len(HOOKS)
+    end = replay.index("\n}();", at)
+    return replay[at:end] + "\n"
+
+
 def build(cxx, headers, out, recorder_text, name):
     d = out / name
     d.mkdir()
     (d / "vk_loader.h").write_text(recsync.test_loader(), encoding="utf-8")
     (d / "vk_work.h").write_text((VK / "vk_work.h").read_text(encoding="utf-8"), encoding="utf-8")
     (d / "vk_recorder.h").write_text(recorder_text, encoding="utf-8")
+    # (whatever else the two headers include from gpu/vk: a header added there later comes along, as #60's gpu_wait_stats.h)
+    work = (VK / "vk_work.h").read_text(encoding="utf-8")
+    for h in sorted(set(re.findall(r'#include "([^"/]+)"', work + recorder_text))):
+        if h not in ("vk_loader.h", "vk_work.h", "vk_recorder.h") and (VK / h).exists():
+            shutil.copyfile(VK / h, d / h)
+    (d / "rec_wait_hooks.inc").write_text(wait_hooks(), encoding="utf-8")
     exe = d / "recorder_own_idle_test.exe"
     cmd = [cxx, "-std=c++20", "-include", recsync.ENV_ON_H, "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
            "-Wno-missing-field-initializers", "-DVK_NO_PROTOTYPES", "-D_CRT_SECURE_NO_WARNINGS", "-DRX_REC_TEST_HOOKS",
@@ -165,6 +203,14 @@ CASES = (
     ("idle_no_hooks", {IDLE: "wait"}, None),
     ("idle_parked", {IDLE: "wait"}, None),
     ("idle_race", {IDLE: "wait"}, None),
+    ("own_slots", {OWN: "1"}, None),
+    ("own_slots_wrong", {OWN: "1"}, "caught: a descriptor pool reset while a held packet binds a set from it (slot 1)"),
+    ("own_slots_early", {OWN: "1"}, "caught: slot reused before its GPU work completed (slot 0)"),
+    ("real_parked", {IDLE: "wait"}, None),
+    ("real_timeout", {IDLE: "wait"}, None),
+    ("real_race", {IDLE: "wait"}, None),
+    ("real_stop", {IDLE: "wait"}, None),
+    ("real_both", {OWN: "1", IDLE: "wait"}, None),
 )
 
 
@@ -193,6 +239,8 @@ BROKEN = (
     ("OwnSlot ignoring slot_begin()", "OwnSlot() { t_own_slot = t_slot_ready; }", "OwnSlot() { t_own_slot = true; }", "own_guard", {OWN: "1"}),
     ("the compare taken from W", "uint64_t compare = r;", "uint64_t compare = W.load(std::memory_order_acquire);", "idle_race", {IDLE: "wait"}),
     ("the wake removed", "            g_wake_by_address(&W);\n", "", "idle_parked", {IDLE: "wait"}),
+    ("the wait's timeout taken out", "g_wait_on_address(&W, &compare, sizeof compare, 2);",
+     "g_wait_on_address(&W, &compare, sizeof compare, 0xFFFFFFFFu);", "real_timeout", {IDLE: "wait"}),
 )
 
 
@@ -213,6 +261,9 @@ def main():
             raise SystemExit("FAIL:\n" + "\n".join(bad))
         print("PASS the switches: %d cases" % len(CASES))
         for i, (what, old, new, case, env) in enumerate(BROKEN):
+            if case.startswith("real_") and os.name != "nt":
+                print("SKIP broken: %s (the real adapter is Windows')" % what)
+                continue
             if recorder.count(old) != 1:
                 raise SystemExit("broken %r: the anchor %r must appear once in vk_recorder.h" % (what, old))
             exe = build(cxx, args.headers, out, recorder.replace(old, new), "broken%d" % i)
