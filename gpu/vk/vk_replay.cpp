@@ -985,14 +985,16 @@ void ub_thread_off() {
     ub_limit = 0;
 }
 /// The open gap around [addr, addr+bytes) that no update covers. False when one does. [lo, hi) is that gap.
-bool ub_gap(const uint64_t* dst, const uint64_t* end, int n, uint64_t addr, uint64_t bytes, uint64_t* lo, uint64_t* hi) {
+bool ub_gap(std::deque<UbUpdate>::const_iterator first, std::deque<UbUpdate>::const_iterator last,
+            uint64_t addr, uint64_t bytes, uint64_t* lo, uint64_t* hi) {
     if (!bytes || addr + bytes < addr) return false;
     uint64_t left = 0, right = ~uint64_t{0};
     const uint64_t stop = addr + bytes;
-    for (int i = 0; i < n; i++) {
-        if (dst[i] < stop && addr < end[i]) return false;
-        if (end[i] <= addr && end[i] > left) left = end[i];
-        if (dst[i] >= stop && dst[i] < right) right = dst[i];
+    for (auto it = first; it != last; ++it) {
+        const uint64_t start = it->dst, end = start + it->bytes.size();
+        if (start < stop && addr < end) return false;
+        if (end <= addr && end > left) left = end;
+        if (start >= stop && start < right) right = start;
     }
     *lo = left;
     *hi = right;
@@ -1012,17 +1014,12 @@ bool ub_gap_holds(uint64_t addr, uint64_t n, size_t first, size_t lim) {
 bool ub_try_gap(size_t first, size_t lim, uint64_t addr, uint64_t n) {
     if (first > lim) return false;
     const uint64_t epoch = ub_list_epoch.load(std::memory_order_relaxed);
-    static thread_local std::vector<uint64_t> dst, end;
-    dst.clear();
-    end.clear();
-    dst.reserve(lim - first);
-    end.reserve(lim - first);
-    for (size_t i = first; i < lim; i++) {
-        dst.push_back(ub_updates[i].dst);
-        end.push_back(ub_updates[i].dst + ub_updates[i].bytes.size());
-    }
+    // (a background thread's range is empty: it reads nothing of the deque, not even its start, while the replay
+    // thread changes it)
+    using It = std::deque<UbUpdate>::const_iterator;
+    const It from = first == lim ? It{} : ub_updates.cbegin() + first, to = first == lim ? It{} : from + (lim - first);
     uint64_t lo = 0, hi = 0;
-    if (!ub_gap(dst.data(), end.data(), (int)dst.size(), addr, n, &lo, &hi)) return false;
+    if (!ub_gap(from, to, addr, n, &lo, &hi)) return false;
     if (ub_list_epoch.load(std::memory_order_relaxed) != epoch) return false;   // (the list changed: do not keep the gap)
     ub_gap_cache = {epoch, lo, hi, first, lim, true};
     return true;
