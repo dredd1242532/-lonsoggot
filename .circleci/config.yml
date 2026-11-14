@@ -101,6 +101,22 @@ workflows:
           extra-params: >-
             {"full":true,"nightly":false,"website_refresh":false,
             "fork_pr":0,"fork_sha":""}
+  setup-api-full:
+    when:
+      and:
+        - equal: [api, << pipeline.event.name >>]
+        - equal: [true, << pipeline.parameters.full >>]
+        - equal: [false, << pipeline.parameters.release_dry_run >>]
+        - equal: [false, << pipeline.parameters.vulkan_dlss >>]
+    jobs:
+      - mb/setup:
+          name: setup-api-full
+          event-file: .circleci/events/main.yml
+          mapping: .circleci/mapping.conf
+          force-full: true
+          extra-params: >-
+            {"full":true,"nightly":false,"release_dry_run":true,
+            "website_refresh":false,"vulkan_dlss":false,"fork_pr":0,"fork_sha":""}
   setup-noop-tag:
     when: (pipeline.git.tag or "") != "" and not ((pipeline.git.tag or "") starts-with "v")
     jobs:
@@ -122,6 +138,7 @@ workflows:
         - equal: [api, << pipeline.event.name >>]
         - equal: [false, << pipeline.parameters.release_dry_run >>]
         - equal: [false, << pipeline.parameters.vulkan_dlss >>]
+        - equal: [false, << pipeline.parameters.full >>]
     jobs:
       - setup-noop:
           name: setup-noop-api

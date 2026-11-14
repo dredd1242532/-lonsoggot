@@ -80,6 +80,7 @@ sequenceDiagram
 | `schedule` + **`nightly`** | `nightly.yml` | Third-party upstream |
 | `schedule` + **`website_refresh`** | `scheduled.yml` | Website deploy |
 | `api` + manual flags | `manual.yml` | Release dry-run or Vulkan DLSS link |
+| `api` + `full: true` only | `main.yml` (dry run) | Force-full main workflow via `setup-api-full` |
 | `custom_webhook` (forks project) | `fork.yml` | `fork_pr` / `fork_sha`; doorbell sets **`full: true`** |
 | Other tags, bare schedule/api | `setup-noop` in config | No continuation (e.g. `nightly-*` tags) |
 
