@@ -303,39 +303,6 @@ case-sensitive, and an unknown one is ignored.
 
 ### Time and profiles
 
-#### System readings
-
-The FPS counter's **System** choice is a compact alternative to Graph/Breakdown/Dev, keeping FPS and frame time.
-It samples process CPU use, resident memory and available system RAM, plus the existing selected-device Vulkan
-usage/budget snapshot. Linux reads `CLOCK_PROCESS_CPUTIME_ID`, `VmRSS` in `/proc/self/status` and `MemAvailable`
-in `/proc/meminfo`. Windows reads `GetProcessTimes`, `K32GetProcessMemoryInfo`'s working set, and
-`GlobalMemoryStatusEx`'s available physical memory. CPU 100% is one logical CPU, not the whole PC. The resident
-set includes shared pages and is not private commit. Device-local usage/budget requires `VK_EXT_memory_budget`;
-without it both values are unavailable on any GPU vendor. On integrated GPUs those heaps can be shared system RAM.
-The budget is a moving driver allowance, not capacity. GPU utilization, temperatures and busiest-thread sampling
-are later work, not readings supplied by this slice.
-
-`RX_VK_SYSTEM_LOG` creates a local CSV at the explicit path; it creates no directory and never overwrites a file.
-No samples are uploaded or automatically attached to a Bug report. The header is:
-
-```text
-# longshot_system,1
-monotonic_ns,cpu_process_pct,rss_bytes,ram_available_bytes,vram_used_bytes,vram_budget_bytes
-```
-
-Integers are bytes or monotonic nanoseconds as named; CPU is percent, with a decimal dot. `na` is unavailable
-(including CPU's first interval), not zero. Displayed memory uses MiB, bytes divided by 1048576. These names retain
-the earlier proposed monitor's units, but this smaller format is deliberately **not** its `perf.csv` V1 schema:
-there is no frame-clock join, frame statistics, completion summary or vendor-sensor protocol.
-
-One complete line is flushed per interval while frames reach the menu tick, without catching up missed intervals.
-The first sample is immediate; a long pause delays the next sample. CPU covers the actual time between samples.
-Reads and optional file writes run on that tick's thread, so enabling them can add latency, particularly on slow
-storage. Use a local file, not a network filesystem. A write failure stops file output with a diagnostic; System
-can still display readings. Choosing another counter level and leaving file output unset disables all monitor
-clock reads, OS reads, formatting and file operations. Its enable check remains; no zero-overhead timing claim is made.
-
-
 | Switch | What it does |
 |---|---|
 | `HOS_PROFILE=<seconds>` | Every interval, the busiest threads in the log; it also starts the samplers below |
@@ -371,6 +338,38 @@ ordinary timestamp-result polls without that bit do not count.
 The game-free `test_gpu_wait_stats`, `test_recorder_sync` and `test_recorder_own_idle` checks use the real accounting
 header. The recorder's source check ignores comments, but still requires every boundary macro to drain first and
 call its own driver function, including sparse-memory release.
+
+#### System readings
+
+The FPS counter's **System** choice is a compact alternative to Graph/Breakdown/Dev, keeping FPS and frame time.
+It samples process CPU use, resident memory and available system RAM, plus the existing selected-device Vulkan
+usage/budget snapshot. Linux reads `CLOCK_PROCESS_CPUTIME_ID`, `VmRSS` in `/proc/self/status` and `MemAvailable`
+in `/proc/meminfo`. Windows reads `GetProcessTimes`, `K32GetProcessMemoryInfo`'s working set, and
+`GlobalMemoryStatusEx`'s available physical memory. CPU 100% is one logical CPU, not the whole PC. The resident
+set includes shared pages and is not private commit. Device-local usage/budget requires `VK_EXT_memory_budget`;
+without it both values are unavailable on any GPU vendor. On integrated GPUs those heaps can be shared system RAM.
+The budget is a moving driver allowance, not capacity. GPU utilization, temperatures and busiest-thread sampling
+are later work, not readings supplied by this slice.
+
+`RX_VK_SYSTEM_LOG` creates a local CSV at the explicit path; it creates no directory and never overwrites a file.
+No samples are uploaded or automatically attached to a Bug report. The header is:
+
+```text
+# longshot_system,1
+monotonic_ns,cpu_process_pct,rss_bytes,ram_available_bytes,vram_used_bytes,vram_budget_bytes
+```
+
+Integers are bytes or monotonic nanoseconds as named; CPU is percent, with a decimal dot. `na` is unavailable
+(including CPU's first interval), not zero. Displayed memory uses MiB, bytes divided by 1048576. These names retain
+the earlier proposed monitor's units, but this smaller format is deliberately **not** its `perf.csv` V1 schema:
+there is no frame-clock join, frame statistics, completion summary or vendor-sensor protocol.
+
+One complete line is flushed per interval while frames reach the menu tick, without catching up missed intervals.
+The first sample is immediate; a long pause delays the next sample. CPU covers the actual time between samples.
+Reads and optional file writes run on that tick's thread, so enabling them can add latency, particularly on slow
+storage. Use a local file, not a network filesystem. A write failure stops file output with a diagnostic; System
+can still display readings. Choosing another counter level and leaving file output unset disables all monitor
+clock reads, OS reads, formatting and file operations. Its enable check remains; no zero-overhead timing claim is made.
 
 ### The GPU
 
