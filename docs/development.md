@@ -124,6 +124,9 @@ The Windows-event worker first logs `stop: requested by ...`, calls `rx_close_as
 Those are the explicit close hooks also used by the ordinary window and control routes: they keep renderer caches,
 request that shader preparation stop, release frame-generation resources, and flush the host log. They do **not**
 drain arbitrary GPU jobs or guest saves. An older renderer without the close export cannot do that renderer work.
+The returning tail also marks a clean end for crash-record bookkeeping, after flushing the log, on the control,
+window/restart and completed windowless-event routes. The timeout route does not mark a clean end itself; until
+the common clean-end call is reached, the running marker remains for unclean-end recovery. This is not a save barrier.
 After these hooks and the log flush return, **only the Windows-event worker** ends with
 `TerminateProcess(GetCurrentProcess(), 0)`, skipping DLL detach. `ExitProcess` would terminate the watchdog before
 DLL detach, so a driver hanging in detach could not be bounded by that watchdog. Normal window/restart and control
