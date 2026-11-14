@@ -3,9 +3,11 @@
    clock_gettime(3), mach/mach_time.h. No private ulock entry points. */
 #if defined(__APPLE__)
 #include "darwin_wait.h"
+#include <dlfcn.h>
 #include <errno.h>
 #include <mach/mach_time.h>
 #include <os/os_sync_wait_on_address.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,10 +63,22 @@ void darwin_wake_word(volatile uint32_t *word, int all) {
    change in an 8-byte value cannot lose its wake just before kernel entry.
    Collisions are permitted spurious wakes. Both Win32 wake names broadcast here,
    as on Linux; waking only one could strand a changed subword's other waiter. */
-static uint32_t address_sequences[256];
+static pthread_once_t address_sequences_once = PTHREAD_ONCE_INIT;
+static uint32_t *address_sequences;
+static void init_address_sequences(void) {
+    /* Each image has its own shim, but only the executable owns the wait keys.
+       RTLD_DEFAULT could select a renderer's accidental private provider. */
+    typedef uint32_t *(*SequencesFn)(void);
+    SequencesFn provider = (SequencesFn)dlsym(RTLD_MAIN_ONLY, "hos_posix_address_wait_sequences");
+    if (!provider || !(address_sequences = provider())) {
+        fputs("fatal: main executable has no Darwin address-wait state provider\n", stderr);
+        abort();
+    }
+}
 static uint32_t *address_sequence(const volatile void *addr) {
+    pthread_once(&address_sequences_once, init_address_sequences);
     const uintptr_t word = (uintptr_t)addr >> 2;
-    return &address_sequences[(word ^ (word >> 8)) & 255];
+    return &address_sequences[(word ^ (word >> 8)) & (DARWIN_ADDRESS_WAIT_SEQUENCE_COUNT - 1)];
 }
 int darwin_wait_address(volatile void *addr, const void *compare, size_t size, uint32_t ms) {
     uint32_t *seq = address_sequence(addr);

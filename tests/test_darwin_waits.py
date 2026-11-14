@@ -1,12 +1,14 @@
 """Darwin waits from the real Win32 layer, without a game, device or window.
 
 The fixture cuts the synchronization functions out of win32_posix.c and links
-its darwin_wait.c, with the real windows.h. All locks, wakes, waits and clocks
-are real primitives. The out-of-scope fiber-only ucontext include and pseudo-thread
-lookup are omitted; ordinary HThread handles exercise the real completion monitor.
+darwin_wait.c and the executable-only darwin_wait_state.c, with the real windows.h.
+All locks, wakes, waits and clocks are real primitives. The out-of-scope fiber-only
+ucontext include and pseudo-thread lookup are omitted; ordinary HThread handles
+exercise the real completion monitor. A second fixture loads two distinct dylibs
+with image-local shims and the real canonical host provider.
 
 python -I -B tests/test_darwin_waits.py [--arch arm64 --arch x86_64]
-    [--source-tree PATH] [--out NEW_DIRECTORY] [--cc clang] [--cxx clang++]
+    [--source-tree PATH] [--out NEW_DIRECTORY] [--cc clang] [--cxx clang++] [--shared-only]
 
 Default: the running Mac's architecture. x86_64 on Apple Silicon needs Rosetta.
 The deployment target is 14.4. Other platforms do not execute Darwin fixtures.
@@ -15,9 +17,14 @@ Tolerances are fixed before measurements: 10 ms waits allow 0.1 ms early and
 outlier is printed, not discarded. Four workers at most, with 5 s progress
 watchdogs and a 90 s process limit. Wake cardinality's 2 ms settle/observation
 windows are repeated observations, not a proof of every scheduler interleaving.
+--shared-only runs the cross-image behavior and C++ header fixtures without the
+elapsed-time campaign. It checks queued and entry-race wakes, all widths and both
+broadcast wrappers; a provider outside the main executable must fail closed.
 """
 import argparse
 from contextlib import nullcontext
+import hashlib
+import json
 from pathlib import Path
 import platform
 import shlex
@@ -31,7 +38,7 @@ RUN_ALL_SKIP = {"windows": "Darwin 14.4+ public address waits and pthread extens
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def fixture(root):
+def fixture(root, harness=None):
     source = (root / "host/posix/win32_posix.c").read_text(encoding="utf-8")
     # Retain preprocessor branches, not a rewritten copy of the implementation.
     prefix = source[:source.index("/* ---- threads ---- */")]
@@ -43,7 +50,7 @@ def fixture(root):
     events = source[source.index("/* ---- events and semaphores ---- */"):
                     source.index("/* ---- fibers", source.index("/* ---- events and semaphores ---- */"))]
     lookup = "static HThread *thread_of(HANDLE h) { return is(h, H_THREAD) ? (HThread *)h : NULL; }\n"
-    return prefix + thread + lookup + events + HARNESS
+    return prefix + thread + lookup + events + (HARNESS if harness is None else harness)
 
 
 HARNESS = r'''
@@ -545,33 +552,86 @@ def run(args, out):
     src.write_text(fixture(root), encoding="utf-8")
     cpp = out / "header.cpp"
     cpp.write_text("#include <initializer_list>\n" + CPP, encoding="utf-8")
+    api = out / "wait_api.c"
+    api.write_text(fixture(root, ""), encoding="utf-8")
+    sharing = out / "sharing.c"
+    sharing_template = ROOT / "tests/darwin_wait_sharing_test.c"
+    sharing.write_text(fixture(root, sharing_template.read_text(encoding="utf-8")), encoding="utf-8")
+    inputs = [root / "host/posix" / name for name in
+              ("win32_posix.c", "windows.h", "darwin_wait.c", "darwin_wait.h", "darwin_wait_state.c")]
+    inputs += [Path(__file__).resolve(), sharing_template, src, cpp, api, sharing]
+    (out / "source-sha256.json").write_text(json.dumps(
+        {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in inputs}, indent=2) + "\n", encoding="utf-8")
     failed = False
     for arch in args.arch or [platform.machine()]:
         common = ["-arch", arch, "-mmacosx-version-min=14.4", "-O2", "-Wall", "-Wextra", "-Werror",
                   "-Wno-unused-function", "-pthread", "-I", str(root / "host/posix")]
-        helper = root / "host/posix/darwin_wait.c"
-        obj = out / (arch + "-darwin_wait.o")
         link = []
-        if helper.exists():
-            code = command([args.cc, "-std=gnu11", *common, "-c", str(helper), "-o", str(obj)], out, arch + "-helper", 45)
+        for name in ("darwin_wait", "darwin_wait_state"):
+            helper = root / "host/posix" / (name + ".c")
+            obj = out / (arch + "-" + name + ".o")
+            code = command([args.cc, "-std=gnu11", *common, "-c", str(helper), "-o", str(obj)], out, arch + "-" + name, 45)
             if code:
                 failed = True
-                continue
-            link = [str(obj)]
-        binary = out / (arch + "-waits")
-        code = command([args.cc, "-std=gnu11", *common, str(src), *link, "-o", str(binary)], out, arch + "-compile", 45)
-        if code:
-            failed = True
+                break
+            link.append(str(obj))
+        if len(link) != 2:
             continue
-        if command(["/usr/bin/arch", "-" + arch, str(binary)], out, arch + "-run", 90):
-            failed = True
+        exports = ["-Wl,-exported_symbol,_hos_posix_*", "-Wl,-undefined,error"]
+        if not args.shared_only:
+            binary = out / (arch + "-waits")
+            code = command([args.cc, "-std=gnu11", *common, str(src), *link, *exports, "-o", str(binary)], out, arch + "-compile", 45)
+            if code:
+                failed = True
+            elif command(["/usr/bin/arch", "-" + arch, str(binary)], out, arch + "-run", 90):
+                failed = True
         cpp_binary = out / (arch + "-header")
-        code = command([args.cxx, "-std=c++17", *common, str(cpp), *link, "-o", str(cpp_binary)], out, arch + "-cpp-compile", 45)
+        code = command([args.cxx, "-std=c++17", *common, str(cpp), *link, *exports, "-o", str(cpp_binary)], out, arch + "-cpp-compile", 45)
         if code:
             failed = True
         elif command(["/usr/bin/arch", "-" + arch, str(cpp_binary)], out, arch + "-cpp-run", 30):
             failed = True
-    print(("FAIL" if failed else "PASS") + " test_darwin_waits architectures=" + ",".join(args.arch or [platform.machine()]))
+        images = []
+        for letter in ("A", "B"):
+            image = out / (arch + "-wait-" + letter + ".dylib")
+            code = command([args.cc, "-std=gnu11", *common, "-dynamiclib", str(api), link[0],
+                            "-Wl,-undefined,error", "-Wl,-install_name,@rpath/" + image.name, "-o", str(image)],
+                           out, arch + "-image-" + letter, 45)
+            if code:
+                failed = True
+                break
+            images.append(str(image))
+        if len(images) != 2:
+            continue
+        decoy = out / (arch + "-decoy-state.dylib")
+        code = command([args.cc, *common, "-dynamiclib", link[1], "-Wl,-undefined,error",
+                        "-Wl,-install_name,@rpath/" + decoy.name, "-o", str(decoy)], out, arch + "-decoy-build", 45)
+        if code:
+            failed = True
+            continue
+        binary = out / (arch + "-sharing")
+        code = command([args.cc, "-std=gnu11", *common, str(sharing), *link, *exports, "-o", str(binary)],
+                       out, arch + "-sharing-build", 45)
+        if code:
+            failed = True
+        elif command(["/usr/bin/arch", "-" + arch, str(binary), *images, str(decoy)], out, arch + "-sharing-run", 90):
+            failed = True
+        missing = out / (arch + "-missing-provider")
+        code = command([args.cc, "-std=gnu11", *common, str(sharing), link[0], "-Wl,-undefined,error",
+                        "-Wl,-exported_symbol,_main", "-o", str(missing)], out, arch + "-missing-build", 45)
+        if code:
+            failed = True
+            continue
+        for operation in ("wait", "single", "all"):
+            for image in ("host", "A", "B"):
+                probe = operation + "-" + image
+                code = command(["/usr/bin/arch", "-" + arch, str(missing), *images, str(decoy), probe],
+                               out, arch + "-missing-" + probe, 15)
+                if code != 86:   # the fixture catches the expected SIGABRT, avoiding intentional crash reports
+                    failed = True
+        print(f"SHARING_CHECKS arch={arch} missing_provider_probes=9 expected_exit=86", flush=True)
+    print(("FAIL" if failed else "PASS") + " test_darwin_waits architectures=" + ",".join(args.arch or [platform.machine()]) +
+          " mode=" + ("sharing-only" if args.shared_only else "all"))
     return int(failed)
 
 
@@ -582,6 +642,7 @@ def main():
     parser.add_argument("--arch", choices=("arm64", "x86_64"), action="append")
     parser.add_argument("--source-tree", type=Path, default=ROOT)
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--shared-only", action="store_true", help="cross-image behavior and C++ headers, without the timing campaign")
     args = parser.parse_args()
     if sys.platform == "darwin":
         if args.out:

@@ -30,6 +30,13 @@ int darwin_wait_until_ns(int64_t until);
    UINT32_MAX is infinite; zero is a comparison/poll, never the OS's invalid zero deadline. */
 int darwin_wait_word(volatile uint32_t *word, uint32_t seen, uint32_t ms);
 void darwin_wake_word(volatile uint32_t *word, int all);
+
+/* Defined only in the main executable; both image-local helpers resolve this
+   export once. Its zero-initialized sequence words live for the whole process. */
+#define DARWIN_ADDRESS_WAIT_SEQUENCE_COUNT 256
+uint32_t *hos_posix_address_wait_sequences(void);
+
+/* A missing executable provider is fatal, never an image-private fallback. */
 int darwin_wait_address(volatile void *addr, const void *compare, size_t size, uint32_t ms);
 void darwin_wake_address(void *addr);
 
