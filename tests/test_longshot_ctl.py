@@ -31,9 +31,15 @@ FAKE = r'''
 import json, os, socket, struct, sys, threading, time, zlib
 path = os.environ["HOS_CONTROL"]
 log = open(os.environ["FAKE_LOG"], "a", buffering=1)
+console = None
+if os.name == "nt":   # (whether this stand-in has a console, and whether that console is a window on the desktop)
+    import ctypes
+    window = ctypes.windll.kernel32.GetConsoleWindow()
+    console = [bool(ctypes.windll.kernel32.GetConsoleCP()), bool(window and ctypes.windll.user32.IsWindowVisible(window))]
 log.write(json.dumps({"cmd": "_start", "control": path, "xdg": os.environ.get("XDG_DATA_HOME"),
                       "argv": sys.argv[1:], "cwd": os.getcwd(), "headless": os.environ.get("HOS_HEADLESS"),
-                      "audio": os.environ.get("HOS_AUDIO"), "env_file": os.environ.get("HOS_ENV_FILE")}) + "\n")
+                      "audio": os.environ.get("HOS_AUDIO"), "env_file": os.environ.get("HOS_ENV_FILE"),
+                      "console": console}) + "\n")
 print("fake: started", flush=True)
 started = time.monotonic()
 options = {"text_speed": 3, "fps_counter": 0}
@@ -319,6 +325,8 @@ class Sessions(unittest.TestCase):
         self.assertEqual(Path(info["environment"]["HOS_ENV_FILE"]).read_bytes(), b"")
         self.assertEqual(info["user"], str(session.folder / "user"))
         self.assertEqual(self.requests("_start")[-1]["argv"], ["--user", info["user"]])
+        if WINDOWS:   # (the owner's own hidden console, inherited: an owner with none left the game to open a window of its own)
+            self.assertEqual(self.requests("_start")[-1]["console"], [True, False], "the game opened a console window")
         attached = self.m.Session.attach(session.folder)
         self.assertEqual(attached.request("status")["state"], "play")
         attached.request("press", buttons="A", frames=3)

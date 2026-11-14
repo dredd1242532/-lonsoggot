@@ -1069,7 +1069,9 @@ def start_session(game_dir, *, run=None, root=None, exe=None, image=None, romfs=
     write_json(session.manifest, info)
     command = (wrapper or []) + [sys.executable, "-I", "-B", str(Path(__file__).resolve()),
                                  "--run", str(folder), "_supervise"]
-    flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS} if WINDOWS \
+    # (Windows: the owner gets a console of its own with no window, apart from the caller's, and the game inherits it. With
+    # no console at all (DETACHED_PROCESS) Windows opened a new console window for the game, one each launch)
+    flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW} if WINDOWS \
         else {"start_new_session": True}
     try:
         with (folder / "owner.log").open("ab") as out:
