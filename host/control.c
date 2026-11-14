@@ -1985,6 +1985,11 @@ static int conn_waiting(int ci) {
 /* ---- the transport: a Unix domain socket (Linux), a named pipe (Windows) ---- */
 #ifndef _WIN32
 static int listen_fd = -1;
+#ifdef HOS_CONTROL_NO_GAME
+/* (the test build only) called between the socket's bind and its listen, where its file is in place and a connect to it
+   is refused: tests/control_test.c's quit case pauses there */
+void (*hos_control_test_bound)(void);
+#endif
 
 /* The socket's folder: this user's, and writable by no one else (no other user can put a file, a link or a socket of their
    own where the bridge binds, unlinks a stale socket or writes shots by a relative path). 0 when it is not (logged) */
@@ -2041,6 +2046,9 @@ static int transport_open(const char *path) {
     const int bound = bind(listen_fd, (struct sockaddr *)&a, sizeof a);
 #endif
     umask(old);
+#ifdef HOS_CONTROL_NO_GAME
+    if (!bound && hos_control_test_bound) hos_control_test_bound();
+#endif
 #if defined(__APPLE__)
     if (bound || chmod(path, 0600) || hos_darwin_control_listen(listen_fd)) {
 #else
