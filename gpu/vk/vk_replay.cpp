@@ -1737,8 +1737,8 @@ void maybe_split(VkCommandBuffer& cmd) {
     // from the whole list (ub_overlay), the same bytes either way. What changes is everything else that reads guest memory
     // after a part's end: a later part's storage, vertex, index or texture reads of an updated range, and, on a GPU whose
     // buffer pools have no VRAM mirror, the game's own CPU reads, since the GPU then writes the memory the game sees partway
-    // through its frame. Written at each part's end, on Intel without mirrors: white blocks and haze at Kokiri, and a
-    // whole-screen white flash every 8 frames on the Arc 140V (https://github.com/NotRexed/Hookshot/issues/999).
+    // through its frame. Written at each part's end, on Intel without mirrors: white blocks and flashes at Kokiri, and
+    // a whole-screen white flash every 8 frames on the Arc 140V (https://github.com/NotRexed/Hookshot/issues/999).
     // Measured on an Intel iGPU only (no mirrors), so the default there; with mirrors (Arc discrete) the write goes to the
     // mirror, and it was not tested there: left as before. RX_VK_SPLIT_UBFLUSH=1: written at each part's end, as before,
     // =0: at the last part's on any GPU)
