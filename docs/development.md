@@ -633,6 +633,9 @@ Insert always releases the latch.
 | `layout_preset` | 0 Nintendo, 1 Xbox / PC, 2 Swap Face, 3 Custom |
 | `steam_deck` | No row writes it; the menu keeps a line you add. 1 the Steam Deck profile on, 0 off; without the line, on where a Steam Deck is found. `RX_VK_STEAM_DECK` wins over it (above) Auto's Steam Deck profile initializes new rows to foliage/shadows 25%, grass/contact shadows 0, object detail 100%, base quality 0 (Normal), preserving existing saved rows and environment overrides. |
 
+Bug reports list these six detail rows under "default depends on this PC" when Auto's current choice sets them.
+On other profiles, their built-in defaults remain known and manual changes appear under "Changes from the defaults".
+
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
 (`gpu/vk/vk_main.cpp`) and the controls (`host/nn_hid.c`).

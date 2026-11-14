@@ -1,4 +1,4 @@
-"""Drive the real report row formatter with authored display/upscaler contexts.
+"""Drive the real report row formatter with authored display/upscaler/profile contexts.
 
 No game or Vulkan device. --source checks the same behavior against an older
 checkout; the released/current pre-fix formatter compiles and fails the cases.
@@ -12,6 +12,14 @@ from pathlib import Path
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
+DISTANCE_ROWS = (
+    ("gfx_foliage", "foliage_distance"),
+    ("gfx_objects", "object_detail"),
+    ("gfx_grass", "grass_density"),
+    ("gfx_shadows", "shadow_distance"),
+    ("gfx_contact_shadows", "contact_shadows"),
+    ("gfx_base_quality", "base_quality"),
+)
 
 
 def definition(text, name):
@@ -68,6 +76,8 @@ def fixture(source):
     unchanged = " && ".join("opts.%s == before.%s" % (member, member) for member in re.findall(r"\bint (\w+)\s*=", options))
     auto_checks = "\n".join('        CHECK(pc.find("%s: ") != std::string::npos, "Auto-controlled %s missing");' %
                             (names[member], member) for member in auto_members)
+    distance_rows = "\n".join('        {"%s-profile", "%s", &Options::%s, &auto_settings::Choice::%s},' %
+                              (member, names[member], member, choice) for member, choice in DISTANCE_ROWS)
     return r'''#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -80,12 +90,14 @@ def fixture(source):
 #include <string>
 #include <vector>
 #include "host/hos_wide_size.h"
+#include "gpu/vk/auto_settings.h"
 #include "gpu/vk/display_modes.h"
 #include "gpu/vk/upscaler_rows.h"
 using namespace mkwvk;
 namespace ur = upscaler_rows;
 ''' + options + r'''
 Options opts;
+::auto_settings::Choice auto_choice;
 ''' + auto_for + r'''
 namespace mkwvk::i18n {
 int lang_saved; // language.txt's language, as the stand-in reads it
@@ -115,11 +127,8 @@ Row rows[] = {
 };
 int ultrawide_read = 1;
 ''' + definition(menu, "void outputs_sync") + r'''
-static bool pending_restart;
-// (the Steam Deck profile's Frame generation, framegen_by_pc: Auto's choice sets it in the auto-profile case, as on a Deck; the
-// framegen-off-deck case is another PC, where the row's change from its built-in default is reported as one)
-static bool deck_profile;
-bool framegen_by_pc() { return deck_profile; }
+bool pending_restart;
+''' + definition(menu, "bool framegen_by_pc") + r'''
 bool restart_changed(const Row& r) { return pending_restart && r.value == &opts.output_res; }
 ''' + policy + "\n" + known + "\n" + formatter + r'''
 int failures;
@@ -137,7 +146,31 @@ int main(int argc, char** argv) {
     // known: the lines a row away from its known default gives, among the changes
     std::string subject, expected_current, fresh_default;
     std::vector<std::string> at_default, known;
-    if (which == "aspect-default" || which == "reordered-shapes") {
+    struct DistanceRow {
+        const char* case_name;
+        const char* name;
+        int Options::*value;
+        int auto_settings::Choice::*choice;
+    };
+    const DistanceRow distances[] = {
+''' + distance_rows + r'''
+    };
+    const auto distance = std::find_if(std::begin(distances), std::end(distances),
+        [&](const DistanceRow& row) { return which == row.case_name; });
+    if (distance != std::end(distances)) {
+        auto_choice.*distance->choice = 0; // zero is a chosen default, not the -1 sentinel
+        subject = distance->name;
+        expected_current = tx_number(opts.*distance->value);
+        for (const auto& other : distances)
+            if (&other != distance) at_default.push_back(std::string(other.name) + ": ");
+    } else if (which == "distances-off-deck") {
+        const Options defaults{};
+        for (const auto& row : distances) {
+            opts.*row.value = defaults.*row.value == 0 ? 1 : 0;
+            known.push_back(std::string(row.name) + ": " + std::to_string(opts.*row.value) +
+                            " (default: " + std::to_string(defaults.*row.value) + ")");
+        }
+    } else if (which == "aspect-default" || which == "reordered-shapes") {
         at_default = {"Aspect ratio: "}; // the monitor's shape, as outputs_sync made it
     } else if (which == "aspect-changed" || which == "aspect-changed-wide") {
         const std::string monitors = tx_ultrawide(opts.ultrawide);
@@ -180,7 +213,11 @@ int main(int argc, char** argv) {
         opts.framegen = 2;
         known = {"''' + names["framegen"] + r''': 2 (default: 0)"};
     } else if (which == "auto-profile") {
-        deck_profile = true;   // (every row apply_auto can set is Auto's here: the Steam Deck profile's Frame generation too)
+        ::auto_settings::Hardware hardware;
+        hardware.deck = true;
+        auto_choice = ::auto_settings::choose(hardware);
+        opts.framegen = auto_choice.framegen;
+        for (const auto& row : distances) opts.*row.value = auto_choice.*row.choice;
         opts.preset = 6; opts.dlss = ur::DLSS; opts.resolution = 3;
         opts.output_res = parse_output("1920x1080"); opts.upscale = 2;
         opts.sharpness = 50; opts.pace = 1; opts.handheld = 0; opts.vram_budget = 7;
@@ -248,7 +285,8 @@ def main():
     args = parser.parse_args()
     cases = ("aspect-default", "reordered-shapes", "aspect-changed", "aspect-changed-wide", "output-context", "render-context",
              "upscaler-context", "auto-profile", "custom-never-auto", "custom-after-auto", "framegen-by", "lang-saved",
-             "lang-changed", "stable-sentinels", "model-env", "model-fixed", "framegen-off-deck")
+             "lang-changed", "stable-sentinels", "model-env", "model-fixed", "framegen-off-deck", "distances-off-deck",
+             *(member + "-profile" for member, _ in DISTANCE_ROWS))
     failed = []
     with tempfile.TemporaryDirectory(prefix="report-defaults-") as tmp:
         cpp = Path(tmp) / "defaults.cpp"

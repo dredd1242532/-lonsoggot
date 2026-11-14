@@ -3034,12 +3034,18 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
 // change the live options the renderer reads. Keep their current values, but do
 // not call them changes or invent a default. GPU 0 and microphone 1 stay stable;
 // report_default has the Aspect ratio's, the Game language's and Frame generation by's.
-// Frame generation's is this PC's where the Steam Deck profile chooses it (framegen_by_pc).
+// Frame generation and distance defaults are this PC's where Auto's choice sets them.
 bool report_default_depends_on_pc(const Row& r) {
     if (r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
         r.value == &opts.handheld || r.value == &opts.vram_budget)
         return opts.preset != 0 || auto_for != 0;
     if (r.value == &opts.framegen) return framegen_by_pc();
+    if (r.value == &opts.gfx_foliage) return auto_choice.foliage_distance >= 0;
+    if (r.value == &opts.gfx_objects) return auto_choice.object_detail >= 0;
+    if (r.value == &opts.gfx_grass) return auto_choice.grass_density >= 0;
+    if (r.value == &opts.gfx_shadows) return auto_choice.shadow_distance >= 0;
+    if (r.value == &opts.gfx_contact_shadows) return auto_choice.contact_shadows >= 0;
+    if (r.value == &opts.gfx_base_quality) return auto_choice.base_quality >= 0;
     return r.value == &opts.output_res || r.value == &opts.resolution || r.value == &opts.dlss ||
            r.value == &opts.preset || r.value == &opts.upscale ||
            (r.value == &opts.dlss_model && dlss_preset_env());
