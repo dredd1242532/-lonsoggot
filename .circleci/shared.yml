@@ -731,10 +731,8 @@ jobs:
   website-deploy:
     executor: node22
     steps:
-      - mb/get-source:
-          fork-pr: << pipeline.parameters.fork_pr >>
-          fork-sha: "<< pipeline.parameters.fork_sha >>"
-          repo-url: "https://git.magicbean.dev/<< pipeline.git.repo_owner >>/<< pipeline.git.repo_name >>.git"
+      # plain checkout: this job holds cloudflare-prod and only runs on main, never on PR or fork code
+      - checkout
       - run:
           name: wrangler deploy (production)
           working_directory: website
