@@ -1973,24 +1973,34 @@ void wb_kind_note(WbKind kind, uint64_t guest_lo, uint64_t guest_hi, uint64_t va
 }
 // (whole copies' page snapshots: a page late for a whole copy gets a 4 KB slot; each whole copy over it from then on also
 // copies its part of the page there, in the same command buffer, and its range is kept with the copy's value. pools_mu)
+// When the 256 slots are taken, the slots of pages not late for a whole copy in kSnapIdle recordings, with nothing on the GPU
+// still writing or reading them, are given back (snap_pages_reclaim); with none such, a new page waits as before
 constexpr uint32_t kSnapSlots = 256;
+constexpr uint64_t kSnapIdle = 1024;   // (recordings)
 // (a small pool, 16 MB or less, whose late page was written back whole: given a shadow at its next write-back, so its pages
-// take the diff pass's exact stamps; a whole copy writes words the program never wrote too, older than the CPU's. pools_mu)
+// take the diff pass's exact stamps; a whole copy writes words the program never wrote too, older than the CPU's. A pool
+// gone leaves the set (late_fix_reap): a new pool at its address starts over. pools_mu)
 constexpr uint64_t kLateShadowPoolMax = 16ull << 20;
 std::unordered_set<uint64_t> late_shadow_pools;
 bool late_shadow_wanted(uint64_t pool_lo) { return !late_shadow_pools.empty() && late_shadow_pools.count(pool_lo); }
 struct SnapPage {
     uint32_t slot = 0;
     uint64_t since = 0;   // (the first recording whose whole copies are snapped)
+    uint64_t used = 0;    // (the last recording that writes its slot (a whole copy) or reads it (a fix): given back only once done)
+    uint64_t late = 0;    // (the recording when a capture last found it late for a whole copy)
     std::vector<std::array<uint64_t, 3>> ranges;   // (lo, hi in the page, the copy's value)
 };
 std::unordered_map<uint32_t, SnapPage> snap_pages;
+std::vector<uint32_t> snap_free;   // (slots given back: snap_pages_reclaim)
 VkBuffer snap_buf = VK_NULL_HANDLE;
 VmaAllocation snap_alloc = nullptr;
 VkDeviceAddress snap_address = 0;
 uint32_t snap_used = 0;
+void snap_pages_reclaim();
 bool snap_page_make(uint32_t pg) {
-    if (snap_pages.count(pg) || snap_used >= kSnapSlots) return false;
+    if (snap_pages.count(pg)) return false;
+    if (snap_used >= kSnapSlots && snap_free.empty()) snap_pages_reclaim();
+    if (snap_used >= kSnapSlots && snap_free.empty()) return false;
     if (!snap_buf) {
         if (!create_device_buffer((uint64_t)kSnapSlots * 4096, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                                                 VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, snap_buf, snap_alloc)) {
@@ -2002,7 +2012,9 @@ bool snap_page_make(uint32_t pg) {
         snap_address = vkGetBufferDeviceAddress(dev.device, &da);
     }
     SnapPage s;
-    s.slot = snap_used++, s.since = mem_rec_value + 1;
+    if (!snap_free.empty()) s.slot = snap_free.back(), snap_free.pop_back();   // (no range of it kept: the old page's words are never read)
+    else s.slot = snap_used++;
+    s.since = mem_rec_value + 1, s.late = mem_rec_value;
     snap_pages.emplace(pg, std::move(s));
     return true;
 }
@@ -2016,6 +2028,7 @@ void late_snap_whole(VkCommandBuffer cmd, const Pool& p, uint64_t off, uint64_t 
         const uint64_t a = std::max(lo, pg << kPageShift), b = std::min(hi, (pg + 1) << kPageShift);
         const VkBufferCopy c{a - p.lo, (uint64_t)it->second.slot * 4096 + (a - (pg << kPageShift)), b - a};
         vkCmdCopyBuffer(cmd, p.mirror, snap_buf, 1, &c);
+        it->second.used = std::max(it->second.used, mem_rec_value);
         std::vector<std::array<uint64_t, 3>>& rs = it->second.ranges;   // (the done ones go: else one a whole copy, for good)
         if (rs.size() >= 32) std::erase_if(rs, [](const std::array<uint64_t, 3>& r) { return r[2] <= mem_completed; });
         rs.push_back({a - (pg << kPageShift), b - (pg << kPageShift), mem_rec_value});
@@ -2128,6 +2141,22 @@ struct LatePage {   // (a page with fixes: until they are done, a read of it on 
     uint64_t fix_part = 0, fix_end = 0;                     // (fix_end: the table's bytes up to its last fix)
 };
 std::unordered_map<uint32_t, LatePage> late_pages;
+// (pools_mu held; the slots all taken) the snapshots of pages not late for a whole copy in kSnapIdle recordings given back:
+// none whose slot a recording not done yet writes or reads (used: its whole copies, and the fixes late_fix_emit recorded), and
+// none with a late page whose fix is not recorded yet or not done (late_fixes still to be recorded read its slot)
+void snap_pages_reclaim() {
+    for (auto it = snap_pages.begin(); it != snap_pages.end();) {
+        const SnapPage& s = it->second;
+        const auto lp = late_pages.find(it->first);
+        const bool fixing = lp != late_pages.end() && (!lp->second.fix_value || lp->second.fix_value > mem_completed);
+        if (fixing || s.used > mem_completed || s.late + kSnapIdle > mem_rec_value) {
+            ++it;
+            continue;
+        }
+        snap_free.push_back(s.slot);
+        it = snap_pages.erase(it);
+    }
+}
 std::vector<uint32_t> late_built;   // (the pages of the last late_fix_build, until late_fix_kept)
 size_t late_built_mark = 0;
 struct LateFixTable { VkBuffer buf = VK_NULL_HANDLE; VmaAllocation alloc = nullptr; uint8_t* map = nullptr; VkDeviceAddress address = 0; uint64_t bytes = 0, value = 0; };
@@ -2239,6 +2268,7 @@ bool late_fix_build(Capture& c) {
                     continue;
                 }
                 SnapPage& s = sit->second;
+                s.late = mem_rec_value;   // (kept from snap_pages_reclaim for kSnapIdle recordings, and its fixes with it)
                 std::erase_if(s.ranges, [](const std::array<uint64_t, 3>& r) { return r[2] <= mem_completed; });
                 if (D + 1 < s.since) { fail(4); continue; }
                 bool odd = false;
@@ -2363,7 +2393,10 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
 // (pools_mu held) the stamps given back and the fixes known done, let go
 void late_fix_reap() {
     static uint64_t reaps;
-    if (++reaps % 64 == 0) stamps_drop_unused();
+    if (++reaps % 64 == 0) {
+        stamps_drop_unused();
+        std::erase_if(late_shadow_pools, [](uint64_t lo) { return !imported.count(lo); });   // (pools gone: their shadow no longer wanted)
+    }
     while (!dead_stamps.empty() && dead_stamps.front().value <= mem_completed) {
         destroy_buffer(dead_stamps.front().buf, dead_stamps.front().alloc);
         dead_stamps.pop_front();
@@ -2414,6 +2447,10 @@ void late_fix_emit() {
         if (t) {
             memcpy(t->map, late_fixes.data(), bytes);
             flush_mapped(t->alloc, bytes);
+            // (after what this upload command buffer wrote since its last barrier: this emit can run several times in one
+            // recording, and between two runs shadow_sync_copy writes a pool's shadow, which the diff fixes read; the stamps'
+            // fills above too. Left out when nothing came in between: the dedupe)
+            full_barrier(up, "late pages' fix (before)");
             GprofSpan gp(up, "late pages' fix (shadows, snapshots -> capture buffers)");
             gp.items = (int)late_fixes.size();
             vkCmdBindPipeline(up, VK_PIPELINE_BIND_POINT_COMPUTE, late_fix_pipe.pipe);
@@ -2425,6 +2462,8 @@ void late_fix_emit() {
                 if (!lp.fix_value) {
                     lp.fix_value = mem_rec_value, lp.fix_map = (LateFix*)t->map + lp.first;
                     lp.fix_alloc = t->alloc, lp.fix_part = mem_rec_part.load(), lp.fix_end = (lp.first + lp.n) * sizeof(LateFix);
+                    if (!snap_pages.empty())   // (its snapshot's slot read by this recording: not given back before it is done)
+                        if (const auto sp = snap_pages.find(pg); sp != snap_pages.end()) sp->second.used = std::max(sp->second.used, mem_rec_value);
                     for (auto& [g, cb] : cap_bufs)   // (its buffer kept until this recording is done: it writes there)
                         if (cb.buffer == lp.buffer && cb.value == lp.cap_value) cb.last_use = std::max(cb.last_use, mem_rec_value);
                 }
@@ -4670,9 +4709,6 @@ template <class F> void wbd_split(uint64_t at, uint64_t size, F&& emit) {
     }
     if (end > body_end) emit(body_end, end - body_end, false);
 }
-// (pools_mu held) the late pages' fix: a stamp block whose shadow was freed counts for none: filled again and tied to its
-// pool's shadow when a late page is next found there (a new shadow may have the freed one's handle and memory, and the
-// stamps were the old one's)
 // (pools_mu held) the shadow-follows-sync entries of a freed shadow dropped, before shadows_reap destroys it (a shadow made
 // after may have its handle: the entries would mark that one's pages known, which never had the copy)
 void shadow_synced_freed() {
@@ -4683,6 +4719,9 @@ void shadow_synced_freed() {
         return false;
     });
 }
+// (pools_mu held) the late pages' fix: a stamp block whose shadow was freed counts for none: filled again and tied to its
+// pool's shadow when a late page is next found there (a new shadow may have the freed one's handle and memory, and the
+// stamps were the old one's)
 void late_fix_shadows_freed() {
     if (dead_shadows.empty() || stamp_blocks.empty()) return;
     for (auto& [key, b] : stamp_blocks) {

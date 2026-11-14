@@ -14,7 +14,13 @@ the test's own, with stand-ins for the buffers and the GPU's progress:
   - a stamp block met by another pool's page is tied to that pool: stamp_pools moves with it (stamps_in);
   - a stamp block whose shadow was freed (late_fix_shadows_freed) is filled again before it is read;
   - a whole copy's page gets a snapshot, then fixes from its pending copies' ranges;
-  - late_snap_whole drops the done ranges (at or below mem_completed) once 32 are kept: no unbounded growth.
+  - late_snap_whole drops the done ranges (at or below mem_completed) once 32 are kept: no unbounded growth;
+  - with the 256 snapshot slots taken, snap_page_make gives back the slots of pages not late for kSnapIdle recordings,
+    keeping any a recording not done yet writes or reads (used) and any with a late page whose fix is pending.
+
+late_fix_emit is read as text: a full_barrier(up) comes right before the fix's dispatch is bound (no command of the
+upload command buffer between them), as it can run several times in one recording, with shadow_sync_copy writing the
+shadows it reads in between.
 
 python -I -B tests/test_late_fix_build.py [--cxx g++]
 """
@@ -150,7 +156,7 @@ void reset() {
     wb_pages = WbPages{}, wb_parts = WbPages{}, wb_direct = WbPages{}, wb_diff_pages = WbPages{}, wb_whole_pages = WbPages{};
     stamp_blocks.clear(), stamp_pools.clear(), stamp_unfilled.clear(), stamp_bytes = 0;
     late_fixes.clear(), late_pages.clear(), late_built.clear(), late_built_mark = 0;
-    snap_pages.clear(), snap_used = 0, late_shadow_pools.clear();
+    snap_pages.clear(), snap_free.clear(), snap_used = 0, late_shadow_pools.clear();
     dead_shadows.clear(), cmd_copies.clear();
     for (int64_t& f : st_lf_fell) f = 0;
     mem_rec_value = mem_completed = 0;
@@ -338,7 +344,33 @@ int main() {
         for (int i = 0; i < 5; i++) late_snap_whole(1, imported[kLo], 3 * 4096 + 4 * i, 4);
         CHECK(s.ranges.size() <= 33 && s.ranges.back()[0] == 16 && s.ranges.back()[1] == 20);
     }
-    std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots and their ranges");
+    // (snapshot slots) all taken: the slots of pages idle for kSnapIdle recordings, nothing on the GPU still writing or reading
+    // them and no fix of theirs pending, given back; a new page takes one, with no range of the old page's
+    reset();
+    {
+        mem_rec_value = 10;
+        for (uint32_t i = 0; i < kSnapSlots; i++) CHECK(snap_page_make(0x10000 + i));
+        CHECK(snap_used == kSnapSlots && snap_free.empty());
+        snap_pages[0x10000].used = 2000;                  // (a recording not done yet writes or reads its slot)
+        snap_pages[0x10001].late = 1500;                  // (late not long ago)
+        late_pages[0x10002] = LatePage{};                 // (a fix not recorded yet)
+        late_pages[0x10003].fix_value = 1900;             // (a fix recorded, not done)
+        mem_rec_value = 1033, mem_completed = 1000;
+        CHECK(!snap_page_make(0x20000) && snap_pages.size() == kSnapSlots);   // (none idle for kSnapIdle yet: it waits)
+        mem_rec_value = 2100, mem_completed = 1800;
+        CHECK(snap_page_make(0x20000));
+        CHECK(snap_pages.size() == 5 && snap_free.size() == kSnapSlots - 5 && snap_used == kSnapSlots);
+        for (uint32_t k = 0x10000; k <= 0x10003; k++) CHECK(snap_pages.count(k));
+        const uint32_t kept = snap_pages[0x10000].slot, taken = snap_pages[0x20000].slot;
+        CHECK(taken < kSnapSlots && snap_pages[0x20000].since == 2101 && snap_pages[0x20000].ranges.empty());
+        for (uint32_t s : snap_free) CHECK(s != taken && s != kept);
+        mem_rec_value = 2600, mem_completed = 2100;
+        for (uint32_t i = 0; i < kSnapSlots - 5; i++) CHECK(snap_page_make(0x30000 + i));
+        CHECK(snap_free.empty() && snap_page_make(0x40000));   // (0x10000, 0x10001 and 0x10003 given back now)
+        CHECK(snap_free.size() == 2 && snap_pages.count(0x10002) && !snap_pages.count(0x10000));   // (0x10002's fix still pending)
+        CHECK(!snap_pages.count(0x10001) && !snap_pages.count(0x10003) && snap_pages.count(0x20000));
+    }
+    std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots, their ranges and slots");
 }
 '''
 
@@ -349,6 +381,14 @@ def main():
     parser.add_argument('--source', type=Path, default=ROOT / 'gpu/vk/vk_memory.cpp')
     args = parser.parse_args()
     text = args.source.read_text(encoding='utf-8')
+    # (late_fix_emit can run several times in one recording's upload command buffer; between two runs shadow_sync_copy
+    # writes the shadows its fixes read: a barrier before the dispatch, after any command recorded before it)
+    emit = block(text, 'void late_fix_emit() {')
+    bind = emit.index('vkCmdBindPipeline(up, VK_PIPELINE_BIND_POINT_COMPUTE, late_fix_pipe.pipe)')
+    barrier = emit.rfind('full_barrier(up', 0, bind)
+    if barrier < 0 or barrier < emit.rfind('vkCmd', 0, bind) or barrier < emit.rfind('if (t) {', 0, bind):
+        raise SystemExit("late_fix_emit: no full_barrier(up) right before the fix's dispatch is bound: what the upload "
+                         "command buffer wrote since its last barrier (shadow_sync_copy's shadows) is not ordered before its reads")
     fixture = (FIXTURE
                .replace('@WBPAGES@', block(text, 'struct WbPages {'))
                .replace('@WBNOTE@', block(text, 'void wb_pages_note(uint64_t guest_lo, uint64_t guest_hi, uint64_t value, uint64_t part) {'))
