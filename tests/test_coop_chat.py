@@ -57,6 +57,7 @@ static unsigned long long hos_oc_note_bits;
 static int rx_option(int id,int) { assert(id==HOS_OPT_CHAT_FOCUS); return chat_option; }
 static void scripted_input(uint64_t* b, int32_t s[4]) { *b=0xffff; s[0]=32767; }
 static int hos_control_input(uint64_t* b, int32_t s[4]) { *b|=1; s[1]=32767; return 0; }
+void hos_oot_autoload_input() {}   /* (host/oot_autoload.c: the Skip title screen row's presses; read_input asks for them after the chat-focus return) */
 @@INPUT@@
 int main() {
     storage.take_text=take_text; storage.coop_feed=feed; storage.coop_chat=command;
