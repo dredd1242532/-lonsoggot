@@ -837,14 +837,24 @@ size_t program_cache_load_some(const std::unordered_set<uint64_t>& wanted, const
 
 /// (longshot) Program key's kept variants made for fn, then let go (modules and layouts): the records stay for play
 void program_cache_borrow(uint64_t key, const std::function<void(Program&)>& fn) {
-    std::vector<std::unique_ptr<Program>> variants;
-    program_cache_load(key, variants, true);
-    for (auto& p : variants) {
+    // (each variant's modules and layouts let go by the guard, also when the loader or fn throws: those of the variant fn was
+    // given and of the rest are not left alive then. A handle let go is nulled, so none is destroyed twice)
+    struct Borrowed {
+        std::vector<std::unique_ptr<Program>> variants;
+        static void release(Program& p) {
+            for (Stage& st : p.stages)
+                if (st.module) vkDestroyShaderModule(dev.device, st.module, nullptr), st.module = VK_NULL_HANDLE;
+            if (p.layout) vkDestroyPipelineLayout(dev.device, p.layout, nullptr), p.layout = VK_NULL_HANDLE;
+            if (p.set_layout) vkDestroyDescriptorSetLayout(dev.device, p.set_layout, nullptr), p.set_layout = VK_NULL_HANDLE;
+        }
+        ~Borrowed() {
+            for (auto& p : variants) release(*p);
+        }
+    } borrowed;
+    program_cache_load(key, borrowed.variants, true);
+    for (auto& p : borrowed.variants) {
         fn(*p);
-        for (Stage& st : p->stages)
-            if (st.module) vkDestroyShaderModule(dev.device, st.module, nullptr);
-        if (p->layout) vkDestroyPipelineLayout(dev.device, p->layout, nullptr);
-        if (p->set_layout) vkDestroyDescriptorSetLayout(dev.device, p->set_layout, nullptr);
+        Borrowed::release(*p);
     }
 }
 

@@ -9108,19 +9108,22 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     const double read_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     const size_t total = notes.size() + computes.size() + fallbacks.size();
     // (the workers' state on the heap: a start whose last pipelines never finish (two of 4926 on an RX 5700 XT, "stuck at
-    // 99%", Discord 11-08) goes on to the game after PRE_STALL_S seconds with no progress, the stragglers left running; it is
-    // let go then, never freed. RX_VK_PRECOMPILE_STALL_S=<s>, 0: wait for all, as before)
+    // 99%", Discord 11-08) goes on to the game after PRE_STALL_S seconds with no progress, the stragglers left running. Shared
+    // with every worker, so the last of them to return frees it; the stall guard frees at once, under mu, every note no worker
+    // has taken, and a worker frees its own when built: one the driver never returns from keeps only its note (each a whole
+    // NvnState). RX_VK_PRECOMPILE_STALL_S=<s>, 0: wait for all, as before)
     struct Pre {
         std::vector<std::unique_ptr<PipeNote>> notes;
         std::vector<Program*> computes, fallbacks;
         std::atomic<size_t> next{0}, done{0};
         std::atomic<size_t> computes_cached{0}, computes_compiled{0}, computes_failed{0};
+        std::atomic<size_t> notes_held{0};   // (taken by a worker and not yet freed: the stuck ones' at the stall)
         std::mutex mu, first_graphics;
         std::atomic<bool> graphics_begun{false};
         bool abandoned = false;
     };
     const size_t graphics_n = notes.size(), computes_n = computes.size(), fallbacks_n = fallbacks.size();
-    Pre* pre = new Pre;
+    const auto pre = std::make_shared<Pre>();
     pre->notes = std::move(notes), pre->computes = std::move(computes), pre->fallbacks = std::move(fallbacks);
     auto& next = pre->next;
     auto& done = pre->done;
@@ -9154,7 +9157,15 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
                     p.compute_state.store(2, std::memory_order_release);
                 }
             } else {
-                PipeNote& n = *notes[i - computes.size() - fallbacks.size()];
+                // (taken from the list under mu, or none once the run is abandoned: the stall guard has freed the rest then)
+                std::unique_ptr<PipeNote> held;
+                {
+                    std::lock_guard lk(pre->mu);
+                    if (pre->abandoned) return;
+                    held = std::move(notes[i - computes.size() - fallbacks.size()]);
+                    pre->notes_held++;
+                }
+                PipeNote& n = *held;
                 const Program* p = program_find(n.prog, n.variant);
                 if (p) {
                     // (the first graphics pipeline alone, the rest in parallel: after the library warm, NVIDIA's driver (621.14,
@@ -9179,6 +9190,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
                 }
             }
             pre->done++;
+            if (i >= computes.size() + fallbacks.size()) pre->notes_held--;   // (its note, freed with held: built, or no program)
         }
     };
     std::vector<std::thread> threads;
@@ -9202,8 +9214,14 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
             pre->abandoned = true;
             gone_on = true;
             prepare_left_workers_note();
-            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", done.load(),
-                 total, stall_s);
+            // (the notes no worker took, freed now: the workers still in the driver hold their own, freed as each returns)
+            size_t freed = 0;
+            for (auto& n : pre->notes)
+                if (n) n.reset(), freed++;
+            const size_t held = pre->notes_held.load();
+            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it (%zu noted "
+                 "states, %.1f MB of host memory: %zu freed now, %zu held by the workers still in the driver)", done.load(), total,
+                 stall_s, freed + held, (freed + held) * sizeof(PipeNote) / 1048576.0, freed, held);
             break;
         }
     }
@@ -9217,7 +9235,6 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     } else {
         for (std::thread& t : threads) t.join();
         compute_counts();
-        delete pre;
     }
     logf("vk: precompile: %zu programs, %zu graphics and %zu compute pipelines, %zu mesh fallback programs in %.0f ms (%.0f ms "
          "of it the caches opened, the notes and programs read)", programs_n, graphics_n, computes_n, fallbacks_n,
@@ -9354,18 +9371,20 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     const size_t notes_n = notes.size(), predicted_n = predicted.size();
     // (the workers' state on the heap, as precompile_run's: a pipeline the driver never finishes (builds stuck after "vertex format
     // NVN 0xe -> vk 17" on players' cards of all kinds, AMD and NVIDIA, #2107) holds its worker for good, and the preparation goes
-    // on without it once nothing has finished for RX_VK_PREDICT_STALL_S. The state is let go then, never freed: that worker still
-    // uses it)
+    // on without it once nothing has finished for RX_VK_PREDICT_STALL_S. Shared with every worker, so the last of them to return
+    // frees it; the stall guard frees at once, under mu, the notes of every program no worker is building, so one the driver never
+    // returns from keeps only its own program's notes, not the whole list (each a whole NvnState, up to 67,106 of them))
     struct Pre {
         std::vector<std::unique_ptr<PipeNote>> notes, predicted;
         std::unordered_map<uint64_t, std::vector<const PipeNote*>> by_program;
         std::vector<uint64_t> keys;
         std::atomic<size_t> next{0}, done{0}, made{0}, same{0};
         std::atomic<bool> out_of_time{false}, abandoned{false}, graphics_begun{false};
-        std::mutex first_graphics, keys_mu;
-        std::vector<uint64_t> made_keys;   // (each made pipeline's key, as play looks it up: predicted_keys_write)
+        std::mutex first_graphics, mu;
+        std::unordered_set<uint64_t> in_flight;   // (mu held: the programs a worker is building, whose notes stay at the stall)
+        std::vector<uint64_t> made_keys;   // (mu held: each made pipeline's key, as play looks it up: predicted_keys_write)
     };
-    Pre* pre = new Pre;
+    const auto pre = std::make_shared<Pre>();
     pre->notes = std::move(notes), pre->predicted = std::move(predicted);
     for (const auto& n : pre->predicted) pre->by_program[n->prog].push_back(n.get());
     for (const auto& kv : pre->by_program) pre->keys.push_back(kv.first);
@@ -9391,7 +9410,16 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
             }
             const size_t i = pre->next++;
             if (i >= pre->keys.size()) return;
-            const auto& list = pre->by_program[pre->keys[i]];
+            const uint64_t key = pre->keys[i];
+            // (begun under mu, or not once the run is abandoned: the stall guard has freed the notes of the programs not begun then)
+            const std::vector<const PipeNote*>* begun = nullptr;
+            {
+                std::lock_guard lk(pre->mu);
+                if (pre->abandoned.load()) return;
+                pre->in_flight.insert(key);
+                begun = &pre->by_program[key];
+            }
+            const auto& list = *begun;
             size_t counted = 0;
             // (each pipeline once, by the key play looks it up by (pipeline_key): the prediction's vertex classes tell apart the
             // exact topology and each stream's stride, which a pipeline takes as dynamic state, and a mesh program takes no vertex
@@ -9399,7 +9427,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
             // twice is borrowed twice. The program's form (mesh, mesh fallback) goes with it: pipeline_key does not hold it)
             std::unordered_set<uint64_t> built;
             std::vector<uint64_t> made_keys;
-            program_cache_borrow(pre->keys[i], [&](Program& p) {
+            program_cache_borrow(key, [&](Program& p) {
                 ensure_layout(p);
                 for (const PipeNote* n : list)
                     if (n->variant == p.variant && !pre->abandoned.load()) {   // (gone on without it: no more of its list)
@@ -9425,11 +9453,10 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
                         pre->done++, counted++;   // (each pipeline as it finishes: the stall check below sees a slow program move)
                     }
             });
-            if (!made_keys.empty()) {
-                std::lock_guard lk(pre->keys_mu);
-                pre->made_keys.insert(pre->made_keys.end(), made_keys.begin(), made_keys.end());
-            }
             if (counted < list.size()) pre->done += list.size() - counted;   // (and the notes no kept variant answered)
+            std::lock_guard lk(pre->mu);
+            pre->made_keys.insert(pre->made_keys.end(), made_keys.begin(), made_keys.end());
+            pre->in_flight.erase(key);   // (its notes the stall guard's to free from here on)
         }
     };
     // (the driver's faults before this run's workers start: one in their first milliseconds counts as this run's, below)
@@ -9458,11 +9485,23 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
         if (done.load() != last_done) last_done = done.load(), last_change = now;
         else if (const bool faulted = driver_faults() > faults_before;
                  stall_s > 0 && (faulted || next.load() >= pre->keys.size()) && now - last_change > std::chrono::seconds(stall_s)) {
+            std::lock_guard lk(pre->mu);
             pre->abandoned = true;
             gone_on = true;
             prepare_left_workers_note();
-            logf("vk: predicted pipelines: %zu of %zu done, nothing finished for %d s (%s): the rest are built in play", done.load(),
-                 predicted_n, stall_s, faulted ? "the driver faulted, and is stuck since" : "the last ones stuck in the driver");
+            // (the notes of every program no worker is building, freed now, and the notes the prediction was made from: the
+            // workers still in the driver keep their own program's, freed with the state when the last of them returns)
+            size_t freed = pre->notes.size(), held = 0;
+            pre->notes.clear();
+            for (auto& n : pre->predicted)
+                if (n && pre->in_flight.count(n->prog)) held++;
+                else if (n) n.reset(), freed++;
+            for (auto it = pre->by_program.begin(); it != pre->by_program.end();)
+                it = pre->in_flight.count(it->first) ? std::next(it) : pre->by_program.erase(it);
+            logf("vk: predicted pipelines: %zu of %zu done, nothing finished for %d s (%s): the rest are built in play (%zu notes, "
+                 "%.1f MB of host memory: %zu freed now, %zu held by the workers still in the driver)", done.load(), predicted_n,
+                 stall_s, faulted ? "the driver faulted, and is stuck since" : "the last ones stuck in the driver", freed + held,
+                 (freed + held) * sizeof(PipeNote) / 1048576.0, freed, held);
             break;
         }
     }
@@ -9482,6 +9521,7 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
          gone_on ? " (gone on without the pipelines the driver did not finish)"
          : out_of_time.load() ? " (the time budget, RX_VK_PREDICT_S, ran out: the rest are built in play)"
          : prepare_stopped() ? " (stopped: the window was closed; the driver keeps what was built)" : "");
+    // (only after a join: the list is whole then. Gone on, the stall guard freed the notes no worker was building)
     if (!prepare_stopped() && !out_of_time.load() && !gone_on) {
         predicted_sample_write(pre->predicted);
         predicted_keys_write(pre->made_keys);
@@ -9490,7 +9530,6 @@ void predict_run(void (*progress)(size_t done, size_t total)) {
     if (!prepare_stopped()) remove(predict_pending_path().c_str());
     else if (FILE* f = fopen(predict_pending_path().c_str(), "wb")) fprintf(f, "%d\n", began), fclose(f);   // (closed: not counted)
     driver_cache_log("after the prediction");
-    if (!gone_on) delete pre;
 }
 
 // ---- (longshot) Whether the driver kept the predicted pipelines. predict_run builds them for the driver's own disk cache alone and
