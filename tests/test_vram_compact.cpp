@@ -57,14 +57,48 @@ int main() {
     CHECK(rule_target(5600 * MB, 5600 * MB) == UINT64_MAX);
     CHECK(rule_target(5600 * MB, 5300 * MB) == 5300 * MB / 8 * 7);                 // (over it: cut to 7/8 of it, as ever)
     // told apart: the budget's size still asks for its 7/8; the 90% rule's and the limit's budgets ask for their excess and
-    // kExcessSlack more (the Market on an 8 GB card: 2,873 MB of textures, 62 MB over the line)
+    // kExcessSlack more (the Market on an 8 GB card: 2,873 MB of textures, 62 MB over the line), but only for a small excess, up
+    // to a sixteenth of their budget: a larger one is cut to 7/8 of it, as before (the Lake: 383 MB over 3,639)
     CHECK(rule_target(2873 * MB, 3285 * MB, 3285 * MB) == UINT64_MAX);             // (no rule asks anything)
     CHECK(rule_target(2873 * MB, 3285 * MB, 2811 * MB) == 2811 * MB - kExcessSlack);   // (the excess: 126 MB go, not 413)
     CHECK(rule_target(2873 * MB, 3285 * MB, 2811 * MB) > rule_target(2873 * MB, 2811 * MB));
     CHECK(rule_target(2873 * MB, 2560 * MB, 2560 * MB) == 2560 * MB / 8 * 7);      // (over its size: 7/8 of it, as before)
-    CHECK(rule_target(2873 * MB, 2560 * MB, 2500 * MB) == 2560 * MB / 8 * 7);      // (both: the lower of the two)
-    CHECK(rule_target(2873 * MB, 2880 * MB, 2200 * MB) == 2200 * MB - kExcessSlack);
-    CHECK(rule_target(100 * MB, 3285 * MB, 32 * MB) == 0);                         // (never under nothing)
+    CHECK(rule_target(2600 * MB, 2560 * MB, 2560 * MB) == 2560 * MB / 8 * 7);      // (a small excess over its size too)
+    CHECK(rule_target(4022 * MB, 4096 * MB, 3639 * MB) == 3639 * MB / 8 * 7);      // (the Lake: cut, not trimmed to the line)
+    CHECK(rule_target(2873 * MB, 2560 * MB, 2500 * MB) == 2500 * MB / 8 * 7);      // (both, 373 MB over the rule's: the lower)
+    CHECK(rule_target(2873 * MB, 2880 * MB, 2200 * MB) == 2200 * MB / 8 * 7);      // (673 MB over: cut)
+    CHECK(rule_target(100 * MB, 3285 * MB, 32 * MB) == 32 * MB / 8 * 7);
+    CHECK(rule_target(3 * MB, 3285 * MB, 0) == 0 && rule_target(0, 3285 * MB, 0) == UINT64_MAX);   // (no budget: all of it)
+    {   // a grid of rule budgets and excesses over them, the edge between small and large at each, with the budget's size far
+        // above (it asks nothing), at the rule's budget (its 7/8 alone) and just above it (the lower of the two)
+        const uint64_t budgets[] = {0, 1, 8, MB, 32 * MB, 256 * MB, 511 * MB, 512 * MB, 513 * MB, 1024 * MB, 2811 * MB,
+                                    3639 * MB, 4096 * MB, 6144 * MB, 16384 * MB};
+        for (const uint64_t b : budgets) {
+            const uint64_t edge = b / kExcessSmall, far = 4 * b + 1024 * MB;   // (the largest small excess; a size never reached)
+            uint64_t ex[] = {0, 1, MB, 62 * MB, edge ? edge - 1 : 0, edge, edge + 1, edge + MB, kExcessSlack, 383 * MB, b / 8, b,
+                             2 * b + 1};
+            std::sort(ex, ex + sizeof ex / sizeof *ex);
+            CHECK(rule_target(b - std::min(b, MB), far, b) == UINT64_MAX);   // (under the budget: nothing)
+            CHECK(rule_target(b - std::min(b, MB), b, b) == UINT64_MAX);
+            uint64_t last = UINT64_MAX;
+            bool last_small = false;
+            for (const uint64_t e : ex) {
+                const uint64_t t = b + e, to = rule_target(t, far, b), cut = rule_target(t, b);
+                const bool small = e && e <= edge;
+                CHECK(cut == (e ? b / 8 * 7 : UINT64_MAX));   // (RX_VK_EVICT_EXCESS=0: 7/8 at every point, as before)
+                if (!e) CHECK(to == UINT64_MAX);
+                else if (small) CHECK(to == b - std::min(b, kExcessSlack) && to < b);   // (small: the excess and 64 MB, as before)
+                else CHECK(to == cut);                                                   // (large: cut to 7/8)
+                if (!(last_small && !small)) CHECK(to <= last);   // (within each regime more excess never asks for less)
+                last = to, last_small = small;
+                CHECK(rule_target(t, b, b) == cut);                                   // (the size alone: its 7/8, small or large)
+                CHECK(rule_target(t, b + MB, b) == std::min(rule_target(t, b + MB), to));
+            }
+            // at the edge the target drops (the trim takes less than the cut) where 64 MB is under an eighth of the budget; under
+            // 512 MB the trim takes more and the target rises there
+            if (edge) CHECK((rule_target(b + edge + 1, far, b) <= rule_target(b + edge, far, b)) == (b >= 8 * kExcessSlack));
+        }
+    }
     CHECK(hold_target(100, 60, 4637 * MB, 5000 * MB, 4500 * MB) == 4637 * MB);     // (the count over 90%: one unused 100 presents still goes)
     CHECK(hold_target(59, 60, 4637 * MB, 5000 * MB, 4500 * MB) == UINT64_MAX);     // (one used in the last 60: never)
     CHECK(hold_target(100, 120, 4637 * MB, 5000 * MB, 4500 * MB) == UINT64_MAX);   // (nor before the pass's own time, whatever that is)

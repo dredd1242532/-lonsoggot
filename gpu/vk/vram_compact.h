@@ -97,11 +97,21 @@ inline uint64_t rule_target(uint64_t total, uint64_t rule_budget) { return total
 /// second, all on screen again within the camera's turn, made again, over the line again: 2.5 <-> 2.95 GB every few seconds,
 /// 8-9 uploads a frame and 16-25 frames over 50 ms in 30 s, where the same scene loaded from a save (just under the line) had
 /// none. So for them what goes is the excess and kExcessSlack more, so that not every pass is one; the budget's size still asks
-/// for its 7/8
+/// for its 7/8.
+/// But only a small excess (excess_small: up to a sixteenth of the rule's budget, half of what the cut takes), the cache sitting
+/// at the line. A larger one is an area come in, or textures made again as fast as a pass lets them go: trimmed to the line,
+/// the cache stays at it and every pass is an eviction (a report against Hookshot's version of the trim: Lake Hylia on a 10 GB
+/// card, a 4 GB budget and the hold at 90%, 383 MB over at each pass, 6.3 uploads a frame at 12.7 fps, against 42.4 fps cut to
+/// 7/8; not reproduced here). So a large excess is cut to 7/8, as before
 inline constexpr uint64_t kExcessSlack = 64ull << 20;
+inline constexpr uint64_t kExcessSmall = 16;   // (an excess is small up to rule_budget / kExcessSmall)
+inline bool excess_small(uint64_t total, uint64_t rule_budget) {
+    return total > rule_budget && total - rule_budget <= rule_budget / kExcessSmall;
+}
 inline uint64_t rule_target(uint64_t total, uint64_t size_budget, uint64_t rule_budget) {
     uint64_t to = rule_target(total, size_budget);
-    if (rule_budget < size_budget && total > rule_budget) to = std::min(to, rule_budget - std::min(rule_budget, kExcessSlack));
+    if (rule_budget < size_budget && total > rule_budget)
+        to = std::min(to, excess_small(total, rule_budget) ? rule_budget - std::min(rule_budget, kExcessSlack) : rule_budget / 8 * 7);
     return to;
 }
 
