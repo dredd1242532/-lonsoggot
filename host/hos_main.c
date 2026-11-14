@@ -13,6 +13,7 @@
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
 #include "hos_paths.h"
+#include "game_layout.h"
 #include "hos_wide_size.h"   /* (the widescreen picture's size, shared with the Insert menu) */
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
@@ -1418,13 +1419,17 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
 }
 #endif
 
-int hos_oot_flight_shortcut_ready(void) {
+int hos_oot_player_seen(void) {
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
     const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
     return seen && hos_now_ns() - seen < 250000000;
 #else
     return 0;
 #endif
+}
+
+int hos_oot_flight_shortcut_ready(void) {
+    return hos_oot_player_seen();
 }
 
 #if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
@@ -1554,6 +1559,8 @@ void hos_oot_lift_player(Ctx *c, uint64_t actor) {
     static SRWLOCK cheats_lock = SRWLOCK_INIT;
     if (!TryAcquireSRWLockExclusive(&cheats_lock)) return;
     oot_update_player_cheats(c, actor, components);
+    void hos_oot_state_tap(uint64_t actor);   /* the control bridge's copied snapshot and per-connection samples */
+    hos_oot_state_tap(actor);
     ReleaseSRWLockExclusive(&cheats_lock);
 #else
     (void)c;
@@ -1751,6 +1758,7 @@ static int game_main(int argc, char **argv) {
 #endif
 #ifdef _WIN32
     if (!narrow_paths_ok(argc, argv)) return 1;
+    hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there: host/game_layout.c) */
     {
         void hos_relaunch_keep_env(void);   /* (host/hos_relaunch.c: the environment before the file's lines, for a restart) */
         hos_relaunch_keep_env();
@@ -1770,7 +1778,8 @@ static int game_main(int argc, char **argv) {
         if (set && !env_on("HOS_DPI_UNAWARE")) set((void *)(intptr_t)-4);
     }
 #endif
-    {   // (started from its icon the game has nowhere to log to: longshot_log.txt beside it, last run only, for players to send in)
+    void hos_crash_record_prepare(const char *log_path);
+    {   // (started from its icon the game has nowhere to log to: longshot_log.txt in the game folder's logs/ (host/game_layout.c), for players to send in)
 #ifdef _WIN32
         {   /* (started again by the Insert menu's Restart now (host/hos_relaunch.c): the run before still has its log open until
                it exits, so wait for it (up to 10 s) before the log moves to .1, or the move fails and its log is overwritten) */
@@ -1788,6 +1797,12 @@ static int game_main(int argc, char **argv) {
             char path[MAX_PATH + 32];
             DWORD n = hos_game_path_a(path, MAX_PATH);
             while (n && path[n - 1] != 92 && path[n - 1] != 47) n--;
+            if (n && n + 5 < MAX_PATH) {   /* (its logs/, which hos_game_layout made; else beside the game, as before) */
+                memcpy(path + n, "logs", 5);
+                if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) path[n + 4] = path[n - 1], n += 5;
+            }
+            memcpy(path + n, "longshot_log.txt", 17);
+            hos_crash_record_prepare(path);   /* recovery before rotation; keep this run's actual destination */
             /* (the four runs before stay as longshot_log.1.txt (the last) to .4.txt: a player who started the game again after a
                crash sent in the new run's log, and the crash was gone) */
             char from[MAX_PATH + 32], to[MAX_PATH + 32];
@@ -1797,14 +1812,18 @@ static int game_main(int argc, char **argv) {
                 memcpy(to, path, n), snprintf(to + n, 32, "longshot_log.%d.txt", k);
                 MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING);
             }
-            memcpy(path + n, "longshot_log.txt", 17);
 #if !defined(_WIN32) && !defined(A64_MEM_ZERO)
             startup_stderr = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
 #endif
             if (freopen(path, "w", stderr)) setvbuf(stderr, NULL, _IONBF, 0);
-        }
+        } else hos_crash_record_prepare(NULL);   /* an externally supplied stderr, not the game's log */
     }
     hos_log("longshot %s", LONGSHOT_VERSION);   /* (the log's first line: which build a report comes from) */
+    const char *hos_report_run_id(void);
+    hos_log("run_id: %s", hos_report_run_id());
+    hos_game_layout_log();
+    void hos_crash_record_log_notes(void);
+    hos_crash_record_log_notes();
     removed_switch_notes();
     void hos_control_start(const char *version);
     hos_control_start(LONGSHOT_VERSION);   /* (HOS_CONTROL=<socket>: the control bridge, host/control.c) */
@@ -2015,6 +2034,8 @@ static int game_main(int argc, char **argv) {
     }
     call_guest(c, hos_entry_nnMain, sp, "nnMain");
     hos_log("nnMain returned");
+    void hos_crash_clean_end(void);
+    hos_crash_clean_end();
     return 0;
 }
 
@@ -2025,10 +2046,13 @@ static int game_argc;
 static char **game_argv;
 static DWORD WINAPI game_thread(void *p) {
     (void)p;
-    ExitProcess((UINT)game_main(game_argc, game_argv));
+    const UINT result = (UINT)game_main(game_argc, game_argv);
+    void hos_crash_clean_end(void);
+    hos_crash_clean_end();
+    ExitProcess(result);
 }
 /* (longshot, linux) Room in the drivers' own shader caches for what the preparation builds. The pipelines the notes predict (~43,000
-   in OoT, vk_draw.cpp predict_run) are built into the driver's disk cache alone, not into mkw_vk_pipelines.bin, which is read in whole
+   in OoT, vk_draw.cpp predict_run) are built into the driver's disk cache alone, not into longshot_vk_pipelines.bin, which is read in whole
    at every start. NVIDIA's cache holds 1 GiB by default and cleans itself down to that as it is written: a full preparation filled
    it to the limit (1026 MB) and the pipelines it dropped were compiled again in play. Mesa's (RADV, ANV) has the same 1 GiB default.
    Raised for this process only, before anything loads Vulkan; a value the player set (or longshot_env.txt) is kept. Windows: the
@@ -2072,6 +2096,7 @@ static void driver_cache_folder(void) {
 int main(int argc, char **argv) {
     int hos_display_init(void);
     void hos_display_loop(void);
+    hos_game_layout();   /* (the game folder's cache/ and logs/, before anything writes there, --prepare-shaders too: host/game_layout.c) */
     load_longshot_env();
     driver_cache_room();
     driver_cache_folder();
