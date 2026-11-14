@@ -135,7 +135,7 @@ int menu_player_flight();
 int menu_free_camera();
 int menu_link_speed();   // (Movement speed in percent, 100 while the tools are off)
 int menu_damage_taken();   // (Damage taken, HOS_OPT_DAMAGE_TAKEN: 1, Normal, while the tools are off)
-int menu_achievements_paused();   // (HOS_OPT_ACHIEVEMENTS_PAUSED: 1 once the Debug tools have been on in this run)
+int menu_achievements_paused();   // (OOT_ACHIEVEMENTS_PAUSED_ID: 1 once a debug tool has been used in this run)
 int menu_take_cheat_action();
 void menu_note_frame(bool game_frame, int shown = 1);   // (the frame rates the FPS counter shows)
 /// The game's picture's size (the Output resolution, its crop) and the window's, at each present: the Window scaling filter

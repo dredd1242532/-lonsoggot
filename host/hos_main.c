@@ -1309,6 +1309,10 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         if (asked & OOT_BRIDGE_AGE) action = OOT_AGE_ACTION, bridge_adult = asked & 1;
         else if (asked) action = OOT_TELEPORT_ACTION + asked - 1;
     }
+    if (action) {   /* a debug tool used (an item, a teleport, the age, the time): no achievement for the rest of this run */
+        void hos_oot_achievements_cheated(void);
+        hos_oot_achievements_cheated();
+    }
     oot_teleport_followup(c);
     oot_inventory_refresh(c, now);
     oot_player_speed(c, components);

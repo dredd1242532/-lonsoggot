@@ -1,0 +1,16 @@
+The achievements' icons (docs/achievements.md): for each id of gpu/vk/oot_achievements.h, <id>.png (unlocked) and
+<id>_locked.png (locked), 128 x 128 RGBA.
+
+All of them are drawn by scripts/make_achievement_icons.py, which is part of this repository: plain shapes (discs, rings,
+polygons, lines) in colours chosen there, with 4 x 4 supersampling. No game file, game asset, screenshot or outside picture
+was used, traced or sampled, and no image-generation model made them. The script was written with AI assistance
+(Claude Opus 5.5) for the person who submitted it, and is licensed with the rest of Longshot (GPL-3.0-or-later); so are the
+icons it draws. Run it again to remake them exactly.
+
+To replace an icon with art of your own: keep its file name, save it as an 8-bit RGBA PNG (not interlaced) of at most
+256 x 256, and add a line below saying who made it and under what licence (it must be GPL-compatible and your own work: no
+art from the game or anyone else's). nx2/achievement_icons.py builds it in; a PNG whose name is no achievement's id stops the
+build, so a misspelled file is never left out quietly.
+
+Replaced icons:
+(none yet)

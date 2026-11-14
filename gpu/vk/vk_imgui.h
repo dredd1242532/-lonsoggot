@@ -7,6 +7,7 @@
 
 struct ImFont;
 struct ImTextureData;
+struct ImVec2;   // (longshot: achievement_icon's atlas corners)
 
 namespace mkwvk::ui {
 
@@ -22,6 +23,9 @@ bool begin(uint32_t w, uint32_t h);
 const Fonts& fonts();
 /// The start-up screen's logo (assets/longshot.png), or null; its width over its height in *aspect
 ImTextureData* logo(float* aspect);
+/// (longshot) An achievement's icon from assets/achievements (<id>.png, or <id>_locked.png when locked): the atlas holding it, its
+/// corners there in *uv0 and *uv1 and its size in pixels in *size; or null, and the menu draws its own medal
+ImTextureData* achievement_icon(const char* id, bool locked, ImVec2* uv0, ImVec2* uv1, ImVec2* size);
 /// The frame's drawing over the window's image `index` (TRANSFER_DST_OPTIMAL before and after): new glyphs and textures
 /// copied in on cmd first (no wait on the queue), then one render pass
 void record(VkCommandBuffer cmd, uint32_t index, uint32_t w, uint32_t h);

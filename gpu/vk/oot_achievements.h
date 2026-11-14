@@ -54,5 +54,9 @@
    page's OOT_CHEAT_ITEM_BASE + its items. */
 #define OOT_ACHIEVEMENT_TOAST_ID 8191
 #define OOT_ACHIEVEMENT_BASE 8192
+/* rx_option_set(OOT_ACHIEVEMENTS_PAUSED_ID, 1) from the game side once a debug tool has been used in this run (host/oot_achievements.c
+   hos_oot_achievements_cheated): none unlock until the game starts again, and the Achievements page says why. The game side
+   decides this itself, from the cheat actions it runs: no option of vk_api.h, which stamps the shader caches. */
+#define OOT_ACHIEVEMENTS_PAUSED_ID 8190
 
 #endif

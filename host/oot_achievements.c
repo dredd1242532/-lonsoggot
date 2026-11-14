@@ -4,8 +4,9 @@
    host/hos_main.c oot_inventory_refresh calls hos_oot_achievements_check twice a second with the Inventory page's counts, on
    Link's update under its lock, so one thread only: no guest reads of its own, no game hook. A met condition unlocks its
    achievement once, appends it to the unlock file and tells the menu (rx_option_set). Nothing unlocks without a save loaded,
-   or once the Debug tools have been on in this run (HOS_OPT_ACHIEVEMENTS_PAUSED): their inventory editor and teleport would
-   hand them out.
+   or once a debug tool has been used in this run (hos_oot_achievements_cheated, from host/hos_main.c's cheat actions: the
+   inventory editor, teleport, the age switch, the clock): they would hand them out. The menu is told
+   (OOT_ACHIEVEMENTS_PAUSED_ID) for the Achievements page's notice.
 
    The unlock file, user/achievements.txt beside the saves (hos_user_dir), one line an unlock: "<id> <UTC time>", as
    "song_zelda 2026-11-14T18:03:22Z". Read once; written whole to achievements.txt.tmp, then moved over it, so a crash leaves
@@ -14,11 +15,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include "../gpu/vk/vk_api.h"           /* (HOS_OPT_ACHIEVEMENTS_PAUSED) */
-#include "../gpu/vk/oot_achievements.h"
+#include "../gpu/vk/oot_achievements.h"   /* (the list, and OOT_ACHIEVEMENTS_PAUSED_ID) */
 
 void hos_log(const char *fmt, ...);
-int rx_option(int id, int otherwise);
 void rx_option_set(int id, int value);
 extern const char *hos_user_dir;
 
@@ -37,7 +36,15 @@ static const OotAchievement ach_list[] = {OOT_ACHIEVEMENTS(OOT_ACH_ROW)};
 static char ach_when[ACH_N][ACH_WHEN];   /* "" while locked */
 static char ach_kept[ACH_KEPT];
 static size_t ach_kept_n;
-static int ach_loaded, ach_paused_logged, ach_save_failed;
+static int ach_loaded, ach_paused, ach_save_failed;
+
+/* A debug tool's action ran (host/hos_main.c oot_update_player_cheats): nothing unlocks for the rest of this run */
+void hos_oot_achievements_cheated(void) {
+    if (ach_paused) return;
+    ach_paused = 1;
+    hos_log("achievements: paused: a debug tool was used in this run");
+    rx_option_set(OOT_ACHIEVEMENTS_PAUSED_ID, 1);
+}
 
 static void ach_path(char *out, size_t cap, const char *suffix) {
     snprintf(out, cap, "%s/achievements.txt%s", hos_user_dir ? hos_user_dir : "user", suffix);
@@ -137,11 +144,7 @@ void hos_oot_achievements_check(const char *const *names, const int *counts, int
         for (int i = 0; i < ACH_N; i++)
             if (ach_when[i][0]) rx_option_set(OOT_ACHIEVEMENT_BASE + i, 1);
     }
-    if (!loaded || !names || !counts || n <= 0) return;
-    if (rx_option(HOS_OPT_ACHIEVEMENTS_PAUSED, 0) > 0) {
-        if (!ach_paused_logged) ach_paused_logged = 1, hos_log("achievements: paused: the Debug tools are on in this run");
-        return;
-    }
+    if (!loaded || !names || !counts || n <= 0 || ach_paused) return;
     int changed = 0;
     for (int i = 0; i < ACH_N; i++) {
         if (ach_when[i][0] || !ach_met(&ach_list[i], names, counts, n)) continue;

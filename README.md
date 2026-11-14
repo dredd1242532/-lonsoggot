@@ -462,6 +462,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Discord status | Off, On ("Playing Longshot" and the time played in your Discord status, while Discord runs on this PC) | On |
 | | Skip opening | Off, On (skips the new-game opening: the story movie and Navi waking Link; later cutscenes and the title screen stay) | Off |
 | | Achievement alerts | Off, On (a short pop-up when you earn an [achievement](docs/achievements.md); they are earned and kept in `user/achievements.txt` either way) | On |
+| | Achievements | Opens the list of [achievements](docs/achievements.md): the ones you have earned and what the others ask for | |
 | | Bug report | Saves a report into a new folder in `bug-reports` (below) | |
 | Controls | Controller in background | Off, On | Off |
 | | Mouse camera | As the stick, Native, Off | As the stick |

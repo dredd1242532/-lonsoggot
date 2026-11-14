@@ -1,8 +1,8 @@
 # Achievements
 
-Status: **first part built** (the tracking, the unlock file, the pop-up and its row). Still to come: the Insert menu's
-Achievements page, and **Hero of Time**, which is work in progress (WIP) until its signal is found. Not yet run in the
-game.
+Status: **built**: the tracking, the unlock file, the pop-up and its row, the Insert menu's Achievements page and the
+icons. Run in the game on an RTX 3060 Ti (Windows 11): see Testing. Still to come: **Hero of Time**, work in progress (WIP)
+until its signal is found.
 
 ## Why
 
@@ -17,11 +17,20 @@ menu, and they let the Longshot Launcher show the same list later.
   `draw_achievement_toast`), never in the game's own rendering. More than three at once (a late save loaded for the
   first time) show as one pop-up that counts them. Off with the Gameplay tab's **Achievement alerts** row
   (`achievement_alerts=` in longshot_options.ini, on by default); achievements are earned and kept either way.
-- **An Achievements page** in the Insert menu (*not built yet*): every achievement, locked ones greyed, unlocked ones
-  with the date, and "n of m" in the banner (the list page layout the Inventory and Teleport pages already use).
-- **Nothing unlocks in a run where the Debug tools have been on.** The inventory editor, teleport and age switch would
-  otherwise hand them out. The pause lasts until the game restarts. It cannot tell what an earlier run's tools put in
-  a save: a later run without them unlocks what that save holds.
+- **An Achievements page** in the Insert menu (Gameplay tab, **Achievements**): every achievement as a card with its icon,
+  title and what it asks for, the locked ones dimmed, and "n of m" in the banner; the help box shows the selected one's
+  status, and says so while the Debug tools pause them. Up and Down, Page Up and Down, Home and End, the wheel and clicks
+  move through it; Esc, B or a right click go back (the Teleport page's layout and keys, `draw_achievements`).
+- **Icons**: `assets/achievements/<id>.png` (unlocked) and `<id>_locked.png` (locked), drawn by
+  `scripts/make_achievement_icons.py` from plain shapes (see that folder's `PROVENANCE.txt`). `nx2/achievement_icons.py`
+  builds them into a header of the build's own, as `nx2/logo_rgba.py` does the logo; `gpu/vk/vk_imgui.cpp` loads them once.
+  A missing icon falls back to a medal drawn in code (a missing locked one to the unlocked one darkened); a PNG whose name
+  is no achievement's id stops the build. Anyone can replace one with their own art under the same name.
+- **Nothing unlocks for the rest of a run in which a Debug tool was used** that hands out items or moves Link: the
+  inventory editor, teleport, the age switch, the clock (the game side sees each of their actions run,
+  `hos_oot_achievements_cheated`). Turning the tools on, flight, the free camera or movement speed alone pause nothing.
+  The pause lasts until the game restarts, and the Achievements page says so. It cannot tell what an earlier run's tools
+  put in a save: a later run without them unlocks what that save holds.
 
 ## The list
 
@@ -58,8 +67,9 @@ Time, not for finishing a temple. It could be its own achievement if wanted.
 2. **Checking.** `oot_inventory_refresh` already has every item's count each half second. After it fills them, it calls
    `hos_oot_achievements_check(names, counts, n, loaded)` (`host/oot_achievements.c`), which evaluates each locked
    achievement's condition. No game hook, no guest call, no extra memory reads.
-3. **Unlocking.** A newly met condition (with a save loaded, not paused: `HOS_OPT_ACHIEVEMENTS_PAUSED`, 58, which the
-   menu answers) rewrites the unlock file and tells the menu through the existing `rx_option_set` channel:
+3. **Unlocking.** A newly met condition (with a save loaded, and no debug tool used in this run: the game side decides
+   that itself and tells the menu with `OOT_ACHIEVEMENTS_PAUSED_ID`; nothing is added to `vk_api.h`, which stamps the
+   shader caches, so this change makes no player prepare shaders again) rewrites the unlock file and tells the menu through the existing `rx_option_set` channel:
    `OOT_ACHIEVEMENT_BASE + i` for its state and `OOT_ACHIEVEMENT_TOAST_ID` for the pop-up. Each unlock is logged
    (`achievements: unlocked song_zelda (Zelda's Lullaby)`), and the start logs `achievements: n of m unlocked`.
 4. **The unlock file.** `user/achievements.txt` beside the saves (`hos_user_dir`), one line per unlock:
@@ -71,6 +81,11 @@ Time, not for finishing a temple. It could be its own achievement if wanted.
    that already has items unlocks them at once (so imported saves and old adventures count).
 
 ## Open questions (for the maintainers)
+
+- **Icon packs from the `mods` folder** (a follow-up): players' own icons read at run time from
+  `<mods>/<name>/achievements/<id>.png`, over the built-in ones, as `host/mods.c` lays mods out. It needs a PNG decoder in
+  the renderer (stb_image, as a new `third_party/` part), so it is left out of the first change; the build-time folder
+  (`assets/achievements/README.md`) covers the repository's own icons.
 
 - **Defeating Ganon.** No flag for it is known in the repository. Someone with the game can find it with the control
   bridge (`docs/control.md`): subscribe with `changes: true`, beat Ganon, and see which flag flips; or log the event
@@ -90,8 +105,12 @@ Time, not for finishing a temple. It could be its own achievement if wanted.
   crash's temporary file dropped), a folder that cannot be written, and the UTC stamps. Its source checks: every pouch
   name exists in `oot_cheat_items.h`, ids are unique, the option ids are free, and the menu row, the pause and the
   refresh's call are wired.
-- **In the game**: a new game through the Deku Tree (sword and shield, Slingshot's bag tiers absent, Zelda's
-  Lullaby, Kokiri's Emerald), plus an imported late-game save that should unlock most of the list at once.
+- **In the game** (RTX 3060 Ti, Windows 11, 2026-11-14, the first part): a new game; the Kokiri Sword and Deku Shield
+  unlocked Ready for Adventure with its pop-up; with Achievement alerts off an unlock is kept without one; a save that
+  already holds the items unlocks them when it loads; nothing unlocks once the Debug tools are on; the Light Medallion
+  counts for nothing; eight at once (stones and medallions) showed as one "8 achievements unlocked" pop-up. The probe's
+  counts confirm the sword, shield, stone and medallion names. **Not yet confirmed: the songs** (the Debug tools'
+  inventory editor could not hand them out, so their names are unproven until one is learned in play) and the bag tiers.
 
 ## The launcher (a later, separate pull request)
 

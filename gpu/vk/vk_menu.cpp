@@ -1300,7 +1300,9 @@ Row rows[] = {
     // (longshot) the achievements' pop-up (oot_achievements.h, host/oot_achievements.c): they are earned and kept whatever this says
     {TAB_GAMEPLAY, "Achievement alerts", &opts.achievement_popups, 0, 1, 1, tx_onoff,
      "Shows a short pop-up when you earn an achievement. Achievements are earned and kept in user/achievements.txt either "
-     "way. None are earned in a run where the Debug tools have been on.", nullptr, false, true},
+     "way. None are earned for the rest of a run in which a Debug tool hands out items or moves Link.", nullptr, false, true},
+    {TAB_GAMEPLAY, "Achievements", nullptr, 0, 0, 0, nullptr,
+     "Opens the list of achievements: the ones you have earned and what each of the others asks for.", nullptr, false, true},
 
     // Controls (12 rows; Motion opens the 6 TAB_MOTION rows, Controls its page with the 2 TAB_PAGE rows)
     {TAB_CONTROLS, "Controller in background", &opts.pad_background, 0, 1, 1, tx_onoff,
@@ -1558,10 +1560,13 @@ constexpr ItemSections item_sections = make_item_sections();
 std::atomic<int> item_counts[kItems];   // (-1 until the game side reports: OOT_CHEAT_ITEM_BASE + i)
 
 // ---- (longshot) achievements (oot_achievements.h; host/oot_achievements.c unlocks them, docs/achievements.md) ----
+#define OOT_ACH_ID(id, title, description, mode, a, b, c) id,
 #define OOT_ACH_TITLE(id, title, description, mode, a, b, c) title,
 #define OOT_ACH_TEXT(id, title, description, mode, a, b, c) description,
+constexpr const char* achievement_ids[] = {OOT_ACHIEVEMENTS(OOT_ACH_ID)};   // (their icons' names: assets/achievements)
 constexpr const char* achievement_titles[] = {OOT_ACHIEVEMENTS(OOT_ACH_TITLE)};
 constexpr const char* achievement_texts[] = {OOT_ACHIEVEMENTS(OOT_ACH_TEXT)};
+#undef OOT_ACH_ID
 #undef OOT_ACH_TITLE
 #undef OOT_ACH_TEXT
 constexpr int kAchievements = sizeof achievement_titles / sizeof achievement_titles[0];
@@ -1573,6 +1578,11 @@ constexpr int64_t kToastNs = 4000000000LL, kToastFadeNs = 300000000LL;
 std::mutex toast_mu;
 int toast_queue[kToastQueue], toast_queued = 0, toast_extra = 0;
 int toast_shown = -1, toast_shown_count = 0;   // (the one showing: an index, or -2 the count of toast_shown_count at once)
+int toast_last = 0;   // (the newest asked for: the several-at-once pop-up's icon)
+int achievement_last_shown() {
+    std::lock_guard lk(toast_mu);
+    return toast_last;
+}
 int64_t toast_since = 0;
 int achievements_unlocked_count() {
     int n = 0;
@@ -1596,9 +1606,15 @@ bool achievement_toast_due(int64_t now) {
     toast_since = now;
     return true;
 }
+// (the Achievements page, page 6: the choice, the rows that fit (Page Up / Down), the cards' scroll eased toward its want)
+int achievement_choice = 0, achievement_page_rows = 1, achievement_wheel = 0;
+float achievement_scroll_px = 0, achievement_want_px = 0;
+bool achievement_follow = true;   // (the scroll keeps the choice in view; the wheel lets it go)
+bool is_achievements_row(const Row& r) { return !r.value && r.tab == TAB_GAMEPLAY && !strcmp(r.name, "Achievements"); }
 void achievement_toast_ask(int index) {   // (the game's thread: OOT_ACHIEVEMENT_TOAST_ID)
     if (index < 0 || index >= kAchievements || !opts.achievement_popups) return;
     std::lock_guard lk(toast_mu);
+    toast_last = index;
     if (toast_queued < kToastQueue) toast_queue[toast_queued++] = index;
     else ++toast_extra;
 }
@@ -2566,8 +2582,8 @@ const std::vector<int>& bindable_keys() {
     }
     return k;
 }
-int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question (2: was the
-                       // debug tools' own page, now on the Debug tab)
+int page = 0;          // 0 the options, 1 the controls, 3 the teleport list, 4 the inventory, 5 the restart question, 6 the
+                       // achievements (2: was the debug tools' own page, now on the Debug tab)
 int csel = 0, ccol = menu_hit::kCtlPrimary;   // the page's row (options, then bindings and reset) and binding column
 const int kTop = tab_row_count(TAB_PAGE);   // (Layout preset and Button prompts: a preset shows in the grid at once)
 int listening = 0;     // waiting for the new input: 1 a gamepad's, 2 a key
@@ -3712,6 +3728,96 @@ void draw_teleport(ui::Ctx& c) {
     ui::prompt_bar(c, prompts, 5);   // (the prompts, on top of the help and the cards)
 }
 
+/// (longshot) Achievement i's badge at m, radius r, for the pop-up and the Achievements page: its icon from assets/achievements
+/// (ui::achievement_icon: <id>.png, or <id>_locked.png while locked; without a locked one, the unlocked one darkened); with no icon,
+/// a medal drawn here: gold with a darker ring and a spark once unlocked, an empty dim ring while locked
+void achievement_medal(ui::Ctx& c, int i, ImVec2 m, float r, float fade, bool unlocked) {
+    const float s = c.s, line = std::max(1.0f, 2 * s);
+    ImVec2 uv0, uv1, size;
+    ImTextureData* icon = ui::achievement_icon(achievement_ids[i], !unlocked, &uv0, &uv1, &size);
+    ImU32 tint = ui::alpha(ui::rgba(255, 255, 255), fade);
+    if (!icon && !unlocked && (icon = ui::achievement_icon(achievement_ids[i], false, &uv0, &uv1, &size)))
+        tint = ui::alpha(ui::rgba(96, 92, 86), 0.85f * fade);
+    if (icon) {   // (its cell of the atlas, fitted into the medal's square, its shape kept)
+        const float k = 2 * r / std::max(size.x, size.y);
+        c.d->AddImage(icon->GetTexRef(), ImVec2(m.x - size.x * k * 0.5f, m.y - size.y * k * 0.5f),
+                      ImVec2(m.x + size.x * k * 0.5f, m.y + size.y * k * 0.5f), uv0, uv1, tint);
+        return;
+    }
+    if (!unlocked) {
+        c.d->AddCircle(m, r, ui::alpha(ui::kDim, 0.7f * fade), 0, line);
+        return;
+    }
+    c.d->AddCircleFilled(m, r, ui::alpha(ui::kGold, fade));
+    c.d->AddCircle(m, r * 0.72f, ui::alpha(ui::kGoldInk, 0.6f * fade), 0, line);
+    for (int k = 0; k < 4; ++k) {
+        const float a = k * 1.5707963f + 0.7853982f, r0 = r * 0.18f, r1 = r * 0.5f;
+        c.d->AddLine(ImVec2(m.x + std::cos(a) * r0, m.y + std::sin(a) * r0), ImVec2(m.x + std::cos(a) * r1, m.y + std::sin(a) * r1),
+                     ui::alpha(ui::kInkBright, fade), line);
+    }
+}
+
+/// (longshot) The Achievements page (page 6, the Gameplay tab's Achievements row): every achievement in oot_achievements.h's
+/// order, one card a row with its medal, title and what it asks for, the unlocked ones bright; the selected one's status in the
+/// help box, and why none unlock while the Debug tools have been on. Scrolled as the teleport list is
+void draw_achievements(ui::Ctx& c) {
+    const float s = c.s;
+    char count[32];
+    snprintf(count, sizeof count, "%d of %d", achievements_unlocked_count(), kAchievements);
+    const float hh = title_banner(c, "Achievements", count);
+    float cx0, cx1, hx0, hx1;
+    bool narrow;
+    columns(c, &cx0, &cx1, &hx0, &hx1, &narrow);
+    column(c, cx0, cx1, hh);
+    const ui::Prompt prompts[] = {{ui::kUpDown, "Move"}, {ui::kBack, "Back"}};
+    const float bar = ui::prompt_bar_top(c);   // (the strip itself drawn last, over all: below)
+    const float left = cx0 + 24 * s, right = cx1 - 24 * s, top = hh + 16 * s, bottom = std::max(top, bar - 12 * s);
+    const float pitch = 60 * s, gap = 8 * s;
+    const int sel = std::clamp(achievement_choice, 0, kAchievements - 1);
+    if (!narrow) {
+        const bool got = achievement_unlocked[sel].load(std::memory_order_relaxed) > 0;
+        help_box(c, hx0, hx1, std::max(hh + 26 * s, c.h * .30f), achievement_titles[sel], achievement_texts[sel],
+                 got ? "Unlocked" : "Not unlocked yet",
+                 menu_achievements_paused() ? "Paused: a Debug tool (the inventory, teleport, the age or the time) was used since "
+                                              "the game started. Restart the game to earn achievements again." : nullptr,
+                 0, false, hh + 18 * s, bar - 12 * s);
+    }
+    const float total = kAchievements * pitch, view = bottom - top;
+    achievement_page_rows = std::max(1, (int)(view / pitch) - 1);
+    float& at = achievement_scroll_px;
+    float& want = achievement_want_px;
+    if (achievement_wheel) want -= achievement_wheel * pitch, achievement_wheel = 0;   // (the wheel: the cards move, the choice stays)
+    if (total <= view) want = 0;
+    else if (!achievement_follow) want = std::clamp(want, 0.0f, total - view);
+    else {
+        if (sel * pitch < want) want = sel * pitch;
+        if ((sel + 1) * pitch > want + view) want = (sel + 1) * pitch - view;
+        want = std::clamp(want, 0.0f, total - view);
+    }
+    at += (want - at) * ease_step;
+    if (std::fabs(want - at) < 0.5f) at = want;
+    if (total > view) scroll_bar(c, cx0 + 12 * s, top, bottom, (int)total, (int)view, at);
+    c.d->PushClipRect(ImVec2(left - 12 * s, top), ImVec2(right + 12 * s, bottom), true);
+    for (int i = 0; i < kAchievements; ++i) {
+        const ImVec2 a(left, top + i * pitch - at), b(right, a.y + pitch - gap);
+        if (b.y < top || a.y > bottom) continue;
+        const bool selected = i == sel, got = achievement_unlocked[i].load(std::memory_order_relaxed) > 0;
+        c.d->AddRectFilled(a, b, selected ? ui::kCellNameSel : ui::kCellName, 3 * s);
+        c.d->AddRect(a, b, ui::kEdge, 3 * s, 0, std::max(1.0f, s));
+        if (selected) c.d->AddRectFilled(a, ImVec2(a.x + 4 * s, b.y), ui::kGoldHi);
+        const float my = (a.y + b.y) * 0.5f, r = 13 * s, tx = a.x + 18 * s + 2 * r + 14 * s;
+        achievement_medal(c, i, ImVec2(a.x + 18 * s + r, my), r, 1.0f, got);
+        c.d->PushClipRect(ImVec2(tx, a.y), ImVec2(b.x - 10 * s, b.y), true);
+        ui::text_mid(c, selected ? c.f.strong : c.f.body, 17 * s, tx, my - 9 * s, got ? ui::kInkBright : ui::kDim, achievement_titles[i]);
+        ui::text_mid(c, c.f.body, 14 * s, tx, my + 11 * s, got ? ui::kSoft : ui::alpha(ui::kDim, 0.8f), achievement_texts[i]);
+        c.d->PopClipRect();
+        if (selected) ui::glow(c, a, b);
+        hits.add(a.x, std::max(a.y, top), b.x, std::min(b.y, bottom), menu_hit::kListLine, i);
+    }
+    c.d->PopClipRect();
+    ui::prompt_bar(c, prompts, 2);   // (the prompts, on top of the help and the cards)
+}
+
 void draw_ask(ui::Ctx& c) {
     const float s = c.s, W = 560 * s, H = 232 * s;
     const ImVec2 p((c.w - W) * 0.5f, (c.h - H) * 0.5f), q = p + ImVec2(W, H);
@@ -3760,6 +3866,8 @@ void prebake(const ui::Ctx& c) {
     const int saved_marquee = marquee_max;
     const int saved_tele[2] = {teleport_columns, teleport_page_rows}, saved_inv[3] = {inventory_columns, inventory_capacity, inventory_page};
     const float saved_tele_px[2] = {teleport_scroll_px, teleport_want_px};
+    const float saved_ach_px[2] = {achievement_scroll_px, achievement_want_px};
+    const int saved_ach_rows = achievement_page_rows;
     const float saved_ease = ease_step;
     float saved_scroll[sizeof scroll_at / sizeof *scroll_at], saved_want[sizeof scroll_at / sizeof *scroll_at];
     int saved_to[sizeof scroll_at / sizeof *scroll_at];   // (the scratch drawing's scroll, given back: the next is the menu's)
@@ -3779,6 +3887,7 @@ void prebake(const ui::Ctx& c) {
     hits = saved_hits, marquee_max = saved_marquee, ease_step = saved_ease;
     teleport_columns = saved_tele[0], teleport_page_rows = saved_tele[1], teleport_scroll_px = saved_tele_px[0], teleport_want_px = saved_tele_px[1];
     inventory_columns = saved_inv[0], inventory_capacity = saved_inv[1], inventory_page = saved_inv[2];
+    achievement_scroll_px = saved_ach_px[0], achievement_want_px = saved_ach_px[1], achievement_page_rows = saved_ach_rows;
     memcpy(scroll_at, saved_scroll, sizeof scroll_at);
     memcpy(scroll_want, saved_want, sizeof scroll_want);
     memcpy(scrolled_to, saved_to, sizeof scrolled_to);
@@ -3799,6 +3908,7 @@ void draw_menu(ui::Ctx& c) {
     else if (page == 1) draw_controls(k);
     else if (page == 3) draw_teleport(k);
     else if (page == 4) draw_inventory(k);
+    else if (page == 6) draw_achievements(k);
     else if (tune_mode) draw_tune_bar(k);
     else draw_options(k);
     if (menu_ox <= 0) return;
@@ -3902,14 +4012,9 @@ void draw_achievement_toast(ui::Ctx& c, int64_t now) {
     ui::shadow(c, p, q, 24 * s, 0.9f * fade, 6 * s);
     c.d->AddRectFilled(p, q, ui::alpha(ui::kBox, fade), 6 * s);
     c.d->AddRect(p, q, ui::alpha(ui::kGoldHi, fade), 6 * s, 0, std::max(1.0f, 1.5f * s));
-    const ImVec2 m(p.x + pad + medal, p.y + H * 0.5f);   // (the medal: a gold disc, a darker ring and a star-like spark)
-    c.d->AddCircleFilled(m, medal, ui::alpha(ui::kGold, fade));
-    c.d->AddCircle(m, medal * 0.72f, ui::alpha(ui::kGoldInk, 0.6f * fade), 0, std::max(1.0f, 2 * s));
-    for (int k = 0; k < 4; ++k) {
-        const float a = k * 1.5707963f + 0.7853982f, r0 = medal * 0.18f, r1 = medal * 0.5f;
-        c.d->AddLine(ImVec2(m.x + std::cos(a) * r0, m.y + std::sin(a) * r0), ImVec2(m.x + std::cos(a) * r1, m.y + std::sin(a) * r1),
-                     ui::alpha(ui::kInkBright, fade), std::max(1.0f, 2 * s));
-    }
+    const ImVec2 m(p.x + pad + medal, p.y + H * 0.5f);
+    if (shown >= 0) achievement_medal(c, shown, m, medal, fade, true);
+    else achievement_medal(c, achievement_last_shown(), m, medal, fade, true);   // (several at once: the last one's)
     const float x = m.x + medal + gap, right = q.x - pad;
     c.d->PushClipRect(ImVec2(x, p.y), ImVec2(right, q.y), true);
     const float y0 = p.y + (text ? 20 : 22) * s;
@@ -4437,11 +4542,8 @@ int menu_player_flight() { return cheats_on() ? player_flight.load(std::memory_o
 int menu_free_camera() { return cheats_on() ? free_camera.load(std::memory_order_relaxed) : 0; }
 int menu_link_speed() { return cheats_on() ? link_speeds[std::clamp(link_speed.load(std::memory_order_relaxed), 0, kLinkSpeeds - 1)] : 100; }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
-int menu_achievements_paused() {   // (once the tools are on, for the rest of the run: what they handed out stays in the save)
-    static std::atomic<bool> seen{false};
-    if (cheats_on()) seen.store(true, std::memory_order_relaxed);
-    return seen.load(std::memory_order_relaxed) ? 1 : 0;
-}
+std::atomic<bool> achievements_paused{false};   // (the game side's OOT_ACHIEVEMENTS_PAUSED_ID: a debug tool used in this run)
+int menu_achievements_paused() { return achievements_paused.load(std::memory_order_relaxed) ? 1 : 0; }
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
 
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h) {
@@ -4549,11 +4651,16 @@ void menu_option_set(int id, int value) {
         return;
     }
     if (id >= OOT_ACHIEVEMENT_BASE && id < OOT_ACHIEVEMENT_BASE + kAchievements) {   // (an achievement unlocked)
-        achievement_unlocked[id - OOT_ACHIEVEMENT_BASE].store(value, std::memory_order_relaxed);
+        if (achievement_unlocked[id - OOT_ACHIEVEMENT_BASE].exchange(value, std::memory_order_relaxed) != value && page == 6)
+            menu_refresh = true;   // (the page open: drawn again with it)
         return;
     }
     if (id == OOT_ACHIEVEMENT_TOAST_ID) {   // (its pop-up)
         achievement_toast_ask(value);
+        return;
+    }
+    if (id == OOT_ACHIEVEMENTS_PAUSED_ID) {   // (a debug tool used: the Achievements page says why none unlock)
+        if (achievements_paused.exchange(value != 0, std::memory_order_relaxed) != (value != 0) && page == 6) menu_refresh = true;
         return;
     }
     if (id >= OOT_CHEAT_ITEM_BASE && id < OOT_CHEAT_ITEM_BASE + kItems) {   // (the game side's inventory counts)
@@ -4772,6 +4879,15 @@ void teleport_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool& 
     }
     if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
     if (ptr.wheel) teleport_wheel += ptr.wheel, teleport_follow = false, changed = true;
+}
+/// (longshot) the mouse on the Achievements page: a click on a card selects it; the wheel scrolls the cards and leaves the
+/// choice where it is; a right click goes back
+void achievements_mouse(const MkwVkPointer& ptr, int mx, int my, bool* press, bool& changed) {
+    const menu_hit::Hit hit = hits.at((float)mx, (float)my);
+    if ((ptr.pressed & HOS_MOUSE_LEFT) && hit.part == menu_hit::kListLine && hit.index >= 0 && hit.index < kAchievements)
+        achievement_choice = hit.index, achievement_follow = true, changed = true;
+    if (ptr.pressed & HOS_MOUSE_RIGHT) press[5] = true;
+    if (ptr.wheel) achievement_wheel += ptr.wheel, achievement_follow = false, changed = true;
 }
 /// A debug tool's row on the Debug tab (Row::cheat i): Left and Right, and confirm (press[7]: A, Enter, a click). Teleport and
 /// Inventory open their pages; back from them comes to the Debug tab, the row still selected
@@ -5209,6 +5325,17 @@ void menu_tick() {
             else teleport_choice = std::clamp(teleport_step_rows(teleport_choice, rows) + (press[4] - press[3]), 0, kTeleports - 1);
             if (teleport_choice != was) teleport_follow = true, changed = true;
         }
+    } else if (open_now.load() && page == 6) {   // (longshot) the achievements
+        if (mouse) achievements_mouse(ptr, mx, my, press, changed);
+        if (press[5]) page = 0, changed = true;   // (to the Gameplay tab, Achievements still selected)
+        else {   // (Up and Down a card, Page Up and Down the cards that fit, Home and End the ends)
+            const int was = achievement_choice;
+            if (press[15]) achievement_choice = 0;
+            else if (press[16]) achievement_choice = kAchievements - 1;
+            else achievement_choice = std::clamp(achievement_choice + (press[2] - press[1]) + (press[14] - press[13]) * achievement_page_rows,
+                                                 0, kAchievements - 1);
+            if (achievement_choice != was) achievement_follow = true, changed = true;
+        }
     } else if (open_now.load()) {
         if (mouse) {   // (the mouse: see the top of this file)
             const menu_hit::Hit hit = hits.at((float)mx, (float)my);
@@ -5319,6 +5446,7 @@ void menu_tick() {
         else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
         else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
+        else if (press[7] && is_achievements_row(r)) page = 6, achievement_follow = true, press[7] = false, changed = true;
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;

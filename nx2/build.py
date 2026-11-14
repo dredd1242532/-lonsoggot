@@ -44,6 +44,7 @@ import kit
 import lifted_c
 import rtgen
 import logo_rgba
+import achievement_icons
 import ui_fonts
 import toolchain
 import version
@@ -1169,6 +1170,8 @@ def main():
         # (LONGSHOT_VK_PREBUILT) and carries neither third_party/fonts nor the back end's sources, and a player's build there
         # stopped at the fonts (FileNotFoundError: LibertinusSans-Regular.ttf, 2026-11-10)
         logo_text = logo_rgba.write(os.path.join(gen_dir, "longshot_logo.h")).encode()
+        # (longshot) the achievements' icons, assets/achievements/*.png, the same way (nx2/achievement_icons.py): vk_imgui.cpp's too
+        logo_text += achievement_icons.write(os.path.join(gen_dir, "longshot_achievement_icons.h")).encode()
         # (the overlays' bundled fonts, third_party/fonts/libertinus, as a C++ file of the build's own: nx2/ui_fonts.py)
         fonts_cpp = os.path.join(gen_dir, "ui_fonts.cpp")
         ui_fonts.write(fonts_cpp)
