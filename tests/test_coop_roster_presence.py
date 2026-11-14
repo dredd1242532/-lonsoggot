@@ -91,7 +91,7 @@ static void received(const CoopRoster *roster, uint32_t seq, uint64_t now) {
     const size_t n = coop_roster_pack(payload, sizeof payload, roster);
     CoopHdr header = {.ver = COOP_PROTO, .type = COOP_T_ROSTER, .room = session->room, .seq = seq};
     const size_t size = coop_dgram_pack(bytes, sizeof bytes, &header, payload, n, session->locator);
-    const uint8_t *body;
+    const uint8_t *body = NULL;
     assert(n && size && coop_dgram_parse(bytes, size, &header, &body));
     assert(on_roster(session, bytes, size, &header, body, now));
     publish(session);
