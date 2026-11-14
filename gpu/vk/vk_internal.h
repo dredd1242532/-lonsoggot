@@ -123,15 +123,21 @@ extern Device dev;
 /// A750 froze the PC on four compute pipelines (issue 496). An Intel UHD on Windows read address 0x170 inside igvk64
 /// during the first scene's compiles (two frames in longshot_vk.dll, and no "driver faulted compiling" line, so the
 /// call was not inside guarded_graphics). One thread enters vkCreateShaderModule and vkCreate*Pipelines.
-/// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, or
-/// RX_VK_NO_INTEL_SERIAL=1 over it: side by side, as before.
+/// Other vendors, and Intel on other systems, are not held. The Intel shader compiles row's Side by side, its Auto on
+/// the Arc B-series (intel_compiles.h: where side by side was measured), or RX_VK_NO_INTEL_SERIAL=1 over it: side by
+/// side, as before.
 /// ask: a create that compiles nothing (VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT), on the replay thread so a
 /// draw or dispatch never waits for a compile. It never waits here either: while a worker holds the gate, busy is set and
 /// the caller answers VK_PIPELINE_COMPILE_REQUIRED (cold) without asking the driver.
 bool intel_compiles_side_by_side();   // (vk_menu.cpp: the row as this run started with it)
 inline bool intel_gate_on() {
 #ifdef _WIN32
-    static const bool on = !intel_compiles_side_by_side() && dev.props.vendorID == 0x8086;
+    static const bool on = [] {
+        if (dev.props.vendorID == 0x8086 && intel_compiles_side_by_side())   // (said once: which it is shows in every log)
+            logf("vk: Intel's compiler is entered side by side (Intel shader compiles row: Side by side, its Auto on the Arc "
+                 "B-series, or RX_VK_NO_INTEL_SERIAL=1)");
+        return !intel_compiles_side_by_side() && dev.props.vendorID == 0x8086;
+    }();
     return on;
 #else
     return false;

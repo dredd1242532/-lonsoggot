@@ -310,7 +310,7 @@ line with the video memory in use against what the driver allows, and DLSS's det
 | "Your antivirus removed part of the build tools" | A false alarm on unsigned programs. Restore the files from Windows Security's Protection history, and add `%LOCALAPPDATA%\LongshotLauncher` and `%LOCALAPPDATA%\Programs\LongshotLauncher` to its exclusions, then build again ([common problems](docs/common-issues.md#your-antivirus-removed-part-of-the-build-tools)). |
 | **Starting** | |
 | The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
-| Windows, Intel: the game closes in the first scene, and the log names `igvk64.dll` | Keep the Debug tab's **Intel shader compiles** row on **One at a time** (the default) and update the graphics driver. See [Intel laptops](#intel-laptops). |
+| Windows, Intel: the game closes in the first scene, and the log names `igvk64.dll` | Set the Debug tab's **Intel shader compiles** row to **One at a time** (it is what **Auto**, the default, means on every Intel GPU but the Arc B-series) and update the graphics driver. See [Intel laptops](#intel-laptops). |
 | The build said "the GPU driver stopped responding", or the log says `the shaders' preparation was skipped at the build` | The game then builds every shader when it is first drawn, and stutters or leaves things out for a long time. Delete `longshot_prepare_skipped` from the game folder's `cache` folder so that the next start prepares them, or build again with **Prepare shaders now** ticked. |
 | Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
 | Linux: low-memory warning, or the whole desktop becomes unresponsive while loading | Close other programs and check `free -h`: the `Mem` and `Swap` rows are separate. Below 10 GiB of physical RAM the game warns even with plenty of swap; absence of that warning does not mean a run will fit. Do not keep retrying a load that locks up the PC. After restarting, keep the failed session's log before launching again, and check `journalctl -k -b -1` for an out-of-memory kill or a GPU reset (if the previous boot's journal was saved). |
@@ -357,8 +357,8 @@ It has not been tested on an Intel GPU yet. On such a PC:
 
 1. Build with **Prepare shaders now** ticked. If the game folder's `cache` folder has a `longshot_prepare_skipped` file
    from an earlier build, delete it first.
-2. Keep the Debug tab's **Intel shader compiles** row on **One at a time** (the default). Side by side builds faster on a
-   CPU with many cores, but Intel's driver can crash the game then.
+2. Keep the Debug tab's **Intel shader compiles** row on **Auto** (the default: one at a time on these laptops) or **One
+   at a time**. Side by side builds faster on a CPU with many cores, but Intel's driver can crash the game then.
 3. A shader the driver faulted on is listed in `longshot_driver_faults.txt` (in the `cache` folder) and left out, with
    its draws, on later starts on the same driver. After a driver update the list starts again; delete the file to try
    them all again sooner.
@@ -489,7 +489,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
-| | Developer: Intel shader compiles | One at a time, Side by side (after a restart; Intel graphics on Windows only) | One at a time |
+| | Developer: Intel shader compiles | Auto, Side by side, One at a time (after a restart; Intel graphics on Windows only) | Auto |
 
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile
   and the video memory limits for a card with that much memory. It leaves the Upscaler and Frame generation as
@@ -634,8 +634,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Robust buffers** (Debug tab, Developer): a read past a buffer's end is dropped instead of stopping the GPU. Auto is
   on, on every card; Off can be faster on some NVIDIA cards.
 - **ASTC as RGBA8** (Debug tab, Developer): the AMD texture workaround below.
-- **Intel shader compiles** (Debug tab, Developer; Intel graphics on Windows only): One at a time, the default, lets one
-  thread at a time into Intel's shader compiler; Side by side is faster on many cores but can crash in the driver. See
+- **Intel shader compiles** (Debug tab, Developer; Intel graphics on Windows only): One at a time lets one thread at a
+  time into Intel's shader compiler; Side by side is faster on many cores but can crash in the driver. Auto, the default,
+  is side by side on the Arc B-series with driver 101.9154 or newer, where it was measured, and one at a time elsewhere. See
   [Intel laptops](#intel-laptops). It applies after a restart.
 - **Game speed:** with Per frame, the game runs slower whenever it is below 60 fps. Real time keeps it at normal speed
   down to 15 fps.
@@ -1124,9 +1125,11 @@ the build. If a build's preparation stopped ("the GPU driver stopped responding"
 `longshot_prepare_skipped` file in its `cache` folder and every start after that builds shaders only when first drawn.
 Build again with **Prepare shaders now** ticked, or delete that file, to prepare them with this fix.
 The Debug tab's **Intel shader compiles** row (Developer section, shown on Intel graphics on Windows) chooses: **One at
-a time**, the default and the safe choice on a CPU with 4 cores or fewer, or **Side by side**, faster builds on a CPU
-with many cores, but Intel's driver can crash the game while building them. It applies after a restart.
-`RX_VK_NO_INTEL_SERIAL=1` is Side by side for a run, whatever the row says. NVIDIA, AMD, and Intel on other systems are
+a time**, the safe choice on a CPU with 4 cores or fewer; **Side by side**, faster builds on a CPU with many cores, but
+Intel's driver can crash the game while building them; or **Auto**, the default: side by side on the Arc B-series with
+driver 101.9154 or newer (on a B580 a new area's first visit froze the picture for four to seven minutes one at a time,
+and not at all side by side, with no fault in ten areas), one at a time on every other Intel GPU. It applies after a
+restart. `RX_VK_NO_INTEL_SERIAL=1` is Side by side for a run and `=0` One at a time, whatever the row says. NVIDIA, AMD, and Intel on other systems are
 unchanged.
 
 `RX_VK_SKIP_CODE=<prefix,...>` leaves out the draws of every program with a stage whose native code key starts with one
