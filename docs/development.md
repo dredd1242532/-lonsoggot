@@ -659,11 +659,18 @@ compiles the actual wait functions and runs them without a game or device; on Ap
 deadlines use awake uptime, like Linux's `CLOCK_MONOTONIC`; civil FILETIME remains realtime.
 `WakeByAddressSingle` broadcasts, as this layer already does on Linux; the Darwin address sequence
 buckets can also cause unrelated spurious wakes, so callers must recheck their predicates.
+The executable and the renderer each link their own copy of `darwin_wait.c`, but they share one set of address
+sequence words: the executable-only `host/posix/darwin_wait_state.c` exports `hos_posix_address_wait_sequences`
+(256 zero-initialized words for the whole process), and each copy finds it once through `dlsym(RTLD_MAIN_ONLY, ...)`.
+A wake in one image therefore reaches a waiter in the other. If the executable lacks the provider, the first
+address wait or wake aborts with `fatal: main executable has no Darwin address-wait state provider`; there is no
+private fallback. `--shared-only` runs only these two-image checks and the C++ header checks, without the timing
+campaign.
 The layer's relative-only waitable timers still ignore the wait's millisecond limit, periodic/APC
 requests and timer flags; polling wait-all still consumes ready objects before all are ready.
 This is not a complete macOS host port: thread, memory, fiber and fault-context APIs remain Linux-specific.
-The macOS build must add `darwin_wait.c` beside `win32_posix.c` in both host and renderer source lists;
-that build-script integration is separate from this wait change.
+The macOS build must add `darwin_wait.c` beside `win32_posix.c` in both host and renderer source lists, and
+`darwin_wait_state.c` to the host's list only; that build-script integration is separate from this wait change.
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.
