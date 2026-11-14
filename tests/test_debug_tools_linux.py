@@ -17,6 +17,9 @@ SOURCE = ROOT / "host/hos_main.c"
 TOOLS = [
     r"static int oot_pouch_change\(",
     r"static void oot_update_player_cheats\(",
+    r"static void oot_save_start\(",
+    r"static void oot_save_tick\(void\) \{",
+    r"int hos_oot_save_ask\(void\) \{",
     r"int hos_oot_flight_shortcut_ready\(void\) \{",
     r"static void oot_write_flight_rotation\(",
     r"void hos_oot_flight_rotation\(",

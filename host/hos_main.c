@@ -834,6 +834,7 @@ static const OotDestination oot_destinations[] = {   /* (generated: work/oot-tel
 };
 #define OOT_AGE_ACTION 999   /* (the Cheats page's Age row) */
 #define OOT_TELEPORT_ACTION 1000   /* (pouch edits use 200 to 348) */
+#define OOT_SAVE_ACTION 998   /* (the Cheats page's Save here row, the bridge's save, "!cheat 998": oot_save_start) */
 #define OOT_GAMEDATA_SLOT 0x84c9e180ULL   /* GameDataMgr, as ReserveBancChange's readers load it */
 #define OOT_EVENTMGR_SLOT 0x84c9e090ULL   /* EventMgr, as SeqOneShotRequestEvent loads it */
 #define OOT_EVENT_ARG_SIZE 0x1b20ULL      /* EventRequestArg: SeqOneShotRequestEvent reserves this much stack */
@@ -1278,6 +1279,211 @@ static int oot_flight_moved_away(Ctx *c, uint64_t actor, const float held[3]) {
     return apart > 2.0f * 2.0f;
 }
 
+/* Save here (the Debug tab's row, the control bridge's save, the live input file's "!cheat 998"): the game saves where Link
+   stands, through its own pause menu, as a player saves. Plus opens the pause menu on its Items tab; R goes to System,
+   whose first entry is Save; A on it shows the slot's card with Cancel chosen; Up, then A, saves into a new slot folder
+   (save/<user id>/slot_NN). That sequence, 3 s between presses, was played through the live input file in the Market and
+   wrote a slot that Continue then loaded at that spot.
+   The game's own save routine is not called: which function the menu's Save runs is not known here (one profiled run, the
+   caller of progress.sav's write, would name it), and the other tools call only functions whose arguments and checks are
+   known. So the presses go through the queue the live input file's go through (hos_hid_tap), one at a time from the
+   controller's read (hos_oot_save_tick), the waits counted in the game's presents. It is taken at Link's update and
+   refused while an event plays (a cutscene, a conversation, a map change's), a map loads, no save is loaded, the free
+   camera or the flight takes buttons it presses, or a save is already under way. Checked as it goes: nothing is pressed
+   until the Insert menu is closed (the row closes it); the pause menu must have opened (Link's update stops while it is
+   open) before anything else is pressed; a progress.sav written after the last A (host/nn_fs.c counts them, with the
+   slot's folder); then B until Link is updated again (the menu closed), at most four times. One line is logged when it
+   saves, does not, or is refused (cheats: save ...), with the slot */
+enum { OOT_SAVE_NONE, OOT_SAVE_MENU, OOT_SAVE_SETTLE, OOT_SAVE_PAUSED, OOT_SAVE_SYSTEM, OOT_SAVE_CARD, OOT_SAVE_CONFIRM,
+       OOT_SAVE_WRITTEN, OOT_SAVE_CLOSE };
+#define OOT_SAVE_WAIT 180   /* (presents between presses: the 3 s the sequence was played with, at 60 a second) */
+static SRWLOCK oot_save_lock = SRWLOCK_INIT;
+static struct {
+    int step;              /* OOT_SAVE_*: what the controller's read does next; NONE: none under way (read unlocked first) */
+    int64_t due, until;    /* presents: when that step is due; the last chance of a step that waits for something */
+    int writes, closes;    /* hos_fs_save_writes' count before the last A; the B presses so far */
+    int saved;             /* (closing) a progress.sav was written (slot), else why not */
+    char why[160], slot[64];
+    int ticket;            /* the bridge's ask under way (0: the Debug tab's or the live file's) */
+    int asked;             /* the bridge's ask waiting for Link's update (read unlocked first), 0 none */
+    int taking;            /* the bridge's ask taken by Link's update and not begun or refused yet */
+    int last_ticket, done_ticket, result;   /* (hos_oot_save_result) */
+    char done_why[256], done_slot[64];
+} oot_save;
+extern volatile LONG64 hos_present_count;   /* (display.c, posix/display_sdl.c: the game's own presents) */
+static int64_t oot_presents(void) { return __atomic_load_n(&hos_present_count, __ATOMIC_RELAXED); }
+/* Link was updated in the last 250 ms: in play, not in the pause menu, a load or the title */
+static int oot_link_in_play(void) {
+    const int64_t seen = __atomic_load_n(&flight_player_seen, __ATOMIC_RELAXED);
+    return seen && hos_now_ns() - seen < 250000000;
+}
+/* (oot_save_lock held) the bridge's answer kept by its ticket: 1 saved (slot), -1 refused before anything was pressed,
+   -3 not saved after pressing (why: the reason, or with 1 a note) */
+static void oot_save_answer(int ticket, int result, const char *why, const char *slot) {
+    if (!ticket) return;
+    oot_save.done_ticket = ticket, oot_save.result = result;
+    snprintf(oot_save.done_why, sizeof oot_save.done_why, "%s", why);
+    snprintf(oot_save.done_slot, sizeof oot_save.done_slot, "%s", slot);
+}
+/* (oot_save_lock held) the end of the one under way (result as oot_save_answer's); line: what to log once the lock is let
+   go */
+static void oot_save_end(char *line, size_t cap, int result, const char *why) {
+    if (result == 1)
+        snprintf(line, cap, "cheats: save: saved in %s%s%s", oot_save.slot[0] ? oot_save.slot : "a slot whose folder was not seen",
+                 why[0] ? "; " : "", why);
+    else snprintf(line, cap, "cheats: save %s: %s", result == -1 ? "refused" : "not made", why);
+    oot_save_answer(oot_save.ticket, result, why, result == 1 ? oot_save.slot : "");
+    oot_save.ticket = 0;
+    __atomic_store_n(&oot_save.step, OOT_SAVE_NONE, __ATOMIC_RELAXED);
+}
+/* (oot_save_lock held) the step after, due at that present (step is read unlocked first: stored atomically) */
+static void oot_save_go(int step, int64_t due) {
+    __atomic_store_n(&oot_save.step, step, __ATOMIC_RELAXED);
+    oot_save.due = due;
+}
+/* (oot_save_lock held) one press through the live input's queue, and the step after it once wait presents are by */
+static void oot_save_press(const char *press, int next, int64_t now, int wait) {
+    void hos_hid_tap(const char *press);   /* host/nn_hid.c: taken at this read */
+    hos_hid_tap(press);
+    oot_save_go(next, now + wait);
+}
+/* (Link's update) Save here asked for: refused, or begun (ticket: the bridge's, 0 none) */
+static void oot_save_start(Ctx *c, int ticket) {
+    int rx_option(int id, int otherwise);
+    int loading = 0;
+    const char *why = NULL;
+    if (oot_event_playing(c)) why = "an event is playing (a cutscene, a conversation, a map change's)";
+    else if (oot_gamedata_bool(c, 0xef2b60c2u, &loading) && loading) why = "a map is loading";   /* Sequence_IsLoadingBanc */
+    else if (oot_pouch_count(c, oot_item_names[0]) < 0) why = "no save is loaded";   /* (as the Inventory page's counts) */
+    else if (rx_option(HOS_OPT_CHEAT_CAMERA, 0)) why = "the free camera is on (it takes L and R from the game)";
+    else if (rx_option(HOS_OPT_CHEAT_FLIGHT, 0) > 0) why = "Link is flying (the flight takes B, L and R from the game)";
+    char line[384] = "";
+    AcquireSRWLockExclusive(&oot_save_lock);
+    if (ticket && oot_save.taking == ticket) oot_save.taking = 0;
+    if (oot_save.step) {   /* (the one under way goes on; this ask is answered now) */
+        snprintf(line, sizeof line, "cheats: save refused: a save is already under way");
+        oot_save_answer(ticket, -1, "a save is already under way", "");
+    } else if (why) {
+        snprintf(line, sizeof line, "cheats: save refused: %s", why);
+        oot_save_answer(ticket, -1, why, "");
+    } else {
+        oot_save.ticket = ticket;
+        oot_save.due = oot_presents() + 1, oot_save.until = oot_save.due + 60 * 60;   /* (a minute for the Insert menu to close) */
+        oot_save.saved = 0, oot_save.closes = 0, oot_save.why[0] = oot_save.slot[0] = 0;
+        __atomic_store_n(&oot_save.step, OOT_SAVE_MENU, __ATOMIC_RELAXED);
+        snprintf(line, sizeof line, "cheats: save: through the pause menu (Plus, R, A, Up, A: System, Save)");
+    }
+    ReleaseSRWLockExclusive(&oot_save_lock);
+    hos_log("%s", line);
+}
+/* (each read of the controller, any thread) the save under way's next step, when it is due */
+static void oot_save_tick(void) {
+    if (!__atomic_load_n(&oot_save.step, __ATOMIC_RELAXED)) return;
+    int rx_option(int id, int otherwise);
+    int hos_fs_save_writes(char *slot, size_t cap);   /* host/nn_fs.c */
+    char line[384] = "";
+    AcquireSRWLockExclusive(&oot_save_lock);
+    const int64_t now = oot_presents();
+    if (!oot_save.step || now < oot_save.due) {
+        ReleaseSRWLockExclusive(&oot_save_lock);
+        return;
+    }
+    switch (oot_save.step) {
+    case OOT_SAVE_MENU:   /* the Insert menu closed: the game's input is the menu's while it is open */
+        if (!rx_option(1, 0)) oot_save_go(OOT_SAVE_SETTLE, now + 30);
+        else if (now >= oot_save.until) oot_save_end(line, sizeof line, -1, "the Insert menu stayed open for a minute");
+        else oot_save.due = now + 6;
+        break;
+    case OOT_SAVE_SETTLE:   /* still in play half a second after: the pause menu opens with Plus */
+        if (rx_option(1, 0)) oot_save_go(OOT_SAVE_MENU, now + 6);
+        else if (!oot_link_in_play()) oot_save_end(line, sizeof line, -1, "Link is not in play (a pause menu, a load, the title)");
+        else oot_save_press("0:PLUS/150", OOT_SAVE_PAUSED, now, OOT_SAVE_WAIT);
+        break;
+    case OOT_SAVE_PAUSED:   /* (Link is not updated while the pause menu is open: still updated, it did not open) */
+        if (oot_link_in_play())
+            oot_save_end(line, sizeof line, -3, "the pause menu did not open after Plus (Link is still in play): nothing more was pressed");
+        else oot_save_press("0:R/150", OOT_SAVE_SYSTEM, now, OOT_SAVE_WAIT);   /* Items -> System */
+        break;
+    case OOT_SAVE_SYSTEM:   /* Save, System's first entry: its slot card, Cancel chosen */
+        oot_save_press("0:A/150", OOT_SAVE_CARD, now, OOT_SAVE_WAIT);
+        break;
+    case OOT_SAVE_CARD:   /* Cancel -> Save */
+        oot_save_press("0:UP/150", OOT_SAVE_CONFIRM, now, OOT_SAVE_WAIT * 2 / 3);
+        break;
+    case OOT_SAVE_CONFIRM:
+        oot_save.writes = hos_fs_save_writes(NULL, 0);
+        oot_save_press("0:A/150", OOT_SAVE_WRITTEN, now, 6);
+        oot_save.until = now + 600;   /* (10 s for the game to write it) */
+        break;
+    case OOT_SAVE_WRITTEN:   /* a progress.sav written since the last A: the slot; then the menu closed */
+        if (hos_fs_save_writes(oot_save.slot, sizeof oot_save.slot) != oot_save.writes)
+            oot_save.saved = 1, oot_save_go(OOT_SAVE_CLOSE, now + 60);   /* (its caption.sav after it) */
+        else if (now >= oot_save.until) {
+            snprintf(oot_save.why, sizeof oot_save.why, "no save file was written in the 10 s after the last A (the pause "
+                     "menu was not where Plus, R, A, Up expected it)");
+            oot_save.slot[0] = 0, oot_save_go(OOT_SAVE_CLOSE, now);
+        } else oot_save.due = now + 6;
+        break;
+    case OOT_SAVE_CLOSE:   /* B until Link is in play again (the card, then the menu), at most four times */
+        if (oot_link_in_play())
+            oot_save_end(line, sizeof line, oot_save.saved ? 1 : -3, oot_save.saved ? "" : oot_save.why);
+        else if (oot_save.closes < 4) {
+            oot_save.closes++;
+            oot_save_press("0:B/150", OOT_SAVE_CLOSE, now, 120);
+        } else if (oot_save.saved)
+            oot_save_end(line, sizeof line, 1, "the pause menu stayed open after four B presses");
+        else {
+            char why[256];
+            snprintf(why, sizeof why, "%s; the pause menu stayed open after four B presses", oot_save.why);
+            oot_save_end(line, sizeof line, -3, why);
+        }
+        break;
+    default: oot_save_end(line, sizeof line, -3, "an unknown step");
+    }
+    ReleaseSRWLockExclusive(&oot_save_lock);
+    if (line[0]) hos_log("%s", line);
+}
+/* (the control bridge) Save here asked for, taken at Link's next update as a teleport is: a ticket. A later ask replaces
+   one not taken yet */
+int hos_oot_save_ask(void) {
+    AcquireSRWLockExclusive(&oot_save_lock);
+    const int ticket = ++oot_save.last_ticket;
+    __atomic_store_n(&oot_save.asked, ticket, __ATOMIC_RELAXED);
+    ReleaseSRWLockExclusive(&oot_save_lock);
+    return ticket;
+}
+/* 1 saved (slot: its folder, "" not seen; why: a note, "" none), -1 refused before anything was pressed (why), -3 not saved
+   after pressing (why), 3 under way, 0 not taken yet, -2 replaced by a later ask or cancelled */
+int hos_oot_save_result(int ticket, char *why, size_t why_cap, char *slot, size_t slot_cap) {
+    AcquireSRWLockShared(&oot_save_lock);
+    int r = -2;
+    if (oot_save.done_ticket == ticket) {
+        r = oot_save.result;
+        snprintf(why, why_cap, "%s", oot_save.done_why);
+        snprintf(slot, slot_cap, "%s", oot_save.done_slot);
+    } else if (oot_save.step && oot_save.ticket == ticket) r = 3;
+    else if (oot_save.asked == ticket || oot_save.taking == ticket) r = 0;
+    ReleaseSRWLockShared(&oot_save_lock);
+    return r;
+}
+/* (the bridge gave up waiting) not taken later behind its back; one under way goes on (the pause menu is open by then), and
+   is not answered */
+void hos_oot_save_cancel(int ticket) {
+    AcquireSRWLockExclusive(&oot_save_lock);
+    if (oot_save.asked == ticket) __atomic_store_n(&oot_save.asked, 0, __ATOMIC_RELAXED);
+    if (oot_save.ticket == ticket) oot_save.ticket = 0;
+    ReleaseSRWLockExclusive(&oot_save_lock);
+}
+static int oot_save_take(void) {   /* (Link's update) the bridge's ask waiting, its ticket, or 0 */
+    if (!__atomic_load_n(&oot_save.asked, __ATOMIC_RELAXED)) return 0;
+    AcquireSRWLockExclusive(&oot_save_lock);
+    const int ticket = oot_save.asked;
+    if (ticket) oot_save.taking = ticket;   /* (still "not taken yet" to the bridge until begun or refused) */
+    __atomic_store_n(&oot_save.asked, 0, __ATOMIC_RELAXED);
+    ReleaseSRWLockExclusive(&oot_save_lock);
+    return ticket;
+}
+
 static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components) {
     int rx_option(int id, int otherwise);
     static uint64_t flying_actor, marked_actor, marked_controller;
@@ -1303,6 +1509,8 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
         if (asked & OOT_BRIDGE_AGE) action = OOT_AGE_ACTION, bridge_adult = asked & 1;
         else if (asked) action = OOT_TELEPORT_ACTION + asked - 1;
     }
+    int save_ticket = 0;   /* (the bridge's save, host/control.c: what came of it is kept for its reply) */
+    if (!action && (save_ticket = oot_save_take())) action = OOT_SAVE_ACTION;
     oot_teleport_followup(c);
     oot_inventory_refresh(c, now);
     oot_player_speed(c, components);
@@ -1321,6 +1529,8 @@ static void oot_update_player_cheats(Ctx *c, uint64_t actor, uint64_t components
     } else if (action >= OOT_TELEPORT_ACTION) {
         const int sent = oot_teleport(c, actor, (unsigned)(action - OOT_TELEPORT_ACTION));
         if (bridge_ticket) oot_bridge_teleport_done(bridge_ticket, sent);
+    } else if (action == OOT_SAVE_ACTION) {
+        oot_save_start(c, save_ticket);
     } else if (action >= 200) {
         oot_edit_pouch(c, action);
     } else if (action >= 100 && action < 124) {
@@ -1425,6 +1635,13 @@ int hos_oot_flight_shortcut_ready(void) {
     return seen && hos_now_ns() - seen < 250000000;
 #else
     return 0;
+#endif
+}
+
+/* (host/nn_hid.c, each read of the controller) Save here's next press, when one is under way (oot_save_tick) */
+void hos_oot_save_tick(void) {
+#if defined(_WIN32) || defined(__linux__)   /* (the debug tools: host/posix has what they call) */
+    oot_save_tick();
 #endif
 }
 

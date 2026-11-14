@@ -233,13 +233,42 @@ static void fake_teleport_cancel(int ticket) {
     if (tp_ticket == ticket) __atomic_store_n(&teleport_asked, -1, __ATOMIC_RELAXED);
     log_unlock();
 }
+/* (Save here: asked as a teleport is, taken by the game's thread at its next frame unless teleport_held; then over a while
+   later: saved in slot_05, or refused with the game's reason while save_refuse is set, as hos_main.c's oot_save_*) */
+static volatile int save_asked, save_refuse;
+static int sv_ticket, sv_done_ticket, sv_result, sv_running;   /* (log_lock) */
+static int fake_save(void) {
+    log_lock();
+    const int ticket = ++sv_ticket;
+    __atomic_store_n(&save_asked, ticket, __ATOMIC_RELAXED);
+    log_unlock();
+    return ticket;
+}
+static int fake_save_result(int ticket, char *why, size_t why_cap, char *slot, size_t slot_cap) {
+    log_lock();
+    int r = -2;
+    if (sv_done_ticket == ticket) {
+        r = sv_result;
+        snprintf(why, why_cap, "%s", r < 0 ? "an event is playing (a cutscene, a conversation, a map change's)" : "");
+        snprintf(slot, slot_cap, "%s", r == 1 ? "slot_05" : "");
+    } else if (sv_running == ticket) r = 3;
+    else if (__atomic_load_n(&save_asked, __ATOMIC_RELAXED) == ticket) r = 0;
+    log_unlock();
+    return r;
+}
+static void fake_save_cancel(int ticket) {
+    log_lock();
+    if (__atomic_load_n(&save_asked, __ATOMIC_RELAXED) == ticket) __atomic_store_n(&save_asked, 0, __ATOMIC_RELAXED);
+    log_unlock();
+}
 static HosControlGame game = {
     .frame = fake_frame, .frame_info = fake_frame_info, .shot = fake_shot, .setting = fake_setting,
     .setting_set = fake_setting_set, .mem_region = fake_mem_region, .mem_read = fake_mem_read,
     .mem_write = fake_mem_write, .save_root = fake_save_root, .log = fake_log, .quit = fake_quit,
     .renderer = fake_renderer, .version = "test", .map = fake_map, .destination = fake_destination,
     .teleport = fake_teleport, .teleport_result = fake_teleport_result, .teleport_cancel = fake_teleport_cancel,
-    .age = fake_age, .oot_state = fake_state, .oot_sample_ask = fake_sample_ask,
+    .age = fake_age, .oot_state = fake_state, .save = fake_save, .save_result = fake_save_result,
+    .save_cancel = fake_save_cancel, .oot_sample_ask = fake_sample_ask,
     .oot_sample_cancel = fake_sample_cancel, .oot_sample = fake_sample};
 
 static void *game_thread(void *unused) {
@@ -273,6 +302,18 @@ static void *game_thread(void *unused) {
                 log_lock();
                 tp_done_ticket = ticket, tp_result = dest_child[t] ? 1 : -1, tp_taking = 0;
                 if (dest_child[t]) snprintf(fake_map_now, sizeof fake_map_now, "%s", dest_child[t]);
+                log_unlock();
+            }
+        }
+        if (!teleport_held) {   /* (Save here: taken, then over a while later) */
+            log_lock();
+            const int t = __atomic_exchange_n(&save_asked, 0, __ATOMIC_RELAXED);
+            if (t) sv_running = t;
+            log_unlock();
+            if (t) {
+                sleep_ms(40);
+                log_lock();
+                sv_done_ticket = t, sv_result = save_refuse ? -1 : 1, sv_running = 0;
                 log_unlock();
             }
         }
@@ -1048,8 +1089,25 @@ int main(int argc, char **argv) {
         CHECK(strstr(line, "\"ok\":true") && strstr(line, "\"age\":\"child\",\"sent\":null"));
         status_until(c, "798", "\"age\":\"child\"", "\"map\":\"KokiriForest_Child\"", line, sizeof line, 2000);
         CHECK(strstr(line, "\"map\":\"KokiriForest_Child\"") && strstr(line, "\"age\":\"child\""));
+        /* Save here: the reply once it is over, with the slot as saves names it ("03"); refused with the game's reason; not
+           taken (not in play): a timeout, the ask withdrawn; without waiting, at once */
+        ask(c, "{\"id\":80,\"cmd\":\"save\"}\n", "80", line, sizeof line, 3000);
+        CHECK(strstr(line, "\"ok\":true") && strstr(line, "\"saved\":true,\"slot\":\"05\"") && !strstr(line, "\"note\""));
+        save_refuse = 1;
+        ask(c, "{\"id\":81,\"cmd\":\"save\"}\n", "81", line, sizeof line, 3000);
+        CHECK(strstr(line, "\"error\":\"refused\"") && strstr(line, "an event is playing"));
+        save_refuse = 0;
+        teleport_held = 1;
+        ask(c, "{\"id\":82,\"cmd\":\"save\",\"timeout\":0.2}\n", "82", line, sizeof line, 3000);
+        CHECK(strstr(line, "\"error\":\"timeout\"") && strstr(line, "did not take the save"));
+        CHECK(__atomic_load_n(&save_asked, __ATOMIC_RELAXED) == 0);
+        ask(c, "{\"id\":83,\"cmd\":\"save\",\"wait\":false}\n", "83", line, sizeof line, 2000);
+        CHECK(strstr(line, "\"ok\":true") && strstr(line, "\"saved\":null"));
+        teleport_held = 0;
+        wait_frames(5);
         hangup(sub);
-        puts("PASS: (OoT) the map in status, events and waits; the teleport by index or map, and its list; the age switch");
+        puts("PASS: (OoT) the map in status, events and waits; the teleport by index or map, and its list; the age switch; "
+             "Save here");
     }
 
     /* a client gone in the middle of a press: its input is let go */

@@ -14,7 +14,8 @@
    (gpu/vk/vk_replay.cpp shot_ask), the Insert menu's settings through its own setter. The game never waits for the
    bridge: the controller's read takes one short lock that the bridge never holds over I/O.
 
-   Commands: status, press, stick, sequence, release, shot, wait, option_get, option_set, saves, teleport and age (OoT),
+   Commands: status, press, stick, sequence, release, shot, wait, option_get, option_set, saves, teleport, age and save
+   (OoT),
    subscribe,
    unsubscribe, quit, and guest memory (mem_read, mem_read_many, mem_write) when HOS_CONTROL_MEM allows it.
    Inputs are timed in frames, from the first controller read after the request. The state (intro, menu, loading,
@@ -309,7 +310,7 @@ typedef struct Conn {
     unsigned log_seen;   /* (the log ring's count it has seen) */
 } Conn;
 
-enum { P_INPUT = 1, P_WAIT, P_SHOT, P_MEM, P_TELEPORT, P_STATUS };
+enum { P_INPUT = 1, P_WAIT, P_SHOT, P_MEM, P_TELEPORT, P_STATUS, P_SAVE };
 enum { W_FRAME = 1, W_STATE, W_LOADING_START, W_LOADING_END, W_CHANGE, W_MAP };
 typedef struct {
     int used, conn, gen, kind;
@@ -1433,6 +1434,66 @@ static void cmd_age(int ci, const JDoc *d, int req, const char *id) {
     reply_end(c, &b);
 }
 
+/* ---- (OoT) the Debug tab's Save here: the game saves where Link stands, through its own pause menu (System, Save), taken at
+   the player's next update as a teleport is. The reply comes once it is over (some 12 s): saved and the slot written, or
+   refused and why (an event playing, a map loading, ...), or failed and why (the pause menu did not open, no save file was
+   written), unless "wait": false ---- */
+static void cmd_save(int ci, const JDoc *d, int req, const char *id) {
+    Conn *c = &G.conns[ci];
+    if (!G.game->save || !G.game->save_result) return reply_error(c, id, "unavailable", "this game has no Save here");
+    int event = 0, loading = 0, child = 0;
+    if (G.game->oot_state && !G.game->oot_state(&event, &loading, &child))
+        return reply_error(c, id, "unavailable", "no save is loaded yet: Link has not been seen in play");
+    Buf b = {0};
+    int bad = 0;
+    const int wait = bool_arg(d, req, "wait", 1);
+    const int64_t deadline = deadline_arg(d, req, 60, &bad);
+    if (bad) return reply_error(c, id, "bad_request", "timeout: seconds");
+    Pending *p = wait ? pending_new(ci, id, P_SAVE) : NULL;
+    if (wait && !p) return reply_error(c, id, "busy", "too many requests waiting");
+    const int ticket = G.game->save();
+    if (ticket <= 0) {
+        if (p) p->used = 0;
+        return reply_error(c, id, "unavailable", "the game did not take the save");
+    }
+    ctl_log("control: save asked for");
+    if (p) {
+        p->token = ticket, p->deadline = deadline;
+        return;
+    }
+    reply_start(&b, id, 1);
+    buf_puts(&b, ",\"saved\":null");
+    reply_end(c, &b);
+}
+/* (pending_tick) what came of a save: saved (the slot), refused, failed, replaced, or not over in time */
+static int save_done(Pending *p, Conn *c, int64_t now) {
+    char why[256] = "", slot[64] = "";
+    const int r = G.game->save_result(p->token, why, sizeof why, slot, sizeof slot);
+    if ((r == 0 || r == 3) && now < p->deadline) return 0;
+    if (r == 0 || r == 3) {
+        if (G.game->save_cancel) G.game->save_cancel(p->token);
+        if (r == 0)
+            reply_error(c, p->id, "timeout", "the game did not take the save: it is taken at Link's next update, in play "
+                        "(not on the title, the file select, a pause menu or a load)");
+        else reply_error(c, p->id, "timeout", "the save was still under way (it goes on: saves shows whether a slot was written)");
+    } else if (r == -1) reply_error(c, p->id, "refused", "the game refused the save: %s", why[0] ? why : "no reason given");
+    else if (r == -3) reply_error(c, p->id, "failed", "the game did not save: %s", why[0] ? why : "no reason given");
+    else if (r == -2) reply_error(c, p->id, "cancelled", "a later save replaced it before the game took it");
+    else {
+        Buf b = {0};
+        reply_start(&b, p->id, 1);
+        buf_puts(&b, ",\"saved\":true,\"slot\":");   /* (slot_03 as "03", as saves names it) */
+        if (slot[0]) buf_str(&b, strncmp(slot, "slot_", 5) ? slot : slot + 5);
+        else buf_puts(&b, "null");
+        if (why[0]) {   /* (saved, but the pause menu stayed open) */
+            buf_puts(&b, ",\"note\":");
+            buf_str(&b, why);
+        }
+        reply_end(c, &b);
+    }
+    return 1;
+}
+
 /* (pending_tick) what came of a teleport or an age switch: sent, refused, replaced, or not taken in time (then cancelled) */
 static int teleport_done(Pending *p, Conn *c, int64_t now) {
     char why[128] = "", map[80] = "";
@@ -1871,6 +1932,7 @@ static void request(int ci, const char *line, size_t len) {
     else if (!strcmp(cmd, "saves")) cmd_saves(ci, id);
     else if (!strcmp(cmd, "teleport")) cmd_teleport(ci, &d, req, id);
     else if (!strcmp(cmd, "age")) cmd_age(ci, &d, req, id);
+    else if (!strcmp(cmd, "save")) cmd_save(ci, &d, req, id);
     else if (!strcmp(cmd, "shot")) cmd_shot(ci, &d, req, id);
     else if (!strcmp(cmd, "wait")) cmd_wait(ci, &d, req, id);
     else if (!strcmp(cmd, "option_get")) cmd_option_get(ci, &d, req, id);
@@ -1933,6 +1995,7 @@ static void pending_drop(Pending *p) {
         if (m->used && m->token == p->token) free(m->buf), m->used = 0;
         ctl_unlock(&G.mu);
     } else if (p->kind == P_TELEPORT && G.game->teleport_cancel) G.game->teleport_cancel(p->token);
+    else if (p->kind == P_SAVE && G.game->save_cancel) G.game->save_cancel(p->token);
     else if (p->kind == P_STATUS) G.game->oot_sample_cancel(p->sample_ticket);
     p->used = 0;
 }
@@ -1959,7 +2022,8 @@ static void pending_tick(int64_t now) {
         }
         const int done = p->kind == P_INPUT ? input_done(p, c, now) : p->kind == P_WAIT ? wait_done(p, c, now)
                        : p->kind == P_MEM ? mem_finished(p, c, now) : p->kind == P_TELEPORT ? teleport_done(p, c, now)
-                       : p->kind == P_STATUS ? status_done(p, now) : shot_finished(p, c, now);
+                       : p->kind == P_STATUS ? status_done(p, now) : p->kind == P_SAVE ? save_done(p, c, now)
+                       : shot_finished(p, c, now);
         if (done) p->used = 0;
     }
 }
@@ -2408,6 +2472,9 @@ int hos_oot_teleport_ask(int index);
 int hos_oot_teleport_result(int ticket, char *why, size_t why_cap, char *map, size_t map_cap, int *accepted);
 void hos_oot_teleport_cancel(int ticket);
 int hos_oot_age_ask(int adult);
+int hos_oot_save_ask(void);
+int hos_oot_save_result(int ticket, char *why, size_t why_cap, char *slot, size_t slot_cap);
+void hos_oot_save_cancel(int ticket);
 int hos_oot_state(int *event, int *loading, int *child);
 uint64_t hos_oot_sample_ask(void);
 void hos_oot_sample_cancel(uint64_t ticket);
@@ -2421,6 +2488,7 @@ static HosControlGame game = {
     .renderer = game_renderer, .map = hos_oot_current_map, .destination = hos_oot_destination,
     .teleport = hos_oot_teleport_ask, .teleport_result = hos_oot_teleport_result,
     .teleport_cancel = hos_oot_teleport_cancel, .age = hos_oot_age_ask, .oot_state = hos_oot_state,
+    .save = hos_oot_save_ask, .save_result = hos_oot_save_result, .save_cancel = hos_oot_save_cancel,
     .oot_sample_ask = hos_oot_sample_ask, .oot_sample_cancel = hos_oot_sample_cancel,
     .oot_sample = hos_oot_sample, .oot_watch = hos_oot_watch, .oot_poll = hos_oot_poll};
 

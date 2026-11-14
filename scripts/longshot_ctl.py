@@ -15,6 +15,7 @@ steer it and read its state from a shell, a test or a coding agent. Standard lib
                                                 loading_start, loading_end, change, map [--map NAME]
     teleport [INDEX|MAP] [--arrive SECS]        (OoT) the debug teleport: sent or refused; none: the destinations
     age [child|adult] [--arrive SECS]           (OoT) the Debug tab's Switch age (none: the other age), reloading the map
+    save [--timeout 60]                         (OoT) the Debug tab's Save here: a save where Link stands; the slot written
     option get [NAME]  /  option set NAME VALUE the Insert menu's settings
     saves  /  slots [--thumbs DIR]              the save folder the game uses; its slots, newest first
     watch [--events present,state,log,map,oot] [--every 60] [--log TEXT] [--count N]
@@ -327,6 +328,13 @@ def run(a):
                 w = check(b.request("wait", timeout=a.arrive, event="loading_end"))
                 show(a, dict(r, arrived=w), lambda r: "age switch: the %s, in %s after %d frames (frame %d)" % (
                     plain_text(r["age"]), plain_text(r.get("map") or "-"), w["waited"], w["frame"]))
+        elif a.command == "save":
+            r = check(b.request("save", wait=False if a.no_wait else None, timeout=a.timeout))
+            if r.get("saved") is None:
+                show(a, r, lambda r: "save asked for: saves shows the slot once it is written")
+            else:
+                show(a, r, lambda r: "saved in slot %s%s" % (plain_text(r.get("slot") or "?"),
+                                                            "; " + plain_text(r["note"]) if r.get("note") else ""))
         elif a.command == "option":
             if a.action == "get":
                 r = check(b.request("option_get", name=a.name))
@@ -606,6 +614,10 @@ def main(argv=None):
     q.add_argument("--arrive", type=float, metavar="SECS", help="then wait up to SECS until the map has reloaded (its "
                    "load ended)")
     q.add_argument("--no-wait", action="store_true", help="reply once asked, without whether the game took it")
+    q = sub.add_parser("save", help="(OoT) the Debug tab's Save here: the game saves where Link stands, through its pause "
+                       "menu (some 12 s); the slot written")
+    q.add_argument("--timeout", type=float, default=60, help="seconds for it to be over (it is taken in play)")
+    q.add_argument("--no-wait", action="store_true", help="reply once asked, without whether the game saved")
     sub.add_parser("saves", help="the save folder the game uses: its files, newest slot first")
     q = sub.add_parser("slots", help="the save slots: last written, sizes, scene; * the newest (Continue's)")
     q.add_argument("--thumbs", metavar="DIR", help="each slot's file-select picture written there as slot_NN.jpg")

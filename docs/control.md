@@ -110,8 +110,8 @@ replies are out. (Linux; a Windows pipe has no half-close.)
 | `forbidden` | a memory command while `HOS_CONTROL_MEM` does not allow it |
 | `out_of_range` | a memory address or range outside mapped guest memory |
 | `not_found` | no such setting |
-| `failed` | a shot could not be written |
-| `refused` | the game turned a teleport down (an event playing, a map loading, ...); the message says why |
+| `failed` | a shot could not be written, or a `save` did not save (the message says why) |
+| `refused` | the game turned a teleport or a save down (an event playing, a map loading, ...); the message says why |
 | `cancelled` | a press that was waited on was let go by `release`, or a teleport was replaced by a later one |
 
 ### Frames and inputs
@@ -380,6 +380,37 @@ With `"wait": false` the reply is at once, with `"sent": null`. The game logs it
 < {"id":14,"ok":true,"frame":7310,"age":"adult","sent":true,"map":"KokiriForest_Adult","accepted":true}
 ```
 
+**save** (OoT): the Debug tab's Save here: the game saves where Link stands, into a new slot, through its own pause menu.
+A test can then start from that spot (`launch --save FOLDER --slot NN`, or Continue, which loads the newest slot) instead
+of playing its way there each run. The game takes it as it takes a teleport, at the player's next update in play, then
+presses for you what a player presses: Plus (the pause menu, on its Items tab), R (System), A (Save: the slot's card,
+Cancel chosen), Up (Save), A, about 3 s apart (180 of the game's frames), then B until the game is back in play. The
+presses go through the queue `HOS_INPUT_LIVE`'s lines go through. The game's own save routine is not called: which
+function the menu's Save runs is not known (see Known limits).
+
+The reply comes once it is over (some 12 s; `timeout` default 60 s):
+
+- `"saved": true` and `slot`, the slot folder the game wrote (`"03"` for `slot_03`, as `saves` names it; `null` if the
+  write was not seen). `note` when it saved but the pause menu stayed open after four B presses.
+- `refused`, before anything is pressed: an event playing (a cutscene, a conversation, a map change's), a map loading, no
+  save loaded, the free camera on or Link flying (they take buttons it presses), or a save already under way.
+- `failed`, after pressing: the pause menu did not open after Plus (Link was still updated: nothing more is pressed), or
+  no `progress.sav` was written in the 10 s after the last A (the menu was not where the presses expected it; B is still
+  pressed to close it).
+- `timeout` when the game did not take it (not in play; withdrawn, as a teleport is), or when it was still under way
+  (it goes on: `saves` shows whether a slot was written). `cancelled` when a later `save` replaced it before the game
+  took it. `unavailable` before Link was seen in play.
+
+With `"wait": false` the reply is at once, with `"saved": null`. The game logs it: `cheats: save: through the pause menu
+...` when it begins, then one of `cheats: save: saved in slot_03`, `cheats: save refused: <why>` or
+`cheats: save not made: <why>`. The same is on the Debug tab (Save here: the Insert menu closes first, and nothing is
+pressed until it has) and in a live input file (`!cheat 998`), without a reply.
+
+```
+> {"id":15,"cmd":"save"}
+< {"id":15,"ok":true,"frame":8120,"saved":true,"slot":"05"}
+```
+
 **quit**: the reply, then the game exits as when its window is closed (the log flushed, exit code 0). The socket is
 removed.
 
@@ -490,6 +521,7 @@ python -I scripts/longshot_ctl.py option set text_speed 3
 python -I scripts/longshot_ctl.py teleport                              # the destinations
 python -I scripts/longshot_ctl.py teleport 1 --arrive 30                # sent (or refused, and why), then arrived
 python -I scripts/longshot_ctl.py age adult --arrive 30                 # the Debug tab's Switch age, then reloaded
+python -I scripts/longshot_ctl.py save                                  # the Debug tab's Save here: saved in slot NN
 python -I scripts/longshot_ctl.py release                               # this client's inputs and abandoned ones (--all)
 python -I scripts/longshot_ctl.py watch --events present,state --log "hid:"
 python -I scripts/longshot_ctl.py --json watch --events oot --every 6 --flags PlayerStatus.Life,0x31ab5580 --changes
@@ -515,6 +547,12 @@ sets `XDG_DATA_HOME` for the run, so it plays from saves of its own. `--env NAME
 - **The first `option_get` or `option_set`** after start can wait, on the bridge's thread, for the start-up check of
   the upscalers (NVIDIA's NGX start: about 3 s). The game does not wait for it; other replies to every client wait
   that long.
+- **Save here presses the pause menu's buttons**: it does not call the game's save routine, which has not been found
+  (one profiled run, the caller of `progress.sav`'s write, would name it; then it can be called as the other tools call
+  the game's functions). The sequence was checked once, in the Market as the child, by hand-written input; menus that
+  differ elsewhere (another default cursor, a slot card laid out otherwise) would make it `failed`, not save something
+  else: the slot written is read from the file system. A save is a new slot each time (the game's own Save from the
+  pause menu writes one); nothing picks the slot written.
 - **OoT samples** stop when Link is not updated. They contain no actor list and do not turn `symbols` into a supported command.
 - `HOS_CONTROL_MEM=rw` writes were checked against the game's memory (written, read back, put back), not against the
   picture the GPU draws from a written value.

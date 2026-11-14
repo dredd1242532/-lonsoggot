@@ -1392,6 +1392,10 @@ Row rows[] = {
      "Enter opens the inventory editor: unlock or relock equipment, items, upgrades and quest items, and change amounts.", nullptr, false, true, 10},
     {TAB_DEBUG, "Movement speed", nullptr, 0, 0, 0, nullptr,
      "How fast Link walks, runs and swims, as a multiple of his own speed. Choose with Left or Right.", nullptr, false, true, 11},
+    // (host/hos_main.c oot_save_*: the game's own pause menu played, System then Save; the control bridge's save, "!cheat 998")
+    {TAB_DEBUG, "Save here", nullptr, 0, 0, 0, nullptr,
+     "Saves the game where Link stands, into a new slot: this menu closes and the game's pause menu is opened and used "
+     "for you (System, Save; about 12 seconds). Not during a cutscene, a conversation or a load.", nullptr, false, true, 12},
     {TAB_DEBUG, "Developer", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     // (longshot, first under the heading: debug_rows lists only those) the zip for the "Submit your pipelines" issue: share_pipeline_list, pipeline_share.h
     {TAB_DEBUG, "Save my pipeline list", nullptr, 0, 0, 0, nullptr,
@@ -1565,7 +1569,7 @@ void choose_inventory_filter(int filter) {
     inventory_amount = false;
     inventory_reveal();
 }
-constexpr int kCheatRows = 12;   // (the debug tools' rows: Row::cheat 0 to 11)
+constexpr int kCheatRows = 13;   // (the debug tools' rows: Row::cheat 0 to 12)
 /// A debug tool's value as its row shows it ("" an action: confirm does it)
 std::string cheat_value(int i) {
     char t[16];
@@ -1588,12 +1592,13 @@ bool age_shown(int i) { return i == 9 && link_age.load(std::memory_order_relaxed
 /// What confirm does on a tool's row, for its prompt (nullptr: nothing)
 const char* cheat_confirm(int i) {
     static const char* const says[kCheatRows] = {"Toggle", "Toggle", "Apply", "Apply", "Set", nullptr, "Apply", "Toggle", "Open list",
-                                                 "Switch", "Open", nullptr};
+                                                 "Switch", "Open", nullptr, "Save"};
     return i >= 0 && i < kCheatRows ? says[i] : nullptr;
 }
 /// The button label on an action tool's row ("": not a button action)
 const char* cheat_button_text(int i) {
-    static const char* const buttons[kCheatRows] = {"", "", "Mark", "Return", "", "", "", "", "Choose map", "Switch", "Edit items", ""};
+    static const char* const buttons[kCheatRows] = {"", "", "Mark", "Return", "", "", "", "", "Choose map", "Switch", "Edit items", "",
+                                                    "Save"};
     return i >= 0 && i < kCheatRows ? buttons[i] : "";
 }
 constexpr int kRows = sizeof rows / sizeof rows[0];
@@ -2809,8 +2814,8 @@ std::string restart_line(ui::Ctx& c, float px, float width) {
 /// and Change quantity are not shown (the Inventory page edits every amount)
 struct DebugGroup { const char* title; int from, to; };   // (debug_tools_order[from, to))
 // (-1 is the saved Damage taken option, not a cheat action: beside Heart protection in Player)
-constexpr int debug_tools_order[] = {0, -1, 1, 11, 9, 10, 8, 2, 3, 7, 4};
-constexpr DebugGroup debug_groups[] = {{"Player", 0, 6}, {"Travel", 6, 9}, {"Camera & world", 9, 11}};
+constexpr int debug_tools_order[] = {0, -1, 1, 11, 9, 10, 8, 2, 3, 12, 7, 4};
+constexpr DebugGroup debug_groups[] = {{"Player", 0, 6}, {"Travel", 6, 10}, {"Camera & world", 10, 12}};
 constexpr int kDebugGroups = sizeof debug_groups / sizeof debug_groups[0];
 constexpr int kDebugTools = sizeof debug_tools_order / sizeof debug_tools_order[0];
 /// The Debug tab's rows as shown (its row numbers, tab_row_to_global's): the switch, the tools in debug_tools_order while they
@@ -4700,6 +4705,11 @@ void cheat_press(int i, const bool* press, bool& changed) {
     }
     if (press[7] && i == 9) {
         cheat_action.store(999);   // (host/hos_main.c OOT_AGE_ACTION)
+        open_now = false;
+        changed = true;
+    }
+    if (press[7] && i == 12) {   // (Save here: the menu closes, the game's own pause menu is played once it has)
+        cheat_action.store(998);   // (host/hos_main.c OOT_SAVE_ACTION)
         open_now = false;
         changed = true;
     }

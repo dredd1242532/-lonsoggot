@@ -439,6 +439,8 @@ static void host_drag_read(int32_t stick[4]);   /* (above) */
 static void scripted_input(uint64_t *buttons, int32_t stick[4]) {
     if (npresses < 0) parse_script();
     live_input();
+    void hos_oot_save_tick(void);   /* host/hos_main.c: the Debug tab's Save here, its next press (hos_hid_tap) when due */
+    hos_oot_save_tick();
     host_taps();
     const int64_t ms = script_elapsed_ms(hos_now_ns());
     for (int i = 0; i < npresses; i++)
@@ -452,7 +454,7 @@ static void scripted_input(uint64_t *buttons, int32_t stick[4]) {
 }
 
 /* (host/oot_menu.c) presses from the host, in the script's syntax ("0:A/100"), from now: the game's pause
-   menu's clicks. Any thread; the next read takes them */
+   menu's clicks, and the Debug tab's Save here (host/hos_main.c oot_save_tick). Any thread; the next read takes them */
 static SRWLOCK tap_lock = SRWLOCK_INIT;
 static char tap_text[256];
 void hos_hid_tap(const char *press) {

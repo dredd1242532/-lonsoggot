@@ -478,7 +478,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Controls | Opens the Controls page | |
 | | Menu shortcut | Insert or F1; F1 only; Insert, F1 or Esc | Insert, F1 or Esc |
 | | Compact menu key | Right Shift, Right Ctrl | Right Shift |
-| Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed) | Off |
+| Debug | Debug tools | Off, On (while on, the tools below it: Heart protection, No-clip flight, Mark position, Return to mark, Set time, Inventory item, Change quantity, Free camera, Teleport, Switch age, Inventory, Movement speed, Save here) | Off |
 | | Player: Damage taken | Half, Normal, Double, Quadruple (live, while Debug tools is on; Half rounds damage up to a quarter heart; Heart protection wins) | Normal |
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
 | | Developer: Descriptor reuse | Off, On (changes at once) | On |
@@ -1042,6 +1042,12 @@ choice returns when the tools do. Heart protection takes priority while enabled.
 is clamped to zero: with two quarter hearts left, a four-quarter hit still kills. The tab's Developer section, always
 shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows, and on Intel graphics on
 Windows the Intel shader compiles row.
+
+**Save here** (in **Travel**) saves the game where Link stands, into a new slot: the menu closes and the game's own pause
+menu is used for you (Plus, then System and Save; about 12 seconds), so it saves exactly as the game does. It is refused
+during a cutscene, a conversation or a load, and while the free camera or the flight is on. The title's Continue loads
+the newest slot, so the next start comes back to that spot. Tests reach it through the control bridge's `save` command
+(docs/control.md) or a live input file's `!cheat 998` line.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then

@@ -113,6 +113,14 @@ def serve(f):
                 r.update(age="adult", sent=None if req.get("wait") is False else True)
                 if r["sent"]:
                     r.update(map="KokiriForest_Adult", accepted=True)
+        elif cmd == "save":   # (saved in slot 03; a timeout of 1 s: refused, as an event playing refuses it)
+            if req.get("timeout") == 1:
+                r = {"id": rid, "ok": False, "frame": frame[0], "error": "refused",
+                     "message": "the game refused the save: an event is playing"}
+            else:
+                r.update(saved=None if req.get("wait") is False else True)
+                if r["saved"]:
+                    r.update(slot="03")
         elif cmd in ("press", "stick", "sequence"):
             r.update(start=frame[0], end=frame[0] + req.get("frames", 8))
         elif cmd == "shot":
@@ -385,6 +393,15 @@ class LongshotCtl(unittest.TestCase):
         self.assertEqual((self.last("wait")["event"], self.last("wait")["timeout"]), ("loading_end", 30))
         self.assertNotIn("map", self.last("wait"))
         ctl("age", "teen", env=self.env, check=2)   # (argparse: child or adult only)
+        r = ctl("save", env=self.env, check=0)
+        self.assertEqual(r.stdout.strip(), "saved in slot 03")
+        self.assertEqual(self.last("save")["timeout"], 60)
+        self.assertNotIn("wait", self.last("save"))
+        r = ctl("save", "--no-wait", env=self.env, check=0)
+        self.assertIn("save asked for", r.stdout)
+        self.assertIs(self.last("save")["wait"], False)
+        r = ctl("save", "--timeout", "1", env=self.env, check=1)
+        self.assertIn("refused: the game refused the save: an event is playing", r.stderr)
         r = ctl("option", "set", "nope", "1", env=self.env, check=1)
         self.assertIn("not_found", r.stderr)
         r = ctl("raw", '{"cmd":"fly"}', env=self.env, check=1)

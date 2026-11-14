@@ -79,6 +79,14 @@ typedef struct HosControlGame {
        numbering (> 0), read with teleport_result (map: the map it reloads) and dropped with teleport_cancel; a later
        teleport or age ask replaces one not taken yet. 0: not asked */
     int (*age)(int adult);
+    /* (OoT) the Debug tab's Save here asked for: taken at the player's next update as a teleport is, then played through
+       the game's pause menu (System, Save) over some 12 s. A ticket (> 0); a later ask replaces one not taken yet.
+       save_result: 1 saved (slot: the folder written, slot_NN, "" not seen; why: a note, "" none), -1 refused before
+       anything was pressed (why), -3 not saved after pressing (why), 3 under way, 0 not taken yet, -2 replaced or
+       cancelled. save_cancel: not to be taken any more (one under way goes on, unanswered) */
+    int (*save)(void);
+    int (*save_result)(int ticket, char *why, size_t why_cap, char *slot, size_t slot_cap);
+    void (*save_cancel)(int ticket);
     /* (OoT) with the map: an event playing (a cutscene, a map change's), a map loading, Link the child. 0 before any */
     int (*oot_state)(int *event, int *loading, int *child);
     /* (OoT) coalesced request for the next safe Link-update snapshot; cancel drops an unanswered request. */

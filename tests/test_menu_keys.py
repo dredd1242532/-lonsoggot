@@ -336,6 +336,9 @@ def main():
     cheats = menu[menu.index("void cheat_press(int i,"):menu.index("void menu_tick() {")]
     need(cheats, r"press\[7\] && i == 8\) page = 3", "confirm on Teleport does not open the map list")
     need(cheats, r"press\[7\] && i == 10\) page = 4", "confirm on Inventory does not open the editor")
+    # (Save here: confirm asks the game side for OOT_SAVE_ACTION and closes the menu, whose input the game waits behind)
+    need(cheats, r"press\[7\] && i == 12\) \{[^}]*cheat_action\.store\(998\);[^}]*open_now = false;",
+         "confirm on Save here does not ask for the save (998) and close the menu")
     if "page == 2" in tick or "page = 2" in tick:
         raise SystemExit("FAIL: vk_menu.cpp: the debug tools' old page is still reached")
     for page in ("4", "3"):

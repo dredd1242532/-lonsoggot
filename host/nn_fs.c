@@ -511,9 +511,40 @@ HLE(_ZN2nn2fs11SetFileSizeENS0_10FileHandleEl) {
     RET(0);
 }
 HLE(_ZN2nn2fs9FlushFileENS0_10FileHandleE) { FlushFileBuffers(get_handle(c, ARG(0))->h); RET(0); }
+/* (longshot) the save files the game writes: each progress.sav in the save folder that is closed after being opened for
+   writing, or renamed into place, is counted with the name of its folder (the slot: slot_NN). The Debug tab's Save here
+   (hos_main.c oot_save_*) reads it to say which slot the game wrote */
+static int save_writes;
+static char save_written[64];   /* (mount_lock) */
+static void note_save_write(const char *guest_path) {
+    char guest[HOS_FS_PATH], host[HOS_FS_PATH], root[HOS_FS_PATH];
+    if ((size_t)snprintf(guest, sizeof guest, "%s", guest_path) >= sizeof guest) return;
+    const char *name = strrchr(guest, '/');
+    if (!name || _stricmp(name + 1, "progress.sav")) return;
+    if (!hos_fs_save_root(root, sizeof root) || !host_path(guest, host, sizeof host, NULL)) return;
+    for (char *q = root; *q; q++) if (*q == '/') *q = '\\';   /* (host_path's separators: the user folder's may be /) */
+    const size_t n = strlen(root);
+    if (strncmp(host, root, n) || host[n] != '\\') return;   /* (another mount's progress.sav) */
+    const char *folder = name;
+    while (folder > guest && folder[-1] != '/' && folder[-1] != ':') folder--;
+    AcquireSRWLockExclusive(&mount_lock);
+    snprintf(save_written, sizeof save_written, "%.*s", (int)(name - folder), folder);
+    save_writes++;
+    ReleaseSRWLockExclusive(&mount_lock);
+}
+/* how many progress.sav writes so far (note_save_write); slot: the last one's folder ("" none, or one at the root) */
+int hos_fs_save_writes(char *slot, size_t cap) {
+    AcquireSRWLockShared(&mount_lock);
+    const int n = save_writes;
+    if (slot && cap) snprintf(slot, cap, "%s", save_written);
+    ReleaseSRWLockShared(&mount_lock);
+    return n;
+}
+
 HLE(_ZN2nn2fs9CloseFileENS0_10FileHandleE) {
     Handle *fh = get_handle(c, ARG(0));
     CloseHandle(fh->h);
+    if (fh->writable) note_save_write(fh->path);
     free_handle(ARG(0));
     free(fh);
 }
@@ -583,7 +614,9 @@ HLE(_ZN2nn2fs10RenameFileEPKcS2_) {
     char a[HOS_FS_PATH], b[HOS_FS_PATH];
     int w1 = 0, w2 = 0;
     if (!host_path(gstr(ARG(0)), a, sizeof a, &w1) || !host_path(gstr(ARG(1)), b, sizeof b, &w2) || !w1 || !w2) { RET(R_PATH_NOT_FOUND); return; }
-    RET(MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING) ? 0 : R_PATH_NOT_FOUND);
+    if (!MoveFileExA(a, b, MOVEFILE_REPLACE_EXISTING)) { RET(R_PATH_NOT_FOUND); return; }
+    note_save_write(gstr(ARG(1)));   /* (a save written under another name, then renamed into place) */
+    RET(0);
 }
 /* a RomFS folder that only mods have: rom:/x -> some mod entry lies under x */
 static void count_extra(void *arg, const char *name, int is_dir, uint64_t size) { (void)name, (void)is_dir, (void)size; ++*(int *)arg; }

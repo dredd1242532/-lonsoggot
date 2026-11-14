@@ -80,6 +80,7 @@ def main():
                             r"static int move_stick_held;", hid, re.M).group(0)
     cheat_spies = """
 volatile int hos_oot_live_action;
+void hos_oot_save_tick(void) {}   /* (the Debug tab's Save here: none under way here) */
 int hos_oot_flight_shortcut_ready(void) { CHECK(!"unexpected cheat readiness query"); return 0; }
 void rx_option_set(int id, int value) { (void)id; (void)value; CHECK(!"unexpected cheat option change"); }
 """
