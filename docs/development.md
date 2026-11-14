@@ -267,7 +267,7 @@ case-sensitive, and an unknown one is ignored.
 |---|---|
 | `HOS_PROFILE=<seconds>` | Every interval, the busiest threads in the log; it also starts the samplers below |
 | `HOS_SAMPLE=<thread>` + `HOS_SAMPLE_FILE=<file>` | One thread's stacks, sampled every millisecond (needs `HOS_PROFILE`); `python -I scripts/prof.py <file>` reads them |
-| `HOS_SAMPLE_ALL=<file>` | Every game and renderer thread every 2 ms while `<file>.go` exists (needs `HOS_PROFILE`); `scripts/crit.py`, `scripts/vkprof.py`, `scripts/hotlist.py` and `scripts/cpu_report.py` (the [CPU profile](cpu-profile.md): CPU time by category, thread and function, and what limits the frame) read it (on Linux with `RX_MAPS=<game folder>`: they name frames from its `longshot` and `longshot_vk.so`) |
+| `HOS_SAMPLE_ALL=<file>` | Every game and renderer thread every 2 ms while `<file>.go` exists (needs `HOS_PROFILE`); `scripts/crit.py`, `scripts/vkprof.py`, `scripts/hotlist.py` and `scripts/cpu_report.py` (the [CPU profile](cpu-profile.md): CPU time by category, thread and function, and what limits the frame) read it (on Linux with `RX_MAPS=<game folder>`: they name frames from its `longshot` and `longshot_vk.so`; macOS below) |
 | `HOS_CHAIN=<file>` | While `<file>.go` exists, every wait of a game thread that blocks, every signal that can end one, every sleep and every present, with the time, the thread, the object and the caller; written to `<file>` when `<file>.go` goes away (about 2 million records at most). `python -I scripts/chain.py <file> [<HOS_SAMPLE_ALL file>]` walks each frame back from its present (the thread that ran, the wait that stopped it, the thread whose signal ended it) and prints the frame's critical path by thread: running, wake-ups, sleeps, and, with a sample file of the same run, the functions on it |
 | `HOS_THREAD_TIMES=<seconds>` | Every interval, the threads that used over 5% of a core |
 | `HOS_FPS_LOG` (set), `HOS_PRESENT_TRACE=<csv>` | The game's frame limiter, VRR flags and nominal rate every 300 presents, and the game clock's speed (1.000: real time); a CSV line per game present with host-clock times before queue flushing, around the renderer call, after virtual-core reacquisition, and at the return counter. These are CPU wall times, not GPU completion or scanout; async rendering measures the enqueue call. Unset/empty trace adds no clock reads |
@@ -280,6 +280,24 @@ case-sensitive, and an unknown one is ignored.
 | `RX_VK_LOG_PROGRAM_LIFE=1` | The programs' life: a log line at each program the game makes (its shaders set) or frees and at each program's first draw or dispatch (what it needed: a program read from the cache, a translation, a pipeline from a cache or compiled, left out, and how long after its create call), and a `program census` line every 600 presents |
 | `RX_VK_PRESENT_THREAD=1` | On (off by default: the game's thread presents). Where the device has a second queue that can present to the window (a second queue of the replay's family, else a compute family's): each present is made on a thread and queue of its own once the frame's copy into the window is done, and the game's thread goes on at once (with NVIDIA's driver on Wayland the present otherwise waits ~2.4 ms a frame for the GPU there). One present out at most; under V-Sync On (FIFO) with `VK_KHR_present_wait`, until it is shown. The log has the fence's and the present's time (and how long after it the frame was shown) every 600 presents |
 | `HOS_PGO=<file>` | In a run of an `RX_PGO=gen` build: `<file>.reset` clears the counters, `<file>.dump` writes them to `<file>`. It is read before `longshot_env.txt`, so set it in the environment |
+
+On macOS the readers' commands are unchanged: `python -I scripts/prof.py <stacks file>`, `scripts/crit.py`,
+`scripts/chain.py` and `scripts/hotlist.py` take the same arguments. A frame is `longshot+<offset>` or
+`longshot_vk.dylib+<offset>`, the PC minus the address the image is loaded at. `RX_MAPS=<folder>` must name the folder
+holding the unstripped, thin `longshot` and `longshot_vk.dylib` of the same build that was sampled, and of the
+architecture that was sampled (arm64 for a native run, x86_64 for a Rosetta run), whatever architecture the reader
+runs on. A universal (fat) image is refused: a `module+offset` capture does not say which slice ran. Without
+`RX_MAPS` the readers look in `work/sa/build`. The loader reads the Mach-O header, load commands and symbol table,
+not the code; it takes the function symbols of code sections, as offsets from the image's preferred header address
+(commonly 0x100000000 for the executable and 0 for the dylib). C++ names need `c++filt` on PATH (the Command Line
+Tools have it), run with `-n`; their argument lists, overloads and anonymous namespaces are kept. A `.map` beside the
+binaries that is not an MSVC/lld-link map (an Apple or GNU linker map) is ignored rather than taken for
+`longshot.exe`. An image that cannot be read (fat, 32-bit, not linked, truncated, no symbol table, or `c++filt`
+missing or failing) is reported on stderr as `prof: cannot load Mach-O symbols from <file>: <reason>`, and its frames
+stay `module+offset`; `hotlist.py` stops when it finds no game binary. A stripped image is not detected: its frames
+take the name of the nearest symbol left before them, or none. `scripts/cpu_report.py` reads Windows captures only.
+`tests/test_prof_symbols.py` builds both images for each `--arch` and checks the four readers against `nm`, `otool`
+and `c++filt`.
 
 ### The GPU
 
