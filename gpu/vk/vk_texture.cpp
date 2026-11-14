@@ -4146,7 +4146,14 @@ void texture_frame(uint64_t completed) {
             // behind the BAR. A load makes one again. RX_VK_STAGING_IDLE_S=<n>: that long, 0: kept)
             static const int64_t idle_s = getenv("RX_VK_STAGING_IDLE_S") ? atoll(getenv("RX_VK_STAGING_IDLE_S")) : 30;
             const bool stale = idle_s && std::chrono::steady_clock::now() - it->used_at > std::chrono::seconds(idle_s);
-            if (idle && (it->size > kArena || kept + it->size > keep || stale)) {
+            // (and up to 256 MB of the ones staged into in the last 2 s stay whatever `keep` is. An arena is free for reuse once
+            // the GPU finished the submission that read it, which is after the next frame staged, so frames that stage in a row
+            // need two taking turns: with 64 MB kept, the idle one of the two went at every second present and the frame after
+            // made a 64 MB arena again, 9 to 41 ms each on a Steam Deck. RX_VK_STAGING_BURST_S=<n>: that long, 0: as before)
+            static const int64_t burst_s = getenv("RX_VK_STAGING_BURST_S") ? atoll(getenv("RX_VK_STAGING_BURST_S")) : 2;
+            const bool recent = burst_s && std::chrono::steady_clock::now() - it->used_at < std::chrono::seconds(burst_s);
+            const uint64_t allowed = recent ? std::max<uint64_t>(keep, 256ull << 20) : keep;
+            if (idle && (it->size > kArena || kept + it->size > allowed || stale)) {
                 destroy_buffer(it->buffer, it->allocation);
                 it = arenas.erase(it);
                 continue;
