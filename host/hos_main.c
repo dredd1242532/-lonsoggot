@@ -129,23 +129,17 @@ static int reserve_guest(void) {
     hos_space_end = (uint64_t)(uintptr_t)&__global_base & ~0xFFFFULL;
     return hos_space_end >= (1ULL << 30);
 #elif defined(_WIN32)
-    /* Committed but untouched pages cost no physical memory. Write-watched: the renderer's buffer cache asks which
-       pages changed (GetWriteWatch) so that it uploads only those (soft write watch builds mark pages themselves). */
-#if defined(A64_WRITE_TRACK)
-    const DWORD watch = 0;
+    /* Committed but untouched pages cost no physical memory. Not write-watched: lifted stores and host writes mark
+       their pages themselves (the soft write watch, rt/a64.h A64_MARK), and the renderer reads those marks. */
     if (env_on("HOS_LARGE_PAGES") && reserve_large(GUEST_SPACE) == (void *)A64_HOST_BASE) {
         hos_large_pages = 1;
         hos_log("mem: the guest window is in large pages (%llu MB)", (unsigned long long)(GUEST_SPACE >> 20));
         return 1;
     }
-#else
-    const DWORD watch = MEM_WRITE_WATCH;
-#endif
-    /* mkw-recomp: 512 GB reserved (write-watched: the renderer's change tracking, a 16 MB bitmap), committed as the
-       runtime hands memory out (hos_commit) or on first touch */
+    /* mkw-recomp: 512 GB reserved, committed as the runtime hands memory out (hos_commit) or on first touch */
     void hos_commit_init(void);
     hos_commit_init();
-    return VirtualAlloc((void *)A64_HOST_BASE, GUEST_SPACE, MEM_RESERVE | watch, PAGE_NOACCESS) == (void *)A64_HOST_BASE;
+    return VirtualAlloc((void *)A64_HOST_BASE, GUEST_SPACE, MEM_RESERVE, PAGE_NOACCESS) == (void *)A64_HOST_BASE;
 #else
     /* (linux) the whole window readable and writable at once, its pages made as they are first touched (no commit
        step: MAP_NORESERVE). Decommitting is madvise (host/posix/win32_posix.c VirtualFree): the pages read as zero. */
@@ -1652,13 +1646,6 @@ float hos_aspect_ratio = 0;   /* (the window's default shape: host/display.c) */
 volatile uint64_t hos_wide_out, hos_wide_scene;
 volatile float hos_wide_ratio, hos_wide_squeeze, hos_wide_margin;
 volatile uint32_t hos_wide_keep_mask = 0xf;   /* (nx2/oot_wide.py KEEP_VTABLES: the screens that keep the whole picture, a bit each; MkwVkHost.wide_menus) */
-/* (nx2/oot_occlusion.py) read by the game's code where it decides to make occlusion queries: 1, none (LONGSHOT_OCCLUSION_OFF=1) */
-volatile int hos_occlusion_off;
-static void occlusion_switch(void) {
-    const char *e = getenv("LONGSHOT_OCCLUSION_OFF");
-    hos_occlusion_off = e && e[0] == '1';
-    if (hos_occlusion_off) hos_log("occlusion off: the game makes no occlusion queries (LONGSHOT_OCCLUSION_OFF=1)");
-}
 /* (issues 1241, 2838) Swap can keep a small Linux PC from running out of backing storage without keeping it responsive.
    Warn below the existing 10 GiB floor in physical RAM there too; this is not a promise that 10 GiB is enough.
    The game starts anyway, and headless runs only log the warning. Windows keeps its commit-limit check. */
@@ -1765,7 +1752,6 @@ static int game_main(int argc, char **argv) {
     }
     load_longshot_env();
 #endif
-    occlusion_switch();
     {
         const char *protect_hearts = getenv("HOS_OOT_PROTECT_HEARTS");
         hos_oot_protect_hearts = protect_hearts && !strcmp(protect_hearts, "1");
