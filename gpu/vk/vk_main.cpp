@@ -1564,6 +1564,7 @@ __attribute__((visibility("default")))
 void mkwvk_close_asked(void) {
     using namespace mkwvk;
     programs_census_log("close");
+    descriptor_arrays_log("close");   // (the indexed descriptor arrays of the programs translated or read: vk_programs.cpp)
     module_ids_flush();
     fsr4_close();             // (AMD FSR 4's tuned layers: their background builds stopped first, what they made then saved below)
     pipeline_cache_close();   // (in play: the pipelines made since the last save, kept for the next start)

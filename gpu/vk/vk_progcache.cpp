@@ -369,6 +369,7 @@ void program_cache_save(const Program& p, const std::vector<std::vector<uint32_t
     // (each stage's phis, for fallback_compute_pipelines: the SPIR-V is not kept after this. Before the program is published)
     if (spirv.size() == p.stages.size())
         for (size_t k = 0; k < p.stages.size(); k++) p.stages[k].phis = fallback_size::spirv_phis(spirv[k].data(), spirv[k].size());
+    descriptor_arrays_note(p);   // (its indexed descriptor arrays counted: every translated program passes here, vk_programs.cpp)
     disk_init();
     if (!disk_on || spirv.size() != p.stages.size()) return;
     std::vector<uint8_t> o;
@@ -519,6 +520,7 @@ void program_cache_read(FILE* in, std::mutex* mu, uint64_t key, const std::vecto
                      (unsigned long long)key, (long long)d.at, d.size);
             continue;
         }
+        descriptor_arrays_note(*p);   // (and every program read: vk_programs.cpp)
         p->ready.store(true, std::memory_order_release);
         variants.push_back(std::move(p));
         st_cache_hits++;
@@ -591,6 +593,7 @@ std::unique_ptr<Program> program_cache_read_light(FILE* in, std::mutex* mu, uint
     get_info(t, st.info);
     if (t.bad || !answers_fit(*p, p->answers)) return nullptr;
     p->code_at = d.at + (int64_t)code_at, p->code_words = words;
+    descriptor_arrays_note(*p);
     p->ready.store(true, std::memory_order_release);
     return p;
 }
