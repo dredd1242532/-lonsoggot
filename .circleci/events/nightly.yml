@@ -1,0 +1,7 @@
+# Nightly schedule (third-party upstream check). Docs: docs/ci.md.
+workflows:
+  upstream:
+    jobs:
+      - third-party-upstream
+      - mb/gate:
+          requires: [third-party-upstream]

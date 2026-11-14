@@ -1,0 +1,8 @@
+# Scheduled website_refresh workflow. Docs: docs/ci.md.
+workflows:
+  website-hourly:
+    jobs:
+      - website-deploy:
+          context: cloudflare-prod
+      - mb/gate:
+          requires: [website-deploy]
