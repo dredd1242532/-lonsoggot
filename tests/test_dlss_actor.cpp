@@ -59,6 +59,14 @@ int main() {
     const std::vector<P> wide_then = {{{0.0f, 0, 0}, 0}, {{0.9f, 0, 0}, 1}}, wide_now = {{{0.5f, 0, 0}, 0}, {{1.4f, 0, 0}, 1}};
     CHECK("draw order pairing more copies wins over nearest first's smaller total",
           same(da::pair_by_place(wide_now, wide_then, 1.0f), {0, 1}));
+    // (a stone changes model: the frame before's copies of this model were the first two stones, this frame's are the second
+    // and third. Within the reach actor_motion keeps at the most (2), the second stone is itself and the third has none; with
+    // a reach past the stones' 2.3, draw order pairs two to nearest first's one and moves both toward their neighbour)
+    const std::vector<P> row_then = {stones[0], stones[1]}, row_now = {{{39.4f, 102.8f, -9.6f}, 0}, {{39.4f, 102.8f, -7.3f}, 1}};
+    CHECK("a row whose model changed, within a reach of 2: itself and none",
+          same(da::pair_by_place(row_now, row_then, 2.0f), {1, -1}));
+    CHECK("... and past the stones' spacing, each takes its neighbour (why the reach is capped)",
+          same(da::pair_by_place(row_now, row_then, 3.3f), {0, 1}));
     // (the same geometry drawn twice for one object: both copies at one place, each keeps its own n-th)
     const std::vector<P> twice = {{{5, 5, 5}, 0}, {{5, 5, 5}, 1}}, twice_swapped = {{{5, 5, 5}, 1}, {{5, 5, 5}, 0}};
     CHECK("a tie at one place: the same n-th", same(da::pair_by_place(twice, twice, 1.0f), {0, 1}) &&

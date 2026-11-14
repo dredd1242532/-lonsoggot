@@ -574,13 +574,15 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
     // first, or by draw order where that is as good, never further apart than the reach: dlss_actor::pair_by_place. Else
     // the same n-th draw of the model as before.
     // The reach is a speed, RX_VK_DLSS_ACTOR_REACH world units a second (default 60), times the time between the two poses,
-    // that time taken as 1/60 s at the least and 1/4 s at the most. It holds for a model drawn once (Link, Epona, a boss) too,
+    // that time taken as 1/60 s at the least and 1/30 s at the most. It holds for a model drawn once (Link, Epona, a boss) too,
     // since a lone copy can be another one (a Gossip Stone drawn by the other model the frame before: this model's only
     // copy then is the next stone, 2.3 away), so it must not refuse an actor that really moved: as a distance a frame, a
     // hitch or a low base frame rate (frame generation from 30 fps) took actors past it and they lost their motion for that
     // frame, ghosting the ones that move most. 60 a second is 1 a frame at 60 fps, and some ten times a running Link (about
-    // 6 a second); it stays under the stones' 2.3 down to a base of 26 fps, and below that a lone stone can take its
-    // neighbour for a frame again. The 1/4 s keeps a long stall from pairing copies across a room)
+    // 6 a second). The 1/30 s keeps the reach (2 at the default) under the stones' 2.3 after any gap: past it, draw order,
+    // which wins whenever it pairs more copies, pairs a whole row with its neighbours (each stone's frame before the next
+    // one's, once a stone changes model), and a lone stone takes its neighbour. The cost: across a gap longer than 1/30 s (a
+    // hitch, a base under 30 fps) an actor that moved more than 2 units keeps only the camera's motion for that frame)
     static const float speed = [] {
         const char* e = getenv("RX_VK_DLSS_ACTOR_REACH");
         if (!e || !*e) return 60.0f;
@@ -596,7 +598,7 @@ int actor_motion(VkCommandBuffer cmd, const Camera& cam, const float* before, ui
                                ? 1.0 / 60.0
                                : std::chrono::duration<double>(taken - s.poses_time).count();
     s.poses_time = taken;
-    const float reach = speed * (float)std::clamp(between, 1.0 / 60.0, 0.25);
+    const float reach = speed * (float)std::clamp(between, 1.0 / 60.0, 1.0 / 30.0);
     const auto read_at_draw = [&](const State::Skin& k) {
         return k.pose != State::Skin::kNoPose && stage.map && (size_t)k.pose + 16 + (size_t)k.nbones * 48 <= s.pose_bytes.size();
     };
@@ -975,10 +977,11 @@ void temporal_note_skinned_draw(const SkinnedDraw& k) {
     // frame's or another draw's (the place pair_by_place needs, too). RX_VK_DLSS_ACTOR_LIVE=1: as before, for an A/B.
     // Read without the lock, into this thread's own buffer (its room kept from draw to draw); the lock is taken only to add it
     // to the frame's poses. ub_read is this recording thread's view of the stream, as the draw's own reads of its uniforms.
-    // (An assumption, open with the author: OoT writes its bone palettes and object blocks on the CPU only. ub_read sees the
-    // submission's CPU memory and the stream's inline uniform updates; a palette written on the GPU (a buffer copy or a compute
-    // pass earlier in the stream) would read stale here and still count as read at the draw, where the copy at the upscale,
-    // from the GPU's buffer, had it right)
+    // A limit: this reads what the CPU wrote, the submission's memory and the stream's inline uniform updates, so it holds for
+    // bone palettes and object blocks the game writes on the CPU. Nothing here checks that no palette is written on the GPU
+    // (a buffer copy or a compute pass earlier in the stream): one that is would read stale and still count as read at the
+    // draw, where the copy at the upscale, from the GPU's buffer, has it right. RX_VK_DLSS_ACTOR_LIVE=1 takes that copy for
+    // every draw)
     static const bool live = env_switch("RX_VK_DLSS_ACTOR_LIVE") == 1;
     thread_local std::vector<uint8_t> pose;
     bool read = false;

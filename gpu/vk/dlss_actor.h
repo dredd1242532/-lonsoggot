@@ -35,7 +35,9 @@ struct Placed {
 /// (each copy with the frame before's same n-th) is kept when it is as good: every pair of it within the reach, and either
 /// more copies paired than nearest first, or as many with the distance moved over all of them no longer (a total over
 /// fewer pairs is not comparable: two copies 0.9 apart both moving 0.5 pair one by nearest first, at 0.4, and two by
-/// draw order, at 0.5 each, which is right).
+/// draw order, at 0.5 each, which is right). So the reach is all that keeps draw order from pairing a row of copies each
+/// with its neighbour (a stone's frame before the next one's, after a stone changes model): it must stay under the copies'
+/// spacing, as actor_motion keeps it (2 at the most, the Gossip Stones stand 2.3 apart).
 /// By draw order alone, the four Gossip Stones drawn in another order took each other's places as their own frame before,
 /// and DLSS Frame Generation drew a stone part way to the next one. Taking the nearest free copy in draw order also failed:
 /// in a row of evenly spaced stones, a stone whose own frame before is missing (not drawn, or drawn by the other model the
