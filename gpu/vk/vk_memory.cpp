@@ -3460,16 +3460,24 @@ void imports_give_back() {   // (pools_mu held)
     // retired imports wait; elsewhere they go back at every submission and this valve reads what it always read)
     if (retired_mode() == retired_give_back::Mode::GRACE) used = retired_give_back::settled(used, dead_import_bytes);
     const uint64_t want = retired_give_back::want(used, cap, high, low);
-    uint64_t want_bytes = want;
-    uint64_t over_seq = 0;
+    // (and under Linux memory pressure, once per /proc/meminfo sample (vk_texture.cpp texture_frame): the shortfall less what is
+    // on its way back already, and over one episode of pressure no more in all than its deepest shortfall: linux_pressure.h
+    // episode_want. Said in lines of its own, not as the system heap's)
+    uint64_t linux_want = 0, over_seq = 0;
+    static uint64_t last_over_seq = 0, episode_deepest = 0, episode_given = 0;
     if (const uint64_t over = linux_pressure_shortfall(&over_seq)) {
-        static uint64_t last_over_seq = 0;
         if (over_seq != last_over_seq) {
             last_over_seq = over_seq;
             cap_free_trim(32ull << 20);
-            want_bytes = std::max(want_bytes, linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes));
+            episode_deepest = std::max(episode_deepest, over);
+            linux_want = linux_pressure::episode_want(linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes),
+                                                      episode_deepest, episode_given);
         }
+    } else {
+        episode_deepest = episode_given = 0;   // (out of pressure: the next episode starts afresh)
     }
+    const bool for_linux = linux_want > want;
+    const uint64_t want_bytes = std::max(want, linux_want);
     if (!want_bytes) return;
     std::vector<std::map<uint64_t, Pool>::iterator> idle;
     for (auto it = imported.begin(); it != imported.end(); ++it) {
@@ -3491,11 +3499,17 @@ void imports_give_back() {   // (pools_mu held)
         n++;
         evicted_pools.push_back(imported.extract(it));
     }
+    if (for_linux) episode_given += freed - std::min(freed, want);
     if (!n) {
         static int logged_none;
-        if (logged_none++ < 8)
-            logf("vk: system heap %llu of %llu MB: no idle import to give back (%zu imported)", (unsigned long long)(used >> 20),
-                 (unsigned long long)(budget >> 20), imported.size());
+        if (logged_none++ < 8) {
+            if (for_linux)
+                logf("vk: memory pressure on Linux: no idle import to give back for %llu MB (%zu imported)",
+                     (unsigned long long)(linux_want >> 20), imported.size());
+            else
+                logf("vk: system heap %llu of %llu MB: no idle import to give back (%zu imported)", (unsigned long long)(used >> 20),
+                     (unsigned long long)(budget >> 20), imported.size());
+        }
         return;
     }
     pools_gen++;
@@ -3504,10 +3518,18 @@ void imports_give_back() {   // (pools_mu held)
     if (mirror_on()) publish_cap_ranges();
     st_imports_evicted += n, st_import_bytes_evicted += freed;
     static int logged;
-    if (logged++ < 40 || logged % 64 == 0)
-        logf("vk: system heap %llu of %llu MB: %d idle imports given back (%llu MB); %lld (%llu MB) in all",
-             (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20), n, (unsigned long long)(freed >> 20),
-             (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+    if (logged++ < 40 || logged % 64 == 0) {
+        if (for_linux)
+            logf("vk: memory pressure on Linux: %d idle imports given back (%llu MB of %llu MB asked; %llu MB in this episode, at "
+                 "most %llu MB); %lld (%llu MB) in all (RX_VK_AVAIL_RESERVE_MB, RX_VK_COMMIT_RESERVE_MB)",
+                 n, (unsigned long long)(freed >> 20), (unsigned long long)(linux_want >> 20),
+                 (unsigned long long)(episode_given >> 20), (unsigned long long)(episode_deepest >> 20),
+                 (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+        else
+            logf("vk: system heap %llu of %llu MB: %d idle imports given back (%llu MB); %lld (%llu MB) in all",
+                 (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20), n, (unsigned long long)(freed >> 20),
+                 (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
+    }
 }
 
 // ---- (longshot) an import trimmed back to the game's live pools (mirror_trim.h) ----

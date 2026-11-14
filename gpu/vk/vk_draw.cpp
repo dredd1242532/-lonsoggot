@@ -2316,7 +2316,7 @@ PipeEntry* graphics_pipeline(const Program& p, const NvnState& s, const Targets&
 /// shader, 3 fragment output
 /// cold: made only if the driver has it compiled already; set, and nothing made, when it would have had to compile
 VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, int part, bool* cold) {
-    if (at.n < 0 || at.n > 8 || p.modules_dropped.load(std::memory_order_acquire)) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
+    if (at.n < 0 || at.n > 8 || program_modules_dropped(p)) return VK_NULL_HANDLE;   // (longshot: at most 8 colour targets)
     const Shader::Info& vs = *vertex_info(p);
     const auto t0 = std::chrono::steady_clock::now();
     std::vector<VkPipelineShaderStageCreateInfo> stages;
@@ -2628,7 +2628,7 @@ double pipe_wait_budget_ms() {
 /// on each recording thread, but for a draw that cannot be left out (must). true: the entry has one to draw with
 bool quick_pipeline(PipeEntry& e, const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, bool must) {
     const double budget_ms = quick_budget_ms();
-    if (budget_ms <= 0 || p.modules_dropped.load(std::memory_order_acquire)) return false;
+    if (budget_ms <= 0 || program_modules_dropped(p)) return false;
     static thread_local quick_pipe::FrameBudget budget;
     const auto now_ms = [] {
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -8951,7 +8951,9 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     std::unordered_set<uint64_t> listed_here;   // (the listed keys this install has a program of)
     const size_t programs_n = program_cache_load_some(wanted, [&](Program& p) {
         ensure_layout(p);
-        if (!p.compute && wanted_variants.count(mix(p.key, p.variant))) p.graphics_built = true;
+#ifdef __linux__
+        if (!p.compute && wanted_variants.count(mix(p.key, p.variant))) program_cache_note_built(p);   // (pipeline_cache_play)
+#endif
         if (p.compute) {
             computes.push_back(&p);
             if (plan.keys.count(p.key)) listed_here.insert(p.key);
@@ -10025,10 +10027,10 @@ void pipeline_cache_play() {
     // already active (or RX_VK_DROP_MODULES=1), the VkShaderModules of ready programs whose pipelines were built in precompile_run
     // (~37,000 modules, ~1.5-1.8 GB of uncompressed SPIR-V in the driver's heap) have done their work once precompile_run finishes.
     // Any graphics program whose noted pipelines were built remakes its module from longshot_programs.bin
-    // (program_cache_complete_graphics) if play ever builds a new state variant; programs without a built graphics pipeline
-    // (!graphics_built) keep their vertex and fragment modules so in-play pipeline builds do not read the disk. 32-64 GB Linux
-    // desktops keep their modules by default so new pipeline variants in play never touch the disk. RX_VK_KEEP_MODULES=1 (or
-    // RX_VK_DROP_MODULES=0) keeps all
+    // (program_cache_complete_graphics) if play ever builds a new state variant; programs without a built graphics pipeline (not
+    // noted by program_cache_note_built) keep their vertex and fragment modules so in-play pipeline builds do not read the disk.
+    // 32-64 GB Linux desktops keep their modules by default so new pipeline variants in play never touch the disk.
+    // RX_VK_KEEP_MODULES=1 (or RX_VK_DROP_MODULES=0) keeps all
     if (!env_on("LONGSHOT_PREPARE_ONLY") && !prepare_left_workers()) {
         uint64_t avail_bytes = 0, swap_free_bytes = 0, total_bytes = 0;
         bool has_swap = true;

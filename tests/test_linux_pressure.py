@@ -77,7 +77,12 @@ def check_source():
          ["if (const uint64_t over = linux_pressure_shortfall(&over_seq)) {",
           "if (over_seq != last_over_seq) {",
           "cap_free_trim(32ull << 20);",
-          "want_bytes = std::max(want_bytes, linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes));",
+          "episode_deepest = std::max(episode_deepest, over);",
+          "linux_want = linux_pressure::episode_want(linux_pressure::import_want(over, dead_import_bytes + evicted_import_bytes),",
+          "episode_deepest = episode_given = 0;",
+          "const uint64_t want_bytes = std::max(want, linux_want);",
+          "if (for_linux) episode_given += freed - std::min(freed, want);",
+          "vk: memory pressure on Linux: %d idle imports given back",
           "evicted_import_bytes -= std::min(evicted_import_bytes, p.hi - p.lo);",
           "evicted_import_bytes += p.hi - p.lo;",
           "if (freed >= want_bytes) break;"])
@@ -95,21 +100,30 @@ def check_source():
     pre = block(draw, "void precompile_run(")
     need("vk_draw.cpp: precompile_run()", pre,
          ["wanted_variants.insert(mix(n->prog, n->variant))",
-          "if (!p.compute && wanted_variants.count(mix(p.key, p.variant))) p.graphics_built = true;"])
+          "if (!p.compute && wanted_variants.count(mix(p.key, p.variant))) program_cache_note_built(p);"])
     pipe = block(draw, "PipeEntry* graphics_pipeline(")
     need("vk_draw.cpp: graphics_pipeline()", pipe,
          ["if (program_cache_complete_graphics(p)) e->pipeline = build_graphics(p, s, at, topo);",
           "if (!program_cache_complete_graphics(p)) {\n            e->ready.store(true, std::memory_order_release);\n            return remember(e);\n        }",
           "if (!program_cache_complete_graphics(*job->p)) {\n            job->e->ready.store(true, std::memory_order_release);\n            return;\n        }"])
     bg = block(draw, "VkPipeline build_graphics(const Program& p, const NvnState& s, const Targets& at, VkPrimitiveTopology topo, int part, bool* cold) {")
-    need("vk_draw.cpp: build_graphics()", bg, ["p.modules_dropped.load(std::memory_order_acquire)"])
+    need("vk_draw.cpp: build_graphics()", bg, ["program_modules_dropped(p)"])
     qp = block(draw, "bool quick_pipeline(PipeEntry& e,")
-    need("vk_draw.cpp: quick_pipeline()", qp, ["p.modules_dropped.load(std::memory_order_acquire)"])
+    need("vk_draw.cpp: quick_pipeline()", qp, ["program_modules_dropped(p)"])
     need("docs/development.md", dev_doc, ["RX_VK_AVAIL_RESERVE_MB", "RX_VK_DROP_MODULES", "RX_VK_KEEP_MODULES"])
     progcache = (ROOT / "gpu/vk/vk_progcache.cpp").read_text(encoding="utf-8")
     comp_gfx = block(progcache, "bool program_cache_complete_graphics(const Program& prog)")
-    if comp_gfx.index("if (!p.modules_dropped.load(std::memory_order_relaxed))") > comp_gfx.index("p.remake_failed.store(true, std::memory_order_release);"):
-        raise SystemExit("vk_progcache.cpp: program_cache_complete_graphics() sets remake_failed before checking modules_dropped under light_mu")
+    tail = comp_gfx[comp_gfx.index("std::lock_guard lk(light_mu);"):]
+    if tail.index("it->second.program != &prog") > tail.index("it->second.failed = true;"):
+        raise SystemExit("vk_progcache.cpp: program_cache_complete_graphics() marks a failed remake before checking, under light_mu, "
+                         "that the modules are still let go")
+    # (the per-program state of the module drop stays out of Program: sizeof(Program) is part of translator_stamp, and a member
+    # more there made every player prepare every shader again)
+    header = (ROOT / "gpu/vk/vk_shader.h").read_text(encoding="utf-8")
+    program = block(header, "struct Program {")
+    for member in ("modules_dropped", "remake_failed", "graphics_built", "record_at", "record_size"):
+        if member in program:
+            raise SystemExit("vk_shader.h: Program has " + member + " again, which changes sizeof(Program) and the translator's stamp")
 
 
 def main():
@@ -132,6 +146,9 @@ def main():
     functions += block(cache, "void program_cache_save(") + "\n" + block(cache, "bool program_cache_payload(") + "\n"
     functions += block(cache, "void program_cache_read(") + "\n"
     functions += "namespace {\nstd::mutex light_mu;\n}\n"
+    functions += block(cache, "namespace module_remake {") + "\n"
+    functions += block(cache, "void program_cache_note_built(") + "\n"
+    functions += block(cache, "bool program_modules_dropped(") + "\n"
     functions += block(cache, "bool program_cache_complete_graphics(") + "\n"
     functions += block(cache, "size_t program_cache_drop_modules(") + "\n"
 

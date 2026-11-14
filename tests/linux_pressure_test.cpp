@@ -15,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -208,6 +209,12 @@ void test_meminfo_and_shortfall(const std::string& dir) {
     CHECK(import_want(1136 * kMB, 256 * kMB) == 880 * kMB);
     CHECK(import_want(256 * kMB, 512 * kMB) == 0);
 
+    // episode_want: over one pressure episode, no more in all than its deepest shortfall
+    CHECK(episode_want(880 * kMB, 1136 * kMB, 0) == 880 * kMB);
+    CHECK(episode_want(880 * kMB, 1136 * kMB, 900 * kMB) == 236 * kMB);
+    CHECK(episode_want(880 * kMB, 1136 * kMB, 1136 * kMB) == 0);
+    CHECK(episode_want(880 * kMB, 1136 * kMB, 2000 * kMB) == 0);
+
     // Missing MemAvailable is rejected; missing SwapFree defaults to 0
     CHECK(!parse_meminfo("MemTotal: 16000000 kB\nSwapFree: 1024 kB\n", &avail, &swap_free));
     CHECK(parse_meminfo("MemAvailable: 1024000 kB\n", &avail, &swap_free));
@@ -325,13 +332,18 @@ void test_module_drop_and_reload(const std::string& dir) {
     CHECK(active_modules == 6);
     CHECK(programs[0x1001][0]->stages[0].code_words == 64);
     CHECK(programs[0x1001][0]->stages[1].code_words == 96);
+    CHECK(programs[0x1001][0]->stages[0].record_size != 0 &&
+          programs[0x1001][0]->stages[0].record_at == programs[0x1001][0]->stages[1].record_at);
+    // Nothing let go yet: no pipeline is refused, and nothing needs making again
+    CHECK(!program_modules_dropped(*programs[0x1001][0]));
+    CHECK(program_cache_complete_graphics(*programs[0x1001][0]));
 
-    // With graphics_built == false (an un-noted variant, or when graphics pipelines are left to first draw) and before
+    // With no program_cache_note_built (an un-noted variant, or when graphics pipelines are left to first draw) and before
     // compute pipelines are built: nothing is dropped (0 modules), so in-play first draws keep their modules in memory.
     CHECK(program_cache_drop_modules() == 0);
     CHECK(active_modules == 6);
 
-    // When precompile_run builds fb's fallback compute pipeline and comp's compute pipeline while graphics_built stays false:
+    // When precompile_run builds fb's fallback compute pipeline and comp's compute pipeline, its graphics pipelines not noted:
     // only fb's compute stage (1) and comp's compute stage (1) drop (2 total), while fb's vertex + fragment modules and
     // gfx's vertex + fragment modules stay ready for their first draw in play!
     programs[0x1002][0]->compute_state.store(2, std::memory_order_release);
@@ -343,12 +355,25 @@ void test_module_drop_and_reload(const std::string& dir) {
     CHECK(programs[0x1002][0]->stages[2].module != VK_NULL_HANDLE);
     CHECK(programs[0x1003][0]->stages[0].module == VK_NULL_HANDLE);
 
-    // When precompile_run built the noted graphics pipelines (setting graphics_built = true on those variants):
+    CHECK(!program_modules_dropped(*programs[0x1001][0]) && !program_modules_dropped(*programs[0x1002][0]));
+
+    // When precompile_run built the noted graphics pipelines (program_cache_note_built on those variants):
     // gfx's 2 modules and fb's 2 graphics modules drop too (4 total):
-    programs[0x1001][0]->graphics_built = true;
-    programs[0x1002][0]->graphics_built = true;
+    program_cache_note_built(*programs[0x1001][0]);
+    program_cache_note_built(*programs[0x1002][0]);
     CHECK(program_cache_drop_modules() == 4);
     CHECK(active_modules == 0);
+    CHECK(program_modules_dropped(*programs[0x1001][0]) && program_modules_dropped(*programs[0x1002][0]));
+
+    // Another program of the same key and variant (one borrowed for the prepare) has its own modules: not dropped for it
+    {
+        Program copy;
+        copy.key = programs[0x1001][0]->key;
+        copy.variant = programs[0x1001][0]->variant;
+        CHECK(!program_modules_dropped(copy));
+        CHECK(program_cache_complete_graphics(copy));
+        CHECK(active_modules == 0);
+    }
 
     // When play needs to build a new graphics pipeline state for gfx or fb, program_cache_complete_graphics
     // reloads only the graphics stages (2 for gfx, 2 for fb — not fb's compute stage!):
@@ -356,6 +381,7 @@ void test_module_drop_and_reload(const std::string& dir) {
     CHECK(active_modules == 2);
     CHECK(module_words[programs[0x1001][0]->stages[0].module] == vs_spv);
     CHECK(module_words[programs[0x1001][0]->stages[1].module] == fs_spv);
+    CHECK(!program_modules_dropped(*programs[0x1001][0]));
 
     CHECK(program_cache_complete_graphics(*programs[0x1002][0]));
     CHECK(active_modules == 4);
@@ -366,26 +392,29 @@ void test_module_drop_and_reload(const std::string& dir) {
     // And dropping again releases those 4 remade modules cleanly:
     CHECK(program_cache_drop_modules() == 4);
     CHECK(active_modules == 0);
-    CHECK(programs[0x1001][0]->modules_dropped.load());
-    CHECK(programs[0x1002][0]->modules_dropped.load());
+    CHECK(program_modules_dropped(*programs[0x1001][0]));
+    CHECK(program_modules_dropped(*programs[0x1002][0]));
 
     // Failure case 1: make_module fails (e.g. out of memory). program_cache_complete_graphics returns false, marks
-    // p.remake_failed = true (leaving p.failed == false so already-built pipelines keep drawing!), and a second call
+    // the remake failed in its own table (leaving p.failed == false so already-built pipelines keep drawing!), and a second call
     // returns false immediately without trying make_module again.
     fail_make_module = true;
     const size_t calls_before = make_module_calls;
     CHECK(!program_cache_complete_graphics(*programs[0x1001][0]));
-    CHECK(programs[0x1001][0]->remake_failed.load() && !programs[0x1001][0]->failed);
+    CHECK(program_modules_dropped(*programs[0x1001][0]) && !programs[0x1001][0]->failed);
     CHECK(make_module_calls == calls_before + 1);
     CHECK(!program_cache_complete_graphics(*programs[0x1001][0]));
     CHECK(make_module_calls == calls_before + 1);
     fail_make_module = false;
 
-    // Failure case 2: stale record head at record_at (key mismatch). Refused before make_module is called, and marked remake_failed.
-    programs[0x1002][0]->key = 0x9999;
+    // Failure case 2: a stale record head at record_at (its size does not match). Refused before make_module is called, and
+    // marked failed to make again: a second call reads nothing
+    for (Stage& st : programs[0x1002][0]->stages) st.record_size += 8;
     const size_t calls_before_stale = make_module_calls;
     CHECK(!program_cache_complete_graphics(*programs[0x1002][0]));
-    CHECK(programs[0x1002][0]->remake_failed.load() && !programs[0x1002][0]->failed);
+    CHECK(program_modules_dropped(*programs[0x1002][0]) && !programs[0x1002][0]->failed);
+    CHECK(make_module_calls == calls_before_stale);
+    CHECK(!program_cache_complete_graphics(*programs[0x1002][0]));
     CHECK(make_module_calls == calls_before_stale);
 
     std::fclose(disk_in);

@@ -32,6 +32,10 @@ struct Stage {
     // file if play ever builds a new pipeline state variant for this program
     int64_t code_at = 0;
     uint64_t code_words = 0;
+    // (longshot) the record it was read from (its payload's position and stored size): its head is checked before code_at is read
+    // again (program_cache_complete_graphics). Here and not in Program, whose size is part of the translator's stamp
+    int64_t record_at = 0;
+    uint64_t record_size = 0;
 };
 
 /// A texture handle the stage reads from a storage buffer: its handle program (Shader::Info::handle_programs, Eden's
@@ -95,17 +99,6 @@ struct Program {
     // SPIR-V is in longshot_programs.bin, and how many words; 0 words: it has its module (program_cache_complete makes it)
     int64_t code_at = 0;
     uint64_t code_words = 0;
-    // (longshot) the record's position and stored size in longshot_programs.bin, and whether program_cache_drop_modules let go of
-    // its graphics VkShaderModules (so program_cache_complete_graphics checks the atomic before taking light_mu, checks the record
-    // head at record_at before reading the stages' SPIR-V, and sets remake_failed instead of failed if a remake fails so pipelines
-    // built in the precompile keep drawing)
-    int64_t record_at = 0;
-    uint64_t record_size = 0;
-    std::atomic<bool> modules_dropped{false};
-    std::atomic<bool> remake_failed{false};
-    // (longshot) precompile_run built this program's noted graphics pipelines before the title (false for an un-noted program or
-    // variant, or when graphics pipelines are left to first draw, whose graphics modules stay for its first draw in play)
-    bool graphics_built = false;
 };
 
 enum class ProgramKind { Graphics, Compute, Mesh };
@@ -155,6 +148,12 @@ bool program_cache_complete_graphics(const Program& p);
 /// (longshot) Lets go of the VkShaderModules of ready programs whose pipelines are built and whose stages can be remade from
 /// longshot_programs.bin (or are compute stages that need no another pipeline); returns how many modules were destroyed
 size_t program_cache_drop_modules();
+/// (longshot) precompile_run built p's noted graphics pipelines before the title: program_cache_drop_modules may let its graphics
+/// modules go (an un-noted program or variant keeps them for its first draw in play)
+void program_cache_note_built(const Program& p);
+/// (longshot) p's graphics modules were let go (program_cache_drop_modules) and not made again yet: no pipeline is built from it
+/// until program_cache_complete_graphics has made them
+bool program_modules_dropped(const Program& p);
 /// (longshot) Every kept graphics and mesh program's key, in the file's order, no record read; *loaded: the variants in memory already
 std::vector<uint64_t> program_cache_keys(std::vector<Program*>* loaded);
 const Program* program_find(uint64_t key, uint64_t variant);

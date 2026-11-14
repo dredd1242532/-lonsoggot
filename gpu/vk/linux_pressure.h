@@ -176,4 +176,12 @@ constexpr uint64_t import_want(uint64_t shortfall_bytes, uint64_t pending_dead_b
     return shortfall_bytes > pending_dead_bytes ? shortfall_bytes - pending_dead_bytes : 0;
 }
 
+/// What imports_give_back() may still unpin in this pressure episode: want, at most the deepest shortfall of the episode less what
+/// it has unpinned for it already. The texture cut, the staging arenas and malloc_trim cover the same bytes, and asking for the
+/// whole shortfall again at every sample unpinned the idle imports over and over while the episode lasted
+constexpr uint64_t episode_want(uint64_t want, uint64_t deepest_shortfall, uint64_t given_in_episode) {
+    const uint64_t room = deepest_shortfall > given_in_episode ? deepest_shortfall - given_in_episode : 0;
+    return want < room ? want : room;
+}
+
 } // namespace linux_pressure
