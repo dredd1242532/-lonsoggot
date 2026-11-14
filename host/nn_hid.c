@@ -986,12 +986,12 @@ static uint64_t oc_pad_word(uint64_t buttons) {
    closed the menu or the one Alt+Tab ended with does not switch walking. Returns whether Link walks now */
 static int walk_held(int down, int readable, int toggle) {
     static int was_down = 1, on;   /* (a key held at the first read counts only after its release) */
+    if (!toggle) on = 0;   /* (also Hold chosen in the Insert menu) */
     if (!readable) {
         was_down = 1;
         return toggle && on;
     }
-    if (!toggle) on = 0;
-    else if (down && !was_down) on = !on, hos_log("hid: walking %s (Walk mode Toggle)", on ? "on" : "off");
+    if (toggle && down && !was_down) on = !on, hos_log("hid: walking %s (Walk mode Toggle)", on ? "on" : "off");
     was_down = down;
     return toggle ? on : down;
 }
@@ -1045,7 +1045,7 @@ static void read_input(uint64_t *buttons, int32_t stick[4]) {
         static int looked;
         if (!looked) looked = 1, env = getenv("HOS_INPUT_BACKGROUND");
         if (pads_in_background(env, rx_option(4, 0))) pads_read(buttons, stick);
-        walk_held(0, 0, 0);
+        walk_held(0, 0, rx_option(HOS_OPT_WALK_MODE, 0) == 1);   /* (behind: a toggled walk is kept) */
         return;
     }
     {   /* (longshot) while the Insert menu is open the pads are its own, as the keyboard is (key()), and after it
