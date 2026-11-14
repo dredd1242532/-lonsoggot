@@ -22,8 +22,9 @@ the test's own, with stand-ins for the buffers and the GPU's progress:
     an earlier PART of this recording (parts go to the GPU while the later ones are recorded, so its fix may be running): that
     part is waited for and the capture read as the fix left it, nothing written to it (a copy of the page then, with the fix
     still to run over it, put the write-back's older word over a word the game's thread wrote after it landed); a part that
-    cannot be waited for, or the recording's current part (not submitted: the GPU has not read its table), has its fix dropped
-    (its table's counts 0) before the page is copied again.
+    cannot be waited for (vk_part_wait -1), one whose wait ran past the hang guard (0: not waited for again), or the recording's
+    current part (not submitted: the GPU has not read its table), has its fix dropped (its table's counts 0) before the page is
+    copied again, and the summary line's two counters (st_lf_part_waits, st_lf_part_fell) tell which way a read went.
 
 late_fix_emit is read as text: a full_barrier(up) comes right before the fix's dispatch is bound (no command of the
 upload command buffer between them), as it can run several times in one recording, with shadow_sync_copy writing the
@@ -158,14 +159,13 @@ void vk_timeline_wait(uint64_t value) {
     if (while_waiting) while_waiting();
 }
 std::atomic<uint64_t> mem_rec_part{0};   // (the part of the submission being recorded: vk_replay.cpp's Recording::part)
-std::vector<uint64_t> part_waits;        // (the parts the replay waited for; one that cannot be waited for when part_wait_ok is false)
-bool part_wait_ok = true;
+std::vector<uint64_t> part_waits;        // (the parts the replay waited for)
+int part_wait_result = 1;                // (vk_part_wait's: 1 done, 0 ran out, -1 cannot be waited for)
 std::function<void()> while_part_waiting;   // (the part's fix runs on the GPU)
-bool vk_part_wait(uint64_t part, uint64_t) {
+int vk_part_wait(uint64_t part, uint64_t) {
     part_waits.push_back(part);
-    if (!part_wait_ok) return false;
-    if (while_part_waiting) while_part_waiting();
-    return true;
+    if (part_wait_result == 1 && while_part_waiting) while_part_waiting();
+    return part_wait_result;
 }
 bool late_fix_pipe_ready() { return late_fix_pipe.tried = true; }   // (its pipeline made)
 @BUILD@
@@ -191,7 +191,7 @@ void reset() {
     snap_pages.clear(), snap_free.clear(), snap_used = 0, late_shadow_pools.clear();
     dead_shadows.clear(), cmd_copies.clear();
     guest_data.clear(), timeline_waits.clear(), while_waiting = nullptr, flushes = invalidates = 0, completed_now = 0, mem_rec_part = 0;
-    part_waits.clear(), while_part_waiting = nullptr, part_wait_ok = true;
+    part_waits.clear(), while_part_waiting = nullptr, part_wait_result = 1, st_lf_part_waits = st_lf_part_fell = 0;
     for (int64_t& f : st_lf_fell) f = 0;
     st_lf_cpu_reads = 0;
     mem_rec_value = mem_completed = 0;
@@ -514,27 +514,43 @@ int main() {
         CHECK(timeline_waits.size() == 1 && timeline_waits[0] == 15 && part_waits.empty() && copied_pages.empty() && invalidates == 1);
         CHECK(slot[kX] == kA && slot[kY] == kCpu);
     }
-    // (k) the read of (j) when that part cannot be waited for (no per-queue fences, a wait that ran out): its fix is dropped before
-    // the page is copied again, as for a part not submitted yet, and the part is not waited for a second time (last: the part is
-    // remembered for the rest of the process)
+    // (k) the read of (j) when that part cannot be waited for (vk_part_wait -1: no timeline of its own, RX_VK_PER_QUEUE_FENCES=0): its
+    // fix is dropped before the page is copied again, as for a part not submitted yet; counted as copied again, and asked again
+    // for the next page, since that costs nothing
     {
         std::vector<LateFix> table;
         set_up_recorded_fix(table, 1);
         mem_rec_part = 2;
-        part_wait_ok = false;
-        LatePage second = late_pages[(uint32_t)pg];         // (a second late page of the same part: its fix is the same table's)
-        second.slot = cap_mem + 4096;
-        late_pages[(uint32_t)pg + 1] = second;
-        guest_data[pg + 1] = (uint8_t*)guest_words;
+        part_wait_result = -1;
         while_waiting = [] { guest_words[kX] = kA; guest_words[kX] = kB; };   // (the write-back lands, the CPU writes over it)
         late_fix_cpu_read((uint32_t)pg, kCapBuf, cap_mem);
         const uint32_t* slot = (const uint32_t*)cap_mem;
         CHECK(part_waits.size() == 1 && timeline_waits.size() == 1 && timeline_waits[0] == 1000 && st_lf_cpu_reads == 1);
-        CHECK(slot[kX] == kB && slot[kY] == kCpu && table[0].count == 0 && late_pages.size() == 1);
+        CHECK(slot[kX] == kB && slot[kY] == kCpu && table[0].count == 0 && late_pages.empty());
+        CHECK(st_lf_part_waits == 0 && st_lf_part_fell == 1);
         gpu_fix(table.data(), table.size());
         CHECK(slot[kX] == kB && slot[kY] == kCpu);          // (the GPU's fix finds its counts 0)
+    }
+    // (o) the hang guard: the wait for the part ran out (vk_part_wait 0): its fix is dropped before the copy as in (k), and that part
+    // is not waited for a second time, for a second page of it (the part is remembered for the rest of the process)
+    {
+        std::vector<LateFix> table;
+        set_up_recorded_fix(table, 1);
+        mem_rec_part = 2;
+        part_wait_result = 0;
+        LatePage second = late_pages[(uint32_t)pg];         // (a second late page of the same part: its fix is the same table's)
+        second.slot = cap_mem + 4096;
+        late_pages[(uint32_t)pg + 1] = second;
+        guest_data[pg + 1] = (uint8_t*)guest_words;
+        while_waiting = [] { guest_words[kX] = kA; guest_words[kX] = kB; };
+        late_fix_cpu_read((uint32_t)pg, kCapBuf, cap_mem);
+        const uint32_t* slot = (const uint32_t*)cap_mem;
+        CHECK(part_waits.size() == 1 && timeline_waits.size() == 1 && st_lf_cpu_reads == 1 && late_pages.size() == 1);
+        CHECK(slot[kX] == kB && slot[kY] == kCpu && table[0].count == 0 && st_lf_part_fell == 1);
+        gpu_fix(table.data(), table.size());
+        CHECK(slot[kX] == kB && slot[kY] == kCpu);
         late_fix_cpu_read((uint32_t)pg + 1, kCapBuf, cap_mem + 4096);
-        CHECK(part_waits.size() == 1 && timeline_waits.size() == 2 && st_lf_cpu_reads == 2 && late_pages.empty());
+        CHECK(part_waits.size() == 1 && timeline_waits.size() == 2 && st_lf_cpu_reads == 2 && late_pages.empty() && st_lf_part_fell == 2);
     }
     std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots, their ranges and slots, and a CPU read of a fixed late page");
 }
@@ -562,7 +578,8 @@ def main():
                .replace('@CAPTURE@', block(text, 'struct Capture {'))
                .replace('@BUILD@', block(text, 'bool late_fix_build(Capture& c) {'))
                .replace('@SHADOWS_FREED@', block(text, 'void late_fix_shadows_freed() {'))
-               .replace('@CPUREAD@', block(text, 'void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {')))
+               .replace('@CPUREAD@', section(text, 'constexpr uint64_t kPartWaitGuard', 'void late_fix_cpu_read(')
+                        + block(text, 'void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {')))
     env = {k: v for k, v in os.environ.items()
            if k not in ('RX_VK_LATE_FIX', 'RX_VK_PARALLEL', 'RX_VK_NO_READBACK_WAIT', 'RX_VK_SHADOW_FOLLOWS_SYNC')}
     with tempfile.TemporaryDirectory(prefix='late-fix-build-') as tmp:

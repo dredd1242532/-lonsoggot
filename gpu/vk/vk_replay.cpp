@@ -3376,6 +3376,14 @@ uint32_t crc32(const uint8_t* p, size_t n, uint32_t c = 0xFFFFFFFFu) {
 }
 } // namespace
 
+// (vk_internal.h) One part of a submission done on the GPU: the late pages' fix reads a page of the capture whose fix an earlier
+// part of this submission recorded (vk_memory.cpp, late_fix_cpu_read), after that part's fix has run
+int vk_part_wait(uint64_t part, uint64_t timeout_ns) {
+    int ok = 0;
+    if (!wait_recorded_part(part, timeout_ns, &ok)) return -1;
+    return ok ? 1 : 0;
+}
+
 // Called while replaying, including workers joined before the next signal is issued.
 // The current logical value may already have completed before a stopped queue resumes.
 // A new signal instead follows every recording using the images being retired, including

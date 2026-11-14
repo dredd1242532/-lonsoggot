@@ -2155,8 +2155,8 @@ struct LatePage {   // (a page with fixes: until they are done, a read of it on 
     uint64_t cap_value = 0;                                 // (its capture's value: the buffer kept under it, cap_bufs)
     size_t first = 0, n = 0;                                // (its fixes in late_fixes, then in fix_map)
     LateFix* fix_map = nullptr;
-    VmaAllocation fix_alloc = nullptr;                      // (fix_map's table, and the recording part it was recorded in)
-    uint64_t fix_part = 0, fix_end = 0;                     // (fix_end: the table's bytes up to its last fix)
+    VmaAllocation fix_alloc = nullptr;                      // (fix_map's table)
+    uint64_t fix_part = 0, fix_end = 0;                     // (fix_part: the recording part it was recorded in; fix_end: the table's bytes up to its last fix)
 };
 std::unordered_map<uint32_t, LatePage> late_pages;
 // (pools_mu held; the slots all taken) the snapshots of pages not late for a whole copy in kSnapIdle recordings given back:
@@ -2181,7 +2181,7 @@ struct LateFixTable { VkBuffer buf = VK_NULL_HANDLE; VmaAllocation alloc = nullp
 LateFixTable late_fix_tables[16];
 int late_fix_next = 0;
 struct { bool tried = false; VkPipelineLayout layout = VK_NULL_HANDLE; VkPipeline pipe = VK_NULL_HANDLE; } late_fix_pipe;
-int64_t st_lf_takes, st_lf_fixed, st_lf_fell[8], st_lf_fixes, st_lf_pages, st_lf_cpu_reads, st_lf_no_table, st_lf_moved;
+int64_t st_lf_takes, st_lf_fixed, st_lf_fell[8], st_lf_fixes, st_lf_pages, st_lf_cpu_reads, st_lf_no_table, st_lf_moved, st_lf_part_waits, st_lf_part_fell;
 bool late_fix_pipe_ready() {
     if (late_fix_pipe.tried) return late_fix_pipe.pipe != VK_NULL_HANDLE;
     late_fix_pipe.tried = true;
@@ -2378,33 +2378,50 @@ void late_fix_kept(bool kept, uint64_t value) {
 }
 // (pools_mu held) a read on the CPU of a page in a capture's buffer whose late page has a fix: it reads what the GPU's copies
 // out of the buffer read. Fixed already: the buffer as the fix left it. Recorded in a submission before this one: that one
-// waited for, then the same. Not recorded, or recorded in this recording's part not yet submitted: its fix dropped, and it
-// waits and is copied again, as before, for both. Recorded in an earlier part of this submission (not to be waited for
-// here): it waits and is copied again; the fix then writes the same write-backs' words over it on the GPU
+// waited for, then the same. Recorded in an earlier part of this submission (parts go to the GPU while the later ones are
+// recorded: that part's fix may be running, or run after this read): that part waited for (it is submitted, so the wait
+// cannot be for work nobody sends), then the same, and nothing is written to the capture. A fix left to run over a page
+// copied again here would put the write-backs' words back over the words the game's thread wrote after they landed
+// (late_fix_cpu_read of the PR 248 nightlies did). Not recorded yet, or recorded in this part (not submitted: the GPU has not
+// read its table): its fix dropped (the table's counts 0), and the page waits and is copied again, as before. The same for
+// an earlier part that cannot be waited for: vk_part_wait says so only when the recordings have no timeline of their own or
+// RX_VK_PER_QUEUE_FENCES=0 (no device and no OS decides it), and then the table's counts are zeroed while the GPU may be
+// reading it: that is the race this way has, and the log's late-fix line counts those reads ("after the wait of an earlier
+// part" and "of them copied again, not waited for"). A wait that ran past kPartWaitGuard (a hang guard, logged) is not
+// repeated for that part
+constexpr uint64_t kPartWaitGuard = 5000000000ull;   // (ns)
 void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
     if (late_pages.empty()) return;
     const auto it = late_pages.find(page);
     if (it == late_pages.end() || it->second.buffer != buffer || it->second.slot != slot) return;
     LatePage& lp = it->second;
-    const auto again = [&] {
+    static uint64_t part_wait_failed = 0;   // (a part waited for past the guard is not waited for again)
+    bool fixed = lp.fix_value && lp.fix_value <= mem_completed;   // (the buffer is as the fix left it)
+    if (!fixed && lp.fix_value && lp.fix_value < mem_rec_value) vk_timeline_wait(lp.fix_value), fixed = true;
+    if (!fixed && lp.fix_value && lp.fix_part && lp.fix_part != mem_rec_part.load()) {   // (an earlier part of this recording)
+        const int waited = lp.fix_part == part_wait_failed ? 0 : vk_part_wait(lp.fix_part, kPartWaitGuard);
+        if (waited > 0) fixed = true, st_lf_part_waits++;
+        else {
+            st_lf_part_fell++;
+            if (waited == 0 && lp.fix_part != part_wait_failed) {
+                part_wait_failed = lp.fix_part;
+                logf("vk: late pages' fix: part %llu not done after %llu s: its pages are copied again", (unsigned long long)lp.fix_part,
+                     (unsigned long long)(kPartWaitGuard / 1000000000ull));
+            }
+        }
+    }
+    if (fixed) {
+        invalidate_mapped(lp.alloc, lp.nbytes);
+    } else {
+        if (!lp.fix_value) {
+            for (size_t k = lp.first; k < lp.first + lp.n && k < late_fixes.size(); k++) late_fixes[k].count = 0;
+        } else if (lp.fix_map) {
+            for (size_t k = 0; k < lp.n; k++) lp.fix_map[k].count = 0;
+            flush_mapped(lp.fix_alloc, lp.fix_end);
+        }
         vk_timeline_wait(lp.late_value);
         guarded_copy(slot, (uint8_t*)host->guest_base() + ((uint64_t)page << kPageShift), 4096);
         flush_mapped(lp.alloc, lp.nbytes);
-    };
-    if (lp.fix_value && lp.fix_value <= mem_completed) {
-        invalidate_mapped(lp.alloc, lp.nbytes);
-    } else if (lp.fix_value && lp.fix_value < mem_rec_value) {
-        vk_timeline_wait(lp.fix_value);
-        invalidate_mapped(lp.alloc, lp.nbytes);
-    } else if (!lp.fix_value) {
-        for (size_t k = lp.first; k < lp.first + lp.n && k < late_fixes.size(); k++) late_fixes[k].count = 0;
-        again();
-    } else if (lp.fix_part == mem_rec_part.load() && lp.fix_map) {
-        for (size_t k = 0; k < lp.n; k++) lp.fix_map[k].count = 0;
-        flush_mapped(lp.fix_alloc, lp.fix_end);
-        again();
-    } else {
-        again();
     }
     st_lf_cpu_reads++;
     late_pages.erase(it);
@@ -2507,13 +2524,14 @@ void late_fix_emit() {
         logf("vk: late pages' fix (600 recordings with one): of %lld captures with late pages %lld fixed (%.1f pages, %.1f fixes "
              "a capture), waited as before: %lld no pool, %lld no stamps or shadow yet, %lld stamps too new, %lld "
              "whole copies, %lld in place or unknown, %lld a page's earlier fix not recorded yet, %lld other; %lld read on the CPU first, %lld with no table, %lld pages whose shadow changed "
-             "first; stamps %zu blocks (%llu KB)",
+             "first; stamps %zu blocks (%llu KB); of the reads on the CPU, %lld waited for an earlier part's fix, %lld copied the page "
+             "again instead (that part not waited for)",
              (long long)st_lf_takes, (long long)st_lf_fixed, st_lf_fixed ? (double)st_lf_pages / st_lf_fixed : 0.0,
              st_lf_fixed ? (double)st_lf_fixes / st_lf_fixed : 0.0, (long long)st_lf_fell[1],
              (long long)st_lf_fell[3], (long long)st_lf_fell[4], (long long)st_lf_fell[5], (long long)st_lf_fell[6],
              (long long)st_lf_fell[2], (long long)st_lf_fell[0], (long long)st_lf_cpu_reads, (long long)st_lf_no_table, (long long)st_lf_moved, stamp_blocks.size(),
-             (unsigned long long)(stamp_bytes >> 10));
-        st_lf_takes = st_lf_fixed = st_lf_pages = st_lf_fixes = st_lf_cpu_reads = st_lf_no_table = st_lf_moved = 0;
+             (unsigned long long)(stamp_bytes >> 10), (long long)st_lf_part_waits, (long long)st_lf_part_fell);
+        st_lf_takes = st_lf_fixed = st_lf_pages = st_lf_fixes = st_lf_cpu_reads = st_lf_no_table = st_lf_moved = st_lf_part_waits = st_lf_part_fell = 0;
         for (int64_t& f : st_lf_fell) f = 0;
     }
 }
