@@ -11,6 +11,7 @@
    the game gets none of it; the capture it had comes back when the menu closes. */
 #include "../hos.h"
 #include "../hos_wide.h"
+void hos_input_clear_toggles(void);
 #include "../hos_sdl.h"
 
 /* (the window's app id: an applications menu entry for the game names it as its StartupWMClass) */
@@ -202,6 +203,7 @@ static void menu_mouse(int request) {
     if (open == menu_open) return;
     menu_open = open;
     if (open) {
+        hos_input_clear_toggles();
         captured_before_menu = (int)mouse_captured || (request == 2 && esc_had_capture);   /* (opened by Esc, which let it go) */
         esc_had_capture = 0;
         mouse_capture(0);
@@ -348,6 +350,7 @@ void hos_display_loop(void) {
                     hos_posix_window[0] = 1;
                     break;
                 case HOS_SDL_EV_FOCUS_LOST:
+                    hos_input_clear_toggles();
                     hos_posix_window[0] = 0;
                     esc_had_capture = 0;
                     mouse_capture(0);
