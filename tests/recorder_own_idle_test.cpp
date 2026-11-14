@@ -349,6 +349,11 @@ static std::atomic<bool> no_timeout{false};
 constexpr uint32_t kLongWaitMs = 10000;
 static std::atomic<bool> entered_without_timeout{false};   // (the wait in progress was entered with the 10 s timeout)
 static std::atomic<uint64_t> last_call_ns{0}, last_return_ns{0};   // (the last wait that returned: its start and end)
+struct WaitSpan {
+    std::atomic<uint64_t> call{0}, ret{0};
+};
+static WaitSpan spans[256];   // (every returned wait's start and end, in order: the first return after a publish is found
+static std::atomic<int> nspans{0};   // even when later ones, early or kicked, follow it)
 static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) {
     const bool inf = no_timeout;
     entered_without_timeout = inf;
@@ -360,6 +365,7 @@ static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) 
 #endif
     const uint64_t ret = rec::now_ns();
     last_call_ns = call, last_return_ns = ret;   // (a pair, written at the return: the next wait does not touch them)
+    if (const int i = nspans.load(); i < 256) spans[i].call = call, spans[i].ret = ret, nspans = i + 1;
     in_real_wait--;
     real_wait_returns++;
     return r;
@@ -379,17 +385,23 @@ static bool real_setup() {
 static bool parked() {   // (the recorder inside the OS wait on W)
     return wait_until([] { return in_real_wait.load() == 1; });
 }
-/// one packet published while the recorder waits; true once it ran (3 s). The last returned wait's start and end are read after
-/// the packet ran and before the unlock, whose wait for the recorder may kick its next wait: until then nothing wakes that one
-static uint64_t seen_call_ns = 0, seen_return_ns = 0;
+/// one packet published while the recorder waits; true once it ran (3 s)
 static bool publish_runs(int want) {
     replay_mu.lock();
     vkCmdWriteTimestamp2(kCmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, (VkQueryPool)(uintptr_t)0x40, 0);
     rec::t_prod->flush();   // (published; the producer does not wait for it, so no kick())
     const bool ran = wait_until([want] { return g_ran.load() == want; });
-    seen_call_ns = last_call_ns, seen_return_ns = last_return_ns;
     if (ran) replay_mu.unlock();
     return ran;
+}
+/// the first wait that returned at or after `pub`: the one the publish ended (the recorder writes it before it runs the packet)
+static bool first_return_after(uint64_t pub, uint64_t& call, uint64_t& ret) {
+    for (int i = 0, n = nspans.load(); i < n; i++)
+        if (spans[i].ret >= pub) {
+            call = spans[i].call, ret = spans[i].ret;
+            return true;
+        }
+    return false;
 }
 /// the recorder stopped through the renderer's own teardown (vkDestroyDevice's boundary), joined within 3 s, and a normal return:
 /// the process ends through exit() with nothing of the recorder left running
@@ -452,7 +464,8 @@ int main(int argc, char** argv) {
                 if (!publish_runs(++published)) fail("a publish did not wake the recorder waiting on W (3 s)");
                 // (the wait that returned began before the publish and blocked for 15 ms or more: no compare at its start, so the
                 // wake ended it. Otherwise inconclusive: again)
-                woken = seen_call_ns < pub && seen_return_ns >= pub && seen_return_ns - seen_call_ns >= 15000000;
+                uint64_t call = 0, ret = 0;
+                woken = first_return_after(pub, call, ret) && call < pub && ret - call >= 15000000;
             }
             if (!woken) fail("no attempt showed the wake ending a blocked wait");
             no_timeout = false;
