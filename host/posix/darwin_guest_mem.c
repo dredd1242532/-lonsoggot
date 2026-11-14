@@ -25,9 +25,12 @@ static ImportPin *pins;
 
 /* A lazy byte per native page costs address space, not a resident 512 GiB
    ledger. Touched watch states never move or disappear, including in a signal.
-   BUSY is held only over protection syscalls/metadata, NEVER a guest access or
-   an allocation: a faulting thread cannot interrupt itself holding this lock. */
-enum { WATCH_OFF, WATCH_RW, WATCH_RO, WATCH_BUSY };
+   BUSY is a bit: the prior state survives a whole-range protection operation.
+   It is held only over protection syscalls/metadata, NEVER a guest access or
+   an allocation: a faulting thread cannot interrupt itself holding this lock.
+   CANCELLED_RW acknowledges an already pending diagnostic fault without
+   rearming the cancelled watch or relaxing a later explicit RO/NOACCESS. */
+enum { WATCH_OFF, WATCH_RW, WATCH_RO, WATCH_CANCELLED_RW, WATCH_BUSY = 0x80 };
 static unsigned char *watch_state;
 static struct { uintptr_t lo, hi; } watches[16];
 static unsigned watch_count;
@@ -53,8 +56,8 @@ static int guest_range(const void *addr, size_t size) {
 static unsigned watch_take(size_t page) {
     for (;;) {
         unsigned char old = __atomic_load_n(&watch_state[page], __ATOMIC_ACQUIRE);
-        if (old != WATCH_BUSY && __atomic_compare_exchange_n(&watch_state[page], &old, WATCH_BUSY, 0,
-                                                            __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return old;
+        if (!(old & WATCH_BUSY) && __atomic_compare_exchange_n(&watch_state[page], &old, old | WATCH_BUSY, 0,
+                                                              __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return old;
     }
 }
 static void watch_put(size_t page, unsigned state) {
@@ -193,37 +196,60 @@ int hos_posix_guest_discard(void *addr, size_t size) {
 
 int hos_posix_guest_protect(void *addr, size_t size, int protect, int *old) {
     pthread_mutex_lock(&memory_mu);
-    if (!size || !guest_range(addr, size) || covered((uintptr_t)addr, (uintptr_t)addr + size, 0)) {
+    if (!size || !guest_range(addr, size) || (protect & ~(PROT_READ | PROT_WRITE | PROT_EXEC))) {
         pthread_mutex_unlock(&memory_mu); errno = EINVAL; return -1;
     }
-    DarwinMemInfo first;
-    if (darwin_mem_query(addr, &first)) { pthread_mutex_unlock(&memory_mu); return -1; }
-    uintptr_t lo = (uintptr_t)addr & ~(host_page - 1);
+    const uintptr_t lo = (uintptr_t)addr & ~(host_page - 1);
     const uintptr_t hi = ((uintptr_t)addr + size + host_page - 1) & ~(host_page - 1);
+
+    /* Freeze each affected diagnostic page once, including overlaps. No
+       allocation or guest access is performed while a fault waits on BUSY. */
+    struct { uintptr_t lo, hi; } spans[16];
+    unsigned count = 0;
     const unsigned n = __atomic_load_n(&watch_count, __ATOMIC_ACQUIRE);
-    while (lo < hi) {
-        uintptr_t next = hi;
-        int watched = 0;
-        for (unsigned i = 0; i < n; i++) {
-            if (lo >= watches[i].lo && lo < watches[i].hi) { watched = 1; break; }
-            if (lo < watches[i].lo && watches[i].lo < next) next = watches[i].lo;
-        }
-        const size_t page = (lo - guest_base) / host_page;
-        const unsigned state = watched ? watch_take(page) : WATCH_OFF;
-        if (watched) next = lo + host_page;
-        if (darwin_mem_protect((void *)lo, next - lo, protect)) {
-            if (watched) watch_put(page, state);
-            pthread_mutex_unlock(&memory_mu);
-            return -1;
-        }
-        /* Explicit protection supersedes a diagnostic watch. Never turn an
-           intentional NOACCESS/RO page writable in response to a stale watch. */
-        if (watched) watch_put(page, WATCH_OFF);
-        lo = next;
+    for (unsigned i = 0; i < n; i++) {
+        const uintptr_t begin = lo > watches[i].lo ? lo : watches[i].lo;
+        const uintptr_t end = hi < watches[i].hi ? hi : watches[i].hi;
+        if (begin >= end) continue;
+        unsigned at = count++;
+        while (at && spans[at - 1].lo > begin) { spans[at] = spans[at - 1]; at--; }
+        spans[at].lo = begin, spans[at].hi = end;
     }
-    if (old) *old = first.protect;
+    unsigned held = 0;
+    for (unsigned i = 0; i < count; i++) {
+        if (held && spans[i].lo <= spans[held - 1].hi) {
+            if (spans[i].hi > spans[held - 1].hi) spans[held - 1].hi = spans[i].hi;
+        } else spans[held++] = spans[i];
+    }
+    for (unsigned i = 0; i < held; i++)
+        for (uintptr_t p = spans[i].lo; p < spans[i].hi; p += host_page) (void)watch_take((p - guest_base) / host_page);
+
+    int result = 0, prior = 0;
+    for (uintptr_t p = lo; p < hi;) {
+        DarwinMemInfo info;
+        if (darwin_mem_query((void *)p, &info)) { result = -1; break; }
+        if (!info.mapped || info.end <= p) { errno = EINVAL; result = -1; break; }
+        if (protect & ~info.max_protect) { errno = EACCES; result = -1; break; }
+        if (p == lo) prior = info.protect;
+        p = info.end;
+    }
+    /* One native operation after whole-range permission preflight, never a
+       sequence that can leave an earlier page protected after a later failure.
+       A native refusal leaves all saved watch states intact as well. */
+    if (!result) result = darwin_mem_protect((void *)lo, hi - lo, protect);
+    const int err = errno;
+    const unsigned next = (protect & (PROT_READ | PROT_WRITE)) == (PROT_READ | PROT_WRITE) ? WATCH_CANCELLED_RW : WATCH_OFF;
+    for (unsigned i = 0; i < held; i++) {
+        for (uintptr_t p = spans[i].lo; p < spans[i].hi; p += host_page) {
+            const size_t page = (p - guest_base) / host_page;
+            const unsigned state = __atomic_load_n(&watch_state[page], __ATOMIC_RELAXED) & ~WATCH_BUSY;
+            watch_put(page, result ? state : next);
+        }
+    }
+    if (!result && old) *old = prior;
     pthread_mutex_unlock(&memory_mu);
-    return 0;
+    if (result) errno = err;
+    return result;
 }
 
 int hos_posix_guest_watch(const void *addr, size_t size) {
@@ -240,7 +266,7 @@ int hos_posix_guest_watch(const void *addr, size_t size) {
             const size_t page = (p - guest_base) / host_page;
             const unsigned state = watch_take(page);
             watch_put(page, state);
-            if (state == WATCH_OFF) failed = 1;
+            if (state != WATCH_RO && state != WATCH_RW) failed = 1;
         }
         pthread_mutex_unlock(&memory_mu);
         if (failed) { errno = EACCES; return -1; }
@@ -274,6 +300,21 @@ int hos_posix_guest_watch_fault(const void *addr) {
     /* No pthread/dlsym/malloc/log calls here. See WATCH_BUSY's invariant above. */
     const unsigned state = watch_take(page);
     if (state == WATCH_OFF) { watch_put(page, state); return 0; }
+    if (state == WATCH_CANCELLED_RW) {
+        /* The old fault may arrive after cancellation made the page writable.
+           Acknowledge it without changing protection or rearming. Recheck the
+           actual map too: never widen a subsequent non-canonical restriction. */
+        DarwinMemInfo info;
+        const int queried = darwin_mem_query((void *)lo, &info);
+        if (queried || !info.mapped || !(info.protect & PROT_WRITE)) {
+            watch_put(page, state);
+            if (!queried) errno = EACCES;
+            return -1;
+        }
+        mark_written(lo, host_page);
+        watch_put(page, state);
+        return 1;
+    }
     if (darwin_mem_protect((void *)lo, host_page, PROT_READ | PROT_WRITE)) {
         watch_put(page, state);
         return -1;

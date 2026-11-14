@@ -2,9 +2,10 @@
 
 Compiles real Mach VM helpers and source-extracted callers. Two independent
 dylibs resolve the executable's canonical guest services. No game or GPU runs.
-All successful memory operations are real; one discard wrapper supplies only
-deterministic thread barriers, never a fake result. Prior RSS experiments can
-be carried with --behavior-only; the ordinary test retains its reclaim check.
+All memory operations are real; wrappers supply deterministic barriers only.
+--watch-protection-only uses the actual Win32 vectored dispatch and real Mach
+maximum-permission failures. --behavior-only carries prior RSS experiments;
+the ordinary test retains its reclaim check.
 
 python -I -B tests/test_darwin_guest_memory.py [--cc clang] [--arch arm64|x86_64]
 The default is native; both --arch options explicitly require Rosetta.
@@ -177,25 +178,33 @@ static int wts_all_threads = 1;
 static ULONGLONG wts_after;
 '''
     guest += take("host/nvn_native.c", "static LONG CALLBACK wts_handler(")
+    guest += take("host/posix/win32_posix.c", "/* ---- exceptions ---- */", "/* ---- the window's state")
     guest += take("host/rx_backend.c", "static inline int marks_clear(")
     guest += take("host/rx_backend.c", "static int64_t collect_in(")
     guest += take("host/rx_backend.c", "static int64_t host_collect_in(")
     guest += r'''
 static int observed_discard(void *addr, size_t size);
+static int observed_protect(void *addr, size_t size, int protect);
 #define darwin_mem_discard observed_discard
+#define darwin_mem_protect observed_protect
 '''
-    guest += '#include "%s"\n#undef darwin_mem_discard\n' % (root / "host/posix/darwin_guest_mem.c")
+    guest += '#include "%s"\n#undef darwin_mem_discard\n#undef darwin_mem_protect\n' % (root / "host/posix/darwin_guest_mem.c")
     guest += '#line 1 "tests/darwin_guest_memory_test.c"\n' + (ROOT / "tests/darwin_guest_memory_test.c").read_text(encoding="utf-8")
     (out / "guest_memory.c").write_text(guest, encoding="utf-8")
     manifest = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names}
     for name in ("tests/test_darwin_guest_memory.py", "tests/darwin_guest_memory_test.c"):
         manifest[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
     manifest["function:darwin_mem_discard"] = hashlib.sha256(function(sources["host/posix/darwin_mem.c"], "int darwin_mem_discard(").encode()).hexdigest()
+    for name, marker in (("host/posix/darwin_guest_mem.c", "int hos_posix_guest_protect("),
+                         ("host/posix/darwin_guest_mem.c", "int hos_posix_guest_watch_fault("),
+                         ("host/posix/win32_posix.c", "static void on_signal("),
+                         ("host/posix/win32_posix.c", "void *AddVectoredExceptionHandler(")):
+        manifest["function:" + marker] = hashlib.sha256(function(sources[name], marker).encode()).hexdigest()
     (out / "source-hashes.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return [str(root / "host/posix/darwin_mem.c")], str(root / "host/posix/darwin_fault.c")
 
 
-def run(root, out, cc, arches, behavior_only):
+def run(root, out, cc, arches, behavior_only, watch_protection_only):
     helpers, fault = prepare(root, out)
     failures = []
     common = [cc, "-x", "c", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-mmacosx-version-min=14.4",
@@ -221,16 +230,19 @@ def run(root, out, cc, arches, behavior_only):
                 libraries.append(str(lib))
         if len(libraries) != 2:
             continue
-        for case, names in (("direct", ["posix_memory.c", "direct_discard.c"]), ("integrated", ["posix_memory.c", "guest_memory.c"])):
+        cases = [("integrated", ["posix_memory.c", "guest_memory.c"])] if watch_protection_only else [
+            ("direct", ["posix_memory.c", "direct_discard.c"]), ("integrated", ["posix_memory.c", "guest_memory.c"])]
+        for case, names in cases:
             exe = out / (case + "-" + arch)
             extra = [fault, "-Wl,-exported_symbol,_hos_posix_*"] if case == "integrated" else []
             cmd = common + ["-arch", arch, *[str(out / n) for n in names], *helpers, *extra, "-o", str(exe)]
             if command(arch, case, "compile", cmd):
-                args = ["--behavior-only"] if behavior_only and case == "integrated" else []
+                args = ["--watch-protection-only"] if watch_protection_only else ["--behavior-only"] if behavior_only and case == "integrated" else []
                 command(arch, case, "run", ["arch", "-" + arch, str(exe), *libraries, *args])
     if failures:
         raise SystemExit("FAIL: Darwin guest memory: " + ", ".join(failures))
-    print("PASS: Darwin guest memory: " + ", ".join(arches))
+    scope = "Darwin guest watch/protection: " if watch_protection_only else "Darwin guest memory: "
+    print("PASS: " + scope + ", ".join(arches))
 
 
 def main():
@@ -239,7 +251,9 @@ def main():
     ap.add_argument("--source", type=Path, default=ROOT)
     ap.add_argument("--arch", choices=("arm64", "x86_64"), action="append")
     ap.add_argument("--out", type=Path, help="retain generated fixture sources and binaries in a new directory")
-    ap.add_argument("--behavior-only", action="store_true", help="carry prior RSS proof; run the memory/lifetime/dirty checks without repeating its 128 MiB experiment")
+    scope = ap.add_mutually_exclusive_group()
+    scope.add_argument("--behavior-only", action="store_true", help="carry prior RSS proof; run the memory/lifetime/dirty checks without repeating its 128 MiB experiment")
+    scope.add_argument("--watch-protection-only", action="store_true", help="only real-dispatch pending-fault and whole-range protection-failure regressions; no RSS or other memory experiments")
     args = ap.parse_args()
     if sys.platform == "darwin":
         arches = args.arch or [platform.machine()]
@@ -247,10 +261,10 @@ def main():
             ap.error("unsupported Darwin architecture: " + ", ".join(arches))
         if args.out:
             args.out.mkdir(parents=True, exist_ok=False)
-            run(args.source.resolve(), args.out.resolve(), args.cc, arches, args.behavior_only)
+            run(args.source.resolve(), args.out.resolve(), args.cc, arches, args.behavior_only, args.watch_protection_only)
         else:
             with tempfile.TemporaryDirectory(prefix="darwin-mem-") as tmp:
-                run(args.source.resolve(), Path(tmp), args.cc, arches, args.behavior_only)
+                run(args.source.resolve(), Path(tmp), args.cc, arches, args.behavior_only, args.watch_protection_only)
     else:
         print("SKIP: Darwin guest memory requires macOS Mach VM (Windows and Linux unchanged)")
 

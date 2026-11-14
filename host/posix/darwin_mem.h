@@ -51,8 +51,11 @@ void hos_posix_guest_import_unpin(uint64_t lo, uint64_t hi);
 
 /* Optional diagnostic watches cover WHOLE native pages. The fault path takes
    no ownership mutex, calls no renderer, allocates nothing, and marks every
-   affected 4 KiB dirty index. 1 = handled, 0 = not a watch, -1 = restore failed.
-   Watched ranges stay conservatively dirty even while disarmed/after an error. */
+   affected 4 KiB dirty index. 1 = handled, 0 = not a watch, -1 = recovery failed.
+   Writable cancellation still acknowledges pending diagnostic faults; explicit
+   RO/NOACCESS never becomes writable through that acknowledgement. Failed
+   whole-range protection preserves prior watch states. Watched ranges remain
+   conservatively dirty even while disarmed/after an error. */
 int hos_posix_guest_watch(const void *addr, size_t size);
 int hos_posix_guest_watch_fault(const void *addr);
 int hos_posix_guest_watch_rearm(void);

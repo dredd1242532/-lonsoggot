@@ -209,6 +209,7 @@ typedef struct {
     BOOL (*release)(void *, SIZE_T, DWORD);
     BOOL (*protect)(void *, SIZE_T, DWORD, DWORD *);
     SIZE_T (*query)(const void *, MEMORY_BASIC_INFORMATION *, SIZE_T);
+    DWORD (*error)(void);
 } MemoryImage;
 static MemoryImage memory_image(const char *path) {
     MemoryImage m = {0};
@@ -218,21 +219,22 @@ static MemoryImage memory_image(const char *path) {
     m.release = (BOOL (*)(void *, SIZE_T, DWORD))dlsym(m.image, "VirtualFree");
     m.protect = (BOOL (*)(void *, SIZE_T, DWORD, DWORD *))dlsym(m.image, "VirtualProtect");
     m.query = (SIZE_T (*)(const void *, MEMORY_BASIC_INFORMATION *, SIZE_T))dlsym(m.image, "VirtualQuery");
-    CHECK(m.alloc && m.release && m.protect && m.query);
+    m.error = (DWORD (*)(void))dlsym(m.image, "GetLastError");
+    CHECK(m.alloc && m.release && m.protect && m.query && m.error);
     return m;
 }
 
-/* The only intercepted operation supplies a latch immediately before the REAL
-   production discard. It does not replace successes, errors, bytes or maps. */
+/* Interceptors only pause before REAL production VM operations. They never
+   manufacture success/failure, modify bytes, or substitute a memory backend. */
 static pthread_mutex_t pause_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t pause_cv = PTHREAD_COND_INITIALIZER;
 static uintptr_t pause_addr;
-static int pause_enabled, pause_entered, pause_continue;
-static unsigned raw_discards;
+static int pause_enabled, pause_entered, pause_continue, pause_protect;
+static unsigned raw_discards, raw_protects;
 static int observed_discard(void *addr, size_t size) {
     __atomic_add_fetch(&raw_discards, 1, __ATOMIC_RELAXED);
     CHECK(!pthread_mutex_lock(&pause_mu));
-    if (pause_enabled && (uintptr_t)addr == pause_addr) {
+    if (pause_enabled && !pause_protect && (uintptr_t)addr == pause_addr) {
         pause_entered = 1;
         CHECK(!pthread_cond_broadcast(&pause_cv));
         while (!pause_continue) CHECK(!pthread_cond_wait(&pause_cv, &pause_mu));
@@ -240,10 +242,25 @@ static int observed_discard(void *addr, size_t size) {
     CHECK(!pthread_mutex_unlock(&pause_mu));
     return darwin_mem_discard(addr, size);
 }
+static int observed_protect(void *addr, size_t size, int protect) {
+    __atomic_add_fetch(&raw_protects, 1, __ATOMIC_RELAXED);
+    /* Fault recovery always operates on one page: never take the fixture's
+       pthread latch from a signal handler. Only the whole-range test pauses. */
+    if (size > host_page) {
+        CHECK(!pthread_mutex_lock(&pause_mu));
+        if (pause_enabled && pause_protect && (uintptr_t)addr == pause_addr) {
+            pause_entered = 1;
+            CHECK(!pthread_cond_broadcast(&pause_cv));
+            while (!pause_continue) CHECK(!pthread_cond_wait(&pause_cv, &pause_mu));
+        }
+        CHECK(!pthread_mutex_unlock(&pause_mu));
+    }
+    return darwin_mem_protect(addr, size, protect);
+}
 static void pause_discard(uint64_t addr) {
     CHECK(!pthread_mutex_lock(&pause_mu));
     pause_addr = (uintptr_t)GP(addr);
-    pause_enabled = 1, pause_entered = 0, pause_continue = 0;
+    pause_enabled = 1, pause_entered = 0, pause_continue = 0, pause_protect = 0;
     CHECK(!pthread_mutex_unlock(&pause_mu));
 }
 static void wait_discard(void) {
@@ -432,28 +449,52 @@ static void concurrent_pin(uint64_t addr, size_t page) {
     puts("CONCURRENT_PIN deterministic_latch=1 pin_waits_for_remap=1 imported_backing_is_new_generation=1 subsequent_free_keeps_backing=1");
 }
 
-static volatile sig_atomic_t memory_faults, expected_refusal;
-static void memory_signal(int sig, siginfo_t *si, void *raw) {
-    (void)sig;
-    CONTEXT context;
-    darwin_fault_context_from(&context, raw);
-    EXCEPTION_RECORD record = {0};
-    record.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
-    record.ExceptionAddress = (void *)(uintptr_t)context.Rip;
-    record.NumberParameters = 2;
-    record.ExceptionInformation[0] = darwin_fault_access(raw);
-    record.ExceptionInformation[1] = (ULONG_PTR)si->si_addr;
-    EXCEPTION_POINTERS pointers = {&record, &context};
-    if (wts_handler(&pointers) != EXCEPTION_CONTINUE_EXECUTION) _exit(expected_refusal ? 91 : 92);
-    memory_faults++;
-    darwin_fault_context_to(raw, &context);
+static unsigned memory_faults, pending_fault, continue_fault;
+static uintptr_t hold_fault_address, refusal_address;
+static volatile sig_atomic_t expected_refusal;
+static int refusal_protect;
+static LONG CALLBACK observe_memory_fault(EXCEPTION_POINTERS *e) {
+    if (e->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || e->ExceptionRecord->NumberParameters < 2 ||
+        e->ExceptionRecord->ExceptionInformation[0] != 1) return EXCEPTION_CONTINUE_SEARCH;
+    __atomic_add_fetch(&memory_faults, 1, __ATOMIC_RELAXED);
+    if (e->ExceptionRecord->ExceptionInformation[1] == hold_fault_address) {
+        __atomic_store_n(&pending_fault, 1, __ATOMIC_RELEASE);
+        while (!__atomic_load_n(&continue_fault, __ATOMIC_ACQUIRE)) {}
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+static LONG CALLBACK expected_memory_refusal(EXCEPTION_POINTERS *e) {
+    if (expected_refusal) {
+        DarwinMemInfo info;
+        if (e->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || e->ExceptionRecord->NumberParameters < 2 ||
+            e->ExceptionRecord->ExceptionInformation[0] != 1 || e->ExceptionRecord->ExceptionInformation[1] != refusal_address ||
+            darwin_mem_query((void *)refusal_address, &info) || !info.mapped || info.protect != refusal_protect) _exit(94);
+        _exit(91); /* Avoid a crash report only for an intentional refused write. */
+    }
+    /* Unexpected SEARCH must reach the real dispatcher's fallback. Returning
+       success here would conceal the SIG_DFL regression under test. */
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 static void install_memory_signal(void) {
-    struct sigaction action = {0};
-    action.sa_sigaction = memory_signal;
-    darwin_fault_action(&action);
-    CHECK(!sigaction(SIGSEGV, &action, NULL));
-    CHECK(!sigaction(SIGBUS, &action, NULL));
+    static int installed;
+    if (installed) return;
+    CHECK(AddVectoredExceptionHandler(0, observe_memory_fault));
+    CHECK(AddVectoredExceptionHandler(0, wts_handler));
+    CHECK(AddVectoredExceptionHandler(0, expected_memory_refusal));
+    installed = 1;
+}
+typedef struct { struct sigaction segv, bus; } FaultHandlers;
+static FaultHandlers fault_handlers(void) {
+    FaultHandlers saved;
+    CHECK(!sigaction(SIGSEGV, NULL, &saved.segv));
+    CHECK(!sigaction(SIGBUS, NULL, &saved.bus));
+    CHECK((saved.segv.sa_flags & SA_SIGINFO) && (saved.bus.sa_flags & SA_SIGINFO));
+    CHECK(saved.segv.sa_handler != SIG_DFL && saved.bus.sa_handler != SIG_DFL);
+    return saved;
+}
+static void expect_fault_handlers(const FaultHandlers *saved) {
+    const FaultHandlers now = fault_handlers();
+    CHECK(now.segv.sa_sigaction == saved->segv.sa_sigaction && now.bus.sa_sigaction == saved->bus.sa_sigaction);
 }
 static void clear_marks(uint64_t addr, size_t size) {
     for (uint64_t p = addr >> 12; p < (addr + size + 4095) >> 12; p++)
@@ -464,6 +505,137 @@ static void expect_refused_child(pid_t child) {
     CHECK(child > 0 && waitpid(child, &status, 0) == child);
     CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 91);
 }
+typedef struct { unsigned char *addr; unsigned char value; } PendingWrite;
+static void *pending_write(void *raw) {
+    const PendingWrite *write = raw;
+    *(volatile unsigned char *)write->addr = write->value;
+    return NULL;
+}
+static void pending_writable_cancel(uint64_t addr, size_t page, const MemoryImage *one, const MemoryImage *two) {
+    unsigned char *p = GP(addr), *next = p + page;
+    memset(p, 0x65, 2 * page);
+    CHECK(!hos_posix_guest_watch(p, 2 * page));
+    CHECK(!hos_posix_guest_watch(next, page)); /* Deliberately overlapping registration. */
+    const FaultHandlers saved = fault_handlers();
+    const unsigned before = __atomic_load_n(&memory_faults, __ATOMIC_RELAXED);
+    PendingWrite write = {p + (page > 4096 ? 4096 : 0) + 19, 0x49};
+    hold_fault_address = (uintptr_t)write.addr;
+    __atomic_store_n(&pending_fault, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&continue_fault, 0, __ATOMIC_RELAXED);
+    pthread_t writer;
+    CHECK(!pthread_create(&writer, NULL, pending_write, &write));
+    await_flag(&pending_fault); /* Real signal entered on_signal, before wts_handler. */
+    CHECK(protection(write.addr) == VM_PROT_READ);
+    DWORD old = 0;
+    CHECK(one->protect(write.addr, 1, PAGE_READWRITE, &old) && old == PAGE_READONLY);
+    const unsigned calls = __atomic_load_n(&raw_protects, __ATOMIC_RELAXED);
+    __atomic_store_n(&continue_fault, 1, __ATOMIC_RELEASE);
+    CHECK(!pthread_join(writer, NULL));
+    hold_fault_address = 0;
+    CHECK(*write.addr == write.value);
+    CHECK(__atomic_load_n(&memory_faults, __ATOMIC_RELAXED) == before + 1);
+    CHECK(__atomic_load_n(&raw_protects, __ATOMIC_RELAXED) == calls); /* No permission change while acknowledging. */
+    expect_fault_handlers(&saved); /* Check before inducing the next real fault. */
+    CHECK(!hos_posix_guest_watch_rearm());
+    CHECK(protection(p) == (VM_PROT_READ | VM_PROT_WRITE)); /* Cancellation stays cancelled. */
+    CHECK(protection(next) == VM_PROT_READ);
+    *(volatile unsigned char *)(next + 7) = 0x52;
+    CHECK(__atomic_load_n(&memory_faults, __ATOMIC_RELAXED) == before + 2);
+    CHECK(next[7] == 0x52);
+    expect_fault_handlers(&saved);
+
+    /* Intentional RO/NOACCESS must not become writable. The third control
+       changes the kernel directly while the cancelled-watch history remains. */
+    for (int kind = 0; kind < 3; kind++) {
+        const pid_t child = fork(); CHECK(child >= 0);
+        if (!child) {
+            expected_refusal = 1;
+            refusal_address = (uintptr_t)write.addr;
+            refusal_protect = kind == 1 ? PROT_NONE : PROT_READ;
+            if (kind == 2) CHECK(mach_vm_protect(mach_task_self(), (mach_vm_address_t)p, page, FALSE, VM_PROT_READ) == KERN_SUCCESS);
+            else CHECK(two->protect(p, page, kind == 1 ? PAGE_NOACCESS : PAGE_READONLY, &old));
+            *(volatile unsigned char *)write.addr = 0x71;
+            _exit(93);
+        }
+        expect_refused_child(child);
+    }
+    expect_fault_handlers(&saved);
+    puts("PENDING_WATCH real_vectored_dispatch=1 pending_before_cancel=1 handlers_retained=1 next_real_fault=1 restrictive_controls=3 no_widening=1");
+}
+
+typedef struct {
+    const MemoryImage *image;
+    void *addr;
+    size_t size;
+    BOOL result;
+    DWORD old, error;
+} ProtectRequest;
+static void *protect_request(void *raw) {
+    ProtectRequest *r = raw;
+    r->result = r->image->protect(r->addr, r->size, PAGE_READONLY, &r->old);
+    r->error = r->image->error(); /* The calling image owns this Win32 TLS value. */
+    return NULL;
+}
+static void whole_protect_failure(uint64_t addr, size_t page, const MemoryImage *image) {
+    for (int late = 0; late < 2; late++) {
+        unsigned char *p = GP(addr + (uint64_t)late * 0x10000);
+        memset(p, 0x6a, 3 * page);
+        unsigned char *alias = shared_alias(p, 3 * page);
+        unsigned char *expected = malloc(3 * page);
+        CHECK(expected);
+        CHECK(!hos_posix_guest_watch(p, 2 * page));
+        CHECK(!hos_posix_guest_watch(p + page, page)); /* Freeze overlaps only once. */
+        *(volatile unsigned char *)(p + 7) = 0x71; /* First page RW, second remains watched RO. */
+        memcpy(expected, alias, 3 * page);
+        CHECK(protection(p) == (VM_PROT_READ | VM_PROT_WRITE) && protection(p + page) == VM_PROT_READ);
+        const size_t first_page = ((uintptr_t)p - guest_base) / page;
+        CHECK(__atomic_load_n(&watch_state[first_page], __ATOMIC_ACQUIRE) == WATCH_RW);
+        CHECK(__atomic_load_n(&watch_state[first_page + 1], __ATOMIC_ACQUIRE) == WATCH_RO);
+        const FaultHandlers saved = fault_handlers();
+        ProtectRequest request = {image, p + 1, 3 * page - 2, FALSE, 0xfeedfaceu, 0};
+        const unsigned before = __atomic_load_n(&raw_protects, __ATOMIC_RELAXED);
+        if (!late) {
+            CHECK(mach_vm_protect(mach_task_self(), (mach_vm_address_t)(p + 2 * page), page, TRUE, VM_PROT_WRITE) == KERN_SUCCESS);
+            protect_request(&request);
+        } else {
+            /* Change a real Mach maximum AFTER the full preflight but BEFORE
+               its single native operation. The interceptor only supplies a latch. */
+            CHECK(!pthread_mutex_lock(&pause_mu));
+            pause_addr = (uintptr_t)p;
+            pause_enabled = 1, pause_entered = 0, pause_continue = 0, pause_protect = 1;
+            CHECK(!pthread_mutex_unlock(&pause_mu));
+            pthread_t changing;
+            CHECK(!pthread_create(&changing, NULL, protect_request, &request));
+            wait_discard();
+            CHECK(mach_vm_protect(mach_task_self(), (mach_vm_address_t)(p + 2 * page), page, TRUE, VM_PROT_WRITE) == KERN_SUCCESS);
+            resume_discard();
+            CHECK(!pthread_join(changing, NULL));
+        }
+        const unsigned native_calls = __atomic_load_n(&raw_protects, __ATOMIC_RELAXED) - before;
+        CHECK(!request.result && request.error == ERROR_ACCESS_DENIED && request.old == 0xfeedfaceu);
+        CHECK(native_calls == (unsigned)late);
+        CHECK(protection(p) == (VM_PROT_READ | VM_PROT_WRITE));
+        CHECK(protection(p + page) == VM_PROT_READ && protection(p + 2 * page) == VM_PROT_WRITE);
+        CHECK(__atomic_load_n(&watch_state[first_page], __ATOMIC_ACQUIRE) == WATCH_RW);
+        CHECK(__atomic_load_n(&watch_state[first_page + 1], __ATOMIC_ACQUIRE) == WATCH_RO);
+        CHECK(!memcmp(alias, expected, 3 * page));
+        expect_fault_handlers(&saved);
+
+        /* Both saved watch states still behave: rearm the disarmed first page,
+           then recover genuine writes to it and to the still-armed second. */
+        const unsigned faults = __atomic_load_n(&memory_faults, __ATOMIC_RELAXED);
+        CHECK(!hos_posix_guest_watch_rearm());
+        *(volatile unsigned char *)(p + 11) = 0x27;
+        *(volatile unsigned char *)(p + page + 11) = 0x28;
+        CHECK(__atomic_load_n(&memory_faults, __ATOMIC_RELAXED) == faults + 2);
+        expect_fault_handlers(&saved);
+        free(expected);
+        CHECK(!munmap(alias, 3 * page));
+        printf("PROTECT_FAILURE phase=%s native_calls=%u error=access_denied prefix_bytes=preserved prefix_protections=preserved watch_states=preserved real_fault_recovery=2\n",
+               late ? "after_preflight" : "preflight", native_calls);
+    }
+}
+
 static void watch_pages(uint64_t addr, size_t page) {
     unsigned char *p = GP(addr), *watched = p + page;
     memset(p, 0x73, 3 * page);
@@ -477,9 +649,9 @@ static void watch_pages(uint64_t addr, size_t page) {
     for (size_t subpage = 0; subpage < page / 4096; subpage++) {
         CHECK(!hos_posix_guest_watch_rearm());
         clear_marks(addr, 3 * page);
-        const sig_atomic_t before = memory_faults;
+        const unsigned before = __atomic_load_n(&memory_faults, __ATOMIC_RELAXED);
         *(volatile unsigned char *)(watched + subpage * 4096 + 31) = (unsigned char)(subpage + 1);
-        CHECK(memory_faults == before + 1);
+        CHECK(__atomic_load_n(&memory_faults, __ATOMIC_RELAXED) == before + 1);
         for (size_t k = 0; k < page / 4096; k++) CHECK(__atomic_load_n(&a64_dirty[(lo >> 12) + k], __ATOMIC_ACQUIRE) == 1);
         CHECK(!__atomic_load_n(&a64_dirty[(addr >> 12)], __ATOMIC_RELAXED));
         CHECK(!__atomic_load_n(&a64_dirty[((addr + 2 * page) >> 12)], __ATOMIC_RELAXED));
@@ -498,6 +670,7 @@ static void watch_pages(uint64_t addr, size_t page) {
     if (!child) {
         expected_refusal = 1;
         CHECK(mach_vm_protect(mach_task_self(), (mach_vm_address_t)watched, page, TRUE, VM_PROT_READ) == KERN_SUCCESS);
+        refusal_address = (uintptr_t)watched, refusal_protect = PROT_READ;
         *(volatile unsigned char *)watched = 0;
         _exit(93);
     }
@@ -507,6 +680,7 @@ static void watch_pages(uint64_t addr, size_t page) {
         expected_refusal = 1;
         CHECK(hos_posix_guest_watch_fault(watched) == 1);
         CHECK(mach_vm_protect(mach_task_self(), (mach_vm_address_t)watched, page, TRUE, VM_PROT_NONE) == KERN_SUCCESS);
+        refusal_address = (uintptr_t)watched, refusal_protect = PROT_NONE;
         CHECK(hos_posix_guest_watch_rearm() == -1);
         uint32_t *dirty = NULL;
         CHECK(host_collect_in(range, 1, &dirty) == (int64_t)(page / 4096));
@@ -582,6 +756,12 @@ static void concurrent_dirty(uint64_t addr) {
     printf("DIRTY concurrent_published=400 acknowledged=%u wide_boundary=255/256 empty_range_preserves=1 overflow_clamped=1\n", collected);
 }
 
+static void watch_protection_regressions(uint64_t addr, size_t page, const MemoryImage *one, const MemoryImage *two) {
+    watch_pages(addr, page);
+    pending_writable_cancel(addr + 0x20000, page, one, two);
+    whole_protect_failure(addr + 0x40000, page, two);
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     const size_t page = (size_t)getpagesize();
@@ -590,6 +770,14 @@ int main(int argc, char **argv) {
     const MemoryImage one = memory_image(argv[1]), two = memory_image(argv[2]);
     CHECK(one.alloc != two.alloc && one.release != two.release && one.protect != two.protect && one.query != two.query);
     CHECK(reserve_guest());
+    if (argc > 3 && !strcmp(argv[3], "--watch-protection-only")) {
+        watch_protection_regressions(HOS_HEAP_BASE + 0x3200000, page, &one, &two);
+        CHECK(import_checks == 0 && !pins);
+        CHECK(!dlclose(one.image) && !dlclose(two.image));
+        CHECK(!munmap(A64_MEM, HOS_GUEST_SPACE));
+        puts("PASS: real vectored pending-fault cancellation and whole-range protection failure");
+        return 0;
+    }
     memset(A64_MEM, 0x56, page);
     memset(A64_MEM + HOS_GUEST_SPACE - page, 0xa8, page);
     CHECK(!reserve_guest());
@@ -618,7 +806,7 @@ int main(int argc, char **argv) {
     pin_lifetime(addr + 0x2000000, page, &one, &two);
     concurrent_free(page);
     concurrent_pin(addr + 0x2800000, page);
-    watch_pages(addr + 0x3000000, page);
+    watch_protection_regressions(addr + 0x3000000, page, &one, &two);
     concurrent_dirty(addr + 0x4000000);
     failure_paths(addr + 0x800000, page);
     if (argc < 4 || strcmp(argv[3], "--behavior-only")) reclaim_large(addr + 0x10000000, page);
