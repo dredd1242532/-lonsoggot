@@ -1,14 +1,25 @@
 /* The host's allocations at the commit limit (host/mkw_glue.c, issue 333), around the real hos_out_of_memory and
    hos_alloc_failed cut out by tests/test_host_alloc_wait.py: a fake malloc that fails as Windows' does at the limit, a
-   clock that Sleep moves, a notice that is counted, and a hos_fatal that returns here. No game, window or GPU. */
+   clock that Sleep moves, a notice that is counted, and a hos_fatal that returns here. No game, window or GPU.
+   Built twice on any host: -DFIXTURE_LINUX=0 runs the cut code's Windows side (GlobalMemoryStatusEx, page file wording),
+   -DFIXTURE_LINUX=1 its Linux side (sysinfo, swap wording), each with the stubs below. */
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32   /* (the cut code's Windows side: its commit headroom is the stub below, not sysinfo) */
+#if FIXTURE_LINUX   /* (after the C library's headers: only the cut code sees the platform chosen here) */
+#undef _WIN32
+#elif !defined _WIN32
 #define _WIN32 1
+#endif
+#ifdef _WIN32
+#define OOM_LINE "mem: Windows is out of memory (RAM and page file)"
+#define OOM_FATAL "out of memory (RAM plus the page file): "
+#else
+#define OOM_LINE "mem: out of memory (RAM and swap)"
+#define OOM_FATAL "out of memory (RAM plus swap): "
 #endif
 
 typedef long LONG;
@@ -21,7 +32,7 @@ typedef struct { DWORD dwLength; unsigned long long ullAvailPageFile; } MEMORYST
 
 static const char *scenario;
 static unsigned long long slept_ms, left_mb = 10;
-static int fails_left, fail_all, headless, boxes, box_closing, threads, deferred_thread, fatals, sleeps_to_close = -1;
+static int fails_left, fail_all, headless, boxes, box_closing, threads, deferred_thread, no_thread, fatals, sleeps_to_close = -1;
 static const char *refuse_env;
 static char logs[8192], fatal_text[512];
 static jmp_buf fatal_jump;
@@ -37,11 +48,20 @@ static void Sleep(DWORD ms) {
 static int CloseHandle(HANDLE h) { (void)h; return 1; }
 static HANDLE CreateThread(void *a, size_t s, LPTHREAD_START_ROUTINE fn, LPVOID arg, DWORD f, DWORD *id) {
     (void)a, (void)s, (void)f, (void)id;
+    if (no_thread) return NULL;   /* (the thread's own memory refused too: win32_posix.c's CreateThread says so with NULL) */
     threads++;
     if (!deferred_thread) fn(arg);   /* (deferred: the notice stays up on its thread) */
     return (HANDLE)1;
 }
+#ifdef _WIN32
 static int GlobalMemoryStatusEx(MEMORYSTATUSEX *m) { m->ullAvailPageFile = left_mb << 20; return 1; }
+#else
+struct sysinfo { unsigned long freeram, bufferram, freeswap; unsigned mem_unit; };
+static int sysinfo(struct sysinfo *si) {   /* (left_mb as free RAM, buffers and swap in 4 KB units) */
+    si->mem_unit = 4096, si->freeram = (unsigned long)(left_mb << 8) - 3, si->bufferram = 1, si->freeswap = 2;
+    return 0;
+}
+#endif
 static int env_on(const char *name) { return !strcmp(name, "HOS_HEADLESS") && headless; }
 static const char *test_getenv(const char *name) { return !strcmp(name, "HOS_TEST_ALLOC_REFUSE") ? refuse_env : NULL; }
 static void hos_log(const char *fmt, ...) {
@@ -99,14 +119,14 @@ int main(int argc, char **argv) {
         CHECK(STOPS(hos_xcalloc(131072, 8, "native NVN: recording handle set")));
         CHECK(slept_ms == 5000 && fatals == 1);
         CHECK(strstr(logs, "native NVN: recording handle set: 1048576 bytes of host memory still refused after 5 s at the commit limit (10 MB of commit left)"));
-        CHECK(strstr(logs, "mem: Windows is out of memory (RAM and page file)"));
+        CHECK(strstr(logs, OOM_LINE));
         CHECK(boxes == 1 && box_closing && threads == 1);   /* (on a thread of its own: on the game's, nothing showed) */
-        CHECK(!strcmp(fatal_text, "out of memory (RAM plus the page file): native NVN: recording handle set (1048576 bytes)"));
+        CHECK(!strcmp(fatal_text, OOM_FATAL "native NVN: recording handle set (1048576 bytes)"));
         CHECK(oom_state == 2);
         hos_out_of_memory(0);   /* (a guest commit refused after: said once) */
         CHECK(boxes == 1 && threads == 1);
-        const char *line = strstr(logs, "Windows is out of memory");
-        CHECK(line && !strstr(line + 1, "Windows is out of memory"));
+        const char *line = strstr(logs, OOM_LINE);
+        CHECK(line && !strstr(line + 1, OOM_LINE));
     } else if (!strcmp(scenario, "commit-first")) {   /* (a guest commit said it first, its notice still up: waited for) */
         deferred_thread = 1;
         hos_out_of_memory(0);
@@ -114,7 +134,7 @@ int main(int argc, char **argv) {
         fail_all = 1, sleeps_to_close = 100 + 3;   /* (the 5 s, then 3 x 100 ms until the notice is closed) */
         CHECK(STOPS(hos_xmalloc(65536, "native NVN: recording buffer")));
         CHECK(slept_ms == 5000 + 300 && boxes == 0 && threads == 1 && oom_state == 2);
-        CHECK(strstr(fatal_text, "out of memory (RAM plus the page file): native NVN: recording buffer (65536 bytes)"));
+        CHECK(strstr(fatal_text, OOM_FATAL "native NVN: recording buffer (65536 bytes)"));
     } else if (!strcmp(scenario, "not-limit")) {   /* (refused with 20 GB of commit left: a size gone wrong, no notice) */
         fail_all = 1, left_mb = 20000;
         CHECK(STOPS(hos_xmalloc(4096, "video: image pool")));
@@ -126,14 +146,19 @@ int main(int argc, char **argv) {
     } else if (!strcmp(scenario, "headless")) {   /* (no notice to wait for: the line and the fatal) */
         fail_all = 1, headless = 1;
         CHECK(STOPS(hos_xmalloc(4096, "native NVN: recording copy")));
-        CHECK(boxes == 0 && threads == 0 && strstr(logs, "Windows is out of memory") && strstr(fatal_text, "out of memory"));
+        CHECK(boxes == 0 && threads == 0 && strstr(logs, OOM_LINE) && strstr(fatal_text, "out of memory"));
+    } else if (!strcmp(scenario, "no-thread")) {   /* (the notice's thread refused too: no notice, no wait, still the fatal) */
+        fail_all = 1, no_thread = 1;
+        CHECK(STOPS(hos_xmalloc(4096, "native NVN: recording copy")));
+        CHECK(slept_ms == 5000 && boxes == 0 && threads == 0 && oom_state == 2 && strstr(logs, OOM_LINE));
+        CHECK(!strcmp(fatal_text, OOM_FATAL "native NVN: recording copy (4096 bytes)"));
     } else if (!strcmp(scenario, "test-switch")) {   /* (HOS_TEST_ALLOC_REFUSE: that label refused as at the limit, others not) */
         refuse_env = "handle set", left_mb = 20000;
         CHECK(!STOPS(p = hos_xmalloc(64, "native NVN: recording copy")));
         CHECK(p && slept_ms == 0);
         CHECK(STOPS(hos_xcalloc(65536, 8, "native NVN: recording handle set")));
         CHECK(slept_ms == 5000 && boxes == 1 && box_closing && threads == 1);
-        CHECK(!strcmp(fatal_text, "out of memory (RAM plus the page file): native NVN: recording handle set (524288 bytes)"));
+        CHECK(!strcmp(fatal_text, OOM_FATAL "native NVN: recording handle set (524288 bytes)"));
     } else {
         fprintf(stderr, "unknown scenario %s\n", scenario);
         return 2;

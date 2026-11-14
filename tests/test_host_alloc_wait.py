@@ -4,7 +4,8 @@ hos_xmalloc / hos_xcalloc / hos_xrealloc (host/mkw_glue.c) wait for commit as a 
 memory, show the notice and only then stop.
 
 Compiles the real hos_out_of_memory and hos_alloc_failed (and the pieces around them) cut out of host/mkw_glue.c with
-tests/host_alloc_wait_test.c's fake malloc, clock and notice, and runs each case in its own process:
+tests/host_alloc_wait_test.c's fake malloc, clock and notice, twice: the cut code's Windows side (page file wording,
+GlobalMemoryStatusEx) and its Linux side (swap wording, sysinfo), on either host. Each case in its own process:
 
 - recovers: refused three times, allocated 150 ms on, logged; realloc keeps the old block while it waits; no notice;
 - limit: never given: 5 s of tries, the line, the notice (on a thread of its own: on the game's thread MessageBoxA
@@ -13,7 +14,11 @@ tests/host_alloc_wait_test.c's fake malloc, clock and notice, and runs each case
 - not-limit: refused with plenty of commit left: no notice, the fatal says how much was left;
 - overflow: calloc's count x size past size_t: the fatal at once, no wait;
 - headless: HOS_HEADLESS shows no notice and so waits for none;
+- no-thread: the notice's thread refused too (its own memory): no notice, no wait, still the fatal;
 - test-switch: HOS_TEST_ALLOC_REFUSE refuses that label as at the limit, and no other.
+
+And Linux's real thread_new and CreateThread (host/posix/win32_posix.c) cut out with tests/posix_thread_oom_test.c's
+refusing calloc: NULL and ERROR_NOT_ENOUGH_MEMORY, not a write through NULL, so no-thread is what Linux does.
 
 And by text: hos_commit's and the first-touch handler's failure (commit_refused) still go through the same notice, and
 the NVN layer's and the video service's allocations go through the helpers, with no die() or hos_fatal() of their own
@@ -33,7 +38,7 @@ import tempfile
 RUN_ALL_ARGS = ["--cc", "gcc"]
 
 ROOT = Path(__file__).resolve().parents[1]
-CASES = ("recovers", "limit", "commit-first", "not-limit", "overflow", "headless", "test-switch")
+CASES = ("recovers", "limit", "commit-first", "not-limit", "overflow", "headless", "no-thread", "test-switch")
 
 
 def block(text, head):
@@ -86,6 +91,13 @@ def main():
         "void *hos_alloc_failed(int kind,", "void *hos_xmalloc(size_t size, const char *what)",
         "void *hos_xcalloc(size_t count, size_t size, const char *what)",
         "void *hos_xrealloc(void *old, size_t size, const char *what)")]
+    win32 = (ROOT / "host/posix/win32_posix.c").read_text(encoding="utf-8")
+    at = win32.find("typedef struct {\n    HObj h;\n    pthread_t th;")
+    end = win32.find("} HThread;", at)
+    if at < 0 or end < 0:
+        raise SystemExit("FAIL: win32_posix.c's HThread is not where the fixture reads it")
+    posix = [win32[at:end + len("} HThread;")], block(win32, "static HThread *thread_new(void)"),
+             block(win32, "HANDLE CreateThread(void *attr, SIZE_T stack,")]
     if "static volatile LONG oom_state;" not in glue:
         raise SystemExit("FAIL: oom_state is not the static the fixture stands in for")
     cc = shutil.which(args.cc)
@@ -95,16 +107,25 @@ def main():
     with tempfile.TemporaryDirectory(prefix="host-alloc-wait-") as temporary:
         folder = Path(temporary)
         (folder / "host_alloc_wait.inc").write_text("\n".join(pieces) + "\n", encoding="utf-8")
-        executable = folder / "fixture.exe"
+        (folder / "posix_thread_oom.inc").write_text("\n".join(posix) + "\n", encoding="utf-8")
+        runs = []
+        for side in ("windows", "linux"):
+            executable = folder / ("fixture-%s.exe" % side)
+            subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-DFIXTURE_LINUX=%d" % (side == "linux"),
+                            "-I", str(folder), str(ROOT / "tests/host_alloc_wait_test.c"), "-o", str(executable)],
+                           check=True, creationflags=flags)
+            runs += [(side, executable, case) for case in CASES]
+        executable = folder / "posix-thread.exe"
         subprocess.run([cc, "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I", str(folder),
-                        str(ROOT / "tests/host_alloc_wait_test.c"), "-o", str(executable)], check=True, creationflags=flags)
-        for case in CASES:
+                        str(ROOT / "tests/posix_thread_oom_test.c"), "-o", str(executable)], check=True, creationflags=flags)
+        runs.append(("linux", executable, "posix-thread"))
+        for side, executable, case in runs:
             result = subprocess.run([str(executable), case], capture_output=True, text=True, encoding="utf-8",
                                     errors="replace", timeout=30, creationflags=flags)
-            print(result.stdout, end="")
+            print("%s: %s" % (side, result.stdout), end="")
             if result.returncode:
                 print(result.stderr, end="", file=sys.stderr)
-                raise SystemExit("FAIL: case %s (exit %d)" % (case, result.returncode))
+                raise SystemExit("FAIL: %s case %s (exit %d)" % (side, case, result.returncode))
     print("PASS: a host allocation at the commit limit waits, then says out of memory and shows the notice before it stops")
 
 

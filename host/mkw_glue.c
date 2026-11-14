@@ -126,7 +126,11 @@ void *hos_alloc_failed(int kind, void *old, size_t count, size_t size, const cha
         hos_fatal(NULL, "%s: %zu bytes of host memory refused for 5 s with %llu MB of commit left", what, n, left);
     hos_log("mem: %s: %zu bytes of host memory still refused after 5 s at the commit limit (%llu MB of commit left)", what, n, left);
     hos_out_of_memory(1);
+#ifdef _WIN32
     hos_fatal(NULL, "out of memory (RAM plus the page file): %s (%zu bytes)", what, n);
+#else
+    hos_fatal(NULL, "out of memory (RAM plus swap): %s (%zu bytes)", what, n);
+#endif
     return NULL;
 }
 void *hos_xmalloc(size_t size, const char *what) {
