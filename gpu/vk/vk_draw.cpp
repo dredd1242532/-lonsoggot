@@ -949,6 +949,11 @@ void play_cache_save(int wait_ms = -1, bool queue = true) {
             continue;
         }
         if (pcache_no_save) {   // (longshot, issue 388: the file not read, nor saved: what play made is in the driver's own cache)
+            static std::atomic<int> told{0};
+            if (const int n = ++told; n <= 4 || n % 16 == 0)
+                logf("vk: pipeline cache: play's generation %d let go, not written (the file not read): %lld pipelines, %lld from the "
+                     "driver's cache, %lld compiled", n, (long long)old->built.load(), (long long)old->from_driver.load(),
+                     (long long)old->compiled.load());
             vkDestroyPipelineCache(dev.device, old->cache, nullptr);
             old->cache = VK_NULL_HANDLE;
             it = unsaved.erase(it);
@@ -10423,8 +10428,11 @@ void pipeline_cache_between_builds() {
     pipeline_cache_save(false);
 }
 void pipeline_cache_save(bool force) {
+    // (longshot, issue 388) The file not read (pcache_no_save): the cache's own part is skipped, never written, but play's
+    // generations are still taken away and freed at each save (play_cache_save writes none then), as they are written and freed
+    // where the file is read. Returning here, what play made would pile up in one generation, in memory, until the close
     const bool between = pcache_save_between;
-    if (!pcache || pcache_no_save || (!force && !between && pcache_built_since_save < 32)) return;
+    if (!pcache || (!force && !between && pcache_built_since_save < 32)) return;
     const int64_t built = pcache_built_since_save.exchange(0);
     // (on a thread of its own unless forced, at exit: ~100 MB fetched and written took the replay thread 100+ ms at
     // each scene change; the cache is internally synchronized, pipelines go on being built meanwhile)
@@ -10454,7 +10462,7 @@ void pipeline_cache_save(bool force) {
             had = lock.held();
             return had && vkGetPipelineCacheData(dev.device, pcache, n, data) == VK_SUCCESS;
         };
-        try {
+        if (!pcache_no_save) try {
             size_t n = 0;
             // (the size last read or written: nothing new, not fetched nor written again; see pcache_saved_size)
             // (in play only once it has grown by a good deal: what play makes is in the play files, and the little pcache still

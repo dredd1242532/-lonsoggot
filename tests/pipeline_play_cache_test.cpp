@@ -52,6 +52,12 @@ struct {
 VkPipelineCache pcache = nullptr;
 std::string pcache_dir, pcache_path;
 bool pcache_no_save = false;   // (vk_draw.cpp pcache_init: the file not read, RX_VK_PCACHE_LOAD or pcache_load.h; the no-save case)
+// (vk_draw.cpp's ordinary save, pipeline_cache_save, extracted unmodified after the play caches: the no-save-periodic case. What the
+// builds count towards a save, and the cache's data size last read or written)
+std::atomic<int64_t> pcache_built_since_save{0};
+std::atomic<size_t> pcache_saved_size{0};
+thread_local bool pcache_save_between = false;   // (vk_draw.cpp: a save run between two serial builds, Intel; not here)
+std::atomic<bool> pcache_save_owed{false};
 std::atomic<int> creates{0}, destroys{0}, merges{0}, compiles{0}, failed_moves{0};
 std::atomic<int> fail_moves{0};   // (the next moves into place that fail)
 FakePipeline the_pipeline;
@@ -223,6 +229,7 @@ using mkwvk::PipelineCacheFile;
 struct { std::atomic<int64_t> play_from_driver{0}, play_from_start{0}, play_compiled{0}; } census;
 thread_local struct { uint8_t made_how = 0; } use_counters;
 #include "pipeline_play_cache.inc"
+#include "pipeline_cache_save.inc"
 
 VkResult make(uint64_t key, unsigned flags = 0) {
     FakeCI ci;
@@ -467,6 +474,40 @@ int run(const std::string& name) {
         play_cache_save();
         CHECK(play_cache.load() != g && !exists(play_path(kPlayFilesKept + 3)));   // (taken away, nothing written)
         CHECK(file_keys(pcache_path) == (std::set<uint64_t>{1, 2, 3}));
+        pcache_no_save = false;
+    } else if (name == "no-save-periodic") {
+        // (longshot, issue 388; PR 416's review) The file not read: the ordinary save, pipeline_cache_save(false) every 300 presents
+        // (vk_replay.cpp), still takes play's generation away and frees it once enough was built, on its thread, with nothing written:
+        // not the file, not a play file. Under its threshold it does nothing, and what is built next goes into the next generation
+        pcache_no_save = true;
+        pcache = cache_of({});
+        write_file(pcache_path, "FAKE", {1, 2, 3});
+        play_cache_begin();
+        PlayCache* g = play_cache.load();
+        CHECK(g && make(60) == VK_SUCCESS && make(61) == VK_SUCCESS && g->built == 2);
+        const int destroyed = destroys.load();
+        pcache_built_since_save = 31;
+        pipeline_cache_save(false);   // (under the threshold: nothing)
+        Sleep(50);
+        CHECK(play_cache.load() == g && destroys == destroyed);
+        pcache_built_since_save = 32;   // (as the builds count it, vk_draw.cpp: enough for a save)
+        pipeline_cache_save(false);
+        CHECK(wait_for([&] { return destroys.load() == destroyed + 1; }));   // (the generation freed on the save's thread)
+        PlayCache* g2 = play_cache.load();
+        CHECK(g2 != g && g2 && g2->cache);
+        CHECK(make(62) == VK_SUCCESS && has(g2->cache, 62) && g2->built == 1);   // (new work goes on, into the next one)
+        pcache_built_since_save = 32;
+        pipeline_cache_save(false);
+        CHECK(wait_for([&] { return destroys.load() == destroyed + 2; }));
+        pipeline_cache_save(true);   // (a forced save, Restart now: after the background one; nothing built since, nothing freed)
+        CHECK(!g->cache && !g2->cache && destroys == destroyed + 2 && play_cache.load()->cache);
+        CHECK(file_keys(pcache_path) == (std::set<uint64_t>{1, 2, 3}));   // (the file as it was)
+        int files = 0;
+        for (const auto& e : std::filesystem::directory_iterator(pcache_dir)) {
+            files++;
+            CHECK(e.path().string() == pcache_path);
+        }
+        CHECK(files == 1);   // (no play file, no temporary file)
         pcache_no_save = false;
     } else if (name == "compact") {
         pcache = cache_of({1});
