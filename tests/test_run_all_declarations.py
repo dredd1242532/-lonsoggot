@@ -342,7 +342,7 @@ class Runner(unittest.TestCase):
             "tests/test_portable_builder_home.py", "tests/test_portable_builder_startup.py",
             "tests/test_portable_setup_paths.py", "tests/test_portable_setup_start.py", "tests/test_portable_setup_transaction.py",
             "tests/test_precompile_compute_guard.py", "tests/test_setup_runtime.py", "tests/test_setup_runtime_paths.py",
-            "tests/test_shader_module_guard.py", "tests/test_appimage_package_retry.py", "tests/test_prof_symbols.py",
+            "tests/test_shader_module_guard.py", "tests/test_appimage_package_retry.py",
         }
         skipped = set()
         for d in ("tests", "nx2"):
