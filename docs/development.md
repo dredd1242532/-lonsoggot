@@ -161,6 +161,11 @@ motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature
 path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
 See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-and-fsr-4-opt-in) for validation and shader regeneration.
 
+The gameplay TAAU replacement supports Native HDR PsychoV35 directly. It is the spatial/FXAA fallback used where the
+game network cannot run, not restored temporal AA. Its RGBA16F shader and history match the scene's format and decode
+the perceptual input once. `RX_VK_TAAU_KEYS=fd029a317a9a4b94` exercises that replacement on hardware that otherwise
+runs the native network; this is a test override, not a requirement for GPUs already using the fallback.
+
 ### Running a test
 
 | Switch | What it does |

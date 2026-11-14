@@ -8,6 +8,11 @@ The game-free fixture compiles actual reprojection math, both preparation polici
 
 ## PsychoV35 with DLSS/DLAA and FSR 4 (opt-in)
 
+The gameplay TAAU replacement also supports Native HDR PsychoV35's RGBA16F buffers without this switch. It remains a
+spatial upscale with FXAA, used where the game network cannot run correctly; this does not restore temporal AA. Its
+input and output views, output shader and history all use the matching format. A format change discards its history;
+the prior image stays alive until in-flight work can no longer use it. Its perceptual input is decoded once on output.
+
 `RX_VK_PSYCHOV35_DLSS=1` lets NVIDIA DLSS/DLAA and AMD FSR 4 (and its Native AA) take the Native HDR PsychoV35 scene, whose gameplay network input and output are RGBA16F (`upscaler_rows.h` `takes_psychov35`: the engines the chain gives linear light in an HDR context). It is off by default. Vanilla's packed B10G11R11 route is unchanged; this switch does not enable PsychoV35 for FSR 3.1 or TAAU.
 
 The pre-existing Upscaler Off stretch also only writes packed output, so Off with PsychoV35 still falls back to the
