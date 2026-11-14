@@ -85,8 +85,9 @@ enum MenuTab {
     TAB_AUDIO = 1,
     TAB_GAMEPLAY = 2,
     TAB_CONTROLS = 3,
-    TAB_DEBUG = 4,   // (the OoT debug tools of #785, a tab of their own)
-    TAB_COUNT = 5,
+    TAB_MODS = 4,    // (RomFS mods only; the Debug tab follows it)
+    TAB_DEBUG = 5,   // (the OoT debug tools of #785, a tab of their own)
+    TAB_COUNT = 6,
     TAB_MOTION = TAB_COUNT,   // (longshot: not a tab of the strip, the Motion page that the Controls tab's Motion row
                               // opens: one past the strip's tabs, so a tab added before TAB_COUNT moves it along)
     TAB_PAGE = TAB_MOTION + 1   // (longshot: the Controls page's rows, above its grid; no tab shows them)
@@ -1620,6 +1621,58 @@ void outputs_sync() {
 
 int cur_tab = TAB_GRAPHICS;
 int tab_selected[TAB_COUNT + 1] = {};   // (and the Motion page's)
+struct RomfsModRow { std::string name; bool enabled, initial_enabled, changed, has_exefs; int initial_position; };
+std::vector<RomfsModRow> romfs_mod_rows;
+int romfs_mod_selected = 0;
+unsigned mod_change_serial = 0, mod_later_serial = 0;
+int mods_exit_tab = -1;   // (a tab change deferred until the restart prompt is answered; -1 means close or stay)
+int mod_drag_from = -1, mod_drag_target = -1, mod_drag_start_x = 0, mod_drag_start_y = 0;
+bool mod_drag_active = false;
+void load_romfs_mod_rows() {
+    romfs_mod_rows.clear();
+    const int count = host && host->mods_romfs_menu_count ? host->mods_romfs_menu_count() : 0;
+    for (int i = 0; i < count; i++) {
+        char name[MAX_PATH] = {};
+        int enabled = 1, has_exefs = 0;
+        if (host->mods_romfs_menu_get(i, name, sizeof name, &enabled, &has_exefs))
+            romfs_mod_rows.push_back({name, enabled != 0, enabled != 0, false, has_exefs != 0,
+                                      (int)romfs_mod_rows.size()});
+    }
+    if (romfs_mod_rows.empty()) romfs_mod_selected = 0;
+    else romfs_mod_selected = std::clamp(romfs_mod_selected, 0, (int)romfs_mod_rows.size() - 1);
+}
+bool romfs_mods_changed() { return host && host->mods_romfs_menu_changed && host->mods_romfs_menu_changed() != 0; }
+bool romfs_mods_ask() { return romfs_mods_changed() && mod_change_serial != mod_later_serial; }
+bool mod_save_failed = false;
+bool set_romfs_mod(int index, bool enabled) {
+    if (index < 0 || index >= (int)romfs_mod_rows.size()) return false;
+    RomfsModRow& row = romfs_mod_rows[index];
+    if (row.has_exefs) return false;
+    if (row.enabled == enabled) return true;
+    if (!host || !host->mods_romfs_menu_set || !host->mods_romfs_menu_set(index, enabled)) return mod_save_failed = true, false;
+    row.enabled = enabled;
+    row.changed = row.enabled != row.initial_enabled || index != row.initial_position;
+    mod_save_failed = false;
+    ++mod_change_serial;
+    return true;
+}
+bool move_romfs_mod(int from, int to) {
+    if (from < 0 || to < 0 || from >= (int)romfs_mod_rows.size() || to >= (int)romfs_mod_rows.size() || from == to ||
+        romfs_mod_rows[from].has_exefs || romfs_mod_rows[to].has_exefs) return false;
+    if (!host || !host->mods_romfs_menu_reorder || !host->mods_romfs_menu_reorder(from, to)) {
+        mod_save_failed = true;
+        return false;
+    }
+    if (from < to) std::rotate(romfs_mod_rows.begin() + from, romfs_mod_rows.begin() + from + 1, romfs_mod_rows.begin() + to + 1);
+    else std::rotate(romfs_mod_rows.begin() + to, romfs_mod_rows.begin() + from, romfs_mod_rows.begin() + from + 1);
+    for (int i = 0; i < (int)romfs_mod_rows.size(); i++)
+        romfs_mod_rows[i].changed = romfs_mod_rows[i].enabled != romfs_mod_rows[i].initial_enabled ||
+                                    i != romfs_mod_rows[i].initial_position;
+    romfs_mod_selected = to;
+    mod_save_failed = false;
+    ++mod_change_serial;
+    return true;
+}
 bool is_motion_row(const Row& r) { return r.tab == TAB_CONTROLS && !r.value && !strcmp(r.name, "Motion"); }
 
 // ---- the rows that take a restart: their values at the start (menu_init, the GPU's at menu_set_gpu_count) ----
@@ -1661,7 +1714,7 @@ unsigned restart_pending() {
 bool restart_ask() {
     int now[mr::kMax];
     restart_values(now);
-    return app_window() && restart_state.ask(now);
+    return app_window() && (restart_state.ask(now) || romfs_mods_ask());
 }
 /// The rows' names in the menu's language, for the restart line and question
 const char* const* tr_names() {
@@ -1670,7 +1723,9 @@ const char* const* tr_names() {
     return t;
 }
 std::string restart_list(const char* last) {
-    return mr::names(tr_names(), restart_state.n, restart_pending(), ", ", last);
+    std::string names = mr::names(tr_names(), restart_state.n, restart_pending(), ", ", last);
+    if (romfs_mods_changed()) names += (names.empty() ? "" : last) + std::string(i18n::tr("RomFS mods"));
+    return names;
 }
 int ask_sel = 0;   // (the restart question's choice: 0 Later, 1 Restart now)
 
@@ -2563,7 +2618,7 @@ float scroll_at[TAB_MOTION + 2];   // (the first row shown, eased toward the sel
                                    // the Controls page: kControlsSlot)
 constexpr int kControlsSlot = TAB_MOTION + 1;
 int wheel_rows[TAB_MOTION + 2];   // (the mouse wheel's notches since the last drawing, a slot each: scroll_rows scrolls by them)
-int scrolled_to[TAB_MOTION + 2] = {-1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
+int scrolled_to[TAB_MOTION + 2] = {-1, -1, -1, -1, -1, -1, -1, -1};   // (the selection scroll_rows last brought into view)
 float scroll_want[TAB_MOTION + 2];   // (where scroll_at is going: the wheel moves it, a new selection too)
 float ease_step = 0;     // (this drawing's share of the way: the time since the last one)
 
@@ -2795,6 +2850,7 @@ std::string restart_line(ui::Ctx& c, float px, float width) {
         const char* names[mr::kMax];
         for (int i = 0; i < restart_state.n; i++) names[i] = i18n::tr(restart_names[i]);
         line = i18n::tr("Restart needed: ") + mr::names(names, restart_state.n, shown);
+        if (romfs_mods_changed()) line += std::string(line.back() == ' ' ? "" : i18n::tr(" and ")) + i18n::tr("RomFS mods");
         if (more) {   // (" settings (many)": the form Russian and Polish take for 5 and up, i18n::plural; never asked in English)
             const int form = i18n::plural(more);
             line += std::string(named ? i18n::tr(" and ") : "") + std::to_string(more) +
@@ -3057,7 +3113,7 @@ const char* bug_report_hint() {
     return text.c_str();
 }
 
-const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Debug"};
+const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Mods", "Debug"};
 inline const char* tab_title(int t) { return t >= 0 && t < TAB_COUNT ? tab_titles[t] : "Settings"; }
 inline bool cheat_is_toggle(int c) { return c == 0 || c == 1 || c == 7; }
 
@@ -3098,6 +3154,8 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
         }
     }
 }
+
+void draw_mods_tab(ui::Ctx& c, float hh, float cx0, float cx1, float hx0, float hx1, bool narrow);
 
 void draw_options(ui::Ctx& c) {
     const float s = c.s, hh = banner_h(c);
@@ -3145,12 +3203,17 @@ void draw_options(ui::Ctx& c) {
     bool narrow;
     columns(c, &cx0, &cx1, &hx0, &hx1, &narrow);
     column(c, cx0, cx1, hh);
+    if (cur_tab == TAB_MODS) {
+        draw_mods_tab(c, hh, cx0, cx1, hx0, hx1, narrow);
+        return;
+    }
     const int count = tab_row_count(cur_tab), sel = tab_selected[cur_tab];
     const Row& selr = rows[tab_row_to_global(cur_tab, sel)];
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
-    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
+    const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) &&
+                                     (restart_pending() || romfs_mods_changed()) ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
     if (help_tall_w != hx1 - hx0 || help_said != share_said)
@@ -3218,6 +3281,68 @@ void draw_options(ui::Ctx& c) {
     }
     c.d->PopClipRect();
     ui::prompt_bar(c, prompt_list, prompts_n);   // (the prompts, on top of the help and the rows)
+}
+
+void draw_mods_tab(ui::Ctx& c, float hh, float cx0, float cx1, float hx0, float hx1, bool narrow) {
+    const float s = c.s, rh = 40 * s, pitch = 48 * s;
+    const int count = (int)romfs_mod_rows.size();
+    if (count) romfs_mod_selected = std::clamp(romfs_mod_selected, 0, count - 1);
+    const int selected = count ? romfs_mod_selected : 0;
+    const char* title = count ? romfs_mod_rows[selected].name.c_str() : "No mods found";
+    const std::string help = mod_save_failed
+        ? "Could not save the mod settings or order beside Longshot's executable. The change was not applied."
+        : count
+        ? romfs_mod_rows[selected].has_exefs
+            ? "This mod contains ExeFS patches and is locked. Remove the mod folder from mods/ and rebuild the game with Longshot Builder to change its patches."
+            : "This switches this mod's RomFS files on or off. Changes take effect after restarting Longshot."
+        : "Place a mod at mods/<name>/romfs or mods/<name>/exefs beside Longshot's executable.";
+    const char* hint = mod_save_failed ? nullptr : count
+        ? romfs_mod_rows[selected].has_exefs ? "ExeFS patches require a rebuild. This mod cannot be changed here."
+                                             : "Choose Off or On, or drag a row to change mod priority. Longshot asks whether to restart when you leave the menu."
+        : nullptr;
+    const bool after = romfs_mods_changed();
+    const float bar_top = ui::prompt_bar_top(c);
+    float bottom = std::min(c.h - c.safe, bar_top) - 10 * s;
+    const float help_tall = ui::para(c, c.f.body, 18 * s, ImVec2(), 0, help.c_str(), hx1 - hx0 - 48 * s, false);
+    if (narrow) {
+        const float help_h = std::min(22 * s + 32 * s + help_tall + (after ? 30 * s : 0) + 22 * s, (bottom - hh) * 0.5f);
+        bottom = std::min(bar_top, c.h - c.safe) - help_h - 16 * s;
+        help_box(c, hx0, hx1, bottom + 8 * s, title, help.c_str(), hint, nullptr, help_tall, after, bottom + 8 * s, bar_top - 10 * s);
+    } else {
+        help_box(c, hx0, hx1, std::max(hh + 26 * s, c.h * 0.30f), title, help.c_str(), hint, nullptr, help_tall, after,
+                 hh + 18 * s, bar_top - 12 * s);
+    }
+    const float top = hh + 24 * s, rx0 = cx0 + 44 * s, rx1 = cx1 - 44 * s, split = rx0 + (rx1 - rx0) * 0.55f;
+    ui::Prompt prompts[] = {{ui::kUpDown, "Choose"}, {ui::kLeftRight, "Change"}, {ui::kTabs, "Tabs"}, {ui::kBack, "Close"}};
+    if (!count) {
+        const float y = top + 10 * s;
+        name_cell(c, ImVec2(rx0, y), ImVec2(rx1, y + rh), "No mods found", false, false);
+        marquee_max = 0;
+        ui::prompt_bar(c, prompts, 4);
+        return;
+    }
+    int shown = 0;
+    const float first = scroll_rows(TAB_MODS, count, selected, top, bottom, pitch, &shown);
+    scroll_bar(c, cx0 + 20 * s, top, top + shown * pitch - (pitch - rh), count, shown, first);
+    c.d->PushClipRect(ImVec2(cx0, top - 8 * s), ImVec2(cx1, bottom + 8 * s));
+    for (int i = 0; i < count; i++) {
+        const float y = top + (i - first) * pitch;
+        if (y + rh < top - 8 * s || y > bottom + 8 * s) continue;
+        const RomfsModRow& mod = romfs_mod_rows[i];
+        const bool chosen = i == selected;
+        name_cell(c, ImVec2(rx0, y), ImVec2(split, y + rh), mod.name.c_str(), chosen && !mod.has_exefs, mod.changed);
+        const ImVec2 va(split, y), vb(rx1, y + rh);
+        halves_cell(c, va, vb, "Off", "On", mod.enabled, chosen, mod.has_exefs);
+        if (mod.has_exefs)
+            c.d->AddRectFilled(ImVec2(rx0, y), ImVec2(rx1, y + rh), ui::rgba(12, 10, 8, 72));
+        if (mod_drag_active && i == mod_drag_target)
+            c.d->AddRect(ImVec2(rx0 + 2 * s, y + 2 * s), ImVec2(rx1 - 2 * s, y + rh - 2 * s), ui::kGoldHi, 2 * s,
+                         0, std::max(2.0f, 2 * s));
+        hits.add(rx0, std::max(y, top - 8 * s), rx1, std::min(y + rh, bottom + 8 * s), menu_hit::kModRow, i, va.x, vb.x);
+    }
+    c.d->PopClipRect();
+    marquee_max = 0;
+    ui::prompt_bar(c, prompts, 4);
 }
 
 /// The tuning bar: a compact TV-style picture settings bar docked at the bottom of the screen,
@@ -3670,8 +3795,8 @@ void draw_ask(ui::Ctx& c) {
     const float hb = 50 * s;   // (a tan title strip, as the banner, its title in dark ink)
     c.d->AddRectFilledMultiColor(p, ImVec2(q.x, p.y + hb), ui::kBannerTop, ui::kBannerTop, ui::kBanner, ui::kBanner);
     c.d->AddRectFilled(ImVec2(p.x, p.y + hb - 3 * s), ImVec2(q.x, p.y + hb), ui::kBannerEdge);
-    ui::text_mid_centre(c, c.f.heading, 23 * s, (p.x + q.x) * 0.5f, p.y + hb * 0.5f, ui::kBannerInk, "Restart Needed");
-    const std::string ask = i18n::tr("Restart to apply ") + restart_list(i18n::tr(" and ")) + "?";
+    ui::text_mid_centre(c, c.f.heading, 23 * s, (p.x + q.x) * 0.5f, p.y + hb * 0.5f, ui::kBannerInk, "Restart Required");
+    const std::string ask = i18n::tr("Restart Longshot to apply ") + restart_list(i18n::tr(" and ")) + ".";
     ui::para(c, c.f.body, 19 * s, ImVec2(p.x + 28 * s, p.y + 64 * s), ui::kInk, ask.c_str(), W - 56 * s);
     ui::text_mid(c, c.f.body, 16 * s, p.x + 28 * s, p.y + 124 * s, ui::kSoft, "Progress since your last save is lost.");
     const float bw = 210 * s, bh = 46 * s, gap = 24 * s, by = p.y + 160 * s, x0 = (p.x + q.x) * 0.5f - bw - gap * 0.5f;
@@ -3683,6 +3808,25 @@ void draw_ask(ui::Ctx& c) {
     }
     const ui::Prompt prompt_list[] = {{ui::kLeftRight, "Choose"}, {ui::kConfirm, "Confirm"}, {ui::kBack, "Later"}};
     ui::prompt_bar(c, prompt_list, 3);
+}
+
+void draw_exefs_locked_notice(ui::Ctx& c) {
+    const float s = c.s, W = 560 * s, H = 244 * s;
+    const ImVec2 p((c.w - W) * 0.5f, (c.h - H) * 0.5f), q = p + ImVec2(W, H);
+    ui::shadow(c, p, q, 30 * s, 1.0f, 8 * s);
+    c.d->AddRectFilled(p, q, ui::rgba(36, 28, 19, 250));
+    c.d->AddRect(p, q, ui::rgba(122, 98, 64, 230), 0, 2 * s);
+    const float hb = 50 * s;
+    c.d->AddRectFilledMultiColor(p, ImVec2(q.x, p.y + hb), ui::kBannerTop, ui::kBannerTop, ui::kBanner, ui::kBanner);
+    c.d->AddRectFilled(ImVec2(p.x, p.y + hb - 3 * s), ImVec2(q.x, p.y + hb), ui::kBannerEdge);
+    ui::text_mid_centre(c, c.f.heading, 22 * s, (p.x + q.x) * 0.5f, p.y + hb * 0.5f, ui::kBannerInk, "ExeFS mod is locked");
+    const char* note = "ExeFS patches are compiled into the game executable. Remove this mod folder from mods/ and rebuild with Longshot Builder to change or disable its patches.";
+    ui::para(c, c.f.body, 18 * s, ImVec2(p.x + 28 * s, p.y + 68 * s), ui::kInk, note, W - 56 * s);
+    const ImVec2 a(p.x + 170 * s, p.y + 176 * s), b(a.x + 220 * s, a.y + 44 * s);
+    ui::button(c, a, b, "OK", true);
+    hits.add(a.x, a.y, b.x, b.y, menu_hit::kButton, 0);
+    const ui::Prompt prompts[] = {{ui::kConfirm, "Close"}, {ui::kBack, "Close"}};
+    ui::prompt_bar(c, prompts, 2);
 }
 
 void draw_menu(ui::Ctx& c);
@@ -3744,11 +3888,20 @@ void draw_menu(ui::Ctx& c) {
     menu_ox = std::floor((c.w - k.w) * 0.5f);
     const int vtx0 = c.d->VtxBuffer.Size, cmd0 = c.d->CmdBuffer.Size;
     hits.clear(0, 0, k.w, k.h);
-    if (page == 5) draw_ask(k);
+    if (page == 5) {
+        draw_options(k);
+        hits.clear(0, 0, k.w, k.h);   // keep the current menu visible beneath the restart decision
+        draw_ask(k);
+    }
+    else if (page == 6) {
+        draw_options(k);
+        hits.clear(0, 0, k.w, k.h);   // the menu stays visible beneath the modal; only the notice receives input
+        draw_exefs_locked_notice(k);
+    }
     else if (page == 1) draw_controls(k);
     else if (page == 3) draw_teleport(k);
     else if (page == 4) draw_inventory(k);
-    else if (tune_mode) draw_tune_bar(k);
+    else if (tune_mode && cur_tab != TAB_MODS) draw_tune_bar(k);
     else draw_options(k);
     if (menu_ox <= 0) return;
     for (int i = vtx0; i < c.d->VtxBuffer.Size; i++) c.d->VtxBuffer[i].pos.x += menu_ox;
@@ -4122,6 +4275,7 @@ void menu_init() {
     static bool done;
     if (done) return;
     done = true;
+    load_romfs_mod_rows();
     for (auto& count : item_counts) count.store(-1, std::memory_order_relaxed);
     bool has_options = false;
     bool has_output = false;   // (an output_res= line: the Output resolution chosen; none: hos_output_default, as the host)
@@ -4461,7 +4615,7 @@ void menu_option_set(int id, int value) {
 // its own thread: menu_mu keeps them apart from menu_tick (the present's thread) and from menu_option_set (the game's)
 bool bridge_row(int i) { return rows[i].value && !rows[i].heading && rows[i].cheat < 0 && row_shown(i); }
 void bridge_fill(int i, MkwVkSetting* out) {
-    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "debug", "motion", "controls"};
+    static const char* const tabs[] = {"graphics", "audio", "gameplay", "controls", "mods", "debug", "motion", "controls"};
     static_assert(sizeof tabs / sizeof tabs[0] == TAB_PAGE + 1, "a name for each MenuTab");
     const Row& r = rows[i];
     *out = MkwVkSetting{};
@@ -4774,6 +4928,7 @@ void outputs_follow_screen() {
 void menu_tick() {
     std::lock_guard lk(menu_mu);   // (the control bridge's settings: menu_setting_set)
     share_finish();   // (Save my pipeline list's worker, done)
+    const bool exefs_notice_was_open = page == 6;
     fullscreen_tick();
     game_lang_tick();
     outputs_follow_screen();
@@ -4906,7 +5061,14 @@ void menu_tick() {
         int now[mr::kMax];
         restart_values(now);
         restart_state.choose_later(now);
-        open_now = false, page = 0, tune_mode = false, changed = true;
+        if (romfs_mods_changed()) mod_later_serial = mod_change_serial;
+        if (mods_exit_tab >= 0) {
+            cur_tab = mods_exit_tab;
+            mods_exit_tab = -1;
+            page = 0, changed = true;
+        } else {
+            open_now = false, page = 0, tune_mode = false, changed = true;
+        }
     };
     // (Menu shortcut "Insert, F1 or Esc", the default: Esc on a closed menu opens it, the keyboard's and RX_VK_MENU_SCRIPT's
     // ESC alone (the gamepad's back is Esc only while it is open, above). The press that opened it does not go back a page
@@ -5096,8 +5258,49 @@ void menu_tick() {
             const int ht = hit.part == menu_hit::kTab ? hit.index : hit.part == menu_hit::kTabPrev ? TAB_COUNT
                          : hit.part == menu_hit::kTabNext ? TAB_COUNT + 1 : -1;
             if (ht != hover_tab) hover_tab = ht, changed = true;
-            int& sel = tab_selected[cur_tab];
-            const bool on_row = hit.part == menu_hit::kRow || hit.part == menu_hit::kSlider;
+            int& sel = cur_tab == TAB_MODS ? romfs_mod_selected : tab_selected[cur_tab];
+            const bool on_row = hit.part == menu_hit::kRow || hit.part == menu_hit::kSlider ||
+                                (cur_tab == TAB_MODS && hit.part == menu_hit::kModRow);
+            bool mod_drag_handled = false;
+            if (cur_tab == TAB_MODS && (ptr.pressed & HOS_MOUSE_LEFT) && hit.part == menu_hit::kModRow &&
+                hit.index >= 0 && hit.index < (int)romfs_mod_rows.size()) {
+                sel = hit.index, scrolled_to[cur_tab] = sel;
+                mod_drag_handled = changed = true;
+                if (romfs_mod_rows[hit.index].has_exefs) page = 6;
+                else {
+                    mod_drag_from = mod_drag_target = hit.index;
+                    mod_drag_start_x = mx, mod_drag_start_y = my;
+                    mod_drag_active = false;
+                }
+            }
+            if (cur_tab == TAB_MODS && mod_drag_from >= 0) {
+                mod_drag_handled = true;
+                if (ptr.held & HOS_MOUSE_LEFT) {
+                    if (!mod_drag_active && std::abs(mx - mod_drag_start_x) + std::abs(my - mod_drag_start_y) >= 8)
+                        mod_drag_active = true, changed = true;
+                    if (mod_drag_active && hit.part == menu_hit::kModRow && hit.index >= 0 &&
+                        hit.index < (int)romfs_mod_rows.size() && !romfs_mod_rows[hit.index].has_exefs &&
+                        mod_drag_target != hit.index)
+                        mod_drag_target = hit.index, changed = true;
+                } else {
+                    const int from = mod_drag_from, to = mod_drag_target;
+                    if (mod_drag_active) {
+                        const bool release_on_mod = hit.part == menu_hit::kModRow && hit.index >= 0 &&
+                                                    hit.index < (int)romfs_mod_rows.size() &&
+                                                    !romfs_mod_rows[hit.index].has_exefs;
+                        const int drop = release_on_mod ? hit.index : to;
+                        if (drop != from && move_romfs_mod(from, drop)) changed = true;
+                        else if (drop != from) mod_save_failed = true;
+                    } else if (hit.part == menu_hit::kModRow && hit.index == from) {
+                        const bool enabled = romfs_mod_rows[from].enabled;
+                        if ((hit.side < 0 && enabled) || (hit.side > 0 && !enabled))
+                            changed = set_romfs_mod(from, !enabled) || changed;
+                    }
+                    mod_drag_from = mod_drag_target = -1;
+                    mod_drag_active = false;
+                    changed = true;
+                }
+            }
             if (drag_row >= 0) {   // (a slider held: it follows the cursor's x until let go)
                 Row& d = rows[tab_row_to_global(cur_tab, drag_row)];
                 if (!(ptr.held & HOS_MOUSE_LEFT) || !d.value) {
@@ -5108,16 +5311,21 @@ void menu_tick() {
                     const int v = permille < 0 ? *d.value : menu_hit::slider_value(permille, d.lo, d.hi, d.step);
                     if (v != *d.value) set_row(d, v, v > *d.value ? 1 : -1, false), changed = true;
                 }
-            } else if (on_row && (moved || ptr.pressed) && hit.index != sel) {
+            } else if (!mod_drag_handled && on_row && (moved || ptr.pressed) && hit.index != sel) {
                 // (the row under the cursor is in view already: no scrolling to it. Brought into view as the keys' choice
                 // is, with its row of context, the top row slid down under a cursor that stayed put, and the next click took
                 // the row above: picking the Upscaler changed the Output resolution, and the menu asked to restart)
                 sel = hit.index, scrolled_to[cur_tab] = sel, changed = true;
             }
-            if ((ptr.pressed & HOS_MOUSE_LEFT) && drag_row < 0) {
+            if ((ptr.pressed & HOS_MOUSE_LEFT) && drag_row < 0 && !mod_drag_handled) {
                 if (hit.part == menu_hit::kTabPrev) tab_left = true;
                 else if (hit.part == menu_hit::kTabNext) tab_right = true;
-                else if (hit.part == menu_hit::kTab && hit.index != cur_tab) cur_tab = hit.index, changed = true;
+                else if (hit.part == menu_hit::kTab && hit.index != cur_tab) {
+                    if (cur_tab == TAB_MODS && restart_ask()) {
+                        mods_exit_tab = hit.index;
+                        page = 5, ask_sel = 0, changed = true;
+                    } else cur_tab = hit.index, changed = true;
+                }
                 else if (hit.part == menu_hit::kSlider) {
                     Row& d = rows[tab_row_to_global(cur_tab, hit.index)];
                     drag_row = hit.index;
@@ -5143,68 +5351,105 @@ void menu_tick() {
             // values change by a click on their arrows or halves, a slider's drag, Left and Right, A and Enter)
             if (ptr.wheel && drag_row < 0) wheel_rows[cur_tab] += ptr.wheel, changed = true;
         }
+        if (!mouse && mod_drag_from >= 0 && !(ptr.held & HOS_MOUSE_LEFT)) {
+            mod_drag_from = mod_drag_target = -1;
+            mod_drag_active = false;
+            changed = true;
+        }
         if (tune_down && (press[12] || tab_left || tab_right || press[1] || press[2] || press[3] || press[4] || press[5] || press[7] || ptr.pressed))
             tune_cancelled = true;
         const bool tune_toggle = tune_release || pad(HOS_PAD_WEST);
         if (tune_toggle && listening == 0) tune_mode = !tune_mode, changed = true;
+        if (exefs_notice_was_open && page == 6 && (press[5] || press[7] || (ptr.pressed & HOS_MOUSE_LEFT)))
+            page = 0, press[5] = false, press[7] = false, changed = true;
         if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         if (press[5] && pending) pending = nullptr, changed = true;   // (a Restart or Quit waiting for its second press: cancelled)
         else if (press[5] && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS, press[5] = false, changed = true;   // (back)
         else if (press[5] && restart_ask()) page = 5, ask_sel = 0, changed = true;   // (the restart question first)
         else if (press[5]) open_now = false, tune_mode = false;
-        // (the tabs: LB and RB, Q and E, or Tab; from the Motion page, as from Controls)
-        if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
-        if (tab_left) cur_tab = (cur_tab + TAB_COUNT - 1) % TAB_COUNT, changed = true;
-        else if (tab_right) cur_tab = (cur_tab + 1) % TAB_COUNT, changed = true;
-        const int tab_count = tab_row_count(cur_tab);
-        int& selected = tab_selected[cur_tab];
-        if (selected >= tab_count) selected = tab_count - 1;   // (a row gone since: the debug tools turned off, HDR turned off: row_shown)
-        auto heading_at = [&](int k) { return rows[tab_row_to_global(cur_tab, k)].heading; };   // (stepped over)
-        if (heading_at(selected)) selected = (selected + 1) % tab_count;
-        if (cur_tab == TAB_DEBUG && (press[1] || press[2])) {   // (the Debug tab: in its layout's order, debug_rows)
-            selected = debug_step(selected, press[2] ? 1 : -1);
-            changed = true;
-        } else {
-            if (press[1]) {
-                do selected = (selected + tab_count - 1) % tab_count;
-                while (heading_at(selected));
-                changed = true;
+        if (page != 5 && page != 6 && open_now.load()) {
+            // The Mods tab asks before leaving with unapplied RomFS state or order changes. Later resumes the requested tab.
+            if ((tab_left || tab_right) && cur_tab == TAB_MOTION) cur_tab = TAB_CONTROLS;
+            if (tab_left || tab_right) {
+                const int target = (cur_tab + TAB_COUNT + (tab_left ? -1 : 1)) % TAB_COUNT;
+                if (cur_tab == TAB_MODS && restart_ask()) {
+                    mods_exit_tab = target;
+                    page = 5, ask_sel = 0, changed = true;
+                } else cur_tab = target, changed = true;
             }
-            if (press[2]) {
-                do selected = (selected + 1) % tab_count;
-                while (heading_at(selected));
-                changed = true;
-            }
-        }
-        Row& r = rows[tab_row_to_global(cur_tab, selected)];
-        const bool confirm_selected = &r == &rows[kQuitRow] || &r == &rows[kRestartRow];
-        if (pending && (pending != &r || !mine)) pending = nullptr, changed = true;
-        if (press[7] && confirm_selected) {
-            if (mine && !press[5]) {
-                if (pending != &r) {
-                    pending = &r, changed = true;
-                } else {   // (as Restart now: saved first, as the window's own close does not force the pipeline cache)
-                    save();
-                    pipeline_cache_save(true);
-                    pending = nullptr;
-                    if (&r == &rows[kRestartRow]) {   // (the restart question's Restart now: the window closes, then the game starts again)
-                        logf("menu: restart");
-                        open_now = false, changed = true;
-                        if (const HWND window = app_window()) PostMessageA(window, WM_APP + 9, 0, 0);
-                    } else if (const HWND window = app_window()) {
-                        PostMessageA(window, WM_CLOSE, 0, 0);
+            if (page != 5 && page != 6 && cur_tab == TAB_MODS) {
+                if (pending) pending = nullptr, changed = true;
+                const int count = (int)romfs_mod_rows.size();
+                if (count) {
+                    romfs_mod_selected = std::clamp(romfs_mod_selected, 0, count - 1);
+                    if (press[1]) romfs_mod_selected = (romfs_mod_selected + count - 1) % count, changed = true;
+                    if (press[2]) romfs_mod_selected = (romfs_mod_selected + 1) % count, changed = true;
+                    if (press[3] || press[4] || press[7]) {
+                        const RomfsModRow& selected_mod = romfs_mod_rows[romfs_mod_selected];
+                        if (selected_mod.has_exefs) {
+                            page = 6;
+                            changed = true;
+                        } else {
+                            const bool enabled = selected_mod.enabled;
+                            if (press[7] || (press[3] && enabled) || (press[4] && !enabled)) {
+                                set_romfs_mod(romfs_mod_selected, !enabled);
+                                changed = true;
+                            }
+                        }
                     }
                 }
+            } else if (page != 5 && page != 6) {
+                const int tab_count = tab_row_count(cur_tab);
+                int& selected = tab_selected[cur_tab];
+                if (selected >= tab_count) selected = tab_count - 1;   // (a row gone since: debug tools or HDR were turned off)
+                auto heading_at = [&](int k) { return rows[tab_row_to_global(cur_tab, k)].heading; };
+                if (heading_at(selected)) selected = (selected + 1) % tab_count;
+                if (cur_tab == TAB_DEBUG && (press[1] || press[2])) {
+                    selected = debug_step(selected, press[2] ? 1 : -1);
+                    changed = true;
+                } else {
+                    if (press[1]) {
+                        do selected = (selected + tab_count - 1) % tab_count;
+                        while (heading_at(selected));
+                        changed = true;
+                    }
+                    if (press[2]) {
+                        do selected = (selected + 1) % tab_count;
+                        while (heading_at(selected));
+                        changed = true;
+                    }
+                }
+                Row& r = rows[tab_row_to_global(cur_tab, selected)];
+                const bool confirm_selected = &r == &rows[kQuitRow] || &r == &rows[kRestartRow];
+                if (pending && (pending != &r || !mine)) pending = nullptr, changed = true;
+                if (press[7] && confirm_selected) {
+                    if (mine && !press[5]) {
+                        if (pending != &r) {
+                            pending = &r, changed = true;
+                        } else {
+                            save();
+                            pipeline_cache_save(true);
+                            pending = nullptr;
+                            if (&r == &rows[kRestartRow]) {
+                                logf("menu: restart");
+                                open_now = false, changed = true;
+                                if (const HWND window = app_window()) PostMessageA(window, WM_APP + 9, 0, 0);
+                            } else if (const HWND window = app_window()) {
+                                PostMessageA(window, WM_CLOSE, 0, 0);
+                            }
+                        }
+                    }
+                } else if (r.cheat >= 0) cheat_press(r.cheat, press, changed);
+                else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
+                else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
+                else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
+                else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
+                if ((press[3] || press[4] || press[7]) && r.value) {
+                    if (press[7]) press[4] = true;
+                    set_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);
+                    changed = true;
+                }
             }
-        } else if (r.cheat >= 0) cheat_press(r.cheat, press, changed);   // (a debug tool: on the Debug tab itself)
-        else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
-        else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
-        else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
-        else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
-        if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
-            if (press[7]) press[4] = true;
-            set_row(r, *r.value + (press[4] ? r.step : -r.step), press[4] ? 1 : -1);
-            changed = true;
         }
         const int64_t now = prof_now();
         if (changed) {   // (a new row or value: its name from the start, after a rest)

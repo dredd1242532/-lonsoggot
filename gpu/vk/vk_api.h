@@ -7,6 +7,7 @@
    namespaces are the same as those of the WebGPU renderer's suyu copy, so the two live in different binaries. */
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "../render/rx_nvn.h"   /* (the NVN objects and command records: C) */
@@ -15,7 +16,7 @@
 extern "C" {
 #endif
 
-#define MKWVK_API_VERSION 21
+#define MKWVK_API_VERSION 23
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -204,6 +205,12 @@ typedef struct MkwVkHost {
     /* (version 20, longshot) the main screen's size in pixels, as host/hos_main.c takes its shape at the start (Windows: the
        primary's; Linux: SDL's primary desktop), for the Insert menu's Aspect ratio and Output resolution rows: 0 when not known */
     int (*screen_size)(int *width, int *height);
+    /* (version 23) RomFS mod controls and load-order reordering in the Insert menu */
+    int (*mods_romfs_menu_count)(void);
+    int (*mods_romfs_menu_get)(int index, char *name, size_t cap, int *enabled, int *has_exefs);
+    int (*mods_romfs_menu_set)(int index, int enabled);
+    int (*mods_romfs_menu_changed)(void);
+    int (*mods_romfs_menu_reorder)(int from, int to);
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

@@ -18,6 +18,7 @@ enum Part {
     kCtlRow,    // the Controls page: a row's name (index; index == the count: Reset to defaults)
     kCtlCell,   // a binding: index the row, side the CtlColumn
     kListLine,  // a list (the teleport list, the inventory): a line as shown (index, 0 the top one), side -1 the left half, 1 the right half
+    kModRow,    // the Mods tab: index of a RomFS mod row, side -1 or 1 the Off/On value half
     kButton,    // the restart question's buttons: index 0 Later, 1 Restart now
 };
 enum CtlColumn { kCtlPrimary, kCtlAlternate, kCtlKeyboard, kCtlToggle, kCtlColumns };
