@@ -88,6 +88,57 @@ uint64_t *hos_tls_slots(HosThread *t) { return t->tls_slots; }
    physical core on SMT machines), so threads the game puts on the same core never run at the same time, as on the
    Switch, where TOTK keeps per-core data without locks (both MacNativeGames and totk-pc-recomp found it relies on
    that); they are still time-sliced at any instruction, not scheduled by priority as Horizon does. */
+
+/* ---- temporary perf counters: PR #327 measurement only, not for merge ---- */
+static volatile long long perf_takes, perf_mask0_takes, perf_mask0_readable, perf_mask0_off;
+static volatile long long perf_mask0_after, perf_mask0_stale_after, perf_affinity, perf_set_zero;
+static volatile int perf_core_slot = -1;
+#define PERF_INC(x) __atomic_add_fetch(&(x), 1, __ATOMIC_RELAXED)
+static uint64_t perf_cached(HosThread *t) {
+    if (perf_core_slot < 0 || perf_core_slot >= HOS_TLS_SLOTS) return (uint64_t)-1;
+    if (t->entry != 0x834a2e50ULL || !t->arg) return (uint64_t)-1;
+    uint64_t *tt = (uint64_t *)hos_guest_range(t->arg + 0xb8, 8);
+    if (!tt || *tt != t->guest_tt) return (uint64_t)-1;
+    return t->tls_slots[perf_core_slot];
+}
+static void perf_before_take(HosThread *t, int c) {
+    PERF_INC(perf_takes);
+    if (t->core_mask != 0) return;
+    PERF_INC(perf_mask0_takes);
+    const uint64_t cell = perf_cached(t);
+    if (cell == (uint64_t)-1) return;
+    PERF_INC(perf_mask0_readable);
+    if (cell != (uint64_t)c + 1) PERF_INC(perf_mask0_off);
+}
+static void perf_after_take(HosThread *t, int c) {
+    if (t->core_mask != 0) return;
+    const uint64_t cell = perf_cached(t);
+    if (cell == (uint64_t)-1) return;
+    PERF_INC(perf_mask0_after);
+    if (cell != (uint64_t)c + 1) PERF_INC(perf_mask0_stale_after);
+}
+static void perf_note_affinity(uint64_t mask) {
+    PERF_INC(perf_affinity);
+    if (mask == 0) PERF_INC(perf_set_zero);
+}
+void perf_report(void);
+void perf_report(void) {
+    fprintf(stderr, "PERF takes=%lld mask0_takes=%lld mask0_readable=%lld mask0_off_cached=%lld "
+            "mask0_after_readable=%lld mask0_stale_after=%lld affinity=%lld set_mask_zero=%lld\n",
+            perf_takes, perf_mask0_takes, perf_mask0_readable, perf_mask0_off,
+            perf_mask0_after, perf_mask0_stale_after, perf_affinity, perf_set_zero);
+    fflush(stderr);
+}
+/* ---- temporary stubs for the shared lift tree's opt-in hooks ---- */
+volatile int hos_vcore_obj186_on;
+void hos_vcore_obj186(Ctx *c, uint64_t obj, uint64_t container, uint64_t obj_core, uint64_t flags) {
+    (void)c; (void)obj; (void)container; (void)obj_core; (void)flags;
+}
+void hos_vcore_obj186_write(Ctx *c, uint64_t obj, uint64_t core, int ctor) {
+    (void)c; (void)obj; (void)core; (void)ctor;
+}
+/* ---- end temporary perf counters ---- */
+
 static void pin_by_core(HosThread *t) {
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     static int on = -1;
@@ -102,6 +153,7 @@ static void vc_note_mask_change(HosThread *t);
 static int vc_mask_changed(uint64_t old_mask, uint64_t new_mask);
 #endif
 void hos_thread_affinity(HosThread *t, int ideal, uint64_t mask) {
+    perf_note_affinity(mask);
     if (ideal >= 0) t->ideal_core = ideal;
     const uint64_t old_mask = t->core_mask;
     t->core_mask = mask;   /* (0 is a real mask: no affinity, and the game still caches the core) */
@@ -1440,6 +1492,7 @@ HLE(_ZN2nn2os15AllocateTlsSlotEPNS0_7TlsSlotEPFvmE) {
     for (int i = 0; i < HOS_TLS_SLOTS; i++) {
         if (!InterlockedCompareExchange(&slot_used[i], 1, 0)) {
             G32(ARG(0)) = (uint32_t)i;
+            if (ARG(0) == 0x84e9f7acULL) perf_core_slot = i;
             if (ARG(0) == 0x84e9f7acULL) core_tls_slot = i;
             RET(0);
             return;
@@ -1746,12 +1799,14 @@ static void vc_note_mask_change(HosThread *t) {
     ReleaseSRWLockExclusive(&vc_lock);
 }
 static void vc_take(HosThread *t, int c) {
+    perf_before_take(t, c);
     vc_owner[c] = t;
     t->vc_held = c + 1;
     t->vc_last = c + 1;
     t->vc_kick = 0;
     t->vc_remask = 0;
     vc_sync_tls(t, c);
+    perf_after_take(t, c);
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)

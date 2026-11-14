@@ -2399,6 +2399,7 @@ static void game_quit(void) {   /* (as the window's close: the pipelines made si
     rx_close_asked();
     hos_log("control: exiting");
     hos_log_flush();
+    { void perf_report(void); perf_report(); }
     ExitProcess(0);
 }
 static const char *game_renderer(void) { return rx_describe(); }
