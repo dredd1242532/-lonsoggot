@@ -739,8 +739,9 @@ anything SDL reports as a Switch Pro Controller or Joy-Con, and that includes th
 channels drive the voice coils. With `renhdrum.dll` beside the game, Longshot sends the game's own HD rumble values to
 them as they are (both bands, both sides, no flattening to two motors), so the pad plays the game's fine vibration
 instead of a rough imitation of it. The menu's Haptic feedback row picks it, Auto does on a cable, and Haptic strength
-scales it; the Rumble strength still applies. A DualSense on Bluetooth has no such endpoint: it keeps the standard
-rumble, and the Haptic status row says so. Without `renhdrum.dll`, or with no endpoint found, nothing breaks: the pad
+scales it; the Rumble strength still applies. Over Bluetooth the pad exposes no such sound card, and its own HID haptics
+reports are a path this build does not implement yet, so a wireless DualSense keeps the standard rumble and the Haptic
+status row says so. Without `renhdrum.dll`, or with no endpoint found, nothing breaks: the pad
 gets the standard rumble. `renhdrum.dll` is RenHDrum's (MIT OR Apache-2.0, `third_party/renhdrum/NOTICE`); the build
 copies it beside the game when it is in `third_party/renhdrum/`, and the game runs without it.
 

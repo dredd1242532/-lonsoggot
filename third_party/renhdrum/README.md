@@ -15,6 +15,18 @@ Expected file
     renhdrum.dll  414,208 bytes
     SHA-256 3f3cfa954a2842f118d9c3fe29c1ba264115268de0484831340a70436c5f7940
 
+That pin is in `renhdrum.dll.sha256`, which is committed (the DLL is not): a clean checkout can tell a good copy from a
+wrong one without the binary.
+
+    python -I scripts/renhdrum.py verify                  # is the copy here the pinned one, and usable?
+    python -I scripts/renhdrum.py build --src <checkout>  # build it from the v0.3.0 tag, static runtime
+    python -I scripts/renhdrum.py fetch <url or path>     # take a copy, and refuse it unless it is the pinned one
+
+`verify` reads the PE's own import table (a copy built without the static CRT imports the VC++ Runtime, and is refused)
+and calls `renhdrum_version()` (0x000300; `host/haptic.c` also accepts 0x000301). Exit status 0 means the haptics back
+end can use it. This is what a clean environment uses: no copy is needed for the game to start, and one can be made or
+checked without guessing.
+
 Build it yourself (reproducible)
 --------------------------------
 From the RenHDrum checkout at the v0.3.0 tag, on Windows with a Rust toolchain:

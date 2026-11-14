@@ -1,0 +1,6 @@
+# The renhdrum.dll this repository was tested with (RenHDrum v0.3.0, RENHDRUM_VERSION 0x000300).
+# The DLL itself is not committed (.gitignore: *.dll, as for SDL2.dll and SDL3.dll): this pin is what a clean checkout
+# can check a copy against.  python -I scripts/renhdrum.py verify  |  build --src <checkout>  |  fetch <url or path>
+#
+# <sha256>  <size>  <name>
+3f3cfa954a2842f118d9c3fe29c1ba264115268de0484831340a70436c5f7940  414208  renhdrum.dll

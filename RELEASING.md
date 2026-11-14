@@ -211,6 +211,15 @@ for Linux. A bump is a pull request that changes its line:
   `add` publishes the archive as a new package version (`<name>-<system>/<version>/<sha256>-<name>.zip`, under the
   organization's *Packages*) and writes the line. A version's files never change: new bytes are a new version. Check that nothing made
   from the game is in it (CONTRIBUTING.md): the profile is addresses and counts, never game code.
+  - **`renhdrum.dll` travels in that same `third-party` archive.** It is not committed (`.gitignore` excludes `*.dll`),
+    so a clean checkout has none; `third_party/renhdrum/renhdrum.dll.sha256` is the pin. Before assembling the archive,
+    put the pinned copy in `third_party/renhdrum/` and check it:
+    `python -I scripts/renhdrum.py verify` (0 = the pinned bytes, the five exports `host/haptic.c` binds, and a static
+    C runtime; anything else says which of those it is not). The copy comes from `scripts/renhdrum.py build --src
+    <RenHDrum at v0.3.0>` (it sets `RUSTFLAGS=-C target-feature=+crt-static` itself), or from a release that carried it.
+    `assemble third-party` then picks it up with the other prebuilt files (`PREBUILT_EXT`), and a build puts it beside
+    the game (`nx2/build.py`, `nx2/make_game.py`). A release without it still works: the haptics row then says
+    "Haptic backend unavailable" and every pad keeps the standard rumble.
 - **A Linux tool** (LLVM, FFmpeg or dav1d, SDL2, the Vulkan headers, the sysroot): they are all ours, made from
   `scripts/linux/deps.sh`'s pinned downloads, on the system the AppImage is for (Ubuntu 22.04: the sysroot is its C library).
   1. Change the version and its `sha256` pin in `scripts/linux/deps.sh` (a tag archive's pin is what it unpacks to: the

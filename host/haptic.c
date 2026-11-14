@@ -306,7 +306,8 @@ static int want_status(void) {   /* (g_life held; g_host shared) */
     if (g_pad.switch_hd && mode != HOS_HAPTIC_STANDARD) return HOS_HAPTIC_SWITCH_HD;
     if (!pad_is_dualsense()) return HOS_HAPTIC_STANDARD_RUMBLE;
     if (mode == HOS_HAPTIC_STANDARD) return HOS_HAPTIC_STANDARD_RUMBLE;
-    if (g_pad.wireless == 1) return HOS_HAPTIC_DS_BT;   /* this build drives USB audio only: Bluetooth keeps the standard rumble */
+    if (g_pad.wireless == 1) return HOS_HAPTIC_DS_BT;   /* this build plays haptics on the pad's USB sound card, which
+                                                           Bluetooth does not expose: the pad keeps the standard rumble */
     return HOS_HAPTIC_DS_USB;
 }
 static void stop_haptics(void) {
@@ -331,7 +332,8 @@ static void apply(void) {
             note((int)g_mode == HOS_HAPTIC_OFF ? "Haptic feedback is Off" : "Rumble strength is Off");
             break;
         case HOS_HAPTIC_SWITCH_HD: note("the pad's own HD Rumble"); break;
-        case HOS_HAPTIC_DS_BT: note("Bluetooth: haptics need a cable, so the standard rumble is in use"); break;
+        case HOS_HAPTIC_DS_BT: note("Bluetooth: these haptics play through the pad's USB sound card, which Bluetooth does "
+                                   "not expose, so the standard rumble is in use"); break;
         case HOS_HAPTIC_STANDARD_RUMBLE:
             note((int)g_mode == HOS_HAPTIC_DUALSENSE && pad_is_dualsense() == 0
                      ? "this pad has no haptics, so the standard rumble is in use"

@@ -4,15 +4,18 @@
    motor strengths on the way (host/nn_hid.c's rumble_map still does that, for every pad that is not driven here).
 
    What drives a pad, from the menu's Haptic feedback row (opts.haptic) and the pad itself:
-     Auto               a DualSense on a cable: DualSense haptics; a DualSense over Bluetooth: the standard rumble (the
-                        multichannel endpoint needs a cable); a Switch Pro or Joy-Con: its own HD Rumble packets, which
-                        host/hd_rumble.h and host/pad_sdl.c send as they always did; anything else: the standard rumble.
+     Auto               a DualSense on a cable: DualSense haptics; a DualSense over Bluetooth: the standard rumble (this
+                        build plays haptics through the pad's USB sound card, and Bluetooth exposes no such endpoint; the
+                        pad's HID haptics reports are a path this build does not implement yet); a Switch Pro or Joy-Con:
+                        its own HD Rumble packets, which host/hd_rumble.h and host/pad_sdl.c send as they always did;
+                        anything else: the standard rumble.
      Standard rumble    SDL's rumble, for every pad.
      DualSense haptics  the same as Auto, but a pad that is not a DualSense falls back to the standard rumble and says so.
      Off                nothing at all: no haptics, no standard rumble.
 
-   The menu's Rumble strength is the one strength: 0 (Off) stops every backend here, and the percent scales the values
-   once, in hos_haptic_push. A DualSense the haptics drive is sent no SDL rumble at the same time (hos_haptic_owns).
+   The menu's Rumble strength is the one strength: 0 (Off) stops every backend here, and the percent is one gain on the
+   samples the DSP has made (endpoint_pull), never a scale on the values handed to it. A DualSense the haptics drive is
+   sent no SDL rumble at the same time (hos_haptic_owns).
 
    Windows only: RenHDrum ships as renhdrum.dll beside the game (nx2/build.py). Elsewhere, and when the DLL or the audio
    endpoint is missing, every pad keeps the standard rumble and hos_haptic_status says why. */
