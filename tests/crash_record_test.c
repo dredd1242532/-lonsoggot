@@ -147,7 +147,8 @@ void rx_close_asked(void) {}
 void coop_shutdown(void) {}   /* (host/coop.c: a co-op room's BYE and LEAVE; control.c's game_quit and the window's exit say it before the clean end) */
 /* CONTROL_QUIT */
 static int relaunch_asked = 1;
-static void relaunch(void) { assert(marker == NO_FILE && !ready); }
+static int relaunch(void) { assert(marker == NO_FILE && !ready); return 1; }   /* (hos_relaunch.c: whether the new process started) */
+void coop_profile_restart_failed(void) { assert(0 && "a started restart must not abandon the temporary profile"); }   /* (host/coop_profile.c: only when none started) */
 /* WINDOW_EXIT */
 static int game_argc;
 static char **game_argv;
