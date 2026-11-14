@@ -111,6 +111,10 @@ uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
 int steam_deck_saved = -1;
 bool auto_deck_turned = false;
 inline bool env_value_off(const char* v) { return !v || !*v || !std::strcmp(v, "0"); }
+unsigned gfx_saved_mask = 0;
+inline unsigned gfx_bit(const int*) { return 0; }
+inline void gfx_limits() {}
+inline const char* gfx_env(const char*, const char*) { return nullptr; }
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
 /* SAVE */

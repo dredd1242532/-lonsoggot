@@ -75,7 +75,11 @@ int main() {
         const int n = debug_rows(order, &dev, &heading);
         assert(heading >= 0);
         assert(dev == (env || enabled ? (int)std::size(expected) : 1));
-        assert(n == dev + 5); // Only the existing Developer rows follow.
+        assert(n == dev + 6); // Includes the new detail-slider control.
+        int uncap_rows = 0;
+        for (int i = dev; i < n; ++i)
+            uncap_rows += !std::strcmp(rows[tab_row_to_global(TAB_DEBUG, order[i])].name, "Uncap detail sliders");
+        assert(uncap_rows == 1);
         for (int i = 0; i < dev; ++i) {
             const Row& row = rows[tab_row_to_global(TAB_DEBUG, order[i])];
             assert(!std::strcmp(row.name, expected[i]));
