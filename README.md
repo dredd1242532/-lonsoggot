@@ -446,7 +446,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | HDR tone mapper | Vanilla (the game's curve), PsychoV35 (RenoDX's; with HDR set to Native. DLSS/DLAA with their NVIDIA frame-generation inputs, and AMD FSR 4, can be tried with `RX_VK_PSYCHOV35_DLSS=1`; FSR 3.1, TAAU and Upscaler Off still fall back to the game's network) | Vanilla |
 | | Anisotropic filtering | Game's, 2x, 4x, 8x, 16x | 16x |
 | | GPU device | Auto, or each graphics card by name (after a restart) | Auto |
-| | Threaded rendering | Auto, On, Off (after a restart). Auto is the same as Off for now | Auto |
+| | Threaded rendering | Auto, On, Off (after a restart). Auto is On with 12 or more processor threads for the game | Auto |
 | | VRAM budget | Auto, 3.6, 4.8, 6, 7.5, 9, 11 GB (2.2 GB only from the Minimum (4GB) preset); a quality preset sets it | Auto |
 | Audio | Volume | 0 to 100%, in steps of 5 | 100% |
 | | Mute in background | Off, On | Off |
@@ -634,9 +634,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   for one run.
 - **Threaded rendering:** On draws the picture on threads of its own (a render thread and a recorder thread) while
   the game goes on to its next frame, for a higher frame rate on a processor with threads to spare; it is still being
-  tested and can show flashes. Off draws it on the game's own thread, as before. Auto will choose by the processor
-  (On with 12 or more threads for the game, Off with fewer, and Off wherever the mode is not safe); for now Auto is
-  the same as Off on every PC. It applies after a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for
+  tested and can show flashes. Off draws it on the game's own thread, as before. Auto chooses by the processor
+  (On with 12 or more threads for the game, Off with fewer, and Off wherever the mode is not safe). It applies after
+  a restart. `RX_VK_ASYNC` and `RX_VK_RECORDER`, when set, choose for
   one run.
 - **Robust buffers** (Debug tab, Developer): a read past a buffer's end is dropped instead of stopping the GPU. Auto is
   on, on every card; Off can be faster on some NVIDIA cards.

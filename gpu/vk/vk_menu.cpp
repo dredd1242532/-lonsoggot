@@ -51,7 +51,7 @@
 #include "upscaler_rows.h"
 #include "auto_settings.h"
 #include "menu_restart.h"
-#include "threaded_rendering.h"   // (the Threaded rendering row's rule, and the gate that keeps its Auto off for now)
+#include "threaded_rendering.h"   // (the Threaded rendering row's rule, and the one gate over its Auto)
 #include "vk_menu_i18n.h"
 #include "display_modes.h"   // (the Aspect ratio and Output resolution rows: the screen's sizes and their shapes)
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
@@ -1084,12 +1084,12 @@ const char* threaded_env() {
     if (getenv("RX_VK_RECORDER")) return "RX_VK_RECORDER";
     return nullptr;
 }
-/// (Auto's line says what Auto is now: Off everywhere while threaded::kAutoEnabled is off, the CPU's rule once it is on)
+/// (Auto's line says what Auto is: the CPU's rule with threaded::kAutoEnabled on, Off everywhere were it off)
 const char* hn_threaded(int v, int variant) {
     static const char* const t[] = {
         threaded::kAutoEnabled
             ? "On where the processor has 12 or more threads for the game, and nothing rules it out; otherwise Off."
-            : "For now the same as Off, on every PC, while threaded rendering is being tested.",
+            : "The same as Off, on every PC.",
         "The picture is drawn on threads of its own while the game goes on to its next frame. Still being tested: it "
         "can show flashes.",
         "The picture is drawn on the game's own thread, as before."};
@@ -4646,7 +4646,7 @@ bool menu_threaded_rendering() {
         case threaded::Why::On: logf("vk: Threaded rendering: On (the render thread and the recorder thread)"); break;
         case threaded::Why::Off: logf("vk: Threaded rendering: Off"); break;
         case threaded::Why::AutoGate:
-            logf("vk: Threaded rendering: Auto: off (Auto is off on every PC for now; %u logical processors, its rule is on "
+            logf("vk: Threaded rendering: Auto: off (Auto is turned off in this build; %u logical processors, its rule is on "
                  "from %u)", cpus, threaded::kAutoCpus);
             break;
         case threaded::Why::AutoUnsafe: logf("vk: Threaded rendering: Auto: off (not safe on this run: %s)", unsafe); break;

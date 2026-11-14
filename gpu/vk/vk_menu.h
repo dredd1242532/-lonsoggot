@@ -14,8 +14,8 @@ struct Options {
     int pace = 0;         // frames shown on an even line (vk_framegen.cpp)
     int vsync = 0;        // (longshot) V-Sync, the swapchain's present mode (vk_main.cpp create_swapchain, made again at once): 0 Auto
                           // (mailbox where the driver has it), 1 On (FIFO), 2 Off (immediate). RX_VK_FIFO / RX_VK_IMMEDIATE over it
-    int threaded_rendering = 0;   // (longshot) Threaded rendering (threaded_rendering.h): 0 Auto (by the CPU; off everywhere while
-                          // threaded::kAutoEnabled is), 1 On (the render thread and the recorder thread), 2 Off. Read once, at the
+    int threaded_rendering = 0;   // (longshot) Threaded rendering (threaded_rendering.h): 0 Auto (by the CPU; off everywhere were
+                          // threaded::kAutoEnabled off), 1 On (the render thread and the recorder thread), 2 Off. Read once, at the
                           // start (menu_threaded_rendering); RX_VK_ASYNC and RX_VK_RECORDER, when set, over it
     int hdr = 0;          // (longshot) HDR10 out (vk_framegen.cpp framegen_hdr): 0 off, 1 the SDR picture expanded, 2 the game's own (native) HDR; when the display has it (the swapchain made again at once)
     int hdr_white = 200;  // HDR paper white, nits (the picture's white)
