@@ -16,7 +16,7 @@ own, like the game. The checks build pretended tags in code.
 | Either | `LONGSHOT_NFC_DIR=<folder>` instead |
 
 Every build of the game and the Longshot Launcher share it. One file a tag, directly in the folder; its name without the
-ending is the tag's name in the menu, in the order of the names (letters' case aside). At most 256 are listed. A file
+ending is the tag's name in the menu, in the order of the names (letters' case aside). At most 256 are listed: the first 256 by name. A file
 whose name starts with `key_` is left out.
 
 | File | What it is |

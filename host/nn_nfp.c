@@ -110,18 +110,29 @@ static int by_name(const void *a, const void *b) {
     return *x ? 1 : *y ? -1 : strcmp(((const NfcFile *)a)->name, ((const NfcFile *)b)->name);
 }
 
+/* A file of the folder, when it is a tag's by its name. The list holds NFC_MAX at the most, and they are the first by name
+   whatever order the folder gives its files in: once it is full, a file takes the place of the last by name when it comes
+   before it. (It stopped taking files at NFC_MAX while the folder was still being read, and sorted after: past 256 files
+   the menu had whichever the folder gave first, and the launcher's page could not say which.) */
 static void add_file(const char *dir, const char *name) {
     const int stem = tag_ending(name);
-    if (!stem || nfc_n >= NFC_MAX || (tolower((unsigned char)name[0]) == 'k' && tolower((unsigned char)name[1]) == 'e' &&
-                                         tolower((unsigned char)name[2]) == 'y' && name[3] == '_')) return;   /* (key_retail.bin: a key file, not a tag) */
-    NfcFile *f = &nfc_files[nfc_n];
-    snprintf(f->name, sizeof f->name, "%.*s", stem > 120 ? 120 : stem, name);
+    if (!stem || (tolower((unsigned char)name[0]) == 'k' && tolower((unsigned char)name[1]) == 'e' &&
+                  tolower((unsigned char)name[2]) == 'y' && name[3] == '_')) return;   /* (key_retail.bin: a key file, not a tag) */
+    NfcFile file;
+    snprintf(file.name, sizeof file.name, "%.*s", stem > 120 ? 120 : stem, name);
 #ifdef _WIN32
-    snprintf(f->path, sizeof f->path, "%s\\%s", dir, name);
+    snprintf(file.path, sizeof file.path, "%s\\%s", dir, name);
 #else
-    snprintf(f->path, sizeof f->path, "%s/%s", dir, name);
+    snprintf(file.path, sizeof file.path, "%s/%s", dir, name);
 #endif
-    nfc_n++;
+    if (nfc_n < NFC_MAX) {
+        nfc_files[nfc_n++] = file;
+        return;
+    }
+    int last = 0;
+    for (int i = 1; i < nfc_n; i++)
+        if (by_name(&nfc_files[i], &nfc_files[last]) > 0) last = i;
+    if (by_name(&file, &nfc_files[last]) < 0) nfc_files[last] = file;
 }
 
 /* The folder listed again, at most once a second (nfc_lk held) */
