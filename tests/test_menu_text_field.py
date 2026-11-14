@@ -5,6 +5,8 @@ The menu's own functions are cut out of gpu/vk/vk_menu.cpp by their text and dri
 gives them (MkwVkHost.take_text): typing, the caret's keys, Backspace and Delete, the length limit, printable ASCII with
 full-width digits/x folded before filtering, Enter and Esc; then Custom output size's Enter, which sets the Output resolution
 row to the size typed, or says why not. The real focused menu_tick branch handles pad-only entry, editing and the wheel.
+Raw pad polling and repeats are compiled with the focused branch beside the real hold-to-toggle helper: gameplay
+latches cannot become text input, held confirm/shoulder buttons need a new press, and the editor's keys still work.
 The host's side, cut out of host/rx_backend.c, is compiled as C: the bounded queue, focus, UTF-8 and first-line paste.
 The Windows focused key branch is run with key-state stubs to check paste repeats. Wiring checks allow later API members
 after take_text while requiring host_take_text in its matching slot. No GPU, game or window.
@@ -55,6 +57,7 @@ MENU_FIXTURE = r'''#define _CRT_SECURE_NO_WARNINGS
 #include <cstring>
 #include <iterator>
 #include "host/hos_wide_size.h"
+#include "host/hold_toggle.h"
 #include "gpu/vk/display_modes.h"
 #include "gpu/vk/menu_restart.h"
 using namespace mkwvk;
@@ -126,8 +129,12 @@ struct { int pressed = 0, wheel = 0; } ptr;
 namespace menu_hit { enum { kRow }; struct Hit { int part = kRow, index = 0; }; }
 struct { menu_hit::Hit at(float, float) { return {}; } } hits;
 bool pad(int button) { return (pad_press >> button & 1) != 0; }
-int GetAsyncKeyState(int) { return 0; }
-int64_t prof_now() { return 100000000LL; }
+int held_key = 0;
+int GetAsyncKeyState(int vk) { return vk == held_key ? 0x8000 : 0; }
+int rx_option(int id, int otherwise) { return id == 1 ? open_now.load() : otherwise; }
+@@GAME_KEY@@
+int64_t now = 100000000LL;
+int64_t prof_now() { return now; }
 void focused_tick() {
     @@FOCUSED@@
 }
@@ -138,6 +145,78 @@ void tap(int button, int count = 1) {
         raw = pad_press = 0;
         focused_tick();
     }
+}
+// The host's raw pad callback and the menu's edge/repeat path, not a latched game-button word.
+uint32_t pad_raw_now = 0;
+@@PAD_RAW@@
+struct { uint32_t (*pad_raw)(); } host_value{hos_pad_raw}, *host = &host_value;
+void routed_tick() {
+    const bool mine = true;
+    bool pad_last = false, held[5] = {};
+    const int listening = 0;
+    std::fill(std::begin(press), std::end(press), false);
+    @@PAD_POLL@@
+    @@PAD_EDGE@@
+    @@PAD_REPEAT@@
+    @@FOCUSED@@
+    (void)chord_now;
+    (void)pad_last;
+}
+void test_toggle_text_isolation() {
+    startup("1920x800");
+    open_now = false;
+    HoldToggle toggle{};
+    const uint64_t game_r = 1u << 7;   // logical Switch R, distinct from its physical shoulder position
+    pad_raw_now = 1u << HOS_PAD_RSHOULDER;
+    CHECK(hold_toggle_apply(&toggle, game_r, game_r, 0) == game_r);
+    routed_tick();
+    pad_raw_now = 0;
+    CHECK(hold_toggle_apply(&toggle, 0, game_r, 0) == game_r);
+    routed_tick();
+    open_now = true;
+    edit_start(output_field, output_field_apply);
+    routed_tick();   // even before the game observes Insert, its live latch is not a raw pad press
+    CHECK(toggle.latched == game_r && is(output_field, "1920x800", 8) && !saves);
+    CHECK(hold_toggle_apply(&toggle, 0, game_r, open_now.load()) == 0);
+    CHECK(!toggle.latched);
+    pad_raw_now = 1u << HOS_PAD_RSHOULDER;
+    CHECK(hold_toggle_apply(&toggle, game_r, game_r, open_now.load()) == 0);
+    routed_tick();   // a fresh physical shoulder still inserts in the editor while gameplay is blocked
+    CHECK(is(output_field, "1920x8000", 8) && !saves);
+    routed_tick();   // held shoulder is not another insertion
+    CHECK(is(output_field, "1920x8000", 8));
+    pad_raw_now = 0;
+    routed_tick();
+    pad_raw_now = 1u << HOS_PAD_UP;
+    routed_tick();
+    CHECK(is(output_field, "1920x8001", 8));
+    now += 350000000LL;
+    routed_tick();   // actual menu repeat still cycles characters, never a gameplay latch
+    CHECK(is(output_field, "1920x8002", 8));
+    pad_raw_now = 0;
+    routed_tick();
+    held_key = VK_LEFT;
+    CHECK(!key(VK_LEFT));   // the real game's key reader rejects the editor's key
+    typed[0] = HOS_TEXT_KEY | VK_LEFT, typed_n = 1;
+    routed_tick();
+    CHECK(is(output_field, "1920x8002", 7));
+    held_key = 0, typed_n = 0;
+    edit_end(false);
+    // The confirm and shoulder already held when focus begins must not commit or type into the field.
+    for (const int button : {pad_confirm, int(HOS_PAD_RSHOULDER), int(HOS_PAD_LSHOULDER)}) {
+        pad_raw_now = 1u << button;
+        routed_tick();
+        edit_start(output_field, output_field_apply);
+        routed_tick();
+        CHECK(editing && is(output_field, "1920x800", 8) && !saves);
+        pad_raw_now = 0;
+        routed_tick();
+        edit_end(false);
+    }
+    open_now = false, held_key = VK_LEFT;
+    CHECK(key(VK_LEFT));
+    held_key = 0, open_now = true;
+    std::puts("PASS: test_toggle_text_isolation: raw pad edges/repeats and editing keys, not gameplay latches");
 }
 void test_pad_only_entry() {
     startup("0");
@@ -238,6 +317,7 @@ void test_monitor_shape() {
     std::puts("PASS: test_monitor_shape: 21:9 and 32:9 keep the monitor's shape for typed 2048x1152");
 }
 int main() {
+    test_toggle_text_isolation();
     test_pad_only_entry();
     test_pad_edit_existing();
     test_pad_character_limits();
@@ -480,6 +560,7 @@ def main():
     menu = (ROOT / "gpu/vk/vk_menu.cpp").read_text(encoding="utf-8")
     api = (ROOT / "gpu/vk/vk_api.h").read_text(encoding="utf-8")
     backend = (ROOT / "host/rx_backend.c").read_text(encoding="utf-8")
+    hid = (ROOT / "host/nn_hid.c").read_text(encoding="utf-8")
     enums = "\n".join(re.findall(r"^enum \{ HOS_TEXT_[^\n]*\};$", api, re.M))
     if enums.count("enum") != 2:
         raise SystemExit("FAIL: vk_api.h: no HOS_TEXT_KEY and HOS_TEXT_OFF/ON/PASTE")
@@ -495,9 +576,15 @@ def main():
     focused = block(menu, "if (open_now.load() && editing) {")
     win = (ROOT / "host/display.c").read_text(encoding="utf-8")
     win_keys = block(win[win.index("case WM_KEYDOWN: {"):], "if (hos_text_focus()) {")
+    pad_poll = between(menu, "    static uint32_t pad_held = 0;", "#ifndef VK_RSHIFT")
+    pad_edge = between(menu, "    auto pad = ", "\n")
+    pad_repeat = block(menu, "    {   // holding an arrow or the D-pad repeats it:")
     with tempfile.TemporaryDirectory(prefix="menu-text-") as tmp:
         compile_run(a.cxx, "c++", "c++20", MENU_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", cut)
-                    .replace("@@FOCUSED@@", focused), "menu", tmp)
+                    .replace("@@PAD_RAW@@", block(hid, "uint32_t hos_pad_raw("))
+                    .replace("@@GAME_KEY@@", block(hid, "static int key("))
+                    .replace("@@PAD_POLL@@", pad_poll).replace("@@PAD_EDGE@@", pad_edge)
+                    .replace("@@PAD_REPEAT@@", pad_repeat).replace("@@FOCUSED@@", focused), "menu", tmp)
         compile_run(a.cxx, "c", "c11", HOST_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@CUT@@", host_cut), "host", tmp)
         compile_run(a.cxx, "c", "c11", WINDOWS_FIXTURE.replace("@@TEXT_ENUMS@@", enums).replace("@@WIN_KEYS@@", win_keys),
                     "windows", tmp)
@@ -563,7 +650,6 @@ def main():
     need(menu, r'\{TAB_GRAPHICS, "Custom output size", nullptr,', "vk_menu.cpp: no Custom output size row")
     need(menu, r'const FieldRow field_rows\[\] = \{\{"Custom output size", &output_field, output_field_apply\}\};',
          "vk_menu.cpp: Custom output size is not a text field")
-    hid = (ROOT / "host/nn_hid.c").read_text(encoding="utf-8")
     need(hid, r"static int key\(int vk\) \{ return !rx_option\(1, 0\) &&",
          "nn_hid.c: the game's keys are not held back while the menu (and so a field) has the keyboard")
     print("PASS: the text field's wiring: the interface's take_text, WM_CHAR, SDL's text input, the menu's focus and TYPE")

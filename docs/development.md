@@ -610,7 +610,9 @@ It applies after remapping to either pad binding, keys and mouse buttons. Only S
 Plus and Minus; directions and ocarina notes do not. Other values mean Off. Saving keeps the flags, not live latches.
 Opening Insert, Plus/Minus, focus loss, rebinding and Reset to defaults clear latches. Background pad presses can
 latch again when Controller in background permits them. Linux's other game dialogs are not guaranteed resets;
-Insert always releases the latch.
+Insert always releases the latch. Text fields use physical pad edges, not latched gameplay buttons: a held confirm
+or shoulder does not commit or add another character when editing starts. Fresh presses and D-pad repeats still edit,
+and keyboard editing keys reach the field while the game receives none.
 
 | Key | Values |
 |---|---|
