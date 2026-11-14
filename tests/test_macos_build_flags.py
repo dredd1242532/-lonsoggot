@@ -5,7 +5,9 @@ reimplementation of them. --source checks another tree without importing its
 builder or touching its work folder. --capture-main emits those reference arrays
 from the old main expressions for review; it is not used during a test run.
 
-On macOS, --llvm-prefix adds a second compiler to the real arm64/Rosetta fixture.
+On macOS, real links run for the current process architecture by default. Repeat
+--arch to opt into other architectures (for example arm64 and x86_64 with Rosetta).
+--llvm-prefix adds a second compiler; simulated command contracts always cover both targets.
 --fixtures-out keeps exact sources, commands and products outside the checkout.
 No renderer, SDL, Metal or Vulkan device is created.
 """
@@ -33,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT
 LLVM_PREFIX = None
 FIXTURES_OUT = None
+ARCHES = None
 BASE = "514591a30d707fe9f3ad31eae148c3cc1e750bff"
 WORK = "/fixture/Games, Zelda"
 FUNCTIONS = {"target", "linker", "HOT_ORDER", "flags", "host_flags", "renderer_flags", "executable_link",
@@ -323,6 +326,13 @@ class DiscoveryContracts(unittest.TestCase):
         ns["check_windows_sdk"]("authored empty work")
         self.assertEqual(called, ["authored empty work"])
 
+    def test_real_architecture_default_and_explicit_selection(self):
+        for machine, expected in (("arm64", "arm64"), ("x86_64", "x86_64"), ("AMD64", "x86_64")):
+            with self.subTest(machine=machine), mock.patch.object(platform, "machine", return_value=machine):
+                self.assertEqual(real_architectures(), [expected])
+                self.assertEqual(real_architectures(["arm64", "x86_64"]), ["arm64", "x86_64"])
+                self.assertEqual(real_architectures(["x86_64", "x86_64"]), ["x86_64"])
+
 
 C_LIBRARY = r'''#include <dlfcn.h>
 int fixture_value = 11;
@@ -369,6 +379,13 @@ int main(void) {
 '''
 
 
+def real_architectures(requested=None):
+    """Ordinary suites require no translator; an explicitly requested unavailable target must fail."""
+    machine = platform.machine().lower()
+    native = {"amd64": "x86_64", "aarch64": "arm64"}.get(machine, machine)
+    return list(dict.fromkeys(requested or [native]))
+
+
 @unittest.skipUnless(sys.platform == "darwin", "real Mach-O links require macOS; command contracts run everywhere")
 class RealMachO(unittest.TestCase):
     def test_c_cpp_links_load_exports_order_and_local_binding(self):
@@ -382,9 +399,7 @@ class RealMachO(unittest.TestCase):
             root = Path(tmp.name)
         compilers = [("apple", None)] + ([("llvm23", LLVM_PREFIX)] if LLVM_PREFIX else [])
         for label, prefix in compilers:
-            for arch in ("arm64", "x86_64"):
-                if arch == "arm64" and platform.machine() != "arm64":
-                    self.skipTest("arm64 execution requires Apple Silicon; this process is not native arm64")
+            for arch in real_architectures(ARCHES):
                 with self.subTest(compiler=label, arch=arch):
                     self.fixture(root / (label + " " + arch + ", test"), prefix, arch)
 
@@ -481,8 +496,11 @@ if __name__ == "__main__":
     parser.add_argument("--capture-main", action="store_true")
     parser.add_argument("--llvm-prefix", type=Path)
     parser.add_argument("--fixtures-out", type=Path)
+    parser.add_argument("--arch", action="append", choices=("arm64", "x86_64"),
+                        help="real fixture target; repeat for both (default: current process architecture)")
     args, rest = parser.parse_known_args()
     SOURCE, LLVM_PREFIX, FIXTURES_OUT = args.source, args.llvm_prefix, args.fixtures_out
+    ARCHES = args.arch
     if args.capture_main:
         print(json.dumps(capture_main(), indent=2))
     else:

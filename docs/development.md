@@ -71,11 +71,15 @@ Darwin API, memory, signals, profiler, CPU assembly and dynamic-loader work must
 LS can compile or run. The custom `RX_PGO=gen` runtime is still COFF-specific; NVIDIA NGX, the AMD FSR runtime and
 the WebGPU backend have no macOS route here. There is no macOS launcher, signing or packaging step.
 
-Game-free command and binding checks (no source-tree `--check` or `--dry-run` needed):
+Game-free command and binding checks (no source-tree `--check` or `--dry-run` needed). Real links default to the
+current Python process architecture, so an ordinary Apple Silicon suite needs no Rosetta and an Intel Mac runs
+its native x86_64 proof. Simulated command contracts always cover both targets. Repeat `--arch` for an explicit
+dual-route qualification; requesting x86_64 on Apple Silicon requires Rosetta, and an unavailable requested route
+fails rather than silently skipping it:
 
 ```
 python -I -B tests/test_macos_build_flags.py
-python -I -B tests/test_macos_build_flags.py --llvm-prefix /path/to/LLVM-23.1.5
+python -I -B tests/test_macos_build_flags.py --arch arm64 --arch x86_64 --llvm-prefix /path/to/LLVM-23.1.5
 ```
 
 
