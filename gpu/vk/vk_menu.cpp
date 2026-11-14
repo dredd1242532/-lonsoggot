@@ -688,10 +688,11 @@ const char* tx_output_res(int v) {
     static char b[40];
     v = output_choice(v);
     // (the picture this choice makes (picture_for: at the monitor's shape when the Aspect ratio takes it), "(native)"
-    // when it is the screen's own size; the game's own choice (0) keeps its name)
+    // when it is the screen's own size; the game's own reduced size (0, 80% of its 2560x1440: hos_output_parse) marked so,
+    // not the default since a new install takes 2560x1440, host/hos_wide_size.h hos_output_default)
     bool native = false;
     const Out o = picture_for(v, &native);
-    snprintf(b, sizeof b, "%ux%u%s", o.w, o.h, native ? " (native)" : v ? "" : " (game's)");
+    snprintf(b, sizeof b, "%ux%u%s", o.w, o.h, native ? " (native)" : v ? "" : " (reduced)");
     return b;
 }
 /// The Aspect ratio row (ultrawide=): the shapes of the sizes offered, narrowest first, the monitor's own named so
@@ -1070,11 +1071,11 @@ const char* hn_vsync(int v, int variant) {
     }
     return variant <= 0 ? t[std::clamp(v, 0, 2)] : nullptr;
 }
-/// The Output resolution: the game's own, the player's own, or one of the screen's sizes as it compares with the screen (its
-/// own, larger, smaller; nothing where the screen's size is not known)
+/// The Output resolution: the game's own reduced size, the player's own, or one of the screen's sizes as it compares with the
+/// screen (its own, larger, smaller; nothing where the screen's size is not known)
 const char* hn_output_res(int v, int variant) {
     static const char* const t[] = {
-        "The game's own size.",
+        "The game's own reduced size, 80% of its 2560x1440: lighter on the GPU.",
         "Your screen's own size: the HUD and text pixel for pixel, nothing to scale to the window.",
         "Larger than your screen: drawn bigger, then scaled down to the window. Sharper, and slower. The game's render "
         "targets get a bigger GPU pool, so a full-size 3D fits.",

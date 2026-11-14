@@ -18,8 +18,11 @@ static inline int hos_output_size_valid(uint32_t w, uint32_t h) {
 /* The Output resolution when none is chosen (no output_res= line in the options file, no HOS_OUTPUT_RES): the game's docked
    picture, 2560 x 1440 (its display size at the full graphics scale: host/nn_applet.c hos_output_parse), or the main screen's
    own size where that has fewer pixels (a Steam Deck's 1280 x 800, a 1080p monitor), so the game draws no more than the screen
-   shows. A screen not known (0 x 0), or of no size the game takes, gets 2560 x 1440 too. host/nn_applet.c at boot and the
-   Insert menu's first start (gpu/vk/vk_menu.cpp menu_init) take it alike, so the run and the menu agree with no restart. */
+   shows. That size keeps the screen's shape, on purpose: 2560 x 1080 (21:9) or 2256 x 1504 (3:2) starts at its own size,
+   pixel for pixel, a picture of the monitor's shape (hos_output_own_shape), the shape the Aspect ratio row's default gives a
+   16:9 size too; 1280 x 800 and 1920 x 1200 did so before. A screen not known (0 x 0), or of no size the game takes, gets
+   2560 x 1440 too. host/nn_applet.c at boot and the Insert menu's first start (gpu/vk/vk_menu.cpp menu_init) take it alike,
+   so the run and the menu agree with no restart. */
 static inline void hos_output_default(uint32_t sw, uint32_t sh, uint32_t *w, uint32_t *h) {
     *w = 2560, *h = 1440;
     sw &= ~7u, sh &= ~7u;

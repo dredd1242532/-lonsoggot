@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
         opts.output_res = 0;
         opts.ultrawide = aspect_of_choice(0, 1);
         assert(aspect_shape(opts.ultrawide) == "21:9" && strcmp(tx_ultrawide(opts.ultrawide), "21:9 (monitor's)") == 0);
-        if (!opts.handheld) assert(strcmp(tx_output_res(0), "2728x1152 (game's)") == 0);
+        if (!opts.handheld) assert(strcmp(tx_output_res(0), "2728x1152 (reduced)") == 0);
         {
             // (#2566's retest on that screen. The arrows go by the size each shows: the game's own, drawn 2728x1152, between
             // 2560x1080 and 3008x1264, as the list reads; it stays choice 0, which is what is saved. Handheld draws nothing
@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
         assert(strcmp(tx_output_res(1), "3840x1080") == 0);
         assert(strcmp(tx_output_res(4), "5120x1440 (native)") == 0);   // (32:9 itself)
         // (the game's own at the host's 32:9: its 2048x1152 widened as the game draws it, at its height)
-        assert(strcmp(tx_output_res(0), "4096x1152 (game's)") == 0);
+        assert(strcmp(tx_output_res(0), "4096x1152 (reduced)") == 0);
         opts.ultrawide = aspect_index("16:9");   // (16:9 on that monitor: the outputs as they are)
         assert(!aspect_is_monitors(opts.ultrawide) && strcmp(tx_output_res(3), "3840x2160") == 0);
         screen_w = 3840, screen_h = 2160;   // (a 16:9 monitor: 16:9 is its own, native named)
@@ -283,17 +283,17 @@ int main(int argc, char **argv) {
 '''
     # (saved, handheld, HOS_OUTPUT_RES, the menu's choice, the size, its label, the pool for 305 MB, what the menu saves)
     cases = (
-        ("0", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (the numbers saved before)
+        ("0", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (the numbers saved before)
         ("1", 0, None, 2, 2560, 1440, "2560x1440", 512, "2560x1440"),
         ("2", 0, None, 3, 3840, 2160, "3840x2160", 687, "3840x2160"),
         ("3", 0, None, 1, 1920, 1080, "1920x1080", 512, "1920x1080"),
         ("4", 0, None, 4, 5120, 1440, "5120x1440", 610, "5120x1440"),
         ("5", 0, None, 5, 5120, 2880, "5120x2880", 900, "5120x2880"),   # (#1670's 5K)
-        ("6", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
+        ("6", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
         ("1", 0, "3", 1, 1920, 1080, "1920x1080", 512, "1920x1080"),
-        ("3", 1, "3", 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (handheld: the game's own)
-        ("4", 1, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
-        ("2048x1152", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (sizes)
+        ("3", 1, "3", 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (handheld: the game's own)
+        ("4", 1, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
+        ("2048x1152", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (sizes)
         ("1920x1080", 0, None, 1, 1920, 1080, "1920x1080", 512, "1920x1080"),
         ("3840x2160", 0, None, 3, 3840, 2160, "3840x2160", 687, "3840x2160"),
         ("5120X1440", 0, None, 4, 5120, 1440, "5120x1440", 610, "5120x1440"),
@@ -304,20 +304,20 @@ int main(int argc, char **argv) {
         ("0", 0, "5120x2880", 5, 5120, 2880, "5120x2880", 900, "5120x2880"),
         ("2560x1080", 0, None, 6, 2560, 1080, "2560x1080", 512, "2560x1080"),   # (2560 wide, not 1440 high)
         ("2560x1600", 0, None, 6, 2560, 1600, "2560x1600", 512, "2560x1600"),
-        ("320x200", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (out of range: the game's own)
-        ("9999x9999", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
-        ("7680x4320", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (more than 5120x2880's pixels)
-        ("6144x2560", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
-        ("640x4320", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (narrower than 5:4)
+        ("320x200", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (out of range: the game's own)
+        ("9999x9999", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
+        ("7680x4320", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (more than 5120x2880's pixels)
+        ("6144x2560", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
+        ("640x4320", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (narrower than 5:4)
         ("5760x1080", 0, None, 6, 5760, 1080, "5760x1080", 515, "5760x1080"),
         ("7680x1440", 0, None, 6, 7680, 1440, "7680x1440", 900, "7680x1440"),   # (5120x2160's pixels: full size)
-        ("7688x1440", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (wider than 48:9)
-        ("3840 x 2160", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (not a size)
-        ("abc", 0, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
-        ("5120x2880", 1, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),
+        ("7688x1440", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (wider than 48:9)
+        ("3840 x 2160", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (not a size)
+        ("abc", 0, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
+        ("5120x2880", 1, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),
         (None, 0, None, 2, 2560, 1440, "2560x1440", 512, "2560x1440"),   # (none chosen, a new install: the game's 2560x1440)
-        (None, 1, None, 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (handheld: its own, as before)
-        (None, 0, "2048x1152", 0, 2560, 1440, "2048x1152 (game's)", 512, "2048x1152"),   # (the reduced size, asked for)
+        (None, 1, None, 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (handheld: its own, as before)
+        (None, 0, "2048x1152", 0, 2560, 1440, "2048x1152 (reduced)", 512, "2048x1152"),   # (the reduced size, asked for)
     )
     # (none chosen, a new install: the game's 2560x1440, or the screen's own size where that has fewer pixels, host and menu alike)
     for need, where, text in (("hos_output_default(", "host/nn_applet.c output_mode", host[host.index("static int output_mode(void)"):]),
