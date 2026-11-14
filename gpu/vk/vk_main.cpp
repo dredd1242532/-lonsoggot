@@ -162,6 +162,16 @@ bool create_instance() {
             if (has_extension(all, want)) exts[n_exts++] = want;
     }
 #endif
+#ifndef _WIN32
+    // (longshot) Mesa's Intel compiler (driconf shader_spilling_rate, read when the driver loads, ignored by the others): when a
+    // program does not fit its registers it spills some and allocates the whole program again, rounds of one at first and then
+    // of (spilled so far / rate). Held to 32 lanes an Iris Xe has 32 registers a lane, and MKW's large compute programs spill
+    // thousands: at Mesa 26.2's default abccf81b45c5eb50, which play dispatches, was not built after 20 minutes and 13 GB, at 2
+    // in 32 s and 1.7 GB; 7a548525c239b91b 531 s and 7.6 GB, at 2 87 s and 4 GB (i9-13900H, 2026-11-14). The programs that do
+    // not spill are built as before; the driver's estimate of those that do moved from 12% better to 53% worse (3 was 165 s for
+    // abccf81b45c5eb50, 4 not built in 8 minutes). A value the player set is kept
+    setenv("shader_spilling_rate", "2", 0);
+#endif
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "mkw-recomp";
     app.apiVersion = VK_API_VERSION_1_3;
@@ -616,6 +626,8 @@ bool create_device() {
         dev.radv_gcn = drv.driverID == VK_DRIVER_ID_MESA_RADV && !f11.storageInputOutput16;
         logf("vk: subgroups: default %u lanes, %u-%u, pinned to 32 on stages %#x; RADV on GCN 1-4: %s", sg.subgroupSize, sc.minSubgroupSize,
              sc.maxSubgroupSize, (unsigned)dev.sg32_stages, dev.radv_gcn ? "yes" : "no");
+        if (drv.driverID == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA && getenv("shader_spilling_rate"))
+            logf("vk: Mesa's Intel compiler spills at rate %s (driconf shader_spilling_rate: 2 unless set)", getenv("shader_spilling_rate"));
     }
     if (!f13.dynamicRendering || !f13.synchronization2 || !f12.timelineSemaphore) {
         logf("vk: the GPU lacks dynamic rendering, synchronization2 or timeline semaphores");

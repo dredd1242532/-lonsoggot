@@ -124,6 +124,13 @@ def check_source():
                         ("fallback_size::parse_limit(e, v)", "the switch is not read as digits only")):
         if needle not in refused:
             raise SystemExit("compute_refused: " + why)
+    # (Mesa's Intel compiler spills in rounds of spilled/2: set before the instance, on Linux, never over the player's own value)
+    main = (ROOT / "gpu/vk/vk_main.cpp").read_text(encoding="utf-8")
+    rate = 'setenv("shader_spilling_rate", "2", 0);'
+    if main.count(rate) != 1 or main.index(rate) > main.index("vkCreateInstance(&ci, nullptr, &dev.instance)"):
+        raise SystemExit("the spilling rate is not set to 2 before the Vulkan instance, or overrides the player's")
+    if main.rfind("#ifndef _WIN32", 0, main.index(rate)) < main.rfind("#endif", 0, main.index(rate)):
+        raise SystemExit("the spilling rate is set outside the Linux build")
     turn = block(draw, "struct ComputeTurn {")
     refuse = "if (gate && compute_refused(compute_described, compute_pinned(ci))) gate = nullptr, stopped = true;"
     if refuse not in turn or turn.index(refuse) > turn.index("gate->enter("):
