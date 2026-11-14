@@ -63,6 +63,7 @@ export async function renderPage(slug: string): Promise<RepoPage> {
   text = rewriteRepoLinks(text, source);
   if (source === 'docs/getting-started.md') text = formatInstallHub(text);
   if (source === 'docs/common-issues.md') text = formatCommonIssues(text);
+  if (source === 'docs/saves.md') text = '\n<div class="save-transfer-guide">\n\n' + text.trim() + '\n\n</div>\n';
   if (source === 'docs/graphics-and-controls.md') {
     text = await formatGraphicsSettings(text, await readFile(repoFile('README.md'), 'utf8'),
       await readFile(repoFile('gpu/vk/vk_menu.cpp'), 'utf8'), await createMarkdownProcessor());

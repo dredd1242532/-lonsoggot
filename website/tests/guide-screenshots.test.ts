@@ -27,12 +27,13 @@ test('canonical guide images resolve to this site, with descriptive alt text', a
     settings: ['settings-graphics.png'],
   })) {
     const { markdown } = await renderPage(page);
+    const { code } = await (await createMarkdownProcessor()).render(markdown);
     for (const file of files) {
       assert.ok(markdown.includes(`/docs/images/guide/${file}`), `${page}: ${file}`);
-      const image = markdown.split('\n').find(line => line.includes(file));
+      const image = markdown.split('\n').find(line => line.includes(file) && line.trimStart().startsWith('!['));
       assert.match(image ?? '', /^\s*!\[[^\]]{20,}\]\(\/docs\/images\/guide\//);
       assert.ok(!image?.includes('git.magicbean.dev'));
-      assert.ok(markdown.split('\n').some(line => line.includes('[Open full-size') && line.includes(file)), `${file}: full-size link`);
+      assert.ok(code.includes(`href="/docs/images/guide/${file}"`), `${file}: full-size link`);
     }
   }
 });

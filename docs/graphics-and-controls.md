@@ -11,16 +11,14 @@ below, then look up any single setting in the list at the bottom.
 | **Controller** | **Home**, or **Select** and **Start** together (or click the touchpad on a DualShock 4 or DualSense) | LB and RB switch tabs, the D-pad chooses and changes, A opens a page, B goes back |
 | **Mouse** | | Click a tab or a row, click the left or right half of a value to lower or raise it, right-click to go back |
 
-<kbd>F1</kbd> always works. **Controls → Menu shortcut** can take <kbd>Esc</kbd> or <kbd>Insert</kbd> off the list, for
-example to leave <kbd>Insert</kbd> to another overlay.
+<kbd>F1</kbd> always works to open the settings menu. **Controls → Menu shortcut** can take <kbd>Esc</kbd> or
+<kbd>Insert</kbd> off the list.
+
+<a href="images/guide/settings-graphics.png">
 
 ![Graphics tab with Quality preset selected, setting rows on the left, help on the right, and keyboard navigation along the bottom.](images/guide/settings-graphics.png)
 
-*Menu layout: tabs at the top, settings on the left and help on the right. This UI-only development-build example uses a
-plain background and bundled fonts. The displayed Custom values are illustrative; use the starting points below.
-Available options vary with your graphics card and build.*
-
-[Open full-size menu screenshot](images/guide/settings-graphics.png).
+</a>
 
 Your choices are saved as you go, in `longshot_options.ini` in the game folder. A setting marked **After a restart**
 applies the next time the game starts: when you close the menu it asks whether to restart. **Later** keeps the change

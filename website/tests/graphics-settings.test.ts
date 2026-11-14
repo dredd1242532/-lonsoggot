@@ -91,7 +91,9 @@ test('cards take the menu\'s help, the source restart flag and README conditions
 test('restart, coverage and condition drift between README and the menu stop publication', () => {
   // (README says after a restart where the menu applies at once, or not where it takes one)
   assert.throws(() => readGraphicsSettings(readme.replace('| | Fullscreen | Off, On', '| | Fullscreen | Off, On (after a restart)'), menu), /restart mismatch at Fullscreen/);
-  assert.throws(() => readGraphicsSettings(readme.replace('Auto, Stereo, 5.1 (after a restart)', 'Auto, Stereo, 5.1'), menu), /restart mismatch at Audio output/);
+  const noAudioRestart = readme.replace(/^(\| \| Audio output \|[^\n]*)after a restart/m, '$1without restarting');
+  assert.notEqual(noAudioRestart, readme, 'Audio output fixture must remove its restart annotation');
+  assert.throws(() => readGraphicsSettings(noAudioRestart, menu), /restart mismatch at Audio output/);
   // (a row of another tab added to the menu, or one README lists that the menu lacks)
   assert.throws(() => readGraphicsSettings(readme, menu.replace('{TAB_AUDIO, "Volume"', '{TAB_AUDIO, "Balance", &opts.volume, 0, 1, 1, tx_onoff, "x"},\n    {TAB_AUDIO, "Volume"')), /Audio coverage mismatch/);
   assert.throws(() => readGraphicsSettings(readme.replace(/^\| \| Mute in background .*\n/m, ''), menu), /Audio coverage mismatch/);
