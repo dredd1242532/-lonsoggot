@@ -70,7 +70,8 @@ download is genuine.
 3. **AMD cards** have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708),
    [#614](https://github.com/NotRexed/Hookshot/issues/614)). To try the other drawing path, add the line
    `RX_VK_MESH_SHADERS=compute` to `longshot_env.txt` in the game folder (usually a little slower; delete the line to
-   undo it).
+   undo it). The game doesn't make that file: if it isn't there, create a plain text file of that name beside
+   `image.bin`. On Linux, AMD cards already use this path, so the line changes nothing there.
 4. **Read the end of the log.** `longshot_log.txt` in the game folder's `logs` folder has the last run; its last lines usually say what
    failed.
 
@@ -78,8 +79,9 @@ download is genuine.
 
 ### Linux: the game doesn't start, or the picture is broken
 
-1. **Check Vulkan and mesh shaders.** `vulkaninfo | grep mesh` should list `VK_EXT_mesh_shader`. The game needs a
-   Vulkan 1.3 driver, ideally with mesh shaders.
+1. **Check Vulkan and mesh shaders.** `vulkaninfo | grep -E 'deviceName|VK_EXT_mesh_shader'` should list
+   `VK_EXT_mesh_shader` under your graphics card's name. A line under `llvmpipe` (Mesa's software renderer, which
+   every Mesa system has) doesn't count. The game needs a Vulkan 1.3 driver, ideally with mesh shaders.
 2. **Update Mesa or the NVIDIA driver** if it doesn't.
 
 [Search Linux reports](https://longshot.magicbean.dev/progress/#problem-search?q=linux)

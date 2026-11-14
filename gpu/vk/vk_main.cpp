@@ -337,7 +337,8 @@ bool create_device() {
     optional(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME, dev.dynamic_state3);
     optional(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME, dev.depth_clip_control);
     optional(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, dev.null_descriptor);
-    optional(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME, dev.index_uint8);
+    // (RX_VK_INDEX_UINT8=0, a test: 8-bit index buffers not asked for, as on RADV before GCN 3; their indices are widened instead)
+    if (const char* u8 = getenv("RX_VK_INDEX_UINT8"); !u8 || strcmp(u8, "0") != 0) optional(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME, dev.index_uint8);
     optional(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME, dev.push_descriptor);
     optional(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME, dev.conditional_rendering);
     optional(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME, dev.provoking_vertex);

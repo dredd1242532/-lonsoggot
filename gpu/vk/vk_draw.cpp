@@ -6825,6 +6825,45 @@ void bind_index(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkInd
     last_ib = {b, (uint64_t)offset, (uint32_t)type, true};
 }
 
+/// (longshot) How many 8-bit indices a draw reads from its index buffer: its count, or for an indirect draw the furthest its
+/// records reach (first index + count), as submitted. 0: none read or more than 16M
+uint64_t u8_indices_read(const DrawArgs& d) {
+    if (!d.indirect) return (uint64_t)std::max(d.count, 1);
+    if (d.max <= 0) return 0;
+    const uint64_t stride = (uint64_t)std::max(d.stride, 20);
+    uint32_t records = (uint32_t)std::min(d.max, 4096);
+    if (uint32_t n = 0; d.count_addr && memory_read_as_submitted(d.count_addr, &n, 4)) records = std::min(records, n);
+    if (!records) return 0;
+    std::vector<uint8_t> raw((size_t)((records - 1) * stride + 20));
+    if (!memory_read_as_submitted(d.indirect, raw.data(), raw.size())) return 0;
+    uint64_t end = 0;
+    for (uint32_t r = 0; r < records; r++) {
+        uint32_t w[5];   // (VkDrawIndexedIndirectCommand: count, instances, first index, vertex offset, first instance)
+        std::memcpy(w, raw.data() + r * stride, sizeof w);
+        if (w[0] && w[1]) end = std::max(end, (uint64_t)w[2] + w[0]);
+    }
+    return end <= (1u << 24) ? end : 0;
+}
+
+/// (longshot) A draw's 8-bit indices as 16-bit ones in the recording's stream, for a card without 8-bit index buffers: RADV
+/// has none before GCN 3 (HD 7000, R9 270-390, R7 260-360), where these draws were left out and the title and the game were
+/// black with sound. Read as submitted, as the quads' indices are; with primitive restart on, 0xFF stays a restart (0xFFFF)
+BufferRef u8_indices_widened(const DrawArgs& d, bool restart) {
+    static std::atomic<bool> told{false};
+    if (!told.exchange(true)) logf("vk: 8-bit indices are widened to 16 bits on the CPU (this card has no 8-bit index buffers)");
+    const uint64_t n = u8_indices_read(d);
+    if (!n) return {};
+    std::vector<uint8_t> raw((size_t)n);
+    if (!memory_read_as_submitted(d.ibuf, raw.data(), n)) return {};
+    const uint64_t at = stream_alloc(n * 2, 16);
+    if (at == UINT64_MAX) return {};
+    uint16_t* out = reinterpret_cast<uint16_t*>(cur->mapped + at);
+    for (uint64_t i = 0; i < n; i++) out[i] = restart && raw[i] == 0xFF ? 0xFFFF : raw[i];
+    BufferRef r;
+    r.buffer = cur->stream, r.offset = at, r.size = n * 2;
+    return r;
+}
+
 /// (longshot, a diagnostic for the temporal upscaler's motion: vk_temporal.cpp) RX_VK_DLSS_TRACE=<frames>: every that many frames, one frame's
 /// draws into targets of a size the upscaler can take as the scene (temporal_scene_size), logged: the program, its targets' formats, the geometry and the uniform buffers
 static void dlss_trace_draw(const NvnState& s, const Program& p, const DrawArgs& d, const Targets& at) {
@@ -7790,8 +7829,12 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
     }
     if (g_fine) fine_ns[FT_VERTEX] += prof_now() - fine_vertex_t0;
     if (!vertex_complete) occ.drop(kOccVertexInput);
-    const VkIndexType itype = d.itype == 0 ? VK_INDEX_TYPE_UINT8_EXT : d.itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
-    if (d.indexed && d.itype == 0 && !dev.index_uint8) SKIP_HERE();
+    // (8-bit indices on a card without them: 16-bit ones in the stream, u8_indices_widened; the quads' are rewritten below anyway)
+    const bool widen_u8 = d.indexed && d.itype == 0 && !dev.index_uint8 && d.prim != NVN_DRAW_PRIMITIVE_QUADS;
+    const VkIndexType itype = widen_u8 ? VK_INDEX_TYPE_UINT16
+                            : d.itype == 0 ? VK_INDEX_TYPE_UINT8_EXT : d.itype == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+    const bool restart_on = s.restart && topo != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && topo != VK_PRIMITIVE_TOPOLOGY_LINE_LIST &&
+                            topo != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST && topo != VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
     if (d.prim == NVN_DRAW_PRIMITIVE_QUADS) {   // (quads as two triangles each: indices made in the stream)
         if (d.indirect || d.count < 4) SKIP_HERE();
         if (d.count > (1 << 24)) SKIP_HERE();   // (longshot: 4M quads at most; the game's count sized host vectors of up to 16 GB)
@@ -7832,7 +7875,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         BufferRef cnt = d.count_addr ? gpu_buffer_bind(d.count_addr, 4, false) : BufferRef{};
         if (!args) SKIP_HERE();
         if (d.indexed) {
-            BufferRef ib = gpu_buffer_bind(d.ibuf, 4, false);
+            BufferRef ib = widen_u8 ? u8_indices_widened(d, restart_on) : gpu_buffer_bind(d.ibuf, 4, false);
             if (!ib) SKIP_HERE();
             bind_index(cmd, ib.buffer, ib.offset, itype);
             occ.issue();
@@ -7848,7 +7891,7 @@ void draw(VkCommandBuffer cmd, NvnState& s, const DrawArgs& d) {
         BufferRef ib;
         {
             FINE_SCOPE(FT_VERTEX);
-            ib = gpu_buffer_bind(d.ibuf, (uint64_t)std::max(d.count, 1) * unit, false);
+            ib = widen_u8 ? u8_indices_widened(d, restart_on) : gpu_buffer_bind(d.ibuf, (uint64_t)std::max(d.count, 1) * unit, false);
             if (!ib) SKIP_HERE();
             FINE_N(FC_IBIND, 1);
             bind_index(cmd, ib.buffer, ib.offset, itype);
