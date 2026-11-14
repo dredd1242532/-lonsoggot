@@ -427,6 +427,7 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `LONGSHOT_KEEP_BUILD_FILES=1` | Keeps the lifted C and the objects after a build, so that the next one compiles only what changed |
 | `LONGSHOT_PROMPT_JOBS=<n>` | Processes that draw the button prompts' faces (default one a face, at most the CPU threads and one per GB free) |
 | `LONGSHOT_OBJ_STORE=<dir>` | One store of compiled objects for every work folder (`nx2/object_store.py`): a build in a new `--work` folder compiles only what no other folder built with the same compiler and headers. Hard links (a copy across drives), so keep it on the work folders' drive. Off when unset, empty or `0`; `scripts/dev_packs.py` turns it on (below) |
+| `LONGSHOT_LIFT_STORE=<dir>` | Translations kept for every work folder (`nx2/lift_store.py`): after a lift, its C, image, chunk boundaries and hot pieces are saved under the lift key without the work and game folders' paths (`make_game.py lift_share_key`), and a new `--work` folder whose key matches copies them (copy-on-write clones on btrfs and XFS) instead of translating the game. Never hard links. `LONGSHOT_LIFT_STORE_KEEP=<n>` keeps the newest n (3). Off when unset, empty or `0`; `scripts/dev_packs.py` turns it on |
 | `LONGSHOT_OBJ_STORE_GB=<n>`, `LONGSHOT_OBJ_STORE_DAYS=<n>` | The store's own clean-up after each `make_game.py` build: an object no work folder holds goes once nobody used it for 14 days, and the oldest first while those come to more than 8 GB. One a work folder holds stays: it costs no space of its own |
 | `LONGSHOT_FORCE_PROMPTS=1` | Regenerates button-prompt assets even when unchanged. Unset, empty, `0`, `false`, `off` and `no` (case-insensitive, surrounding spaces ignored) are off |
 | `LONGSHOT_MINGW=<dir>`, `LONGSHOT_MSVC=1` | The llvm-mingw to build with; the Visual Studio route instead |
@@ -557,9 +558,9 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
     skips it, and a preparation that fails (no usable Vulkan, a driver that stopped responding) keeps the base, with
     the reason in `base.json`'s `not_prepared`, and leaves the work to its first start.
   - **Where:** game packs share one work folder per base (`<base>/game-work`). The lift key holds that folder's
-    path, so the first game pack translates the game once and the later ones skip the lift while the translator,
-    the HLE functions and the hot list stay the same; the base's compiled objects are linked in. Build one pack at
-    a time.
+    path, so the first game pack translates the game once (or copies the base's translation from the lift store,
+    below) and the later ones skip the lift while the translator, the HLE functions and the hot list stay the same;
+    the base's compiled objects are linked in. Build one pack at a time.
 - **`rt`** makes a game folder to run: the base's, with `romfs` hard-linked (it is never written), the other files
   copied (the game writes its caches), and the packs' files over them. Two packs that bring the same file are
   refused (merge the branches and build one pack); a pack built on another base is refused too, so the game and
@@ -573,6 +574,10 @@ python -I scripts/dev_packs.py rt   ../base-main ../rt-my-fix my-fix
   `~/.cache/longshot-objects`, `%LOCALAPPDATA%\Longshot\objects` on Windows), so a new base compiles only the files no
   earlier base or pack on this PC compiled. On another drive than the bases it copies instead of linking: set
   `LONGSHOT_OBJ_STORE` to a folder on the bases' drive, or to `0` for none.
+- **Translations shared by every base:** the same for the lift (`LONGSHOT_LIFT_STORE`, by default
+  `~/.cache/longshot-lifts`, `%LOCALAPPDATA%\Longshot\lifts`): a new base, or a base's first game pack, copies the
+  translation an earlier base or pack made from the same game, translator, HLE functions, hot list and settings
+  instead of translating the game again. `0` for none.
 
 For numbers, compare the runtime with one made by `rt` from no pack: same base, same caches, one difference.
 
