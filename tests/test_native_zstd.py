@@ -165,8 +165,29 @@ int main(int argc, char **argv) {
 # both go on to publish it and only one may log. (The fallback table's lock itself is not shown by either: no probe holds a
 # thread between its read and its write.)
 CONC = r'''
+#ifdef _WIN32   /* (Windows threads with every compiler there: the Microsoft runtime has no pthread.h or sched.h) */
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+typedef HANDLE thr_t;
+#define THR_FN(name) static DWORD WINAPI name(LPVOID p)
+#define THR_RET return 0
+static void thr_start(thr_t *t, LPTHREAD_START_ROUTINE f, void *p) { *t = CreateThread(NULL, 0, f, p, 0, NULL); }
+static void thr_join(thr_t t) {
+    WaitForSingleObject(t, INFINITE);
+    CloseHandle(t);
+}
+static void thr_yield(void) { SwitchToThread(); }
+#else
 #include <pthread.h>
 #include <sched.h>
+typedef pthread_t thr_t;
+#define THR_FN(name) static void *name(void *p)
+#define THR_RET return NULL
+static void thr_start(thr_t *t, void *(*f)(void *), void *p) { pthread_create(t, NULL, f, p); }
+static void thr_join(thr_t t) { pthread_join(t, NULL); }
+static void thr_yield(void) { sched_yield(); }
+#endif
 #include <stdio.h>
 #include <time.h>
 #include "hos.h"
@@ -177,19 +198,19 @@ void hos_vcore_back(void) {}
 static int armed, b_done, stuck, n_on, n_note;
 static int (*fn)(Ctx *);
 static Ctx cb;
-static pthread_t tb;
-static void *second(void *p) {
+static thr_t tb;
+THR_FN(second) {
     (void)p;
     fn(&cb);
     __atomic_store_n(&b_done, 1, __ATOMIC_SEQ_CST);
-    return NULL;
+    THR_RET;
 }
 void hos_log(const char *fmt, ...) {
     __atomic_fetch_add(strstr(fmt, "runs lifted") ? &n_note : &n_on, 1, __ATOMIC_SEQ_CST);
     if (!__atomic_exchange_n(&armed, 0, __ATOMIC_SEQ_CST)) return;
-    pthread_create(&tb, NULL, second, NULL);
+    thr_start(&tb, second, NULL);
     const time_t t0 = time(NULL);
-    while (!__atomic_load_n(&b_done, __ATOMIC_SEQ_CST) && time(NULL) - t0 < 3) sched_yield();
+    while (!__atomic_load_n(&b_done, __ATOMIC_SEQ_CST) && time(NULL) - t0 < 3) thr_yield();
     stuck = !__atomic_load_n(&b_done, __ATOMIC_SEQ_CST);
 }
 static int meet, met;
@@ -197,25 +218,25 @@ static int cold_env_on(const char *name) {
     if (__atomic_load_n(&meet, __ATOMIC_SEQ_CST)) {
         __atomic_fetch_add(&met, 1, __ATOMIC_SEQ_CST);
         const time_t t0 = time(NULL);
-        while (__atomic_load_n(&met, __ATOMIC_SEQ_CST) < 2 && time(NULL) - t0 < 10) sched_yield();
+        while (__atomic_load_n(&met, __ATOMIC_SEQ_CST) < 2 && time(NULL) - t0 < 10) thr_yield();
     }
     return env_on(name);
 }
 #define env_on cold_env_on
 #include "hos_zstd.c"
 #undef env_on
-static void *call(void *p) {
+THR_FN(call) {
     fn((Ctx *)p);
-    return NULL;
+    THR_RET;
 }
 static void cold(const char *name, int (*f)(Ctx *), Ctx a) {
     Ctx b = a;
-    pthread_t t1, t2;
+    thr_t t1, t2;
     fn = f, n_on = n_note = met = 0, meet = 1;
-    pthread_create(&t1, NULL, call, &a);
-    pthread_create(&t2, NULL, call, &b);
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
+    thr_start(&t1, call, &a);
+    thr_start(&t2, call, &b);
+    thr_join(t1);
+    thr_join(t2);
     meet = 0;
     printf("%s %d %d %d 0\n", name, met, n_on, n_note);
 }
@@ -223,7 +244,7 @@ static void phase(const char *name, int (*f)(Ctx *), Ctx a) {
     fn = f, cb = a, n_on = n_note = b_done = stuck = 0, armed = 1;
     f(&a);
     const int started = !armed;
-    if (started) pthread_join(tb, NULL);
+    if (started) thr_join(tb);
     printf("%s %d %d %d %d\n", name, started, n_on, n_note, stuck);
 }
 int main(int argc, char **argv) {
@@ -638,7 +659,7 @@ def build(cxx, tmp, broken=False, conc=False):
         objs.append(str(o))
     exe = d / "fixture.exe"
     subprocess.run([cc, "-std=gnu11", "-include", str(ENV_ON_H), "-Wall", "-Wextra", "-I", str(d), str(d / "fixture.c"),
-                    "-o", str(exe)] + flags + objs + (["-pthread"] if conc else []), check=True)
+                    "-o", str(exe)] + flags + objs + (["-pthread"] if conc and os.name != "nt" else []), check=True)
     return exe
 
 
