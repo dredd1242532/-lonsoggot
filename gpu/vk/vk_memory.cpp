@@ -4688,7 +4688,10 @@ bool wbd_pipe_ready() {
         }
     }
     const bool ok = wbd_pipe.pipe != VK_NULL_HANDLE;
-    logf("vk: write-back diff %s", ok ? "on (RX_VK_WB_DIFF=0: off)" : "off: its pipeline was not made");
+    // (longshot: the mirror syncs' pass makes it too, RX_VK_MSYNC_PASS, with the diff itself off or on)
+    logf("vk: write-back diff %s", !ok           ? "off: its pipeline was not made"
+                                   : wb_diff_on() ? "on (RX_VK_WB_DIFF=0: off)"
+                                                  : "off (RX_VK_WB_DIFF=0); its pipeline made for the mirror syncs' pass");
     return ok;
 }
 void shadow_written_to(std::vector<uint32_t>& list, const uint32_t* pages, int64_t n) {
@@ -5163,11 +5166,11 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
 // address). So the regions go as its chunks, one workgroup a chunk, and a sync's chunks in one dispatch where their copies
 // were: the presync's (memory_sync_mirrors_before_segments) every pool's at once. No barrier between the chunks: the copies had
 // none either (each page of a mirror comes from one place in a sync), and the full barrier that ends the uploads
-// (texture_uploads_recorded) waits for all commands, the dispatch's too. The tables are blocks of host memory, a block taken
-// again once the submission that last read it is done; a sync whose table finds no room goes as the copies, as before. (Not
-// the write-back diff's own ring, wbd_table_get: one table of 128 KB or more a dispatch there, and a serial replay makes about
-// 25 of these dispatches a frame, so its 64 tables could all be in flight; a write-back that finds none copies whole and
-// forgets its shadows.)
+// (texture_uploads_recorded) waits for all commands, the dispatch's too. The tables are blocks of host memory, each table on
+// cache atoms of its own (msync_block_get), a block taken again once the submission that last read it is done; a sync whose
+// table finds no room goes as the copies, as before. (Not the write-back diff's own ring, wbd_table_get: one table of 128 KB
+// or more a dispatch there, and a serial replay makes about 25 of these dispatches a frame, so its 64 tables could all be in
+// flight; a write-back that finds none copies whole and forgets its shadows.)
 std::vector<WbdChunk> msync_chunks;   // (pools_mu)
 struct MsyncCopy {
     VkBuffer src, dst;
@@ -5188,13 +5191,21 @@ constexpr uint64_t kMsyncBlockBytes = 256u << 10;   // (8192 chunks: a frame's p
 MsyncBlock msync_blocks[kMsyncBlocks];
 int msync_block_cur = -1;
 
-/// (pools_mu held) Room for a table of `bytes`: in the current block, or in the next one once the GPU is done with it
-MsyncBlock* msync_block_get(uint64_t bytes) {
+/// (pools_mu held) Room for a table of `bytes`, from offset `at`: in the current block, or in the next one once the GPU is
+/// done with it. Each table starts on a cache atom of its own (nonCoherentAtomSize), as staging's slices do: a block's
+/// memory need not be coherent, a flush covers whole atoms (vkFlushMappedMemoryRanges), and a dispatch already submitted
+/// may still be reading the table before it in the block. (An atom of the block is one of its memory: VMA starts the
+/// allocations of a non-coherent memory type on an atom.)
+MsyncBlock* msync_block_get(uint64_t bytes, uint64_t& at) {
     if (bytes > kMsyncBlockBytes) return nullptr;
+    const uint64_t align = std::max<uint64_t>(sizeof(WbdChunk), dev.props.limits.nonCoherentAtomSize);
     if (msync_block_cur >= 0) {
         MsyncBlock& b = msync_blocks[msync_block_cur];
-        if (b.map && b.fill + bytes <= kMsyncBlockBytes) {
+        const uint64_t start = (b.fill + align - 1) & ~(align - 1);
+        if (b.map && start + bytes <= kMsyncBlockBytes) {
+            b.fill = start + bytes;
             b.value = std::max(b.value, mem_rec_value);
+            at = start;
             return &b;
         }
     }
@@ -5220,8 +5231,9 @@ MsyncBlock* msync_block_get(uint64_t bytes) {
         b.map = (uint8_t*)map;
     }
     msync_block_cur = next;
-    b.fill = 0;
+    b.fill = bytes;
     b.value = mem_rec_value;
+    at = 0;
     return &b;
 }
 
@@ -5262,7 +5274,8 @@ void msync_pass_flush() {
     }
     VkCommandBuffer cmd = upload_command_buffer();
     const uint64_t bytes = msync_chunks.size() * sizeof(WbdChunk);
-    MsyncBlock* b = msync_block_get(bytes);
+    uint64_t at = 0;
+    MsyncBlock* b = msync_block_get(bytes, at);
     if (!b) {
         for (const MsyncCopy& c : msync_copies) {
             GprofSpan gp(cmd, "msync copies (CPU pages from a capture -> mirror)");
@@ -5275,17 +5288,16 @@ void msync_pass_flush() {
         if (logged++ < 8)
             logf("vk: mirror syncs' pass: no table room for %zu chunks: this sync as copies", msync_chunks.size());
     } else {
-        memcpy(b->map + b->fill, msync_chunks.data(), bytes);
-        flush_mapped_range(b->alloc, b->fill, bytes);
+        memcpy(b->map + at, msync_chunks.data(), bytes);
+        flush_mapped_range(b->alloc, at, bytes);
         const uint32_t n = (uint32_t)msync_chunks.size();
         GprofSpan gp(cmd, "msync pass (CPU pages from a capture -> mirror, one dispatch)");
         gp.items = (int)n;
         for (const WbdChunk& c : msync_chunks) gp.bytes += (uint64_t)c.count * (c.vecs ? 16 : 4);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, wbd_pipe.pipe);
-        const struct { uint64_t table; uint32_t count, pad; uint64_t observations; } pc{b->address + b->fill, n, 0, 0};   // (no stamps, no observations)
+        const struct { uint64_t table; uint32_t count, pad; uint64_t observations; } pc{b->address + at, n, 0, 0};   // (no stamps, no observations)
         vkCmdPushConstants(cmd, wbd_pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
         vkCmdDispatch(cmd, std::min<uint32_t>(n, 65535u), (n + 65534u) / 65535u, 1);
-        b->fill += bytes;
         st_msync_dispatches++, st_msync_chunks += (int64_t)n;
     }
     msync_chunks.clear();

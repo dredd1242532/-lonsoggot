@@ -13,6 +13,21 @@ addresses and fake memory, and checks:
   taken (false), the caller copies them as before;
 - the switch: on when unset, off for 0, false, off and no (any case, spaces around), on for any other value.
   (A chunk's vecs is 0 or 1: its bit 1 would be the late pages' fix's stamps, which the pass has none of.)
+Then the tables: msync_block_get and msync_pass_flush as they are, over fake blocks of host memory (guard bytes after
+each) and a GPU that may read a table from its dispatch until its submission is done (a parallel replay submits a
+segment before the next one is recorded), with a nonCoherentAtomSize of 64, 128 and 256 bytes (more than a chunk) and
+of 1 and 32:
+- a flush, as the whole atoms Vulkan flushes (vkFlushMappedMemoryRanges), never covers a byte of a table a dispatch may
+  still read: an earlier submission's or one of the same submission's, tables of 1 to 9 chunks;
+- nothing is written over such a table or past a block's end: the room a table asks for counts its alignment (a table
+  that fits the block's rest only unaligned goes to the next block, one that fits it aligned stays);
+- each table is its sync's chunks, written before its flush (the bytes flushed are the chunks) and flushed whole; the
+  push constants point at it with no stamp and no observations, and the dispatch's rows cover its chunks as the shader
+  numbers them;
+- 64 tables of a chunk share one block, not one each;
+- with every block still read, a table bigger than a block (the next block free or not), or a block that can't be made
+  (no memory, not mapped, no address; nothing kept of it), the sync goes as its copies; a block is taken again, from
+  its start, once the submission that read it last is done (a later submission's table in it too).
 Then, from the text: every capture buffer is made with cap_usage(), which gives them storage and an address when the pass
 is on (it reads them by address); the runs the pass takes still go into the write-back shadow (shadow_sync_copy, as the
 copies' do: else the diff writes a capture's older words over the CPU's newer ones); the pass's push constants are the
@@ -51,6 +66,15 @@ def block(text, marker):
     return text[start:end]
 
 
+def region(text, first, last):
+    """The source from first up to last, last left out (the definitions between them, as they are)"""
+    start, end = text.find(first), text.find(last)
+    if start < 0 or end < start:
+        raise SystemExit(f"FAIL: no {first.strip(' {(')} before {last.strip(' {(')} in the source (the mirror syncs' pass "
+                         "is not there)")
+    return text[start:end]
+
+
 FIXTURE = r'''
 #define _CRT_SECURE_NO_WARNINGS   // (getenv, with an MSVC-target {cxx}: as the tests' own .cpp files)
 #include <algorithm>
@@ -65,14 +89,25 @@ FIXTURE = r'''
 typedef uint64_t VkDeviceAddress;
 typedef struct VkBuffer_T* VkBuffer;
 typedef struct VkDevice_T* VkDevice;
+typedef struct VkCommandBuffer_T* VkCommandBuffer;
+typedef struct VkPipeline_T* VkPipeline;
+typedef struct VkPipelineLayout_T* VkPipelineLayout;
+typedef struct VmaAllocation_T* VmaAllocation;
+typedef uint32_t VkBufferUsageFlags;
 #define VK_NULL_HANDLE nullptr
 enum { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO = 1000244001 };
+enum { VK_BUFFER_USAGE_STORAGE_BUFFER_BIT = 0x20, VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT = 0x20000 };
+enum { VK_PIPELINE_BIND_POINT_COMPUTE = 1, VK_SHADER_STAGE_COMPUTE_BIT = 0x20 };
 struct VkBufferCopy { uint64_t srcOffset, dstOffset, size; };
 struct VkBufferDeviceAddressInfo { int sType; const void* pNext; VkBuffer buffer; };
 
+static int failures;   // (the first 24 told)
+#define CHECK(ok, ...) do { if (!(ok) && failures++ < 24) { std::fprintf(stderr, "failed: %s: ", #ok); \
+    std::fprintf(stderr, __VA_ARGS__); std::fprintf(stderr, "\n"); } } while (0)
+
 namespace mkwvk {
 static void logf(const char*, ...) {}
-struct { VkDevice device; } dev{};
+struct { VkDevice device; struct { struct { uint64_t nonCoherentAtomSize; } limits; } props; } dev{};
 std::map<VkBuffer, VkDeviceAddress> addresses;   // (a buffer's device address; 0 for one without)
 VkDeviceAddress vkGetBufferDeviceAddress(VkDevice, const VkBufferDeviceAddressInfo* i) {
     auto it = addresses.find(i->buffer);
@@ -82,6 +117,88 @@ bool pipe_ready = true;
 bool wbd_pipe_ready() { return pipe_ready; }
 struct Pool { VkBuffer mirror = VK_NULL_HANDLE; };
 
+// (the tables' fakes: a block is host memory with guard bytes after it, at a device address of its own; the commands are
+// recorded, a dispatch with the push constants before it)
+uint64_t mem_rec_value = 0, mem_completed = 0;
+int64_t st_msync_dispatches = 0, st_msync_chunks = 0, st_msync_fallbacks = 0;
+constexpr uint64_t kGuard = 4096;
+struct FakeBlock {
+    std::vector<uint8_t> mem;
+    uint64_t size = 0;
+    VkDeviceAddress address = 0;
+};
+std::map<VmaAllocation, FakeBlock> made;
+uintptr_t made_serial = 0;
+enum { MAKE_OK, MAKE_FAILS, MAKE_UNMAPPED, MAKE_NO_ADDRESS } make_next = MAKE_OK;   // (the next block made: once)
+bool create_buffer(uint64_t size, VkBufferUsageFlags usage, bool host_visible, VkBuffer& buffer, VmaAllocation& allocation,
+                   void** mapped, bool = false) {
+    CHECK(host_visible && (usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) &&
+          (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT),
+          "a table's block made without host access, storage or an address (usage %#x)", usage);
+    const auto how = make_next;
+    make_next = MAKE_OK;
+    if (how == MAKE_FAILS) return false;   // (as vmaCreateBuffer: nothing made, the handles left null)
+    made_serial++;
+    buffer = (VkBuffer)(0x100000 + made_serial);
+    allocation = (VmaAllocation)(0x200000 + made_serial);
+    FakeBlock& b = made[allocation];
+    b.mem.assign(size + kGuard, 0xa5);
+    b.size = size;
+    b.address = 0x600000000000ull + (uint64_t)made_serial * (4ull << 20);
+    if (how != MAKE_NO_ADDRESS) addresses[buffer] = b.address;
+    *mapped = how == MAKE_UNMAPPED ? nullptr : b.mem.data();
+    return true;
+}
+void destroy_buffer(VkBuffer buffer, VmaAllocation allocation) {
+    addresses.erase(buffer);
+    made.erase(allocation);
+}
+struct Flush {   // (the bytes as they were when flushed: what the GPU may see of a non-coherent block)
+    VmaAllocation alloc;
+    uint64_t offset, size;
+    std::vector<uint8_t> seen;
+};
+std::vector<Flush> flushes;
+void flush_mapped_range(VmaAllocation allocation, uint64_t offset, uint64_t size) {
+    const auto it = made.find(allocation);
+    std::vector<uint8_t> seen;
+    if (it != made.end() && offset <= it->second.size && size <= it->second.size - offset)
+        seen.assign(it->second.mem.data() + offset, it->second.mem.data() + offset + size);
+    flushes.push_back({allocation, offset, size, std::move(seen)});
+}
+VkCommandBuffer upload_command_buffer() { return (VkCommandBuffer)(uintptr_t)0xc0; }
+struct GprofSpan {
+    int items = 1;
+    uint64_t bytes = 0;
+    GprofSpan(VkCommandBuffer, const char*) {}
+};
+struct { VkPipeline pipe; VkPipelineLayout layout; } wbd_pipe{(VkPipeline)(uintptr_t)0xd0,
+                                                            (VkPipelineLayout)(uintptr_t)0xd1};
+struct Recorded { VkDeviceAddress table; uint32_t count, x, y; };
+std::vector<Recorded> dispatches;
+Recorded pushed{};
+struct CopyCmd { VkBuffer src, dst; std::vector<VkBufferCopy> rs; };
+std::vector<CopyCmd> copy_cmds;
+void vkCmdBindPipeline(VkCommandBuffer, int, VkPipeline) {}
+void vkCmdPushConstants(VkCommandBuffer, VkPipelineLayout, uint32_t, uint32_t offset, uint32_t size, const void* data) {
+    CHECK(offset == 0 && size == 24, "push constants of %u bytes at %u, not the write-back diff's 24 at 0", size, offset);
+    std::memcpy(&pushed.table, data, 8);
+    std::memcpy(&pushed.count, (const uint8_t*)data + 8, 4);
+    if (size == 24) {   // (no stamp, no observations: with an address the shader writes a word a chunk there)
+        const uint8_t* rest = (const uint8_t*)data + 12;
+        CHECK(std::all_of(rest, rest + 12, [](uint8_t v) { return v == 0; }), "push constants with a stamp or an "
+              "observations address");
+    }
+}
+void vkCmdDispatch(VkCommandBuffer, uint32_t x, uint32_t y, uint32_t) {
+    Recorded r = pushed;
+    r.x = x, r.y = y;
+    dispatches.push_back(r);
+}
+void vkCmdCopyBuffer(VkCommandBuffer, VkBuffer src, VkBuffer dst, uint32_t n, const VkBufferCopy* rs) {
+    copy_cmds.push_back({src, dst, std::vector<VkBufferCopy>(rs, rs + n)});
+}
+
 @SWITCH_ON@
 @WBD_SPLIT@
 @WBD_CHUNK@;
@@ -89,12 +206,11 @@ std::vector<WbdChunk> msync_chunks;
 @MSYNC_COPY@;
 std::vector<MsyncCopy> msync_copies;
 @PASS_ADD@
+@MSYNC_BLOCKS@
+@BLOCK_GET@
+@PASS_FLUSH@
 }  // namespace mkwvk
 using namespace mkwvk;
-
-static int failures;
-#define CHECK(ok, ...) do { if (!(ok)) { std::fprintf(stderr, "failed: %s: ", #ok); std::fprintf(stderr, __VA_ARGS__); \
-    std::fprintf(stderr, "\n"); failures++; } } while (0)
 
 // (the fake memory: a capture buffer and a mirror, each at a device address; a buffer's bytes by its address)
 constexpr uint64_t kSrcBytes = 1u << 20, kDstBytes = 1u << 20;
@@ -155,9 +271,184 @@ static void check_refused(const std::vector<VkBufferCopy>& rs, const char* what)
           msync_chunks.size());
 }
 
+// ---- the tables: msync_block_get and msync_pass_flush as they are ----
+struct Table {   // (a table a dispatch was recorded with: the GPU may read it until its submission is done)
+    VmaAllocation alloc;
+    uint64_t at, bytes, value;
+    std::vector<uint8_t> want;
+};
+static std::vector<Table> tables;
+static uint64_t chunk_serial;
+static char scene[64];
+
+static void tables_reset(uint64_t atom) {
+    for (MsyncBlock& b : msync_blocks) {
+        if (b.buf) destroy_buffer(b.buf, b.alloc);
+        b = {};
+    }
+    msync_block_cur = -1;
+    tables.clear(), flushes.clear(), dispatches.clear(), copy_cmds.clear();
+    dev.props.limits.nonCoherentAtomSize = atom;
+    mem_rec_value = 1, mem_completed = 0;
+}
+
+static const FakeBlock* block_at(VkDeviceAddress a, VmaAllocation* alloc) {
+    for (const auto& kv : made)
+        if (a >= kv.second.address && a < kv.second.address + kv.second.size) {
+            *alloc = kv.first;
+            return &kv.second;
+        }
+    return nullptr;
+}
+
+/// A sync of n chunks (made up: a word each) through msync_pass_flush, a table taking it or (dispatch false) its copies;
+/// then what it published, against every table a dispatch recorded before it may still be reading
+static void publish(uint32_t n, bool dispatch, const char* what) {
+    msync_chunks.clear(), msync_copies.clear();
+    for (uint32_t i = 0; i < n; i++, chunk_serial++) {
+        const uint64_t d = 0x10000000ull + 4 * chunk_serial;
+        msync_chunks.push_back({0x7f0000000000ull + 4 * chunk_serial, d, d, 1u, 0u});
+    }
+    msync_copies.push_back({(VkBuffer)(uintptr_t)0x1000, (VkBuffer)(uintptr_t)0x2000, {{0, 0, 4ull * n}}});
+    const std::vector<WbdChunk> chunks = msync_chunks;
+    const size_t f0 = flushes.size(), d0 = dispatches.size(), c0 = copy_cmds.size();
+    msync_pass_flush();
+    CHECK(msync_chunks.empty() && msync_copies.empty(), "%s, %s: the sync's chunks or copies kept after it", scene, what);
+    const uint64_t atom = std::max<uint64_t>(1, dev.props.limits.nonCoherentAtomSize), bytes = n * sizeof(WbdChunk);
+    const size_t nd = dispatches.size() - d0, nf = flushes.size() - f0, nc = copy_cmds.size() - c0;
+    if (!dispatch) {
+        CHECK(nd == 0 && nf == 0 && nc == 1 && copy_cmds.back().rs.size() == 1 &&
+              copy_cmds.back().rs[0].size == 4ull * n,
+              "%s, %s: not as its copies (%zu dispatches, %zu flushes, %zu copy commands)", scene, what, nd, nf, nc);
+    } else if (nd != 1 || nf != 1 || nc != 0) {
+        CHECK(nd == 1 && nf == 1 && nc == 0, "%s, %s: not one dispatch with one flush (%zu dispatches, %zu flushes, %zu "
+              "copy commands)", scene, what, nd, nf, nc);
+    } else {
+        const Recorded& d = dispatches.back();
+        const Flush& f = flushes.back();
+        VmaAllocation alloc = nullptr;
+        const FakeBlock* b = block_at(d.table, &alloc);
+        CHECK(b && alloc == f.alloc, "%s, %s: the table at %#llx is not in the block flushed", scene, what,
+              (unsigned long long)d.table);
+        const uint64_t at = b ? d.table - b->address : 0;
+        if (b && alloc == f.alloc && at + bytes > b->size) {
+            CHECK(at + bytes <= b->size, "%s, %s: the table [%llu, %llu) runs past its block's %llu bytes", scene, what,
+                  (unsigned long long)at, (unsigned long long)(at + bytes), (unsigned long long)b->size);
+        } else if (b && alloc == f.alloc) {
+            CHECK(f.offset == at && f.size == bytes && d.count == n, "%s, %s: the flush [%llu, +%llu) and the count %u, not "
+                  "the table's [%llu, +%llu) and its %u chunks", scene, what, (unsigned long long)f.offset,
+                  (unsigned long long)f.size, d.count, (unsigned long long)at, (unsigned long long)bytes, n);
+            CHECK(d.table % 8 == 0, "%s, %s: the table at %#llx, not 8-byte aligned (the shader's Table)", scene, what,
+                  (unsigned long long)d.table);
+            // (the shader's chunk is gl_WorkGroupID.x + gl_WorkGroupID.y * 65535: rows of 65535 but the last)
+            CHECK(d.x >= 1 && d.y >= 1 && d.y <= 65535 && (d.y == 1 ? d.x >= n : d.x == 65535 && 65535ull * d.y >= n),
+                  "%s, %s: a dispatch of %u x %u workgroups for %u chunks", scene, what, d.x, d.y, n);
+            CHECK(!std::memcmp(b->mem.data() + at, chunks.data(), bytes), "%s, %s: the table is not the sync's chunks",
+                  scene, what);
+            CHECK(f.seen.size() == bytes && !std::memcmp(f.seen.data(), chunks.data(), bytes), "%s, %s: the bytes flushed "
+                  "are not the sync's chunks (the table written after its flush?)", scene, what);
+            // (Vulkan flushes whole atoms: the first and the last the flush touches are written whole)
+            const uint64_t lo = f.offset / atom * atom;
+            const uint64_t hi = std::min(b->size, (f.offset + f.size + atom - 1) / atom * atom);
+            for (const Table& t : tables)
+                CHECK(t.alloc != alloc || t.value <= mem_completed || t.at + t.bytes <= lo || t.at >= hi,
+                      "%s, %s: its flush of bytes [%llu, %llu) is one of atoms [%llu, %llu), with bytes [%llu, %llu) of a "
+                      "table submission %llu may still be reading", scene, what, (unsigned long long)f.offset,
+                      (unsigned long long)(f.offset + f.size), (unsigned long long)lo, (unsigned long long)hi,
+                      (unsigned long long)t.at, (unsigned long long)(t.at + t.bytes), (unsigned long long)t.value);
+            tables.push_back({alloc, at, bytes, mem_rec_value, std::vector<uint8_t>(chunks.size() * sizeof(WbdChunk))});
+            std::memcpy(tables.back().want.data(), chunks.data(), bytes);
+        }
+    }
+    for (const Table& t : tables) {   // (nothing written over a table the GPU may still read, nor past a block)
+        if (t.value <= mem_completed) continue;
+        const auto it = made.find(t.alloc);
+        CHECK(it != made.end() && !std::memcmp(it->second.mem.data() + t.at, t.want.data(), t.bytes),
+              "%s, %s: a table submission %llu may still be reading, at [%llu, %llu), written over", scene, what,
+              (unsigned long long)t.value, (unsigned long long)t.at, (unsigned long long)(t.at + t.bytes));
+    }
+    for (const auto& kv : made) {
+        const uint8_t* end = kv.second.mem.data() + kv.second.size;
+        CHECK(std::all_of(end, end + kGuard, [](uint8_t v) { return v == 0xa5; }), "%s, %s: written past the end of a block",
+              scene, what);
+    }
+}
+
+static void check_tables() {
+    const uint32_t whole = (uint32_t)(kMsyncBlockBytes / sizeof(WbdChunk));
+    for (uint64_t atom : {64ull, 128ull, 256ull, 1ull, 32ull}) {
+        std::snprintf(scene, sizeof scene, "nonCoherentAtomSize %llu", (unsigned long long)atom);
+        const uint64_t align = std::max<uint64_t>(atom, sizeof(WbdChunk));
+        // (an earlier table still read: the next submission's sync, then more of that submission's)
+        tables_reset(atom);
+        publish(1, true, "a sync of one chunk");
+        mem_rec_value = 2;
+        publish(1, true, "the next submission's sync of one chunk, the first's table still read");
+        for (uint32_t n : {3u, 5u, 8u, 9u, 1u, 2u}) publish(n, true, "more syncs of that submission");
+        mem_completed = 1, mem_rec_value = 3;
+        publish(4, true, "a sync once the first submission is done");
+        // (tables of one chunk each share a block)
+        tables_reset(atom);
+        for (int i = 0; i < 64; i++) publish(1, true, "one of 64 syncs of a chunk");
+        CHECK(made.size() == 1, "%s: 64 tables of a chunk took %zu blocks, not one", scene, made.size());
+        // (the room: a table that fits the block's rest only unaligned goes to the next block; one that fits it aligned
+        // stays)
+        tables_reset(atom);
+        publish(1, true, "a sync of one chunk");
+        publish((uint32_t)((kMsyncBlockBytes - align) / sizeof(WbdChunk)), true,
+                "a table that fills the block's rest, aligned");
+        CHECK(made.size() == 1, "%s: a table that fits the block's rest aligned went to a block of its own", scene);
+        tables_reset(atom);
+        publish(1, true, "a sync of one chunk");
+        publish(whole - 1, true, "a table that fits the block's rest only unaligned");
+        publish(1, true, "a sync after it");
+        // (the ring: every block still read, then the first one's submission done; a table bigger than a block)
+        tables_reset(atom);
+        for (int i = 0; i < kMsyncBlocks; i++, mem_rec_value++) publish(whole, true, "a table of a whole block");
+        publish(1, false, "a sync with every block still read");
+        mem_completed = 1;
+        publish(1, true, "a sync once the first block's submission is done");
+        CHECK(!dispatches.empty() && dispatches.back().table == msync_blocks[0].address, "%s: a block whose submission is "
+              "done not taken again from its start", scene);
+        publish(whole + 1, false, "a table bigger than a block");
+        // (a block a later submission's table went into after an earlier one's: not taken again until the later is done)
+        tables_reset(atom);
+        publish(1, true, "a sync of one chunk");
+        mem_rec_value = 2;
+        publish(1, true, "the next submission's sync, in the same block");
+        for (int i = 1; i < kMsyncBlocks; i++, mem_rec_value++) publish(whole, true, "a table of a whole block");
+        mem_completed = 1;
+        publish(1, false, "a sync with the first block's second submission still read");
+        mem_completed = mem_rec_value - 1;
+        publish(1, true, "a sync once that submission is done");
+        CHECK(!dispatches.empty() && dispatches.back().table == msync_blocks[0].address, "%s: a block whose submissions are "
+              "done not taken again from its start", scene);
+        // (a table bigger than a block with the next block free; a block that could not be made, kept from nothing)
+        tables_reset(atom);
+        publish(whole + 1, false, "a table bigger than a block, the next block free");
+        CHECK(made.empty(), "%s: a block made for a table bigger than a block", scene);
+        for (auto how : {MAKE_FAILS, MAKE_UNMAPPED, MAKE_NO_ADDRESS}) {
+            make_next = how;
+            publish(1, false, "a sync whose block could not be made");
+            CHECK(made.empty() && msync_block_cur == -1, "%s: a block that could not be made (%d) kept", scene, (int)how);
+        }
+        publish(1, true, "a sync once a block can be made");
+    }
+    tables_reset(64);
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && !std::strcmp(argv[1], "switch")) {
         std::printf("%d\n", msync_pass_on() ? 1 : 0);
+        return 0;
+    }
+    if (argc > 1 && !std::strcmp(argv[1], "tables")) {
+        check_tables();
+        if (failures) {
+            std::fprintf(stderr, "%d failed\n", failures);
+            return 1;
+        }
+        std::puts("ok");
         return 0;
     }
     fill(src_mem, 3);
@@ -256,7 +547,10 @@ def main():
                .replace('@WBD_SPLIT@', block(text, 'template <class F> void wbd_split('))
                .replace('@WBD_CHUNK@', block(text, 'struct WbdChunk'))
                .replace('@MSYNC_COPY@', block(text, 'struct MsyncCopy'))
-               .replace('@PASS_ADD@', block(text, 'bool msync_pass_add(Pool& p, VkBuffer buf, const std::vector<VkBufferCopy>& rs) {')))
+               .replace('@PASS_ADD@', block(text, 'bool msync_pass_add(Pool& p, VkBuffer buf, const std::vector<VkBufferCopy>& rs) {'))
+               .replace('@MSYNC_BLOCKS@', region(text, 'struct MsyncBlock {', 'MsyncBlock* msync_block_get('))
+               .replace('@BLOCK_GET@', block(text, 'MsyncBlock* msync_block_get('))
+               .replace('@PASS_FLUSH@', block(text, 'void msync_pass_flush(')))
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / 'msync_pass.cpp'
         exe = Path(tmp) / 'msync_pass.exe'
@@ -267,6 +561,9 @@ def main():
         run = subprocess.run([str(exe)], capture_output=True, text=True)
         if run.returncode:
             errors.append('the chunks: ' + (run.stderr.strip() or f'exit {run.returncode}'))
+        run = subprocess.run([str(exe), 'tables'], capture_output=True, text=True)
+        if run.returncode:
+            errors.append('the tables: ' + (run.stderr.strip() or f'exit {run.returncode}'))
         for value, want in ((None, 1), ('0', 0), ('false', 0), (' OFF ', 0), ('No', 0), ('1', 1), ('yes', 1), ('2', 1)):
             env = {k: v for k, v in os.environ.items() if k != SWITCH}
             if value is not None:
@@ -279,7 +576,7 @@ def main():
             print('FAIL:', e)
         raise SystemExit(1)
     print('PASS: the mirror syncs\' pass takes each capture run as the copies did, whole chunks, the switch by the one rule, '
-          'capture buffers made for it')
+          'capture buffers made for it, each table on cache atoms of its own')
 
 
 if __name__ == '__main__':
