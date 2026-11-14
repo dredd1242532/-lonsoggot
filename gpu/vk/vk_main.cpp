@@ -1565,6 +1565,7 @@ void mkwvk_close_asked(void) {
     using namespace mkwvk;
     programs_census_log("close");
     module_ids_flush();
+    page_table_census_log("close");   // (the guest pools the page table cannot reach: how many came, vk_memory.cpp)
     fsr4_close();             // (AMD FSR 4's tuned layers: their background builds stopped first, what they made then saved below)
     pipeline_cache_close();   // (in play: the pipelines made since the last save, kept for the next start)
     if (prep_running.load() && !prepare_stopped()) {
