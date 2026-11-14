@@ -6,9 +6,9 @@ and Auto picks them where the process may run on 12 or more logical processors a
 behind one constant, threaded::kAutoEnabled, which is off: Auto is Off on every PC until it is turned on, so the row
 changes nobody's default. The source checks: that constant is the only gate and is off; the row is Auto by default,
 takes a restart and is in the readme and the development guide; RX_VK_ASYNC is read in one place (vk_replay.cpp
-render_thread_mode, the switch over the row), which async_on and behind_on both take; the recorder asks the row only
+render_thread_mode, the switch over the row), which async_on takes; the recorder asks the row only
 with RX_VK_RECORDER unset; and the host's present poll asks the renderer (HOS_OPT_RENDER_THREAD) instead of reading
-RX_VK_ASYNC itself, so the row's On answers the poll exactly as RX_VK_ASYNC=2 does.
+RX_VK_ASYNC itself, so the row's On answers the poll exactly as RX_VK_ASYNC=1 does.
 
 python -I -B tests/test_threaded_rendering.py [--cxx g++]
 """
@@ -115,13 +115,12 @@ def main():
         raise SystemExit("vk_menu.cpp: menu_threaded_rendering() is the row's answer alone: the switches are read over it by "
                          "their own readers")
 
-    # (the replay: RX_VK_ASYNC in one place, the switch over the row, and the row's On exactly RX_VK_ASYNC=2)
+    # (the replay: RX_VK_ASYNC in one place, the switch over the row, and the row's On exactly RX_VK_ASYNC=1)
     mode = block(replay, "int render_thread_mode() {")
-    if 'const char* e = getenv("RX_VK_ASYNC");' not in mode or "return e ? atoi(e) : menu_threaded_rendering() ? 2 : 0;" not in mode:
-        raise SystemExit("vk_replay.cpp: render_thread_mode() is no longer RX_VK_ASYNC when set, else the row as 2 or 0")
-    if "render_thread_mode() != 0" not in block(replay, "bool async_on() {") or \
-            "render_thread_mode() == 2" not in block(replay, "bool behind_on() {"):
-        raise SystemExit("vk_replay.cpp: async_on() or behind_on() no longer reads render_thread_mode()")
+    if 'const char* e = getenv("RX_VK_ASYNC");' not in mode or "return e ? atoi(e) : menu_threaded_rendering() ? 1 : 0;" not in mode:
+        raise SystemExit("vk_replay.cpp: render_thread_mode() is no longer RX_VK_ASYNC when set, else the row as 1 or 0")
+    if "render_thread_mode() != 0" not in block(replay, "bool async_on() {"):
+        raise SystemExit("vk_replay.cpp: async_on() no longer reads render_thread_mode()")
     for path in sorted(list(vk.glob("*.cpp")) + list(vk.glob("*.h")) + list((ROOT / "host").glob("*.c"))):
         text = path.read_text(encoding="utf-8", errors="replace")
         reads = len(re.findall(r'getenv\("RX_VK_ASYNC"\)', text))
@@ -140,11 +139,11 @@ def main():
             "(rec::g_setting_thread = menu_threaded_rendering, true)" not in replay:
         raise SystemExit("the recorder's question to the row is not set up (vk_recorder.h g_setting_thread, vk_replay.cpp)")
 
-    # (the host: the present poll asks the renderer, which answers behind_on())
+    # (the host: the present poll asks the renderer, which answers async_on())
     if "enum { HOS_OPT_RENDER_THREAD = 58 };" not in api:
         raise SystemExit("vk_api.h: HOS_OPT_RENDER_THREAD is not option 58")
-    if "if (id == HOS_OPT_RENDER_THREAD) return behind_on();" not in block(replay, "t.option = [](int id) -> int {"):
-        raise SystemExit("vk_replay.cpp: the option callback no longer answers HOS_OPT_RENDER_THREAD with behind_on()")
+    if "if (id == HOS_OPT_RENDER_THREAD) return async_on();" not in block(replay, "t.option = [](int id) -> int {"):
+        raise SystemExit("vk_replay.cpp: the option callback no longer answers HOS_OPT_RENDER_THREAD with async_on()")
     poll = block(native, "NV(nvnEventGetValue) {")
     if "now = e ? atoi(e) != 0 : rx_option(HOS_OPT_RENDER_THREAD, -1);" not in poll or 'getenv("HOS_PRESENT_NOWAIT")' not in poll:
         raise SystemExit("nvn_native.c: the present poll is not HOS_PRESENT_NOWAIT when set, else the renderer's "

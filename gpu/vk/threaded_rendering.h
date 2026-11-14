@@ -4,7 +4,7 @@
 // host/nvn_native.c) and the checks (tests/test_threaded_rendering.py compiles this file alone).
 //
 //   Off    the replay on the game's submitting thread, the recorder as RX_VK_RECORDER chooses it: as before the row
-//   On     the render thread (what RX_VK_ASYNC=2 gives: the replay on a thread of its own, the game a frame ahead of it) and
+//   On     the render thread (what RX_VK_ASYNC=1 gives: the replay on a thread of its own, the game a frame ahead of it) and
 //          the recorder thread (what RX_VK_RECORDER=thread gives) together, whatever the CPU
 //   Auto   (the default) decided from the logical processors the process may run on (its affinity mask, usable_cpus, not
 //          the PC's count): kAutoCpus or more, the render thread and the recorder thread; fewer, off. And off where the mode
@@ -14,7 +14,7 @@
 //
 // The environment's switches stay the overrides they were, for testing: RX_VK_ASYNC set chooses the render thread and
 // RX_VK_RECORDER set the recorder, each over the row; unset, the row decides. Read once, at the start: a change of the row
-// takes effect at the next start (the replay's async_on and behind_on and the recorder's mode are read once).
+// takes effect at the next start (the replay's async_on and the recorder's mode are read once).
 #pragma once
 
 namespace mkwvk::threaded {
