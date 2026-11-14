@@ -49,17 +49,35 @@ VKX_DEVICE3(VKX_DEFINE)
 static PFN_vkGetInstanceProcAddr get_instance_proc;
 
 bool load_global() {
+#if defined(__APPLE__)
+    if (!mkwvk::host->vulkan_library) {
+        mkwvk::logf("vk: missing macOS host Vulkan library callback");
+        return false;
+    }
+    HMODULE m = mkwvk::host->vulkan_library();
+#else
 #ifdef _WIN32   // (longshot: the loader from System32 only, not from the current folder or PATH)
     HMODULE m = LoadLibraryExA("vulkan-1.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 #else
     HMODULE m = LoadLibraryA("vulkan-1.dll");   // (linux: libvulkan.so.1, host/posix/win32_posix.c)
 #endif
+#endif
     if (!m) return false;
     get_instance_proc = (PFN_vkGetInstanceProcAddr)(void*)GetProcAddress(m, "vkGetInstanceProcAddr");
+#if defined(__APPLE__)
+    if (!get_instance_proc) mkwvk::logf("vk: Vulkan library is missing vkGetInstanceProcAddr");
+#endif
     if (!get_instance_proc) return false;
 #define VKX_LOAD(f) f = (PFN_##f)get_instance_proc(nullptr, #f);
     VKX_GLOBAL(VKX_LOAD)
 #undef VKX_LOAD
+#if defined(__APPLE__)
+    if (!vkEnumerateInstanceExtensionProperties) {
+        mkwvk::logf("vk: Vulkan library is missing vkEnumerateInstanceExtensionProperties");
+        return false;
+    }
+    if (!vkCreateInstance) mkwvk::logf("vk: Vulkan library is missing vkCreateInstance");
+#endif
     return vkCreateInstance != nullptr;
 }
 PFN_vkGetInstanceProcAddr instance_proc_addr() { return get_instance_proc; }
@@ -137,6 +155,60 @@ bool has_extension(const std::vector<VkExtensionProperties>& all, const char* na
     return false;
 }
 
+#if defined(__APPLE__)
+// Pure admission decisions; tests compile these without loading Vulkan or SDL.
+static const char* darwin_result_name(VkResult result) {
+    switch (result) {
+    case VK_SUCCESS: return "VK_SUCCESS";
+    case VK_INCOMPLETE: return "VK_INCOMPLETE";
+    case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY";
+    case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+    case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+    case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST";
+    case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT";
+    case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT";
+    case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT";
+    case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+    default: return "unrecognized VkResult";
+    }
+}
+static const char* darwin_instance_extensions(const std::vector<VkExtensionProperties>& all,
+                                            const char* const* sdl, uint32_t count,
+                                            std::vector<const char*>& want, VkInstanceCreateFlags& flags) {
+    // Swapchain remains a device requirement even headless, so its generic surface dependency stays enabled.
+    if (!has_extension(all, VK_KHR_SURFACE_EXTENSION_NAME)) return VK_KHR_SURFACE_EXTENSION_NAME;
+    want.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    for (uint32_t i = 0; i < count; i++) {
+        if (!sdl || !sdl[i]) return "SDL_Vulkan_GetInstanceExtensions";
+        if (!has_extension(all, sdl[i])) return sdl[i];
+        bool listed = false;
+        for (const char* name : want) listed |= !strcmp(name, sdl[i]);
+        if (!listed) want.push_back(sdl[i]);
+    }
+    // VK_KHR_portability_enumeration is a loader extension, not necessarily advertised by a directly loaded ICD.
+    flags = 0;
+    if (has_extension(all, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+        bool listed = false;
+        for (const char* name : want) listed |= !strcmp(name, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        if (!listed) want.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+        flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
+    return nullptr;
+}
+static const char* darwin_device_extensions(const std::vector<VkExtensionProperties>& all, std::vector<const char*>& want) {
+    if (!has_extension(all, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) return VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    // VUID-VkDeviceCreateInfo-pProperties-04451: advertised portability_subset MUST be enabled.
+    if (has_extension(all, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) want.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+    return nullptr;
+}
+static const char* darwin_required_feature(const VkPhysicalDeviceVulkan12Features& f12, const VkPhysicalDeviceVulkan13Features& f13) {
+    if (!f13.dynamicRendering) return "VkPhysicalDeviceVulkan13Features.dynamicRendering";
+    if (!f13.synchronization2) return "VkPhysicalDeviceVulkan13Features.synchronization2";
+    if (!f12.timelineSemaphore) return "VkPhysicalDeviceVulkan12Features.timelineSemaphore";
+    return nullptr;
+}
+#endif
+
 bool create_instance() {
     uint32_t version = VK_API_VERSION_1_0;
     if (vkEnumerateInstanceVersion) vkEnumerateInstanceVersion(&version);
@@ -144,6 +216,22 @@ bool create_instance() {
         logf("vk: the Vulkan loader is %u.%u: 1.3 is needed", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version));
         return false;
     }
+#if defined(__APPLE__)
+    logf("vk: loader Vulkan %u.%u.%u", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version), VK_VERSION_PATCH(version));
+    uint32_t count = 0;
+    VkResult enumerated = vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+    if (enumerated != VK_SUCCESS) {
+        logf("vk: instance extension enumeration failed: %s (%d)", darwin_result_name(enumerated), (int)enumerated);
+        return false;
+    }
+    std::vector<VkExtensionProperties> available(count);
+    enumerated = vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+    if (enumerated != VK_SUCCESS) {
+        logf("vk: instance extension enumeration failed: %s (%d)", darwin_result_name(enumerated), (int)enumerated);
+        return false;
+    }
+    available.resize(count);
+#else
 #ifdef _WIN32
     const char* exts[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
     const uint32_t n_exts = 2;
@@ -160,17 +248,37 @@ bool create_instance() {
             if (has_extension(all, want)) exts[n_exts++] = want;
     }
 #endif
+#endif
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "mkw-recomp";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ci.pApplicationInfo = &app;
+#if defined(__APPLE__)
+    uint32_t sdl_count = 0;
+    const char* const* sdl_names = nullptr;
+    if (!host->vulkan_extensions || !host->vulkan_extensions(&sdl_count, &sdl_names)) {
+        logf("vk: missing macOS host SDL Vulkan instance extensions");
+        return false;
+    }
+    std::vector<const char*> ext_list;
+    if (const char* missing = darwin_instance_extensions(available, sdl_names, sdl_count, ext_list, ci.flags)) {
+        logf("vk: required instance extension missing: %s", missing);
+        return false;
+    }
+    logf("vk: portability enumeration %s; SDL window extensions %u", ci.flags ? "enabled" : "not advertised", sdl_count);
+#else
     std::vector<const char*> ext_list(exts, exts + n_exts);
+#endif
     {   // (longshot) what NVIDIA DLSS needs (vk_dlss.cpp; nothing in a build without it)
+#if defined(__APPLE__)
+        const auto& all = available;
+#else
         uint32_t n = 0;
         vkEnumerateInstanceExtensionProperties(nullptr, &n, nullptr);
         std::vector<VkExtensionProperties> all(n);
         vkEnumerateInstanceExtensionProperties(nullptr, &n, all.data());
+#endif
         dlss_instance_extensions(ext_list, all);
         // (longshot) the HDR10 colour space for the Insert menu's HDR (the menu's settings are read after the instance is made, so
         // whenever the driver has it; the SDR choice in create_swapchain keeps to the sRGB surface)
@@ -182,10 +290,20 @@ bool create_instance() {
     // RX_VK_VALIDATION=1: the Khronos validation layer (when installed)
     const char* layer = "VK_LAYER_KHRONOS_validation";
     if (env_on("RX_VK_VALIDATION")) ci.enabledLayerCount = 1, ci.ppEnabledLayerNames = &layer;
+#if defined(__APPLE__)
+    for (const char* name : ext_list) logf("vk: instance extension: %s", name);
+    const VkResult created = vkCreateInstance(&ci, nullptr, &dev.instance);
+    logf("vk: vkCreateInstance: %s (%d)", darwin_result_name(created), (int)created);
+    if (created != VK_SUCCESS) {
+        if (created == VK_ERROR_LAYER_NOT_PRESENT) logf("vk: required instance layer missing: %s", layer);
+        return false;
+    }
+#else
     if (vkCreateInstance(&ci, nullptr, &dev.instance) != VK_SUCCESS) {
         logf("vk: vkCreateInstance failed");
         return false;
     }
+#endif
     load_instance(dev.instance);
     return true;
 }
@@ -256,6 +374,9 @@ bool pick_device() {
     dev.physical = all[best];
     vkGetPhysicalDeviceProperties(dev.physical, &dev.props);
     vkGetPhysicalDeviceMemoryProperties(dev.physical, &dev.memory);
+#if defined(__APPLE__)
+    logf("vk: selected driver: %s", driver_text().c_str());
+#endif
     return true;
 }
 
@@ -275,10 +396,32 @@ static bool native_fadd_wanted(const char* env, VkDriverId driver, uint32_t devi
 
 bool create_device() {
     uint32_t n = 0;
+#if defined(__APPLE__)
+    VkResult enumerated = vkEnumerateDeviceExtensionProperties(dev.physical, nullptr, &n, nullptr);
+    if (enumerated != VK_SUCCESS) {
+        logf("vk: device extension enumeration failed: %s (%d)", darwin_result_name(enumerated), (int)enumerated);
+        return false;
+    }
+    std::vector<VkExtensionProperties> exts(n);
+    enumerated = vkEnumerateDeviceExtensionProperties(dev.physical, nullptr, &n, exts.data());
+    if (enumerated != VK_SUCCESS) {
+        logf("vk: device extension enumeration failed: %s (%d)", darwin_result_name(enumerated), (int)enumerated);
+        return false;
+    }
+    exts.resize(n);
+#else
     vkEnumerateDeviceExtensionProperties(dev.physical, nullptr, &n, nullptr);
     std::vector<VkExtensionProperties> exts(n);
     vkEnumerateDeviceExtensionProperties(dev.physical, nullptr, &n, exts.data());
+#endif
     std::vector<const char*> want = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+#if defined(__APPLE__)
+    if (const char* missing = darwin_device_extensions(exts, want)) {
+        logf("vk: required device extension missing: %s", missing);
+        return false;
+    }
+    const bool portability_subset = has_extension(exts, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
     auto optional = [&](const char* name, bool& flag) {
         flag = has_extension(exts, name);
         if (flag) want.push_back(name);
@@ -388,6 +531,9 @@ bool create_device() {
         if ((families[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) ==
             (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT))
             dev.queue_family = i;
+#if defined(__APPLE__)
+    if (dev.queue_family == UINT32_MAX) logf("vk: required queue missing: graphics and compute in one family");
+#endif
     if (dev.queue_family == UINT32_MAX) return false;
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -470,6 +616,10 @@ bool create_device() {
     VkPhysicalDeviceProvokingVertexFeaturesEXT pv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT};
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT};
     void** tail = &f13.pNext;
+#if defined(__APPLE__)
+    VkPhysicalDevicePortabilitySubsetFeaturesKHR portability{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR};
+    if (portability_subset) *tail = &portability, tail = &portability.pNext;
+#endif
     // (longshot: the load at a program's create call makes a pipeline from the caches by its module's identifier, without the
     // program's code: vk_programs.h. Nothing else uses it)
     VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT module_idf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT};
@@ -615,10 +765,17 @@ bool create_device() {
         logf("vk: subgroups: default %u lanes, %u-%u, pinned to 32 on stages %#x; RADV on GCN 1-4: %s", sg.subgroupSize, sc.minSubgroupSize,
              sc.maxSubgroupSize, (unsigned)dev.sg32_stages, dev.radv_gcn ? "yes" : "no");
     }
+#if defined(__APPLE__)
+    if (const char* missing = darwin_required_feature(f12, f13)) {
+        logf("vk: required device feature missing: %s", missing);
+        return false;
+    }
+#else
     if (!f13.dynamicRendering || !f13.synchronization2 || !f12.timelineSemaphore) {
         logf("vk: the GPU lacks dynamic rendering, synchronization2 or timeline semaphores");
         return false;
     }
+#endif
     mesh.multiviewMeshShader = mesh.primitiveFragmentShadingRateMeshShader = VK_FALSE;   // (not used)
     dev.mesh_shader = dev.mesh_shader && mesh.meshShader && mesh.taskShader;
     // (task and mesh shader counts in pipeline statistics, a feature of their own: RADV has it off on RDNA2, and a query
@@ -653,10 +810,17 @@ bool create_device() {
     ci.pQueueCreateInfos = qs.data();
     ci.enabledExtensionCount = (uint32_t)want.size();
     ci.ppEnabledExtensionNames = want.data();
+#if defined(__APPLE__)
+    for (const char* name : want) logf("vk: device extension: %s", name);
+    const VkResult created = vkCreateDevice(dev.physical, &ci, nullptr, &dev.device);
+    logf("vk: vkCreateDevice: %s (%d)", darwin_result_name(created), (int)created);
+    if (created != VK_SUCCESS) return false;
+#else
     if (vkCreateDevice(dev.physical, &ci, nullptr, &dev.device) != VK_SUCCESS) {
         logf("vk: vkCreateDevice failed");
         return false;
     }
+#endif
 
 
     load_device(dev.device);

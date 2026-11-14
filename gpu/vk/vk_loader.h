@@ -11,6 +11,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#if defined(__APPLE__)
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS   // VK_KHR_portability_subset's types and structure-type values
+#endif
+#endif
 #include <vulkan/vulkan.h>
 
 #define VKX_GLOBAL(X)                                                                                                 \

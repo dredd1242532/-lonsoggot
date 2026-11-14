@@ -18,6 +18,7 @@
 #if defined(__APPLE__)
 #include "darwin_mem.h"
 #include "darwin_fault.h"
+#include "darwin_vulkan.h"
 #endif
 
 /* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
@@ -905,6 +906,9 @@ HMODULE LoadLibraryA(LPCSTR name) {
     load_error[0] = 0;
     if (!name) return NULL;
     char path[PATH_MAX];
+#if defined(__APPLE__)
+    if (!hos_darwin_library_path(name, path, sizeof path)) { last_error = ERROR_FILE_NOT_FOUND; return NULL; }
+#else
     snprintf(path, sizeof path, "%s", name);
     for (char *p = path; *p; p++) if (*p == '\\') *p = '/';
     char *slash = strrchr(path, '/');
@@ -919,6 +923,7 @@ HMODULE LoadLibraryA(LPCSTR name) {
             strcpy(path + n - 4, ".so");
         }
     }
+#endif
     HMODULE m = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!m) {
         last_error = ERROR_FILE_NOT_FOUND;

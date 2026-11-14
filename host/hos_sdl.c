@@ -3,6 +3,9 @@
    out differently (both read here at their offsets: SDL_Event is 128 bytes in SDL3, 56 in SDL2). */
 #include "hos.h"
 #include "hos_sdl.h"
+#if defined(__APPLE__)
+#include "posix/darwin_vulkan.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -118,6 +121,9 @@ int hos_sdl_load(void) {
         HMODULE m = want && atoi(want) == 2 ? NULL : load_one("SDL3.dll");
         if (m && get_all(m, 1)) version = 3;
         else if ((m = load_one("SDL2.dll")) && get_all(m, 0)) version = 2;
+#if defined(__APPLE__)
+        if (version) hos_darwin_vulkan_sdl(m, version);
+#endif
         hos_log(version ? "sdl: SDL%d" : "sdl: no SDL3 or SDL2 found: no window, sound or SDL controllers", version);
         InterlockedExchange(&state, 2);
     }
@@ -164,6 +170,9 @@ const char *hos_sdl_error(void) { return version ? CALL(const char *(*)(void), G
 /* ---- the window ---- */
 enum { WIN_SHOWN2 = 0x4, WIN_RESIZABLE = 0x20, WIN_HIGH_DENSITY = 0x2000, WIN_VULKAN = 0x10000000, CENTRED = 0x2FFF0000 };
 void *hos_sdl_window(const char *title, int width, int height) {
+#if defined(__APPLE__)
+    if (!hos_darwin_vulkan_prepare()) return NULL;
+#endif
     if (version == 2)
         return CALL(void *(*)(const char *, int, int, int, int, uint32_t), CreateWindow)(
             title, CENTRED, CENTRED, width, height, WIN_SHOWN2 | WIN_RESIZABLE | WIN_HIGH_DENSITY | WIN_VULKAN);
