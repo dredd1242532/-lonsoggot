@@ -11,8 +11,9 @@ through one connection, with replies. Presses are timed in frames, and every rep
   from Link's update, copied to the bridge thread), `host/hos_mem.c` (guest memory's
   bounds), `host/nn_fs.c` (the save folder), `host/rx_backend.c` (the renderer's side, `MkwVkRenderer`).
 - The client is `scripts/longshot_ctl.py` (standard library only).
-- Tests: `tests/test_control.py` (the bridge against a fake game) and `tests/test_longshot_ctl.py` (the client against a
-  fake bridge).
+- Tests: `tests/test_control.py` (the bridge against a fake game), `tests/test_longshot_ctl.py` (the client against a
+  fake bridge) and `tests/test_control_pipe_security.py` (the Windows pipe's DACL in the source, and a Windows compile
+  of the bridge when there is a compiler for it).
 
 ## Turning it on
 
@@ -34,8 +35,24 @@ it. The default waits until the bridge answers, then prints the socket's path. S
 - **Local only.** There is a Unix domain socket on Linux and a named pipe on Windows, and never TCP. The pipe refuses
   remote clients.
 - **This user only.** The socket is created with mode 0600 (the umask is set around `bind` too), and a client whose
-  `SO_PEERCRED` user differs from the game's is turned away. The pipe's DACL grants the current user alone.
-  `FILE_FLAG_FIRST_PIPE_INSTANCE` keeps another process from owning the name first.
+  `SO_PEERCRED` user differs from the game's is turned away. The pipe's DACL is protected and grants the current user
+  (full access), with two additions that a sandboxed game needs:
+  - **The game's AppContainer.** When the game's token is an AppContainer's (`TokenIsAppContainer`), its
+    `TokenAppContainerSid` gets full access too. The game still runs as your user, so a client of yours connects. But
+    each new pipe instance, made for the next client, is checked against the pipe's DACL with the game's token, and
+    an AppContainer's check also needs its own SID. Without that ACE, only the first client could connect.
+  - **`HOS_CONTROL_PEER_SID`, one more account.** It is for a game run as another account than its driver, like the
+    Beanstalk agent's `beanstalk-runner` user, whose agent runs as the volunteer's own account. That account gets read
+    and write (`GRGW`), enough to connect as a client. Write access also includes `FILE_CREATE_PIPE_INSTANCE`, so that
+    account could make instances of the pipe too: set this only to an account at least as trusted as the game's. The
+    value must be a user's SID, written as Windows writes it and nothing else: `S-1-5-21-<three numbers>-<RID>` with a
+    RID of 1000 or more, an account this PC can look up, and a user, not a group. Everyone, Authenticated Users,
+    Users, Administrators and other well-known SIDs (an SDDL alias like `WD` too) are refused. A refused value is
+    logged (`control: HOS_CONTROL_PEER_SID refused: ...`), and the pipe stays the current user's alone. Unset, nothing
+    changes.
+
+  Linux has neither addition: a sandbox there (the farm's bwrap) runs the game as the same user, which
+  `SO_PEERCRED` already lets in. `FILE_FLAG_FIRST_PIPE_INSTANCE` keeps another process from owning the name first.
 - **A folder of this user's.** The socket's folder has to be owned by the game's user and writable by no one else
   (not a shared `/tmp`): otherwise the bridge stays off and the log says why. Another user could otherwise put a link
   or a socket of theirs where the bridge binds, removes a stale socket, or writes a shot by a relative path.

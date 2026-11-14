@@ -777,6 +777,11 @@ rupees, A-button prompt and music. `subscribe` with `events:["oot"]`, `every`, `
 samples and optional watched/changed flags. There is no separate state file; off unless `HOS_CONTROL` is set.
 See [control.md](control.md) for the fields, sampling, bounds and examples.
 
+`HOS_CONTROL_PEER_SID=<SID>` (Windows) also lets one other local user account open the bridge's pipe: the Test Farm
+agent sets it when it runs the game as its low-rights user. Only a local user account's SID is taken (`S-1-5-21-...`, a
+RID of 1000 or more); a group such as Everyone or Users is refused and logged. Unset, the pipe is the game's user's
+alone. See [control.md](control.md#security).
+
 ## Layout
 
 | Path | What |
