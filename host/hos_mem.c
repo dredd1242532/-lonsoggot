@@ -169,7 +169,13 @@ static void discard_pages(uint64_t addr, uint64_t size) {
     /* (pages a dma-buf import holds stay where they are, zeroed: a hole punched under one would leave the GPU on
        the old pages and the game on new ones) */
     if (rx_guest_imported(lo, hi)) memset(GP(lo), 0, (size_t)(hi - lo));
+#if defined(__APPLE__)
+    else if (hos_posix_guest_discard(GP(lo), (size_t)(hi - lo)))
+        hos_fatal(NULL, "mem: cannot discard guest pages at %#llx (%#llx bytes)",
+                  (unsigned long long)lo, (unsigned long long)(hi - lo));
+#else
     else hos_posix_guest_discard(GP(lo), (size_t)(hi - lo));
+#endif
 #endif
 }
 
@@ -433,7 +439,11 @@ HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
 #else
         else if (hi > lo) {   /* (linux: kept mapped, the pages read as zero; MADV_REMOVE on the memfd window) */
             extern int hos_posix_guest_discard(void *p, size_t n);
+#if defined(__APPLE__)
+            if (hos_posix_guest_discard(GP(lo), (size_t)(hi - lo))) { RET(0xCA01); return; }
+#else
             hos_posix_guest_discard(GP(lo), (size_t)(hi - lo));
+#endif
         }
 #endif
         RET(0);

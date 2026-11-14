@@ -94,6 +94,28 @@ Launcher's build log shows info and above unless its level picker asks for more;
 shows the line with it. Per-item lines a player can't act on (one per program or pipeline, a decoder's details) are debug or
 trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags.
 
+### macOS guest-memory groundwork
+
+`host/posix/darwin_mem.c` supplies the memory primitives for macOS, targeting 14.4 or later. It reserves the
+512 GiB guest window at its fixed address without replacing an occupant. The window is readable/writable and
+demand-paged; a 64 KiB guest commit preserves existing bytes. This is memory groundwork, not a complete macOS build:
+the macOS source lists must link this file wherever they link `host/posix/win32_posix.c`, including the renderer.
+
+Discard zeroes exactly the requested bytes. Complete interior host pages get fresh anonymous backing; partial
+host-page edges are zeroed in place, so adjacent live 4 KiB guest pages survive a free on native 16 KiB hosts too.
+`MADV_DONTNEED` is not used for zero-on-free on Darwin. Host allocation and protection use the process's real page
+size (16 KiB on native Apple Silicon, 4 KiB under Rosetta), not the guest's granule. Guest dirty tracking is unchanged.
+
+The caller must own writable anonymous memory and serialize its lifetime. Existing GPU-import checks still select
+in-place zeroing: replacing imported backing is not safe, and GPU sharing is not qualified by these CPU tests.
+Heap shrink still zeroes without reclaiming, and optional write-watch and general `VirtualQuery` are separate work.
+The byte-preservation guarantee does not repair the address-region allocator's existing unlock-before-discard race.
+
+`python -I -B tests/test_darwin_guest_memory.py --cc clang` compiles the real helper and text-extracted callers for
+arm64 and x86-64 and runs both (the latter through Rosetta). It uses no game or graphics device, checks collision
+refusal, neighboring subpages, byte-unaligned discards, failure results, and resident memory before readback.
+`--source <tree>` runs the same check against another source tree; `--arch` selects one route for a targeted run.
+
 ## Switches for testing and debugging
 
 The running game reads its switches from the environment or from `longshot_env.txt` beside `image.bin` (one
