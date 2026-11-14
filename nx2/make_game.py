@@ -1562,7 +1562,12 @@ def refuse_dump_links(folder):
     reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     folders = [long_path(folder)]
     while folders:
-        with os.scandir(folders.pop()) as listing:
+        d = folders.pop()
+        try:
+            listing = os.scandir(d)
+        except OSError as e:   # (os.walk, before, passed over a folder it could not list, and its files went missing)
+            fail("Could not read the game files at %s (%s): %s" % (folder, d, e.strerror or e))
+        with listing:
             for entry in listing:
                 attrs = entry.stat(follow_symlinks=False)
                 if entry.is_symlink() or getattr(attrs, "st_file_attributes", 0) & reparse:

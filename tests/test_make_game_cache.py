@@ -509,6 +509,41 @@ class RomfsCopyTests(unittest.TestCase):
                     make_game.refuse_dump_links(src)
                 link.unlink()
 
+    @unittest.skipUnless(os.name == "nt", "a junction is Windows'")
+    def test_a_junction_deep_in_a_dump_is_refused(self):
+        # (a junction needs no right to make, unlike a symbolic link: Windows' own way to link a folder. It is read from the
+        # folder's listing now, not an lstat per file: its reparse-point attribute must still be seen, three folders down)
+        import _winapi
+        with tempfile.TemporaryDirectory(prefix="longshot-dump-junction-") as folder:
+            src, elsewhere = Path(folder) / "romfs", Path(folder) / "elsewhere"
+            (src / "Model" / "Deep").mkdir(parents=True)
+            (src / "Model" / "Deep" / "a.zs").write_bytes(b"game data")
+            elsewhere.mkdir()
+            make_game.refuse_dump_links(src)
+            _winapi.CreateJunction(str(elsewhere), str(src / "Model" / "Deep" / "Door"))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
+                make_game.refuse_dump_links(src)
+            self.assertIn("Door", out.getvalue())
+
+    def test_a_folder_that_cannot_be_read_is_said_not_passed_over(self):
+        # (os.walk passed over a folder it could not list, and its files were missing from the game folder without a word)
+        with tempfile.TemporaryDirectory(prefix="longshot-dump-unreadable-") as folder:
+            src = Path(folder) / "romfs"
+            (src / "Model" / "Locked").mkdir(parents=True)
+            real = os.scandir
+
+            def scandir(path):
+                if os.path.basename(str(path)) == "Locked":
+                    raise PermissionError(13, "Access is denied")
+                return real(path)
+            out = io.StringIO()
+            with mock.patch.object(make_game.os, "scandir", scandir), contextlib.redirect_stdout(out), \
+                    self.assertRaises(SystemExit):
+                make_game.refuse_dump_links(src)
+            self.assertIn("Could not read the game files", out.getvalue())
+            self.assertIn("Access is denied", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
