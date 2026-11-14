@@ -617,13 +617,15 @@ HLE(_ZN2nn2os23SignalConditionVariableEPNS0_21ConditionVariableTypeE) {
 }
 /* (longshot) Broadcast: every waiter wakes. Left to the guest SDK, it signals the kernel key at cv+4, which no HLE waiter
    sleeps on, so its waiters slept on until some Signal (the movie framework's reply and buffer queues, NVIDIA's OS layer:
-   untimed waits). Horizon moves all the waiters onto the mutex, so each is owed it, as a Signal's one is (cv_reserve: one mutex for all of them, at most 8 owed). */
+   untimed waits). Horizon moves all the waiters onto the mutex, so each is owed it, as a Signal's one is (cv_reserve: one mutex for all of them, at most 8 owed).
+   (cv_in, not cv_waiting: a waiter counted in by cv_count_in but not yet in cv_enter is owed nothing; it reads the new
+   generation and does not sleep) */
 HLE(_ZN2nn2os26BroadcastConditionVariableEPNS0_21ConditionVariableTypeE) {
     Obj *cv = obj(ARG(0), K_COND);
     if (watched_cv(ARG(0))) watch_log("broadcast", watch_mutex(), ARG(0), c, NULL);
     HOS_CHAIN(HOS_CHAIN_SIGNAL, cv->key);
     AcquireSRWLockExclusive(&cv->lk);
-    for (int n = cv->cv_waiting - cv->cv_owed; n > 0; n--) cv_reserve(cv);
+    for (int n = cv->cv_in - cv->cv_owed; n > 0; n--) cv_reserve(cv);
     cv->gen++;
     ReleaseSRWLockExclusive(&cv->lk);
     WakeAllConditionVariable(&cv->cv);
