@@ -253,7 +253,7 @@ BROKEN = (
     ("vkEndCommandBuffer among the slot's own calls", "return k == B_vkResetCommandPool ||",
      "return k == B_vkEndCommandBuffer || k == B_vkResetCommandPool ||", "own_other", {OWN: "1"}),
     ("the guard removed", "    if (g->idle_at(end_pos)) {", "    if (end_pos || true) {", "own_guard", {OWN: "1"}),
-    ("the switch ignored", 'g_own = env_on("RX_VK_RECORDER_OWN");', "g_own = true;", "own_off", {}),
+    ("the switch ignored", "g_own = own ? !env_value_off(own) : row;", "g_own = true;", "own_off", {}),
     ("OwnSlot ignoring slot_begin()", "OwnSlot() { t_own_slot = t_slot_ready; }", "OwnSlot() { t_own_slot = true; }", "own_guard", {OWN: "1"}),
     ("the compare taken from W", "uint64_t compare = r;", "uint64_t compare = W.load(std::memory_order_acquire);", "idle_race", {IDLE: "wait"}),
     ("the wake removed", "            g_wake_by_address(&W);\n", "", "idle_parked", {IDLE: "wait"}),

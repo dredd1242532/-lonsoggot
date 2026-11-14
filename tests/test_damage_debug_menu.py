@@ -43,6 +43,7 @@ def main():
     source += 'const char* hn_robust(int, int) { return nullptr; }\n'
     source += 'const char* hn_astc_rgba8(int, int) { return nullptr; }\n'
     source += 'const char* hn_intel_compiles(int, int) { return nullptr; }\n'
+    source += 'const char* hn_recorder_thread(int, int) { return nullptr; }\n'
     source += 'Row rows[] = {' + ',\n'.join(entries) + '};\n'
     source += 'constexpr int kRows = sizeof rows / sizeof rows[0];\n'
     source += '''
@@ -76,7 +77,7 @@ int main() {
         const int n = debug_rows(order, &dev, &heading);
         assert(heading >= 0);
         assert(dev == (env || enabled ? (int)std::size(expected) : 1));
-        assert(n == dev + 5); // Only the existing Developer rows follow.
+        assert(n == dev + 6); // Only the existing Developer rows follow (Intel shader compiles hidden).
         for (int i = 0; i < dev; ++i) {
             const Row& row = rows[tab_row_to_global(TAB_DEBUG, order[i])];
             assert(!std::strcmp(row.name, expected[i]));
