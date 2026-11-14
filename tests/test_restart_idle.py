@@ -73,8 +73,11 @@ void hos_log(const char *fmt, ...) { (void)fmt; }
 #define hos_oot_autoload_input real_autoload_input
 #include "@AUTOLOAD@"
 #undef hos_oot_autoload_input
+/* Only this fixture combines the source files: autoload's io.h declares the CRT tell. */
+#define tell fixture_restart_tell
 #define hos_oot_restart_input real_restart_input
 #include "@RESTART@"
+#undef tell
 #undef hos_oot_restart_input
 void hos_oot_autoload_input(void) { counts.autoload++; real_autoload_input(); }
 void hos_oot_restart_input(void) { counts.restart++; real_restart_input(); }
