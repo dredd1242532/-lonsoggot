@@ -345,12 +345,13 @@ COMPILER_MB = 1500
 
 # LONGSHOT_SPLIT_GIANTS (nx2/split_giants.py): the lifted functions of split_giants.MIN_KB or more are compiled as pieces cut at
 # their labels, with a dispatch loop under the function's own name (compile_one compiles that copy; the lifted files stay as the
-# lift wrote them, so its patches, cuts and lists never see the pieces). "0": off; a number: the pieces' size in KB
+# lift wrote them, so its patches, cuts and lists never see the pieces). On by default at split_giants.PIECE_KB (8): a whole
+# first build's compile 1,347 -> 1,057 s on a Ryzen 5 5600. "0": off; a number: the pieces' size in KB
 def split_giants_flags():
     """The flag the lifted chunks carry when their giants are split (split_giants.FLAG: the piece size and the splitter's own
     hash, so a change of either builds them again); [] when off"""
     raw = os.environ.get("LONGSHOT_SPLIT_GIANTS", "").strip()
-    if raw in ("", "0"):
+    if raw == "0":
         return []
     import split_giants
     return [split_giants.flag(int(raw) if raw.isdigit() else split_giants.PIECE_KB)]

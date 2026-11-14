@@ -125,6 +125,9 @@ def text_checks():
     try:
         os.environ["LONGSHOT_SPLIT_GIANTS"] = "0"
         check(build.split_giants_flags() == [], "LONGSHOT_SPLIT_GIANTS=0: no flag")
+        os.environ.pop("LONGSHOT_SPLIT_GIANTS", None)
+        f = build.split_giants_flags()
+        check(len(f) == 1 and f[0].startswith(SG.FLAG + "%d_" % SG.PIECE_KB), "unset: on at %d KB by default: %s" % (SG.PIECE_KB, f))
         os.environ["LONGSHOT_SPLIT_GIANTS"] = "16"
         f = build.split_giants_flags()
         check(len(f) == 1 and f[0].startswith(SG.FLAG + "16_"), "LONGSHOT_SPLIT_GIANTS=16: the flag names the size: %s" % f)
