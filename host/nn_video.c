@@ -177,8 +177,7 @@ static void set_host(uint64_t obj, uint32_t magic, void *p) {
         if (i == nhost_objs) {
             if (nhost_objs == cap_host_objs) {
                 cap_host_objs = cap_host_objs ? cap_host_objs * 2 : 16;
-                host_objs = (HostObj *)realloc(host_objs, cap_host_objs * sizeof *host_objs);
-                if (!host_objs) hos_fatal(NULL, "video: out of memory");
+                host_objs = (HostObj *)hos_xrealloc(host_objs, cap_host_objs * sizeof *host_objs, "video: decoder table");
             }
             nhost_objs++;
         }
@@ -214,8 +213,7 @@ HLE(_ZN2nn5codec31CalculateDecoderImagePoolBufferEPmS1_RKNS0_27VideoDecoderImage
 /* InitializeDecoderImagePool(pool, void* memory, size, Preference const&, u32 count) */
 HLE(_ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj) {
     const Pref *p = (const Pref *)GP(ARG(3));
-    Pool *o = (Pool *)calloc(1, sizeof *o);
-    if (!o) hos_fatal(NULL, "video: out of memory for an image pool");
+    Pool *o = (Pool *)hos_xcalloc(1, sizeof *o, "video: image pool");
     o->w = p->magic == PREF_MAGIC && p->w ? p->w : 1280, o->h = p->magic == PREF_MAGIC && p->h ? p->h : 720;
     o->format = p->magic == PREF_MAGIC ? (int)p->format : 2;
     o->count = (int)ARG(4) > 0 ? (int)ARG(4) : 1;

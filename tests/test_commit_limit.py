@@ -6,7 +6,8 @@ Checked here:
 - the textures' budget has a commit rule: below RX_VK_COMMIT_RESERVE_MB of headroom (GlobalMemoryStatusEx's ullAvailPageFile,
   Windows only) the shortfall comes off the budget and the rule's budget, as the driver's limit's excess does;
 - hos_commit and the first-touch handler wait at the commit limit (1455) and commit again before they give up, and they log a
-  failure the same way (commit_refused: the out-of-memory notice).
+  failure the same way (commit_refused: the out-of-memory notice, hos_out_of_memory, shared with the host's own allocations:
+  tests/test_host_alloc_wait.py).
 - the first-touch handler tries a page another thread committed again on Windows only (#ifdef _WIN32): on Linux every fault in
   the guest window would be retried forever instead of reaching the crash report.
 python -I -B tests/test_commit_limit.py
@@ -74,7 +75,8 @@ def main():
     if "hos_commit(" in touch:
         raise SystemExit("FAIL: the first-touch handler calls hos_commit, which would wait a second time")
     refused = block(glue, "static void commit_refused(uint64_t lo, uint64_t size, DWORD err)")
-    if "hos_out_of_memory_box" not in refused:
+    notice = block(glue, "void hos_out_of_memory(int wait)")
+    if "hos_out_of_memory(0)" not in refused or "oom_box" not in notice:
         raise SystemExit("FAIL: commit_refused does not show the out-of-memory notice")
     print("PASS: the textures give commit back near the limit, and a commit at the limit waits for it before it fails")
 
