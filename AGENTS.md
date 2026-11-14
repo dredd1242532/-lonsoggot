@@ -142,8 +142,10 @@ request. The guide for people is [docs/test-requests.md](docs/test-requests.md).
   on the PR (`forge.py pr comment`), then `done --result pass|fail|mixed --comment <link>`. `claim` refuses a moved
   head unless `--commit <pin>` explicitly confirms the old pin and public API comparisons still prove membership.
   A claim saves both its commit and observed head; renewal does not retarget it. `done` defaults to that claim's
-  commit, and refuses a different `--commit`. Without an active claim, a pinned result needs an explicit full SHA.
-  Results completed for an old pin remain historical after an update, not current successes for the new code.
+  commit only while it is still the card's pin, and refuses a different `--commit`. After an update, `done` without
+  `--commit` refuses: `claim --again` to test the current pin, or `done --commit <claimed-sha>` to report the earlier
+  build. That result stays historical, and the answer says the current pin still has no result from you.
+  Without an active claim, a pinned result needs an explicit full SHA.
   Footerless legacy requests keep their previous behavior without the new flag; `claim --commit` and
   `done --commit` on those cards refuse until the requester introduces a pin with `update`. Client pin checks use public
   Forgejo GETs, not git fetch or another sign-in; the testing guide also checks the fetched head, ancestry and exact pinned diff before building.

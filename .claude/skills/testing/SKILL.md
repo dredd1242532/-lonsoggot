@@ -50,7 +50,8 @@ python -I scripts/test_requests.py claim T-XXXX
 - A claim lasts 90 minutes and then simply clears. **Keep it alive while you work:** run
   `python -I scripts/test_requests.py renew` (no ID: all your claims) about every 30 minutes, and at every pause in a
   long build or run. Nothing shows on Discord when you renew.
-  Renewal preserves the claim's commit and head even if the requester updates the card.
+  Renewal preserves the claim's commit and head even if the requester updates the card. `show` and `list` mark
+  such a claim with `earlier commit <sha>` when it no longer matches the card's pin.
 - If you stop without a result (no time, the build fails for reasons unrelated to the PR, the user changes their
   mind): `release T-XXXX` straight away.
 
@@ -109,10 +110,13 @@ python -I scripts/test_requests.py done T-XXXX --result pass --comment https://g
 ```
 
 `--result` is `pass`, `fail` or `mixed`. The script checks the link is a comment on the request's PR. On a pinned
-request, `done` defaults to the active claim's commit. Optional `--commit <sha>` must resolve to that same commit;
-it cannot change what you claimed. If the card moved to another pin while you worked, completing your old claim
-records a historical result, not a current result for the new code. Once a claim expires or is released, there is
-no implicit commit: a result without a claim requires an explicit **full 40-hex SHA** of the build actually tested.
+request, `done` defaults to the active claim's commit only while it is still the card's current pin.
+Optional `--commit <sha>` must resolve to that same claimed commit; it cannot change what you claimed.
+If the requester updated the card while you worked, `done` without `--commit` refuses and names both commits.
+Run `claim T-XXXX --again` to test the current pin, or use `done T-XXXX --commit <claimed-sha>` to report what
+you tested at the earlier pin. That result is historical, and the answer says the current pin still has no result
+from you. Once a claim expires or is released, there is no implicit commit: a result without a claim requires an
+explicit **full 40-hex SHA** of the build actually tested.
 Footerless legacy requests keep their previous behavior. The result's link is intended for the Discord relay, but
 offline CLI tests do not exercise live sign-in, room posting or Discord card rendering.
 Remove only your test folder when finished: `git worktree remove ../Longshot-test-<pr>`.

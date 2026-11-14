@@ -415,13 +415,76 @@ class PinTests(unittest.TestCase):
         state = self.replay([request(), done(commit=None)])
         self.assertEqual(state["results"], {})
 
+    def test_done_refuses_stale_claim_until_claim_again(self):
+        events = [request(OLD, OLD)]
+        result = self.run_cli(events, "bob", "claim", TID, head=OLD, minute=1)
+        self.assertEqual(result[0], 0, result[2:4])
+        self.assertIn("build exactly " + OLD, result[2])
+        result = self.run_cli(events, "ann", "update", TID, "--commit", HEAD, minute=3)
+        self.assertEqual(result[0], 0, result[2:4])
+        before = copy.deepcopy(events)
+        result = self.run_cli(events, "bob", "done", TID, "--result", "pass", "--comment", COMMENT,
+                              info=tr.team_chat.ChatError("cannot reach Forgejo"))
+        self.refused(result)
+        self.assertEqual(result[2], "")
+        self.assertEqual(result[3],
+                         "refused: your claim is for earlier commit %s, but %s now requests %s; "
+                         "run claim %s --again to test the current commit, or done %s --commit %s "
+                         "to report what you tested at the earlier commit\n"
+                         % (OLD, TID, HEAD, TID, TID, OLD))
+        self.assertEqual(result[4], [])
+        self.assertEqual(events, before)
+        state = self.replay(events)
+        self.assertEqual((state["claim_commits"][BOB], state["claim_heads"][BOB]), (OLD, OLD))
+        self.assertEqual(state["results"], {})
+        self.assertEqual(self.current(state), {})
+        self.refused(self.run_cli(events, "bob", "done", TID, "--result", "pass", "--comment", COMMENT,
+                                 "--commit", HEAD))
+        result = self.run_cli(events, "bob", "claim", TID, "--again", minute=11)
+        self.assertEqual(result[0], 0, result[2:4])
+        self.assertIn("build exactly " + HEAD, result[2])
+        state = self.replay(events, minute=11)
+        self.assertEqual((state["claim_commits"][BOB], state["claim_heads"][BOB]), (HEAD, HEAD))
+        result = self.run_cli(events, "bob", "done", TID, "--result", "pass", "--comment", SECOND_COMMENT, minute=12)
+        self.assertEqual(result[0], 0, result[2:4])
+        self.assertEqual(result[1], [message("done pass", SECOND_COMMENT, HEAD, HEAD)])
+        self.assertEqual(result[2], "marked %s done (pass)\n" % TID)
+        state = self.replay(events, minute=12)
+        self.assertEqual(self.current(state)[BOB]["commit"], HEAD)
+        self.assertEqual(self.current(state)[BOB]["comment"], SECOND_COMMENT)
+        for field in ("claims", "claim_commits", "claim_heads"):
+            self.assertNotIn(BOB, state[field])
+
+    def test_show_and_list_mark_stale_claims_after_update(self):
+        events = [request(OLD, OLD), claim(commit=OLD, head=OLD)]
+        result = self.run_cli(events, "ann", "update", TID, "--commit", HEAD, minute=3)
+        self.assertEqual(result[0], 0, result[2:4])
+        result = self.run_cli(events, "cat", "claim", TID, minute=4)
+        self.assertEqual(result[0], 0, result[2:4])
+        for user, name in (("bob", "you"), ("ann", BOB)):
+            for argv in (("show", TID), ("list",)):
+                with self.subTest(user=user, argv=argv):
+                    result = self.run_cli(events, user, *argv)
+                    self.assertEqual(result[0], 0, result[2:4])
+                    self.assertIn("    being tested by %s (earlier commit %s), %s\n" % (name, OLD, CAT), result[2])
+                    self.assertNotIn("%s (earlier commit" % CAT, result[2])
+        state = self.replay(events)
+        self.assertEqual(state["claim_commits"], {BOB: OLD, CAT: HEAD})
+        self.assertEqual(self.current(state), {})
+
     def test_stale_claim_done_remains_historical_after_retarget(self):
         events = [request(OLD, OLD), claim(commit=OLD, head=OLD), update()]
-        result = self.run_cli(events, "bob", "done", TID, "--result", "fail", "--comment", COMMENT)
+        result = self.run_cli(events, "bob", "done", TID, "--result", "fail", "--comment", COMMENT,
+                              "--commit", OLD, info=tr.team_chat.ChatError("cannot reach Forgejo"))
         self.assertEqual(result[0], 0, result[2:4])
         self.assertTrue(result[1][0].endswith(footer(OLD, OLD)))
+        self.assertEqual(result[2], "marked %s done (fail)\n"
+                         "reported earlier commit %s; current commit %s still has no result from you\n"
+                         % (TID, OLD, HEAD))
+        self.assertEqual(result[4], [])
         state = self.replay(events)
         self.assertEqual(state["results"][BOB]["commit"], OLD)
+        self.assertEqual(state["results"][BOB]["head"], OLD)
         self.assertEqual(self.current(state), {})
         self.assertEqual(state["commit"], HEAD)
         self.assertNotIn(BOB, state["claim_heads"])

@@ -65,7 +65,10 @@ python -I scripts/test_requests.py show T-XXXX --json
   requester can keep the same request and select the new version with
   `python -I scripts/test_requests.py update T-XXXX --commit <new-sha>`.
   The API must prove the new pin belongs to the observed head. Old results are retained but are no longer current
-  for a different pin. Existing claims keep their old commit and head; a late result from one is historical.
+  for a different pin. Existing claims keep their old commit and head; `show` and `list` mark them with
+  `earlier commit <sha>` when they no longer match the card's pin. A tester's `done` then refuses without `--commit`:
+  use `claim T-XXXX --again` to test the current pin, or `done T-XXXX --commit <claimed-sha>` to report the earlier
+  build. That result stays historical, and the answer says the current pin still has no result from that tester.
   Only the requester can update an open request. Close and ask separately when the hardware needs change.
 
 ## 3. Close it

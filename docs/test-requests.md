@@ -100,8 +100,11 @@ Between `claim` and `done`:
    ```
 
 4. Copy the comment's link (`forge.py pr comment` prints it; on the site, the time stamp next to your name) and run `done` with `--result pass`, `fail`
-   or `mixed`. On a pinned request, omitted `--commit` means the commit saved in your active claim; an explicit
-   `--commit <sha>` must resolve to that same commit, not a different build.
+   or `mixed`. On a pinned request, omitted `--commit` means the commit saved in your active claim, but only while
+   it is still the card's current pin. If the requester updated the card, `done` refuses and names both commits:
+   run `claim T-7KQ2 --again` to test the current pin, or add `--commit <claimed-sha>` to report what you tested at
+   the earlier pin. An explicit `--commit` must match your claim, not a different build. An earlier-pin report is
+   historical; the answer says the current pin still has no result from you.
    Without an active claim, a pinned result requires an explicit full 40-hex `--commit` of the build actually tested;
    an expired or released claim supplies no default.
 
@@ -123,8 +126,9 @@ Between `claim` and `done`:
   requester to `update` the pin when the new code is what needs testing.
 - **Old results are not current results.** JSON `results` retains the recorded results; `current_results` selects
   only those matching the active pin. Sorting, display and the already-tested check use `current_results`.
-  A claim already in progress keeps its commit and observed head across a request update. Its eventual result
-  remains historical if its commit no longer matches; renewing it does not move it to the new pin.
+  A claim already in progress keeps its commit and observed head across a request update. `show` and `list` mark
+  it with `earlier commit <sha>` when it no longer matches the card's pin. Its eventual result remains historical;
+  renewing it does not move it to the new pin.
 - **Results go on the PR**, as a comment: hardware, driver, OS, the commit you built, what you checked, numbers or the
   steps to reproduce a failure. The Discord message links to it.
 - **No game files or anything made from them** in comments or messages ([CONTRIBUTING.md](../CONTRIBUTING.md#the-rule-with-no-exceptions)).

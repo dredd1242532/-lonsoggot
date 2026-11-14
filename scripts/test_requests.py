@@ -40,8 +40,9 @@ someone has looked at it. The script asks git.magicbean.dev, with the team sign-
 New cards pin a full commit SHA. A trailing Commit/Head footer records the requested pin and the observed PR head;
 earlier note lines stay notes. A moved head requires explicit confirmation of the SAME pin, never silently following
 the new head. Only the requester may update the pin. Claims remember their pin/head; done records the tested pin,
-refusing another claimed commit. After expiry/release give the full tested SHA explicitly. Earlier results remain in
-JSON results, but only matching-pin current_results are displayed or counted. Footerless cards retain the old rules.
+refusing another claimed commit. After an update, an earlier claim needs an explicit --commit to report its result,
+or claim --again to test the current pin. After expiry/release give the full tested SHA explicitly. Earlier results
+remain in JSON results, but only matching-pin current_results are displayed or counted. Footerless cards retain the old rules.
 
 list puts first what most needs a tester: requests nobody has tested or is testing, then the ones being tested with no
 result yet, then the ones with results; oldest first within each. Exit code 3: the action was refused (closed, not
@@ -363,7 +364,11 @@ def describe(t, me=None):
     if t["needs"]:
         lines.append("    needs: " + t["needs"])
     if t["claims"]:
-        lines.append("    being tested by " + ", ".join(who(u) for u in sorted(t["claims"])))
+        lines.append("    being tested by " + ", ".join(
+            who(u) + (" (earlier commit %s)" % t["claim_commits"][u]
+                      if t.get("commit") and t["claim_commits"].get(u)
+                      and t["claim_commits"][u] != t["commit"] else "")
+            for u in sorted(t["claims"])))
     for user, r in sorted(current_results(t).items(), key=lambda kv: kv[1]["time"]):
         lines.append("    %s by %s: %s" % (r["result"], who(user), r["comment"]))
     if t.get("approved") is False:
@@ -527,6 +532,11 @@ def cmd_done(args, config):
     if t.get("commit"):
         me = config["user_id"]
         claimed = t["claim_commits"].get(me)
+        if claimed and claimed != t["commit"] and not args.commit:
+            return refuse("your claim is for earlier commit %s, but %s now requests %s; "
+                          "run claim %s --again to test the current commit, or done %s --commit %s "
+                          "to report what you tested at the earlier commit"
+                          % (claimed, t["id"], t["commit"], t["id"], t["id"], claimed))
         commit = args.commit or claimed
         if claimed and not same_commit(commit, claimed):
             return refuse("--commit differs from the commit you claimed")
@@ -538,6 +548,8 @@ def cmd_done(args, config):
         footer = pin_footer(commit.lower(), head)
     send(config, rid, "%s %s done %s: %s%s" % (MARK, t["id"], args.result, url, footer))
     print("marked %s done (%s)" % (t["id"], args.result))
+    if t.get("commit") and claimed and claimed != t["commit"]:
+        print("reported earlier commit %s; current commit %s still has no result from you" % (claimed, t["commit"]))
     return 0
 
 
@@ -600,7 +612,7 @@ def main(argv=None):
     p.add_argument("id")
     p.add_argument("--result", required=True, choices=("pass", "fail", "mixed"))
     p.add_argument("--comment", required=True)
-    p.add_argument("--commit", help="commit actually tested (default: your active claim)")
+    p.add_argument("--commit", help="commit actually tested (default: your active claim, only if still current)")
     p = sub.add_parser("cancel", help="close your request")
     p.add_argument("id")
     args = parser.parse_args(argv)
