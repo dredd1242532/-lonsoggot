@@ -89,6 +89,9 @@ static int counted_vsnprintf(char *out, size_t cap, const char *fmt, va_list arg
     if (measuring_tap) tap_formats++;
     return vsnprintf(out, cap, fmt, args);
 }
+#if defined(__APPLE__)
+#undef vsnprintf   /* (the SDK's fortified macro: this fixture counts the real calls below) */
+#endif
 #define vsnprintf counted_vsnprintf
 static int64_t hos_now_ns(void) {
     if (measuring_tap) tap_clocks++;
