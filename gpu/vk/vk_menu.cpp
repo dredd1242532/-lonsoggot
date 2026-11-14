@@ -571,7 +571,7 @@ int step_output_choice(int id, int dir) {
 /// it has that shape; else the screen's own size when it has it; else the one whose height is nearest the screen's
 /// (display_modes.h pick)
 float window_start_aspect = 0;   // Allocated targets keep their startup shape across a live resize.
-int aspect_started = -3;   // Neither Window (-1), monitor (-2), nor a shape index.   // (the Aspect ratio row's value at the start, from the size the run started with: outputs_sync)
+int aspect_started = -3;   // the Aspect ratio row's value at the start (outputs_sync); -3 until then: not Window (-1), monitor (-2) or a shape index
 int output_started = 0;    // (the Output resolution the run started with)
 int output_for_aspect(int v) {
     if (v == aspect_window_value()) return opts.output_res;
@@ -869,7 +869,12 @@ const char* tx_preset(int v) {
 constexpr int kVramBudgets = 8;
 constexpr int kVramMinimumOnly = 1;   // (2.2 GB: set by the Minimum (4GB) preset only; the row's own steps go past it)
 constexpr int kVramTextureMb[kVramBudgets] = {0, 2200, 3600, 4800, 6144, 7500, 9216, 11000};
-constexpr int kVramMirrorMb[kVramBudgets] = {0, 256, 512, 1024, 1536, 2048, 2560, 3072};
+// (longshot) 3.6 GB's mirrors, the Low (6GB) preset's and so every 6 GB card's from its first start (menu_first_start_for_gpu): 1536
+// MB, not 512, what Auto gives a 6 GB card too (mirror_budget.h auto_bytes). At 512 the game's pools left out of VRAM were read over
+// PCIe, 30-32 GB of bound ranges every 600 submits in Hyrule Field on an RTX 3060 Laptop (6 GB), the GPU's frame 27 ms. A preset's
+// mirrors are never more than Auto's on the card (mirror_budget.h budget_bytes): Low on a 4 GB card, which preset_caps_memory lets
+// through, keeps 512
+constexpr int kVramMirrorMb[kVramBudgets] = {0, 256, 1536, 1024, 1536, 2048, 2560, 3072};
 int preset_vram_budget(int p) {
     static const int of[] = {0, 1, 2, 3, 5, 7};   // (none: Auto; Minimum 2.2 GB, Low 3.6, Balanced 4.8, High 7.5, Ultra 11)
     return of[std::min(std::max(p, 0), 5)];
@@ -1791,22 +1796,23 @@ const char* tx_pad_layout(int v) {
     return t[std::min(std::max(v, 0), 3)];
 }
 void apply_pad_layout(int layout) {
-    if (!can_bind()) return;
-    if (layout == 0) { // Nintendo (Default: Bottom=B, Right=A, Top=X, Left=Y)
-        host->bind(HOS_BIND_PAD, HOS_SW_A, 0, HOS_PAD_EAST);
-        host->bind(HOS_BIND_PAD, HOS_SW_B, 0, HOS_PAD_SOUTH);
-        host->bind(HOS_BIND_PAD, HOS_SW_X, 0, HOS_PAD_NORTH);
-        host->bind(HOS_BIND_PAD, HOS_SW_Y, 0, HOS_PAD_WEST);
-    } else if (layout == 1) { // Xbox / PC Standard (Bottom=A, Right=B, Left=X, Top=Y)
-        host->bind(HOS_BIND_PAD, HOS_SW_A, 0, HOS_PAD_SOUTH);
-        host->bind(HOS_BIND_PAD, HOS_SW_B, 0, HOS_PAD_EAST);
-        host->bind(HOS_BIND_PAD, HOS_SW_X, 0, HOS_PAD_WEST);
-        host->bind(HOS_BIND_PAD, HOS_SW_Y, 0, HOS_PAD_NORTH);
-    } else if (layout == 2) { // Swap Face Buttons (Bottom=A, Right=B, Top=X, Left=Y)
-        host->bind(HOS_BIND_PAD, HOS_SW_A, 0, HOS_PAD_SOUTH);
-        host->bind(HOS_BIND_PAD, HOS_SW_B, 0, HOS_PAD_EAST);
-        host->bind(HOS_BIND_PAD, HOS_SW_X, 0, HOS_PAD_NORTH);
-        host->bind(HOS_BIND_PAD, HOS_SW_Y, 0, HOS_PAD_WEST);
+    if (!can_bind() || layout < 0 || layout > 2) return;
+    static const int face[4] = {HOS_SW_A, HOS_SW_B, HOS_SW_X, HOS_SW_Y};
+    static const int want[3][4] = {
+        {HOS_PAD_EAST, HOS_PAD_SOUTH, HOS_PAD_NORTH, HOS_PAD_WEST},   // Nintendo (Default: Bottom=B, Right=A, Top=X, Left=Y)
+        {HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_WEST, HOS_PAD_NORTH},   // Xbox / PC Standard (Bottom=A, Right=B, Left=X, Top=Y)
+        {HOS_PAD_SOUTH, HOS_PAD_EAST, HOS_PAD_NORTH, HOS_PAD_WEST},   // Swap Face Buttons (Bottom=A, Right=B, Top=X, Left=Y)
+    };
+    // (again while a face button is not the preset's: the host leaves an empty Input 1 as it is when the input asked for is
+    // another button's only one (hos_bind), and that button may take its own new input later in the same pass)
+    for (int pass = 0; pass < 4; pass++) {
+        bool done = true;
+        for (int i = 0; i < 4; i++)
+            if (host->binding(HOS_BIND_PAD, face[i], 0) != want[layout][i]) {
+                host->bind(HOS_BIND_PAD, face[i], 0, want[layout][i]);
+                done = false;
+            }
+        if (done) break;
     }
 }
 int detect_pad_layout() {
@@ -2356,6 +2362,7 @@ void set_row(Row& r, int v, int dir, bool keep = true) {
         if (v < 0) v = 2;
         *r.value = v;
         apply_pad_layout(*r.value);
+        *r.value = detect_pad_layout();   // (Custom when the preset could not be had whole)
     } else if (r.value == &opts.preset) {
         *r.value = v > r.hi ? r.lo : v < r.lo ? r.hi : v;
         apply_preset(*r.value);

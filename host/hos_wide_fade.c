@@ -1,6 +1,7 @@
 /* Window's centred loading canvas: fill only its spanning fade pane, not its icon.
    Size hook and layout fields from llun's #95 (7cedec2d), based on ozwaldorf's
-   pane work. Keep this independent of the HUD planner; defer to #95 when combined. */
+   pane work. Whichever of #95/#142 lands second removes this #142 bridge and
+   uses #95's size hook, so the combined build never resizes the pane twice. */
 #include "hos.h"
 #include <math.h>
 #include <string.h>

@@ -95,6 +95,6 @@ Every report of a false positive teaches Microsoft that Longshot is safe, for ev
 
 ## Still stuck?
 
-[Search the reports](/progress/#problem-search?q=antivirus) or [ask on Discord](https://discord.gg/KX99srmQTe). To
+[Search the reports](/progress/#problem-search?q=antivirus) or [ask on Discord](https://discord.gg/magicbean). To
 report a new problem, include the file's name and version, where you downloaded it from, and the exact detection name.
 Never send game files or keys.
