@@ -16,9 +16,10 @@ source and run against stand-ins for the map, the submissions and a texture:
   - a write recorded before another inside it is still reported in full (recorded ranges never nest, so where the
     lookup starts is where every write reaching the storage can be found);
   - two writes, one inside and one ending past the storage, come back as their two parts, each clipped;
-  - the caller uploads the part (RX_VK_GPU_WRITE_WHOLE=1 asks for all of it again, as before), takes the CPU's writes
-    since into the same part (the whole upload used to cover them, and upload_gen moves past them), and leaves the
-    sparse images to the whole path;
+  - the caller uploads the part (RX_VK_GPU_WRITE_WHOLE=1 asks for all of it again, as before) and joins the CPU's
+    writes since into the same part: run through join_ranges, a CPU range beside the GPU's part is uploaded with it and
+    one that touches the part merges into it (the whole upload used to cover them, and upload_gen moves past them);
+    sparse images stay with the whole path;
   - the upload's own byte count: the CPU path moves whole GOB-block rows, so what it took from guest memory is
     measured there rather than inferred from the ranges it was handed.
 
@@ -144,6 +145,21 @@ int main() {
         check(d && r.size() == 2 && r[0].first == 0x100 && r[0].second == 0x200 && r[1].first == 0xC00 && r[1].second == 0x1000,
               "two writes report both parts, clipped to the storage");
     }
+    {   // (the CPU's writes since the last upload go into the same part: the whole upload used to cover them, and
+     // the upload moves upload_gen past them, so a part that left one out would lose it for good)
+        Texture t2; t2.gpu = 0x9000, t2.guest_size = 0x2000;
+        rec_value = 15; texture_gpu_wrote(0x9400, 0x100);   // (the GPU covered [0x9400, 0x9500))
+        completed_value = 15;
+        auto [d, part] = ask(t2);
+        check(d && part.size() == 1 && part[0].first == 0x400 && part[0].second == 0x500, "the part the GPU wrote");
+        Ranges both = part;
+        join_ranges(both, {{0x100, 0x200}});                // (a CPU write elsewhere in the storage, since)
+        check(both.size() == 2 && both[0].first == 0x100 && both[0].second == 0x200 &&
+              both[1].first == 0x400 && both[1].second == 0x500, "a CPU write beside the GPU's part is uploaded with it");
+        join_ranges(both, {{0x480, 0x600}});                // (and one reaching into the tail of the GPU's part)
+        check(both.size() == 2 && both[1].first == 0x400 && both[1].second == 0x600,
+              "ranges that touch the part merge into it, in order");
+    }
     {   // (what the upload path really takes from guest memory: the CPU path works in whole GOB-block rows, so a
      // 1.75 MB write into a 2560x1440 RGBA8 level costs the 24 rows it lands in, not the bytes its ranges name)
         const LevelGeo g{0, 2560, 1440, 1, 2560, 1440, 1, 0, 0, 14837760};   // (2560 x 4: 160 GOBs a row, 180 rows)
@@ -181,6 +197,7 @@ def main():
         ("gpu_wrote_into(*tex, gpu_part ? &dirty : nullptr)", "the GPU-write marking does not report the ranges it found"),
         ("if (gpu_partial) {", "the CPU's writes since a GPU write are not taken into the same part"),
         ("if (texture_dirty(*tex, since, cpu))", "the CPU's writes since a GPU write are not looked for"),
+        ("join_ranges(dirty, cpu)", "the CPU's writes since a GPU write do not join the part"),
         ("const bool up_ok = upload(*tex, up_part ? &dirty : nullptr, &gw_moved);", "the upload does not take the part"),
         ("st_gw_moved_kb.fetch_add(gw_moved >> 10", "the gpu-write tally does not count what the upload path took"),
     ]:
@@ -190,6 +207,7 @@ def main():
     cuts = block(tex, "void texture_gpu_wrote(uint64_t gpu, uint64_t size)") + "\n" + \
         block(tex, "bool gpu_wrote_into(Texture& tex, Ranges* out)") + "\n" + \
         block(tex, "struct RowGeom {") + ";\n" + block(tex, "RowGeom row_geom(") + "\n" + \
+        block(tex, "void join_ranges(Ranges& into, const Ranges& more)") + "\n" + \
         block(tex, "std::vector<std::pair<uint32_t, uint32_t>> dirty_runs(")
     src = FIXTURE.replace("__CUTS__", cuts)
 

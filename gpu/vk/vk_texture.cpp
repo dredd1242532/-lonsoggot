@@ -988,6 +988,21 @@ bool overlaps(const Ranges* dirty, uint64_t a, uint64_t b) {
     return false;
 }
 
+/// The two sets of written ranges - what the GPU buffers covered, and what the CPU wrote since the last upload - as
+/// one list in order, touching and overlapping ranges merged: the upload and overlaps() read it in that order. A CPU
+/// range has to join the part, not wait for a later pass: the upload moves upload_gen past it, and after that nothing
+/// looks for it again.
+void join_ranges(Ranges& into, const Ranges& more) {
+    into.insert(into.end(), more.begin(), more.end());
+    if (into.size() < 2) return;
+    std::sort(into.begin(), into.end());
+    size_t w = 0;
+    for (size_t i = 1; i < into.size(); i++)
+        if (into[i].first <= into[w].second) into[w].second = std::max(into[w].second, into[i].second);
+        else into[++w] = into[i];
+    into.resize(w + 1);
+}
+
 /// The GOB-block row geometry of one level: the rows a written page can force up, how many there are, and what one
 /// row takes of the storage. A row is self-contained, so it is the unit both the marking and the copy work in.
 struct RowGeom {
@@ -2615,16 +2630,7 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     if (gpu_partial) {   // (the CPU's writes since go in the same part: what the whole upload used to cover. Its ranges
                          // are not found again later: the upload below moves upload_gen past them)
         static thread_local Ranges cpu;
-        if (texture_dirty(*tex, since, cpu))
-            for (const auto& r : cpu) dirty.push_back(r);
-        if (dirty.size() > 1) {   // (the two sorted lists into one: overlaps() reads it in order)
-            std::sort(dirty.begin(), dirty.end());
-            size_t w = 0;
-            for (size_t i = 1; i < dirty.size(); i++)
-                if (dirty[i].first <= dirty[w].second) dirty[w].second = std::max(dirty[w].second, dirty[i].second);
-                else dirty[++w] = dirty[i];
-            dirty.resize(w + 1);
-        }
+        if (texture_dirty(*tex, since, cpu)) join_ranges(dirty, cpu);
     }
     if (tex->uploaded && !gpu_dirty && !texture_dirty(*tex, since, dirty)) return tex;
     const uint32_t gen = memory_generation();
