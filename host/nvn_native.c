@@ -24,6 +24,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#if defined(__APPLE__)
+#include "posix/darwin_mem.h"
+#endif
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
 #endif
@@ -809,6 +812,84 @@ NV(nvnTextureGetViewOffset) {
 }
 /* RX_NVN_WATCH_TEXELS_SRC=<w>x<h> (debugging): after each WriteTexels into a texture that size its source buffer's pages are made read-only, and the
    next write to them is logged with the writer's call stack (f_XXXXXXXX frames are guest code), then allowed */
+#if defined(__APPLE__)
+/* Publish only fixed-size fault records in the signal handler. Formatting and
+   logging run on the rearm thread; its own stack is not the faulting stack. */
+static struct { uintptr_t addr, pc; char name[64]; unsigned ready; } wts_events[12];
+static unsigned wts_reports;
+static pthread_once_t wts_once = PTHREAD_ONCE_INIT;
+static int wts_started, wts_all_threads;
+static ULONGLONG wts_after;
+static LONG CALLBACK wts_handler(EXCEPTION_POINTERS *e) {
+    if (e->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || e->ExceptionRecord->NumberParameters < 2 ||
+        e->ExceptionRecord->ExceptionInformation[0] != 1) return EXCEPTION_CONTINUE_SEARCH;
+    const uintptr_t a = (uintptr_t)e->ExceptionRecord->ExceptionInformation[1];
+    if (hos_posix_guest_watch_fault((void *)a) != 1) return EXCEPTION_CONTINUE_SEARCH;
+    HosThread *th = hos_self();   /* TLS lookup and stable current-thread name, no ownership lock. */
+    const char *tn = th ? hos_thread_name(th) : "?";
+    if ((wts_all_threads || strcmp(tn, "Resource Memory")) && GetTickCount64() >= wts_after) {
+        unsigned slot = __atomic_load_n(&wts_reports, __ATOMIC_RELAXED);
+        while (slot < 12 && !__atomic_compare_exchange_n(&wts_reports, &slot, slot + 1, 0,
+                                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {}
+        if (slot < 12) {
+            wts_events[slot].addr = a;
+            wts_events[slot].pc = (uintptr_t)e->ExceptionRecord->ExceptionAddress;
+            size_t k = 0;
+            for (; k + 1 < sizeof wts_events[slot].name && tn[k]; k++) wts_events[slot].name[k] = tn[k];
+            wts_events[slot].name[k] = 0;
+            __atomic_store_n(&wts_events[slot].ready, 1, __ATOMIC_RELEASE);
+        }
+    }
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+static DWORD WINAPI wts_rearm(void *p) {
+    (void)p;
+    unsigned reported = 0;
+    for (int k = 0; k < 300000 && reported < 12; k++) {
+        Sleep(2);
+        while (reported < 12 && __atomic_load_n(&wts_events[reported].ready, __ATOMIC_ACQUIRE)) {
+            hos_log("nvn: write to watched guest %#llx by %s (fault pc %#llx; deferred report)",
+                    (unsigned long long)(wts_events[reported].addr - (uintptr_t)GP(0)), wts_events[reported].name,
+                    (unsigned long long)wts_events[reported].pc);
+            reported++;
+        }
+        if (reported < 12 && hos_posix_guest_watch_rearm())
+            hos_log("nvn: a native-page watch could not be rearmed (errno %d); its full range remains dirty", errno);
+    }
+    return 0;
+}
+static void wts_init(void) {
+    wts_after = GetTickCount64() + (getenv("RX_NVN_WATCH_AFTER") ? (ULONGLONG)atoi(getenv("RX_NVN_WATCH_AFTER")) * 1000 : 0);
+    wts_all_threads = env_on("RX_NVN_WATCH_ALL");
+    void *handler = AddVectoredExceptionHandler(1, wts_handler);
+    if (!handler) return;
+    HANDLE thread = CreateThread(NULL, 0, wts_rearm, NULL, 0, NULL);
+    if (!thread) { RemoveVectoredExceptionHandler(handler); return; }
+    CloseHandle(thread);
+    wts_started = 1;
+}
+void hos_watch_guest_writes(const uint8_t *data, uint64_t size) {
+    pthread_once(&wts_once, wts_init);
+    if (!wts_started) { hos_log("nvn: cannot initialize guest write-watch handler/thread"); return; }
+    if (hos_posix_guest_watch(data, (size_t)size)) {
+        hos_log("nvn: cannot arm guest write watch (errno %d)", errno);
+        return;
+    }
+    hos_log("nvn: watching writes to guest %#llx..%#llx (whole native pages)",
+            (unsigned long long)((uintptr_t)data - (uintptr_t)GP(0)),
+            (unsigned long long)((uintptr_t)data - (uintptr_t)GP(0) + size));
+}
+static void watch_texels_source(const nvn_tex *t, const uint8_t *data, uint64_t size) {
+    static int on = -1;
+    static unsigned want_w, want_h;
+    if (on < 0) on = getenv("RX_NVN_WATCH_TEXELS_SRC") && sscanf(getenv("RX_NVN_WATCH_TEXELS_SRC"), "%ux%u", &want_w, &want_h) == 2;
+    if (!on || t->d.width != want_w || t->d.height != want_h || size < 4096) return;
+    const uintptr_t begin = (uintptr_t)data;
+    if (size > UINTPTR_MAX - begin || begin > UINTPTR_MAX - 4095) return;
+    const uintptr_t lo = (begin + 4095) & ~(uintptr_t)4095, hi = (begin + size) & ~(uintptr_t)4095;
+    if (hi > lo) hos_watch_guest_writes((const uint8_t *)lo, hi - lo);
+}
+#else
 static uintptr_t wts_lo[16], wts_hi[16];
 static int wts_n;
 static volatile LONG wts_reports;
@@ -882,6 +963,7 @@ static void watch_texels_source(const nvn_tex *t, const uint8_t *data, uint64_t 
     hos_log("nvn: watching WriteTexels source guest %#llx..%#llx", (unsigned long long)(lo - (uintptr_t)GP(0)),
             (unsigned long long)(hi - (uintptr_t)GP(0)));
 }
+#endif
 /* (longshot) the bytes of the game's buffer that ReadTexels / WriteTexels touch at row and image strides (as
    texture_read_texels walks it: depth images of height rows of wb bytes); 0 when that overflows */
 static uint64_t texels_extent(uint64_t wb, uint64_t hb, uint64_t depth, uint64_t row, uint64_t img) {

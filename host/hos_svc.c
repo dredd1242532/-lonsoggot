@@ -463,6 +463,9 @@ void a64_svc(Ctx *c, uint32_t imm) {
         return;
     }
     case 0x2C:   /* MapPhysicalMemory(address, size) */
+#if defined(__APPLE__)
+        if (!hos_guest_range(c->x[0], c->x[1])) { c->x[0] = 0xCA01; return; }
+#endif
         hos_commit(c->x[0], c->x[1]);
         if (hos_trace) hos_log("MapPhysicalMemory(%#llx, %#llx)", (unsigned long long)c->x[0], (unsigned long long)c->x[1]);
         c->x[0] = R_OK;
@@ -472,15 +475,17 @@ void a64_svc(Ctx *c, uint32_t imm) {
             c->x[0] = 0xCA01;
             return;
         }
+#if defined(__APPLE__)
+        /* The canonical host pin/discard transaction covers active and retired
+           imports. A renderer overlap query followed by free is not a pin. */
+        if (!VirtualFree(GP(c->x[0]), (SIZE_T)c->x[1], MEM_DECOMMIT)) { c->x[0] = 0xCA01; return; }
+#else
         {   /* (pages under a Vulkan import stay committed, zeroed: hos_mem.c FreeMemoryPages) */
             extern int rx_guest_imported(uint64_t lo, uint64_t hi);
             if (rx_guest_imported(c->x[0], c->x[0] + c->x[1])) memset(GP(c->x[0]), 0, (size_t)c->x[1]);
-#if defined(__APPLE__)
-            else if (!VirtualFree(GP(c->x[0]), (SIZE_T)c->x[1], MEM_DECOMMIT)) { c->x[0] = 0xCA01; return; }
-#else
             else VirtualFree(GP(c->x[0]), (SIZE_T)c->x[1], MEM_DECOMMIT);
-#endif
         }
+#endif
         c->x[0] = R_OK;
         return;
     case 0x1F: { /* ConnectToNamedPort(-, name) -> (result, session handle): (longshot) SDK code that resolves a

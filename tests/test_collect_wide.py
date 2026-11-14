@@ -27,12 +27,15 @@ static uint8_t a64_dirty[A64_DIRTY_PAGES];
 static uint64_t guest_size = A64_DIRTY_PAGES << 12;
 static uint64_t hos_guest_size(void) { return guest_size; }
 static int clear_calls;
-#define memcpy(d, s, n) (clear_calls += (n) == 256, memcpy(d, s, n))
+static void hos_fatal(void *ctx, const char *message) {
+    (void)ctx; fprintf(stderr, "%s\n", message); abort();
+}
 
 @MARKS_CLEAR@
+#define marks_clear(m, n) (clear_calls += (n) == 256, marks_clear(m, n))
 @COLLECT_IN@
 
-#undef memcpy
+#undef marks_clear
 
 static uint64_t rng = 0x9E3779B97F4A7C15ull;
 static uint64_t rnd(void) {
@@ -46,6 +49,7 @@ static size_t plain(const uint64_t (*ranges)[2], int n, const uint8_t *marks, ui
     memcpy(left, marks, A64_DIRTY_PAGES);
     for (int r = 0; r < n; r++) {
         const uint64_t hi = ranges[r][1] < guest_size ? ranges[r][1] : guest_size;
+        if (ranges[r][0] >= hi) continue;
         uint64_t p1 = (hi + 4095) >> 12;
         if (p1 > A64_DIRTY_PAGES) p1 = A64_DIRTY_PAGES;
         for (uint64_t p = ranges[r][0] >> 12; p < p1; p++)
@@ -122,7 +126,7 @@ def main():
     p.add_argument("--cc", default="gcc")
     a = p.parse_args()
     src = (ROOT / "host" / "rx_backend.c").read_text(encoding="utf-8")
-    fixture = (FIXTURE.replace("@MARKS_CLEAR@", block(src, "static inline int marks_clear_256("))
+    fixture = (FIXTURE.replace("@MARKS_CLEAR@", block(src, "static inline int marks_clear("))
                .replace("@COLLECT_IN@", block(src, "static int64_t collect_in(")))
     with tempfile.TemporaryDirectory(prefix="collect-wide-") as tmp:
         c = Path(tmp) / "fixture.c"

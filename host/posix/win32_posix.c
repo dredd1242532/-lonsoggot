@@ -20,8 +20,8 @@
 #include "darwin_fault.h"
 #endif
 
-/* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
-   readable and writable, which VirtualQuery reports as committed without asking the kernel */
+/* The guest window (rt/a64.h A64_HOST_BASE, hos.h HOS_GUEST_SPACE). Darwin
+   queries the real kernel mappings and resolves mutations to the host owner. */
 #define GUEST_LO 0x100000000000ULL
 #define GUEST_HI (GUEST_LO + (1ULL << 39))
 
@@ -640,6 +640,32 @@ static int prot_of(DWORD p) {
     default: return PROT_READ | PROT_WRITE;
     }
 }
+#if defined(__APPLE__)
+static DWORD page_protect(int p) {
+    if (p & PROT_EXEC) return p & PROT_WRITE ? PAGE_EXECUTE_READWRITE : p & PROT_READ ? PAGE_EXECUTE_READ : PAGE_EXECUTE;
+    return p & PROT_WRITE ? PAGE_READWRITE : p & PROT_READ ? PAGE_READONLY : PAGE_NOACCESS;
+}
+/* Function pointers may be image-local; guest backing/ownership never is. */
+static pthread_once_t guest_memory_once = PTHREAD_ONCE_INIT;
+static int (*guest_commit)(void *, size_t);
+static int (*guest_discard)(void *, size_t);
+static int (*guest_protect)(void *, size_t, int, int *);
+static void guest_memory_resolve(void) {
+    guest_commit = (int (*)(void *, size_t))dlsym(RTLD_MAIN_ONLY, "hos_posix_guest_commit");
+    guest_discard = (int (*)(void *, size_t))dlsym(RTLD_MAIN_ONLY, "hos_posix_guest_discard");
+    guest_protect = (int (*)(void *, size_t, int, int *))dlsym(RTLD_MAIN_ONLY, "hos_posix_guest_protect");
+}
+static int guest_memory_services(void) {
+    pthread_once(&guest_memory_once, guest_memory_resolve);
+    if (guest_commit && guest_discard && guest_protect) return 1;
+    errno = ENOSYS;
+    return 0;
+}
+static int touches_guest(const void *addr, size_t size) {
+    const uintptr_t lo = (uintptr_t)addr;
+    return lo < GUEST_HI && (lo >= GUEST_LO || size > GUEST_LO - lo);
+}
+#endif
 /* the reservations VirtualAlloc made, for MEM_RELEASE (which gives no size) */
 static struct { uintptr_t base; size_t size; } regions[256];
 static pthread_mutex_t regions_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -647,6 +673,7 @@ static pthread_mutex_t regions_mu = PTHREAD_MUTEX_INITIALIZER;
    MADV_DONTNEED leaves a shared mapping's pages as they were; MADV_DONTNEED elsewhere */
 static int discard_pages(void *p, size_t n) {
 #if defined(__APPLE__)
+    if (touches_guest(p, n)) return guest_memory_services() ? guest_discard(p, n) : -1;
     return darwin_mem_discard(p, n);
 #else
     typedef int (*DiscardFn)(void *, size_t);
@@ -659,8 +686,14 @@ static int discard_pages(void *p, size_t n) {
 }
 void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
 #if defined(__APPLE__)
-    if (size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr > UINTPTR_MAX - 4095) {
+    if (!size || size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr + size > UINTPTR_MAX - 4095) {
         last_error = ERROR_INVALID_PARAMETER;
+        return NULL;
+    }
+    if (addr && (type & MEM_RESERVE) && touches_guest(addr, size)) {
+        /* Only the canonical host reserves this window. No image-local release
+           record may later unmap backing protected by an import pin. */
+        last_error = ERROR_ALREADY_EXISTS;
         return NULL;
     }
 #endif
@@ -675,11 +708,15 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
         return addr;
     }
     if (addr && (type & MEM_COMMIT) && !(type & MEM_RESERVE)) {
-        /* (inside a reservation: made accessible; the guest window is accessible already) */
-        if ((uintptr_t)addr >= GUEST_LO && (uintptr_t)addr + size <= GUEST_HI) return addr;
+        /* (inside a reservation: made accessible; the guest window is committed already) */
 #if defined(__APPLE__)
+        if (touches_guest(addr, size)) {
+            if (!guest_memory_services() || guest_commit(addr, size)) { fail_errno(); return NULL; }
+            return addr;
+        }
         if (darwin_mem_protect(addr, size, prot_of(protect))) { fail_errno(); return NULL; }
 #else
+        if ((uintptr_t)addr >= GUEST_LO && (uintptr_t)addr + size <= GUEST_HI) return addr;
         const uintptr_t lo = (uintptr_t)addr & ~(page - 1), hi = ((uintptr_t)addr + size + page - 1) & ~(page - 1);
         if (mprotect((void *)lo, hi - lo, prot_of(protect))) { fail_errno(); return NULL; }
 #endif
@@ -700,10 +737,20 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
 #endif
         return NULL;
     }
+#if defined(__APPLE__)
+    const size_t mask = (size_t)getpagesize() - 1;
+    size = (size + mask) & ~mask;
+#endif
     pthread_mutex_lock(&regions_mu);
+    int recorded = 0;
     for (int i = 0; i < 256; i++)
-        if (!regions[i].base) { regions[i].base = (uintptr_t)p, regions[i].size = size; break; }
+        if (!regions[i].base) { regions[i].base = (uintptr_t)p, regions[i].size = size; recorded = 1; break; }
     pthread_mutex_unlock(&regions_mu);
+#if defined(__APPLE__)
+    if (!recorded) { munmap(p, size); last_error = ERROR_NOT_ENOUGH_MEMORY; return NULL; }
+#else
+    (void)recorded;
+#endif
     return p;
 }
 BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
@@ -718,6 +765,9 @@ BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
         return discard_pages((void *)lo, hi - lo) == 0 ? TRUE : fail_errno();
     }
     if (type & MEM_RELEASE) {
+#if defined(__APPLE__)
+        if (touches_guest(addr, size)) { last_error = ERROR_INVALID_PARAMETER; return FALSE; }
+#endif
         pthread_mutex_lock(&regions_mu);
         for (int i = 0; i < 256; i++)
             if (regions[i].base == (uintptr_t)addr) {
@@ -738,8 +788,17 @@ BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
 }
 BOOL VirtualProtect(void *addr, SIZE_T size, DWORD protect, DWORD *old) {
 #if defined(__APPLE__)
-    if (old) *old = PAGE_READWRITE;
-    return darwin_mem_protect(addr, size, prot_of(protect)) == 0 ? TRUE : fail_errno();
+    int prior;
+    if (touches_guest(addr, size)) {
+        if (!guest_memory_services() || guest_protect(addr, size, prot_of(protect), &prior)) return fail_errno();
+    } else {
+        DarwinMemInfo info;
+        if (darwin_mem_query(addr, &info) || !info.mapped) { last_error = ERROR_INVALID_PARAMETER; return FALSE; }
+        prior = info.protect;
+        if (darwin_mem_protect(addr, size, prot_of(protect))) return fail_errno();
+    }
+    if (old) *old = page_protect(prior);
+    return TRUE;
 #else
     const uintptr_t lo = (uintptr_t)addr & ~(uintptr_t)4095, hi = ((uintptr_t)addr + size + 4095) & ~(uintptr_t)4095;
     if (old) *old = PAGE_READWRITE;
@@ -747,8 +806,43 @@ BOOL VirtualProtect(void *addr, SIZE_T size, DWORD protect, DWORD *old) {
 #endif
 }
 SIZE_T VirtualQuery(const void *addr, MEMORY_BASIC_INFORMATION *mbi, SIZE_T size) {
-    if (size < sizeof *mbi) return 0;
+    if (!mbi || size < sizeof *mbi) { last_error = ERROR_INVALID_PARAMETER; return 0; }
     memset(mbi, 0, sizeof *mbi);
+#if defined(__APPLE__)
+    DarwinMemInfo info;
+    if (darwin_mem_query(addr, &info)) { fail_errno(); return 0; }
+    const uintptr_t a = (uintptr_t)addr, page = a & ~((uintptr_t)getpagesize() - 1);
+    mbi->BaseAddress = (void *)page;
+    mbi->RegionSize = info.end - page;
+    if (!info.mapped) {
+        mbi->State = MEM_FREE;
+        mbi->Protect = PAGE_NOACCESS;
+        return sizeof *mbi;
+    }
+    mbi->AllocationBase = (void *)info.base;
+    mbi->Protect = mbi->AllocationProtect = page_protect(info.protect);
+    mbi->State = info.protect ? MEM_COMMIT : MEM_RESERVE;
+    mbi->Type = info.shared ? MEM_MAPPED : MEM_PRIVATE;
+    if (a >= GUEST_LO && a < GUEST_HI) {
+        /* The guest's demand-paged window was committed at reservation, even
+           when VirtualProtect subsequently makes a page NOACCESS/RO. */
+        mbi->AllocationBase = (void *)GUEST_LO;
+        mbi->AllocationProtect = PAGE_READWRITE;
+        mbi->State = MEM_COMMIT;
+        if (mbi->RegionSize > GUEST_HI - page) mbi->RegionSize = GUEST_HI - page;
+    } else {
+        pthread_mutex_lock(&regions_mu);
+        for (int i = 0; i < 256; i++) {
+            if (a < regions[i].base || a - regions[i].base >= regions[i].size) continue;
+            mbi->AllocationBase = (void *)regions[i].base;
+            const size_t left = regions[i].size - (page - regions[i].base);
+            if (mbi->RegionSize > left) mbi->RegionSize = left;
+            break;
+        }
+        pthread_mutex_unlock(&regions_mu);
+    }
+    return sizeof *mbi;
+#else
     const uintptr_t a = (uintptr_t)addr, page = a & ~(uintptr_t)4095;
     mbi->BaseAddress = (void *)page;
     if (a >= GUEST_LO && a < GUEST_HI) {
@@ -782,6 +876,7 @@ SIZE_T VirtualQuery(const void *addr, MEMORY_BASIC_INFORMATION *mbi, SIZE_T size
         break;
     }
     if (f) fclose(f);
+#endif
     return sizeof *mbi;
 }
 

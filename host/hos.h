@@ -54,6 +54,15 @@ int hos_game_is_mkw(void);
 uint64_t hos_used_memory(uint64_t base);   /* (hos_mem.c) base + heap + the game's mapped pages: the used memory it is told */
 int hos_commit(uint64_t addr, uint64_t size);          /* (mkw_glue.c) guest pages made usable by host APIs: 1, or 0 if refused */
 int hos_mem_region(uint64_t addr, uint64_t size);      /* (hos_mem.c) the control bridge: 0 if not wholly in mapped guest memory */
+#if defined(__APPLE__)
+/* Canonical host backing ownership (host/posix/darwin_guest_mem.c). Import
+   ranges are full outward-rounded backing, held through active AND retired
+   GPU memory lifetime. Every successful pin, duplicates included, is balanced. */
+int hos_posix_guest_import_pin(uint64_t lo, uint64_t hi);
+void hos_posix_guest_import_unpin(uint64_t lo, uint64_t hi);
+int hos_posix_guest_discard(void *p, size_t n);
+void hos_posix_guest_watch_mark(void);
+#endif
 #if defined(A64_WRITE_TRACK) && !defined(__EMSCRIPTEN__)
 void hos_mark_written(const void *p, size_t n);   /* (hos_mem.c: guest memory written by host code, native soft watch) */
 #define HOS_WRITTEN(p, n) hos_mark_written((p), (n))

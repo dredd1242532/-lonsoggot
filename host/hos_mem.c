@@ -1,5 +1,5 @@
 /* Guest memory map: the system region (our own objects), the heap, address regions.
-   The whole 4 GB window is committed up front (hos_main.c), so "mapping" here is only bookkeeping and zeroing. */
+   Darwin reserves the 512 GiB window RW/demand-paged; guest ownership stays 4 KiB. */
 #include "hos.h"
 #ifndef LONGSHOT_ENV_H   /* (env_on: the switches' one rule) */
 #include "../gpu/vk/compat/longshot_env.h"
@@ -91,6 +91,10 @@ uint64_t hos_sys_alloc(uint64_t size, uint64_t align) {
 }
 
 uint64_t hos_region_alloc(uint64_t size, uint64_t align) {
+    if (!size || size > HOS_SPACE_END - 0xFFF || (align && (align & (align - 1)))) {
+        hos_fatal(NULL, "invalid address-region size/alignment");
+        return 0;
+    }
     if (align < 0x1000) align = 0x1000;
     size = (size + 0xFFF) & ~0xFFFULL;
     LOCK();
@@ -123,8 +127,15 @@ uint64_t hos_region_alloc(uint64_t size, uint64_t align) {
         }
     if (found) {
         if (nregions == capregions) {
-            capregions = capregions ? capregions * 2 : 64;
-            regions = (Range *)realloc(regions, capregions * sizeof(Range));
+            const int capacity = capregions ? capregions * 2 : 64;
+            Range *next = (Range *)realloc(regions, (size_t)capacity * sizeof(Range));
+            if (!next) {
+                UNLOCK();
+                hos_fatal(NULL, "address-region bookkeeping exhausted");
+                return 0;
+            }
+            capregions = capacity;
+            regions = next;
         }
         memmove(&regions[at + 1], &regions[at], (nregions - at) * sizeof(Range));
         regions[at].addr = found;
@@ -139,21 +150,23 @@ uint64_t hos_region_alloc(uint64_t size, uint64_t align) {
     return found;
 }
 
+#if !defined(__APPLE__)
 static uint64_t pages_used[(1ULL << 32) / 0x1000 / 64];
 
 static void pages_mark_used_locked(uint64_t addr, uint64_t size) {
     for (uint64_t p = addr >> 12; p < (addr + size + 0xFFF) >> 12 && p < (1ULL << 20); p++) pages_used[p >> 6] |= 1ULL << (p & 63);
 }
+#endif
 
-static void discard_pages(uint64_t addr, uint64_t size) {
-    if (!hos_guest_range(addr, size)) return;   /* (longshot: guest pages only; Linux's discard zeroes what it is given) */
+static int discard_pages(uint64_t addr, uint64_t size) {
+    if (!hos_guest_range(addr, size)) return -1;   /* (guest pages only) */
     const uint64_t lo = (addr + 0xFFF) & ~0xFFFULL, hi = (addr + size) & ~0xFFFULL;
     static int keep = -1;
     if (keep < 0) keep = env_on("HOS_KEEP_FREED_PAGES");
-    if (hi <= lo || keep) return;
+    if (hi <= lo || keep) return 0;
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     extern int hos_large_pages;   /* (hos_main.c: large pages cannot be discarded) */
-    if (hos_large_pages) return;
+    if (hos_large_pages) return 0;
     typedef DWORD(WINAPI * DiscardFn)(PVOID, SIZE_T);
     static DiscardFn discard;
     static int looked;
@@ -163,20 +176,17 @@ static void discard_pages(uint64_t addr, uint64_t size) {
     }
     if (!discard || discard(GP(lo), (SIZE_T)(hi - lo)) != ERROR_SUCCESS)
         VirtualAlloc(GP(lo), (SIZE_T)(hi - lo), MEM_RESET, PAGE_READWRITE);
+#elif defined(__APPLE__)
+    return hos_posix_guest_discard(GP(lo), (size_t)(hi - lo));
 #elif !defined(__EMSCRIPTEN__)
     extern int hos_posix_guest_discard(void *p, size_t n);   /* (hos_main.c: MADV_REMOVE on the memfd window) */
     extern int rx_guest_imported(uint64_t lo, uint64_t hi);
     /* (pages a dma-buf import holds stay where they are, zeroed: a hole punched under one would leave the GPU on
        the old pages and the game on new ones) */
     if (rx_guest_imported(lo, hi)) memset(GP(lo), 0, (size_t)(hi - lo));
-#if defined(__APPLE__)
-    else if (hos_posix_guest_discard(GP(lo), (size_t)(hi - lo)))
-        hos_fatal(NULL, "mem: cannot discard guest pages at %#llx (%#llx bytes)",
-                  (unsigned long long)lo, (unsigned long long)(hi - lo));
-#else
     else hos_posix_guest_discard(GP(lo), (size_t)(hi - lo));
 #endif
-#endif
+    return 0;
 }
 
 /* (longshot) the address regions (hos_region_alloc's), at most cap of them into out ({start, end}); how many there are. For
@@ -194,7 +204,17 @@ void hos_region_free(uint64_t addr) {
     LOCK();
     for (int i = 0; i < nregions; i++) {
         if (regions[i].addr == addr) {
+#if defined(__APPLE__)
+            /* Keep the address owned until zero/discard is complete. Allocation
+               cannot publish a replacement while the old free still owns bytes. */
+            if (discard_pages(regions[i].addr, regions[i].size)) {
+                UNLOCK();
+                hos_fatal(NULL, "mem: cannot discard guest region at %#llx", (unsigned long long)addr);
+                return;
+            }
+#else
             pages_mark_used_locked(regions[i].addr, regions[i].size);
+#endif
             freed = regions[i].addr;
             freed_size = regions[i].size;
             memmove(&regions[i], &regions[i + 1], (nregions - i - 1) * sizeof(Range));
@@ -203,7 +223,11 @@ void hos_region_free(uint64_t addr) {
         }
     }
     UNLOCK();
+#if !defined(__APPLE__)
     if (freed_size) discard_pages(freed, freed_size);
+#else
+    (void)freed, (void)freed_size;
+#endif
 }
 
 /* ---- nn::os memory -------------------------------------------------------------------------------------- */
@@ -213,6 +237,7 @@ void hos_region_free(uint64_t addr) {
 void hos_mark_written(const void *p, size_t n) {
     const uintptr_t a = (uintptr_t)p - (uintptr_t)A64_MEM;
     if (!n || (uintptr_t)p < (uintptr_t)A64_MEM || a >= HOS_GUEST_SPACE) return;
+    if (n > HOS_GUEST_SPACE - a) n = (size_t)(HOS_GUEST_SPACE - a);
     for (uintptr_t q = a >> 12; q <= (a + n - 1) >> 12 && q < A64_DIRTY_PAGES; q++)
         __atomic_store_n(&a64_dirty[q], 1, __ATOMIC_RELEASE);
 }
@@ -355,7 +380,7 @@ uint64_t hos_used_memory(uint64_t base) {
 /* nn::os::AllocateMemoryPages(unsigned long, unsigned long) -> Result: new pages read as zero */
 HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
     HOS_TRACE_CALL("AllocateMemoryPages");
-    const uint64_t a = ARG(0), n = ARG(1), end = a + n;
+    const uint64_t a = ARG(0), n = ARG(1);
     if (!hos_guest_range(a, n)) {   /* (longshot: a range that wrapped around was zeroed whole, past the guest window) */
         hos_log("AllocateMemoryPages(%#llx, %#llx): outside the guest window", (unsigned long long)a, (unsigned long long)n);
         RET(0xCA01);   /* svc::ResultOutOfMemory */
@@ -380,6 +405,17 @@ HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
         UNLOCK();
     }
     static int zero_all = -1;
+#if defined(__APPLE__)
+    /* The native reservation is committed already. A repeated 4 KiB allocation
+       must not erase live bytes, even below the old 4 GiB used-page bitmap.
+       Free completed its exact zeroing before dropping this same ownership lock. */
+    LOCK();
+    if (zero_all < 0) zero_all = env_on("HOS_ZERO_ALL_PAGES");
+    hos_commit(a, n);
+    if (zero_all) memset(GP(a), 0, n);
+    UNLOCK();
+#else
+    const uint64_t end = a + n;
     if (zero_all < 0) zero_all = env_on("HOS_ZERO_ALL_PAGES");
     if (end > (1ULL << 32) && !zero_all) {
         /* (mkw-recomp) above 4 GB the used-page bitmap does not reach, and zeroing the whole range wiped live data
@@ -412,6 +448,7 @@ HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
         else
             for (int i = 0; i < nruns; i++) memset(GP(runs[i][0]), 0, runs[i][1] - runs[i][0]);
     }
+#endif
     HOS_WRITTEN(GP(a), n);
     RET(0);
 }
@@ -424,6 +461,19 @@ HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
         RET(0xCA01);
         return;
     }
+#if defined(__APPLE__)
+    const uint64_t a = ARG(0), n = ARG(1);
+    const uint64_t lo = (a + 0xFFF) & ~0xFFFULL, hi = (a + n) & ~0xFFFULL;
+    LOCK();
+    const int failed = a + n > (1ULL << 32)
+        ? (hi > lo && hos_posix_guest_discard(GP(lo), (size_t)(hi - lo))) : discard_pages(a, n);
+    if (!failed) {   /* (no longer counted against the console's total once the pages are gone, under the same lock) */
+        mapped_bytes -= (uint64_t)pages_count_locked(a, n, 0);
+        pages_report_locked();
+    }
+    UNLOCK();
+    RET(failed ? 0xCA01 : 0);
+#else
     LOCK();   /* (longshot: no longer counted against the console's total, AllocateMemoryPages above) */
     mapped_bytes -= (uint64_t)pages_count_locked(ARG(0), ARG(1), 0);
     pages_report_locked();
@@ -439,11 +489,7 @@ HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
 #else
         else if (hi > lo) {   /* (linux: kept mapped, the pages read as zero; MADV_REMOVE on the memfd window) */
             extern int hos_posix_guest_discard(void *p, size_t n);
-#if defined(__APPLE__)
-            if (hos_posix_guest_discard(GP(lo), (size_t)(hi - lo))) { RET(0xCA01); return; }
-#else
             hos_posix_guest_discard(GP(lo), (size_t)(hi - lo));
-#endif
         }
 #endif
         RET(0);
@@ -451,6 +497,7 @@ HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
     }
     discard_pages(ARG(0), ARG(1));
     RET(0);
+#endif
 }
 
 /* nn::os::QueryMemoryInfo(nn::os::MemoryInfo*). TOTK reads +0 (total available) and +8 (total used):

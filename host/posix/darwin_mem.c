@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#include <mach/vm_param.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -43,6 +44,41 @@ void *darwin_mem_map(void *addr, size_t size, int protect) {
         return MAP_FAILED;
     }
     return (void *)(uintptr_t)at;
+}
+
+int darwin_mem_query(const void *addr, DarwinMemInfo *out) {
+    if (!out) { errno = EINVAL; return -1; }
+    const uintptr_t a = (uintptr_t)addr;
+    if (a >= MACH_VM_MAX_ADDRESS) { errno = EINVAL; return -1; }
+    mach_vm_address_t at = a;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    const kern_return_t result = mach_vm_region(mach_task_self(), &at, &size,
+        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &object);
+    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+    if (result == KERN_INVALID_ADDRESS) {
+        memset(out, 0, sizeof *out);
+        out->base = a & ~((uintptr_t)getpagesize() - 1);
+        out->end = MACH_VM_MAX_ADDRESS;
+        return 0;
+    }
+    if (result != KERN_SUCCESS) return mach_errno(result);
+    if (!size || size > UINTPTR_MAX - at) { errno = EINVAL; return -1; }
+    memset(out, 0, sizeof *out);
+    if (at > a) {
+        out->base = a & ~((uintptr_t)getpagesize() - 1);
+        out->end = at;
+    } else {
+        out->base = at;
+        out->end = at + size;
+        out->mapped = 1;
+        out->protect = info.protection;
+        out->max_protect = info.max_protection;
+        out->shared = info.shared;
+    }
+    return 0;
 }
 
 /* Fail before changing any bytes if a request crosses a hole or a non-writable

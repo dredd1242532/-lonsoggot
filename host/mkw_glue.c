@@ -61,9 +61,15 @@ int hos_commit(uint64_t addr, uint64_t size) {
     const uint64_t lo = addr & ~0xFFFFULL, hi = (addr + size + 0xFFFF) & ~0xFFFFULL;
     if (!VirtualAlloc(GP(lo), (SIZE_T)(hi - lo), MEM_COMMIT, PAGE_READWRITE)) {
         const DWORD err = GetLastError();
+#if defined(__APPLE__)
+        hos_fatal(NULL, "mem: cannot commit guest range %#llx..%#llx (error %lu)",
+                  (unsigned long long)lo, (unsigned long long)hi, (unsigned long)err);
+        return 0;
+#else
         if (err == ERROR_COMMITMENT_LIMIT && commit_wait(GP(lo), (SIZE_T)(hi - lo))) return 1;
         commit_refused(lo, hi - lo, err);
         return 0;
+#endif
     }
     return 1;
 }
@@ -115,6 +121,10 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
 static uint64_t peek_guest(uint64_t a) {
     MEMORY_BASIC_INFORMATION mbi;
     if (a >= HOS_GUEST_SPACE - 8 || !VirtualQuery(GP(a), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return 0;
+#if defined(__APPLE__)
+    if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)) ||
+        mbi.RegionSize < (uintptr_t)GP(a) - (uintptr_t)mbi.BaseAddress + 8) return 0;
+#endif
     return G64(a);
 }
 

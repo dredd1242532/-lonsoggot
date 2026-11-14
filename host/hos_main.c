@@ -153,7 +153,7 @@ static int reserve_guest(void) {
     /* Keep the whole window RW and demand-paged, without replacing an occupant. */
     void hos_commit_init(void);
     hos_commit_init();
-    const int ok = darwin_mem_map((void *)A64_HOST_BASE, GUEST_SPACE, PROT_READ | PROT_WRITE) == (void *)A64_HOST_BASE;
+    const int ok = hos_posix_guest_reserve((void *)A64_HOST_BASE, GUEST_SPACE) == (void *)A64_HOST_BASE;
     if (!ok) {
         const char *why = errno == EEXIST ? "address range already occupied" : strerror(errno);
         if (startup_stderr >= 0) dprintf(startup_stderr, "mem: cannot reserve macOS guest window: %s\n", why);
@@ -245,13 +245,11 @@ static int reserve_guest(void) {
    they read as zero again on either kind of mapping */
 int hos_guest_memfd = -1;
 int hos_posix_guest_memfd(void) { return hos_guest_memfd; }
+#if !defined(__APPLE__)
 int hos_posix_guest_discard(void *p, size_t n) {
-#if defined(__APPLE__)
-    return darwin_mem_discard(p, n);
-#else
     return madvise(p, n, hos_guest_memfd >= 0 ? MADV_REMOVE : MADV_DONTNEED);
-#endif
 }
+#endif
 #endif
 
 /* The guest window, for the renderer (gpu/render/rx_buffer.cpp). */
