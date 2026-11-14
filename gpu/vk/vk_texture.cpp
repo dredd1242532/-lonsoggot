@@ -275,8 +275,9 @@ std::deque<Dead> dead;
 // 17 GB). Now a render target's image whose texture is gone waits in a pool by its create info, views and all, and a new texture
 // of the same create info takes it; it is put into GENERAL from UNDEFINED and cleared as a new one is (create), so nothing it held
 // shows. Only images made for a target (texture_get's !for_sampling) are pooled. The pool is bounded (RX_VK_TARGET_POOL_MB, default
-// 256; 0: none, every image destroyed as before; and none while VRAM is near what the driver allows), and an image unused in it for
-// 120 presents is destroyed, at most 16 a present ----
+// 256; 0: none, every image destroyed as before; and none while VRAM is near what the driver allows): an image that would put it
+// past the bound is not taken (pool_offer) and is destroyed as before, so it never holds more, and what it holds comes off the
+// textures' budget (budget_less_pool). An image unused in it for 120 presents is destroyed, at most 16 a present ----
 struct Pooled {
     VkImage image;
     VmaAllocation allocation;
@@ -285,7 +286,7 @@ struct Pooled {
 };
 std::mutex pool_mu;
 std::unordered_map<uint64_t, std::vector<Pooled>> target_pool;   // by pool_key_of
-uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_made, st_pool_destroyed;
+uint64_t pool_bytes, pool_n, st_pool_reused, st_pool_made, st_pool_destroyed, st_pool_refused;
 bool pool_pressed;   // (VRAM near what the driver allows: texture_frame's budget)
 bool compact_on() {   // (longshot: the textures in a pool of their own, compacted: compact_step. On unless RX_VK_COMPACT=0)
     static const bool v = vram_compact::enabled(getenv("RX_VK_COMPACT"));
@@ -342,23 +343,34 @@ void pool_destroy(Pooled& p) {
     destroy_image(p.image, p.allocation);
     st_pool_destroyed++;
 }
-/// (texture_frame) a dead render target's image the GPU is done with, into the pool
-void pool_put(Dead& d) {
+/// (texture_frame's dead list) a gone render target's image the GPU is done with,
+/// offered to the pool: taken unless it would put the pool past its bound, or VRAM is short. false: refused, d is left whole and
+/// its caller lets it go as any other dead image. The bound holds at every put, so the pool never holds more than pool_cap():
+/// put first and trimmed after (16 a present), a sweep's 300-700 targets waited in it for presents, GBs that no budget counted
+bool pool_offer(Dead& d) {
     std::lock_guard lk(pool_mu);
+    const uint64_t cap = pool_cap();
+    if (pool_pressed || d.bytes > cap || pool_bytes > cap - d.bytes) return false;
     target_pool[d.pool_key].push_back(Pooled{d.image, d.allocation, std::move(d.view_map), d.bytes, frame_no});
     pool_bytes += d.bytes, pool_n++;
+    return true;
 }
-/// (texture_frame, each present) the pool over its bound, or all of it while VRAM is short, and what waits in it unused for 120
-/// presents: destroyed, at most 16 a present (64 while VRAM is short). Returns how many
+/// (texture_frame) the textures' budget as a size, less what the pool holds: its images are VRAM of the kind that budget is a
+/// size of and were in no count it was compared with, so the textures and the pool together stay within it
+uint64_t budget_less_pool(uint64_t budget) {
+    std::lock_guard lk(pool_mu);
+    return budget - std::min(budget, pool_bytes);
+}
+/// (texture_frame, each present) all of the pool while VRAM is short, and what waits in it unused for 120 presents: destroyed,
+/// at most 16 a present (64 while VRAM is short). Its bound is pool_offer's. Returns how many
 size_t pool_trim() {
     std::lock_guard lk(pool_mu);
-    const uint64_t cap = pool_pressed ? 0 : pool_cap();
     const size_t most = pool_pressed ? 64 : 16;
     size_t n = 0;
     for (auto it = target_pool.begin(); it != target_pool.end() && n < most;) {
         auto& v = it->second;
         for (size_t i = 0; i < v.size() && n < most;) {   // (the oldest of a shape first: the front)
-            if (pool_bytes <= cap && frame_no - v[i].since <= 120) {
+            if (!pool_pressed && frame_no - v[i].since <= 120) {
                 ++i;
                 continue;
             }
@@ -4196,17 +4208,41 @@ void texture_frame(uint64_t completed) {
     }
     bc_scratch_idle();
     compact_step(completed);   // (longshot, RX_VK_COMPACT: while its pass is open nothing of the textures' pool is freed)
+    // (longshot) the driver's count, looked at each present, not each tenth: this present's offers to the target pool and its
+    // trim go by pool_pressed, and in ten presents a sweep's targets were pooled past a limit already reached. The budget's
+    // rules below, every tenth present as before, look again after the dead list and the trim
+    uint64_t used = 0, allowed = 0, block_free = 0;
+    bool known = false;
+    static const bool by_blocks = env_on("RX_VK_BUDGET_BY_BLOCKS");   // (the budget's 90% rule, below)
+    // (longshot, RX_VK_COMPACT) compacted, only the textures' pool's free space comes off the count: vram_compact.h
+    uint64_t reclaim = 0, pressure = 0;
+    bool kept_only = false;   // (the textures' pool is down to its blocks made at the start: the 97% rule, below)
+    const auto look = [&] {
+        known = vram_usage(&used, &allowed, &block_free);
+        reclaim = block_free;
+        kept_only = false;
+        if (compact_on()) {
+            uint64_t pool_blocks = 0, pool_free = 0, pool_kept = 0;
+            if (textures_pool_usage(&pool_blocks, &pool_free, &pool_kept)) reclaim = vram_compact::reclaimable(block_free, pool_free);
+            kept_only = vram_compact::kept_only(pool_blocks, pool_kept);
+        }
+        pressure = by_blocks ? used : used - std::min(used, reclaim);
+    };
+    look();
+    pool_pressed = known && pressure > allowed / 10 * 9;   // (the target pool given back meanwhile)
     for (auto it = dead.begin(); it != dead.end();) {
         if (compact.in_pass) break;   // (longshot, RX_VK_COMPACT: nothing is freed while a pass is open; a frame or two)
         if (it->value > completed) {
             ++it;
             continue;
         }
-        if (it->pool_key) {   // (a render target's image: kept for the next of its shape, above)
-            pool_put(*it);
+        if (it->pool_key && pool_offer(*it)) {   // (a render target's image: kept for the next of its shape, above)
             it = dead.erase(it);
             continue;
         }
+        if (it->pool_key) st_pool_refused++;   // (the pool full, or VRAM short: destroyed as any other, its views with it)
+        for (auto& kv : it->view_map)
+            if (kv.second) vkDestroyImageView(dev.device, kv.second, nullptr);
         for (VkImageView v : it->views) vkDestroyImageView(dev.device, v, nullptr);
         destroy_image(it->image, it->allocation);
         if (it->buffer) destroy_buffer(it->buffer, it->buffer_alloc);
@@ -4219,8 +4255,9 @@ void texture_frame(uint64_t completed) {
     // last 8 presents used, nothing recorded work may still read.
     static uint64_t own = 0;
     if (frame_no % 10) return;
-    uint64_t used = 0, allowed = 0, block_free = 0;
-    const bool known = vram_usage(&used, &allowed, &block_free);
+    // (looked at again: what the dead list and the trim just freed is free in the blocks now. By the look above the rules below
+    // took it for held and let go of live textures for it, on the very presents an eviction's images are destroyed)
+    look();
     if (!own)   // (RX_VK_VRAM_MB, else 70% of what the driver allows the process at the first look)
         own = getenv("RX_VK_VRAM_MB") ? (uint64_t)atoi(getenv("RX_VK_VRAM_MB")) << 20
               : known                ? std::min<uint64_t>(allowed / 100 * (allowed <= (8704ull << 20) ? 45 : 70), 6144ull << 20)
@@ -4306,26 +4343,17 @@ void texture_frame(uint64_t completed) {
         // Safety clamp: do not exceed 75% of driver-allowed memory on constrained VRAM (prevents VK_ERROR_DEVICE_LOST)
         budget = std::min(budget, (allowed / 4) * 3);
     }
+    // (longshot) and less what the render targets' pool holds, which no count below sees: budget_less_pool
+    budget = budget_less_pool(budget);
     // (near what the driver allows, the budget shrinks by the excess. The excess of what the process holds less the
     // free space in VMA's blocks, which new images take before VMA makes a block: measured by the blocks alone, the
     // textures evicted freed space inside them that the driver still counted, so 10 frames later the budget shrank
     // again. A race kept ~3 GB free in the blocks and evicted and made again ~100 textures every 10 frames (1300 at
     // once), mostly the same ones: their uploads and decodes, and images made empty in the frame that drew them.
     // The driver's own count near its limit (97%) still squeezes, whatever the blocks hold free: then it pages VRAM
-    // out. RX_VK_BUDGET_BY_BLOCKS=1: as before)
-    static const bool by_blocks = env_on("RX_VK_BUDGET_BY_BLOCKS");
+    // out. RX_VK_BUDGET_BY_BLOCKS=1: as before. The pressure itself is worked out above, each present, for the target pool)
     uint64_t evict_to = 0;   // (longshot, RX_VK_COMPACT: what an eviction goes down to when the compaction's hold set the budget)
     uint64_t hold_to = 0;    // (and what the hold's own line asks for, when the reserve's lower line set evict_to)
-    // (longshot, RX_VK_COMPACT) compacted, only the textures' pool's free space comes off the count: vram_compact.h
-    uint64_t reclaim = block_free;
-    bool kept_only = false;   // (the textures' pool is down to its blocks made at the start: the 97% rule, below)
-    if (compact_on()) {
-        uint64_t pool_blocks = 0, pool_free = 0, pool_kept = 0;
-        if (textures_pool_usage(&pool_blocks, &pool_free, &pool_kept)) reclaim = vram_compact::reclaimable(block_free, pool_free);
-        kept_only = vram_compact::kept_only(pool_blocks, pool_kept);
-    }
-    const uint64_t pressure = by_blocks ? used : used - std::min(used, reclaim);
-    pool_pressed = known && pressure > allowed / 10 * 9;   // (the target pool given back meanwhile)
     compact.pressed = known && vram_compact::pressed(used, allowed);   // (longshot, RX_VK_COMPACT: by the driver's own count)
     const uint64_t size_budget = budget;   // (the budget as a size, before the rules that take an excess off it: rule_target)
     if (known && pressure > allowed / 10 * 9) {
@@ -4410,9 +4438,10 @@ void texture_frame(uint64_t completed) {
         vma_log_image_blocks();
         {
             std::lock_guard lk(pool_mu);
-            logf("vk: render target images: %llu reused from the pool, %llu made new, %llu destroyed from it; it holds %llu "
-                 "(%llu MB)%s", (unsigned long long)st_pool_reused, (unsigned long long)st_pool_made,
-                 (unsigned long long)st_pool_destroyed, (unsigned long long)pool_n, (unsigned long long)(pool_bytes >> 20),
+            logf("vk: render target images: %llu reused from the pool, %llu made new, %llu destroyed from it, %llu refused by "
+                 "it; it holds %llu (%llu MB)%s", (unsigned long long)st_pool_reused, (unsigned long long)st_pool_made,
+                 (unsigned long long)st_pool_destroyed, (unsigned long long)st_pool_refused, (unsigned long long)pool_n,
+                 (unsigned long long)(pool_bytes >> 20),
                  pool_cap() ? (pool_pressed ? ", VRAM short: given back" : "") : " (RX_VK_TARGET_POOL_MB=0)");
         }
         logf("vk: VRAM: %llu MB used of %llu MB allowed (%llu MB of it free in the blocks); textures %llu MB (budget %llu "

@@ -87,18 +87,22 @@ class TargetImagePoolTests(unittest.TestCase):
     def test_the_dead_list_pools_before_it_destroys_and_the_pool_is_trimmed_each_present(self):
         frame = block(self.tex, "void texture_frame(uint64_t completed)")
         loop = frame[frame.index("for (auto it = dead.begin(); it != dead.end();) {"):]
-        self.assertLess(loop.index("if (it->pool_key) {"), loop.index("destroy_image(it->image, it->allocation);"))
-        self.assertIn("pool_put(*it);", loop[:loop.index("destroy_image(")])
+        # (offered to the pool first; one it refuses, full or VRAM short, is destroyed there with its views: test_target_pool_cap)
+        offer = loop.index("if (it->pool_key && pool_offer(*it)) {")
+        self.assertLess(offer, loop.index("for (auto& kv : it->view_map)"))
+        self.assertLess(loop.index("for (auto& kv : it->view_map)"), loop.index("destroy_image(it->image, it->allocation);"))
         trim = frame.index("pool_trim();")
         self.assertLess(trim, frame.index("if (frame_no % 10) return;"))   # (every present, not every tenth)
-        self.assertIn("pool_pressed = known && pressure > allowed / 10 * 9;", frame)
+        # (and whether VRAM is short is known each present too, before the offers)
+        self.assertLess(frame.index("pool_pressed = known && pressure > allowed / 10 * 9;"),
+                        frame.index("for (auto it = dead.begin(); it != dead.end();) {"))
 
-    def test_the_trim_is_bounded_a_present_and_gives_back_idle_and_excess_images(self):
+    def test_the_pool_is_bounded_at_the_put_and_the_trim_gives_back_idle_images_a_few_a_present(self):
+        offer = block(self.tex, "bool pool_offer(Dead& d)")
+        self.assertIn("if (pool_pressed || d.bytes > cap || pool_bytes > cap - d.bytes) return false;", offer)
         trim = block(self.tex, "size_t pool_trim()")
-        self.assertIn("pool_pressed ? 0 : pool_cap()", trim)
         self.assertIn("pool_pressed ? 64 : 16", trim)
-        self.assertIn("frame_no - v[i].since <= 120", trim)
-        self.assertIn("pool_bytes <= cap", trim)
+        self.assertIn("!pool_pressed && frame_no - v[i].since <= 120", trim)
         self.assertIn("pool_destroy(v[i]);", trim)
         destroy = block(self.tex, "void pool_destroy(Pooled& p)")
         self.assertIn("vkDestroyImageView", destroy)
