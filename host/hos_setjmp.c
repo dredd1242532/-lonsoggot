@@ -36,6 +36,8 @@ typedef struct { uint64_t rets[4], target; void *buf[32]; } SjSlot;   /* (buf: r
 typedef struct { SjSlot slot[DEPTH]; int depth, overflow; } SjStack;
 static _Thread_local SjStack *stack;
 
+/* Darwin arm64's assembly is in posix/darwin_cpu.c; keep both existing x86 implementations unchanged. */
+#if !defined(__APPLE__) || !defined(__aarch64__)
 #ifdef _WIN32
 /* buf: rbx rbp rdi rsi r12 r13 r14 r15 at 0-56, rsp (after the return) at 64, the return address at 72, xmm6-15 at
    80-224, mxcsr at 240 and the x87 control word at 244 */
@@ -140,6 +142,7 @@ __attribute__((naked, noreturn)) static void recomp_sj_longjmp(void **buf, int v
         "jmpq *72(%rdi)\n\t");
 }
 
+#endif
 #endif
 
 void **recomp_sj_push(Ctx *c, uint64_t r0, uint64_t r1, uint64_t r2, uint64_t r3) {

@@ -104,6 +104,22 @@ Launcher's build log shows info and above unless its level picker asks for more;
 shows the line with it. Per-item lines a player can't act on (one per program or pipeline, a decoder's details) are debug or
 trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags.
 
+## Darwin host CPU checks
+
+`python -I -B tests/test_arm64_host.py` compiles the real host jump and thread files and a `YieldProcessor()` caller,
+then exercises nonlocal returns and callee-saved registers without a game or a graphics device. It runs on the Mac's
+native architecture. On Apple Silicon with Rosetta installed, add `--arch arm64 --arch x86_64` to check both routes;
+the compiler stays native and the x86-64 executable runs through `arch -x86_64`. The deployment target is macOS 14.4.
+`--source <checkout>` tests another checkout's source, and `--out <new directory>` keeps objects, commands and output.
+
+The arm64 jump preserves x19-x29, SP, LR, d8-d15, FPCR and FPSR, leaving Apple's reserved x18 alone. It returns 0
+initially and the longjmp value later (1 for a zero value). It is a same-thread return to a still-live caller, not a
+fiber scheduler or a signal-mask restore. arm64e is rejected explicitly: authenticating its saved SP, FP and return
+address needs a separate qualification. The x86 assembly and Windows/Linux paths stay as they were.
+
+This CPU-only check compiles `host/posix/darwin_cpu.c` explicitly. It does not enable macOS in `nx2/build.py` or
+establish that the game builds or runs on macOS; the Darwin build's host source list must include that new file.
+
 ## Switches for testing and debugging
 
 The running game reads its switches from the environment or from `longshot_env.txt` beside `image.bin` (one
