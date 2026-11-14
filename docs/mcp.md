@@ -10,9 +10,9 @@ His guide and checks are retained in the import history, changed only by the pro
 [control client and sessions](control.md#sessions); it adds no game-side command, file transport or log parser.
 The command-line client works without MCP. The scenario runner and contributor-process proposals from that original work
 are separate, not requirements of this server.
-This server is part 2 of 3, stacked on [Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47);
-the session prerequisite ends with `docs(control): link the README by its name in this repository`. The branch keeps
-those session commits until pull request 47 is merged; their hashes can differ after a rebase.
+This server is part 2 of 3. Its standard-library session prerequisite from
+[Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47) is now merged into main.
+This branch contains only the adapter changes and their documentation and tests.
 The third part is the separate scenario runner.
 
 ## Install
