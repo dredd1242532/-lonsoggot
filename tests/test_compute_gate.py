@@ -87,6 +87,8 @@ def check_source():
                          "the compile's time counts its wait at the gate")):
         if needle not in turn:
             raise SystemExit(why)
+    if turn.index("prepare_compiled();") > turn.index("compiling.erase(mine);"):
+        raise SystemExit("a compile leaves the active list before the watchdog hears it ended: the short timeout can race the completion")
     if turn.index("gate->leave(weight);") > turn.index("malloc_trim(0);"):
         raise SystemExit("the memory is handed back before the turn is: the next compile waits for it")
     gate = function(draw, "compute_gate::Gate& compute_compiles() {")

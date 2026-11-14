@@ -1502,6 +1502,10 @@ struct ComputeCompiling {
 };
 std::mutex compiling_mu;
 std::list<ComputeCompiling> compiling;
+bool prepare_compiling_seen() {
+    std::lock_guard lk(compiling_mu);
+    return !compiling.empty();
+}
 bool compute_pinned(const VkComputePipelineCreateInfo& ci) {
     for (auto n = (const VkBaseInStructure*)ci.stage.pNext; n; n = n->pNext)
         if (n->sType == VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO) return true;
@@ -1607,6 +1611,7 @@ struct ComputeTurn {
         {
             std::lock_guard lk(compiling_mu);
             was = *mine;
+            prepare_compiled();   // (before it leaves the list: the watchdog cannot fall back to the short limit in between)
             compiling.erase(mine);
         }
         compute_compiled_log(was, held_ms);
@@ -9478,7 +9483,9 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     const size_t total = notes.size() + computes.size() + fallbacks.size();
     // (the workers' state on the heap: a start whose last pipelines never finish (two of 4926 on an RX 5700 XT, "stuck at
     // 99%", Discord 11-08) goes on to the game after PRE_STALL_S seconds with no progress, the stragglers left running; it is
-    // let go then, never freed. RX_VK_PRECOMPILE_STALL_S=<s>, 0: wait for all, as before)
+    // let go then, never freed. RX_VK_PRECOMPILE_STALL_S=<s>, 0: wait for all, as before. An active compute compile gets the
+    // preparation watchdog's 900 s: a healthy 32-lane Intel compile was measured at 531 s, and abandoning it here ended a
+    // --prepare-shaders run with the driver still working)
     struct Pre {
         std::vector<std::unique_ptr<PipeNote>> notes;
         std::vector<Program*> computes, fallbacks;
@@ -9566,14 +9573,22 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
         if (next.load() >= total + threads.size()) break;
         const auto now = std::chrono::steady_clock::now();
         if (done.load() != last_done) last_done = done.load(), last_change = now;
-        else if (stall_s > 0 && next.load() >= total && now - last_change > std::chrono::seconds(stall_s)) {
-            std::lock_guard lk(pre->mu);
-            pre->abandoned = true;
-            gone_on = true;
-            prepare_left_workers_note();
-            logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", done.load(),
-                 total, stall_s);
-            break;
+        else {
+            // (the preparation's own process waits for a compile under way: its watchdog stops one that is stuck (vk_main.cpp), and
+            // one left behind here died with the run's end. A game start goes on to play after 900 s, the compile behind it)
+            static const bool prepare_only_run = env_on("LONGSHOT_PREPARE_ONLY");
+            const int limit_s = stall_s > 0 && next.load() >= total && prepare_compiling()
+                                    ? (prepare_only_run ? 0 : std::max(stall_s, 900))
+                                    : stall_s;
+            if (limit_s > 0 && next.load() >= total && now - last_change > std::chrono::seconds(limit_s)) {
+                std::lock_guard lk(pre->mu);
+                pre->abandoned = true;
+                gone_on = true;
+                prepare_left_workers_note();
+                logf("vk: precompile: %zu of %zu done, nothing finished for %d s: the game starts, the rest go on behind it", done.load(),
+                     total, limit_s);
+                break;
+            }
         }
     }
     size_t cs_cached = 0, cs_compiled = 0, cs_failed = 0;
@@ -10747,6 +10762,9 @@ void pipeline_cache_save(bool force) {
         }
     }
 }
+
+/// (vk_internal.h: a compile under way, for the preparation's watchdog)
+bool prepare_compiling() { return prepare_compiling_seen(); }
 
 } // namespace mkwvk
 

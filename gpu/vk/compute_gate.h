@@ -17,7 +17,8 @@
 // turn comes, never left out. The pinned programs of 2,000 phis or more (SPIR-V's OpPhi: Stage::phis) are the ones that
 // took minutes and gigabytes: 7a548525c239b91b (2,534 phis) 7.6 GB and 531 s, abccf81b45c5eb50 (2,190, in the shipped
 // list) past 5.6 GB and not done after 15 minutes; others there took 24-34 s and 1-2.2 GB, and nothing below 2,000 took more
-// than 2.2 GB. So a pinned compile of kHeavyPhis or more weighs kHeavyMB: beside it only what still fits.
+// than 2.2 GB. So a pinned compile of kHeavyPhis or more weighs kHeavyMB: beside it only what still fits. The preparation's
+// watchdog lets a compile with a CPU at work run long (vk_main.cpp).
 //
 // What a finished compile held does not go back to the system by itself: the compile runs on whichever worker's turn it
 // is, glibc gives each thread its own heap, and the little the compile leaves behind (the pipeline) sits on top of the
