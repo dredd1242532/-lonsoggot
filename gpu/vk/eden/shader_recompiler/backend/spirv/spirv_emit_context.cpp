@@ -498,6 +498,18 @@ Id DescType(EmitContext& ctx, Id sampled_type, Id pointer_type, u32 count) {
         return pointer_type;
     }
 }
+
+// (longshot) the 8- and 16-bit views of storage buffers need the capability and its extension declared. They were used
+// without either, and drivers took the module anyway
+void DeclareNarrowStorage(EmitContext& ctx, u32 bits) {
+    if (bits == 8) {
+        ctx.AddExtension("SPV_KHR_8bit_storage");
+        ctx.AddCapability(spv::Capability::StorageBuffer8BitAccess);
+    } else {
+        ctx.AddExtension("SPV_KHR_16bit_storage");
+        ctx.AddCapability(spv::Capability::StorageBuffer16BitAccess);
+    }
+}
 } // Anonymous namespace
 
 void VectorTypes::Define(Sirit::Module& sirit_ctx, Id base_type, std::string_view name) {
@@ -1549,7 +1561,10 @@ void EmitContext::DefineGlobalMemoryFunctions(const Info& info) {
         }};
         define_body(&StorageDefinitions::U32, addr, storage_types.U32.element, 2,
                     [&](Id ssbo_pointer) { cas_loop(ssbo_pointer); }, false);
-        guest_lookup(addr, 4U, [&](Id target) {
+        // (longshot) the page table looks up the aligned word the loop works on; the bit offset stays the byte's. Given the
+        // byte's own address, the loop ran on a misaligned word, put the byte in the wrong word, and a byte in a page's last
+        // three bytes did not fit the 4-byte access and was dropped
+        guest_lookup(OpBitwiseAnd(U64, addr, Constant(U64, ~u64{3})), 4U, [&](Id target) {
             if (gp_level >= 3) {
                 cas_loop(psb_member(U32[1], target));
             } else {
@@ -1901,6 +1916,7 @@ void EmitContext::DefineStorageBuffers(const Info& info, u32& binding) {
     }
     if (profile.support_int8 && profile.support_storage_buffer_8bit &&
         True(used_types & IR::Type::U8)) {
+        DeclareNarrowStorage(*this, 8);   // (longshot: the u8 and s8 views)
         DefineSsbos(*this, storage_types.U8, &StorageDefinitions::U8, info, binding, U8,
                     sizeof(u8));
         DefineSsbos(*this, storage_types.S8, &StorageDefinitions::S8, info, binding, S8,
@@ -1908,6 +1924,7 @@ void EmitContext::DefineStorageBuffers(const Info& info, u32& binding) {
     }
     if (profile.support_int16 && profile.support_storage_buffer_16bit &&
         True(used_types & IR::Type::U16)) {
+        DeclareNarrowStorage(*this, 16);   // (longshot: the u16 and s16 views)
         DefineSsbos(*this, storage_types.U16, &StorageDefinitions::U16, info, binding, U16,
                     sizeof(u16));
         DefineSsbos(*this, storage_types.S16, &StorageDefinitions::S16, info, binding, S16,
