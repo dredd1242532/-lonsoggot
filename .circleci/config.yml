@@ -99,10 +99,7 @@ workflows:
           event-file: .circleci/events/manual.yml
           force-full: true
           extra-params: >-
-            {"full":true,"nightly":false,
-            "release_dry_run":<< pipeline.parameters.release_dry_run >>,
-            "website_refresh":false,
-            "vulkan_dlss":<< pipeline.parameters.vulkan_dlss >>,
+            {"full":true,"nightly":false,"website_refresh":false,
             "fork_pr":0,"fork_sha":""}
   setup-noop-tag:
     when: (pipeline.git.tag or "") != "" and not ((pipeline.git.tag or "") starts-with "v")
