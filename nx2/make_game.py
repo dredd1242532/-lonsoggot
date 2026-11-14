@@ -64,6 +64,7 @@ if sys.platform == "darwin":   # (macOS: a64-kit's toolchain and build_emit with
 BESIDE = ["longshot", "longshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["longshot.exe", "longshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
 if DARWIN:
     from darwin_build import BESIDE
+    import darwin_package
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -781,20 +782,13 @@ def check_darwin_prerequisites(work=None):
                 if pin and importlib.util.find_spec(pin[1]) is None:
                     missing.append("Python module %s (install requirements.txt with %s)" % (pin[1], sys.executable))
     prebuilt = build.prebuilt_renderer()
-    if prebuilt:
-        try:
-            r = subprocess.run([_toolchain.need(_toolchain.find("lipo")), "-verify_arch", _darwin.architecture(), prebuilt],
-                               capture_output=True, text=True, timeout=15)
-            if r.returncode:
-                missing.append("macOS renderer %s has no %s Mach-O slice: %s" % (prebuilt, _darwin.architecture(), r.stderr.strip()))
-        except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
-            missing.append("macOS renderer architecture check: %s" % e)
-    else:
+    if not prebuilt:
         for (name, _, probe, env), found in zip(build.VK_HEADERS, build.vulkan_headers(work)):
             if not found:
                 missing.append("%s header %s (RX_CPM, %s, /opt/homebrew, /usr/local or /usr)" % (name, probe, env))
-    ffmpeg = build.darwin_build.ffmpeg_flags(build.FFMPEG_LIBS, missing)
-    sdl = build.darwin_build.sdl_flags(missing)
+    plan = build.darwin_build.dependencies(build.FFMPEG_LIBS, prebuilt, missing,
+                                           os.path.join(work, "sa", "build") if work else "")
+    ffmpeg, sdl = (plan.ffmpeg, plan.sdl) if plan else (None, None)
     for name in ("clang", "clang++", "llvm-profdata"):
         try:
             path = _toolchain.need(_toolchain.find(name))
@@ -802,7 +796,9 @@ def check_darwin_prerequisites(work=None):
         except (OSError, SystemExit, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             missing.append("%s: %s" % (name, e))
     try:
-        flags = build.target() + _toolchain.native_link()
+        # Apple's ld deprecates the explicit spelling but still enforces it. Compatibility is checked from actual
+        # binary metadata above, not by making every unrelated linker warning fatal.
+        flags = build.target() + _toolchain.native_link() + ["-Xlinker", "-undefined", "-Xlinker", "error"]
         with tempfile.TemporaryDirectory() as d:
             for name, text, extra in (
                 ("clang", "extern unsigned avcodec_version(void); extern int SDL_GetCPUCount(void);\n"
@@ -819,12 +815,17 @@ def check_darwin_prerequisites(work=None):
                                    capture_output=True, text=True, timeout=60)
                 if r.returncode:
                     missing.append("macOS %s link for %s: %s" % (name, _darwin.architecture(), (r.stdout + r.stderr).strip()))
+                else:
+                    try:
+                        darwin_package.inspect(os.path.join(d, "t"), _darwin.architecture())
+                    except darwin_package.DependencyError as e:
+                        missing.append("macOS compiler product: " + str(e))
     except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
         missing.append("macOS compiler/linker: %s" % e)
     if missing:
         fail("Missing macOS build prerequisites: " + "; ".join(" ".join(m.splitlines()) for m in missing))
-    print("macOS build prerequisites: OK (%s, minimum 14.4; LLVM 23.1.5 is the release pin, other versions accepted)" %
-          _darwin.architecture(), flush=True)
+    print("macOS build prerequisites: OK (%s, minimum 14.4; exact library closure admitted; "
+          "LLVM 23.1.5 is the release pin, other versions accepted)" % _darwin.architecture(), flush=True)
 
 
 def requested_jobs(value):
@@ -2504,8 +2505,12 @@ def main(a=None):
         launcher = launcher if os.path.isfile(launcher) else None
     game_dir = os.path.join(out, "bin") if launcher else out
     os.makedirs(game_dir, exist_ok=True)
+    previous_mac = darwin_package.read_manifest(game_dir, optional=True) if DARWIN else None
+    current_mac = darwin_package.read_manifest(built) if DARWIN else None
+    if DARWIN:
+        darwin_package.check_destination(game_dir, current_mac, previous_mac)
     ffmpeg_dlls = [] if LINUX or DARWIN else sorted(f for f in os.listdir(built) if f.endswith(".dll") and f.startswith(("av", "sw")))
-    for n in BESIDE + ffmpeg_dlls:
+    for n in (darwin_package.package_files(built) if DARWIN else BESIDE + ffmpeg_dlls):
         src = os.path.join(built, n)
         if os.path.exists(src):
             staged.append((src, os.path.join(game_dir, n)))
@@ -2516,7 +2521,7 @@ def main(a=None):
         try:
             if os.path.exists(dst + ".new"):
                 os.remove(dst + ".new")
-            shutil.copy2(src, dst + ".new")
+            shutil.copy2(src, dst + ".new", follow_symlinks=False) if DARWIN else shutil.copy2(src, dst + ".new")
         except PermissionError:
             fail("Could not stage the new build at %s. Check that %s is readable and the staged file and output folder are writable, "
                  "close any program using that file, then retry. No installed files were replaced; the compiled source is still available."
@@ -2532,6 +2537,9 @@ def main(a=None):
         except PermissionError:
             fail("Could not replace %s. Close any running copy of Longshot and check that the file and folder are writable, then retry. "
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
+    if DARWIN:
+        darwin_package.package_files(game_dir)  # verify the copies, not only their staged inputs
+        darwin_package.remove_stale(game_dir, previous_mac, current_mac)
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; longshot is the launcher now)
         stale = [] if LINUX or DARWIN else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
         for n in BESIDE[1:] + stale + ["longshot.map", "longshot-game.exe"]:

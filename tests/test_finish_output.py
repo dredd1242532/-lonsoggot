@@ -8,6 +8,7 @@ import ctypes
 import errno
 import importlib.util
 import io
+import json
 import os
 from pathlib import Path
 import stat
@@ -72,7 +73,7 @@ class FinishOutputTests(unittest.TestCase):
             # Comprehensions use globals. Keep one namespace, as in production, and discover only authored setup files.
             namespace = dict(make_game.__dict__, built=str(self.built), out=str(self.out), work=str(self.work),
                              ROOT=str(self.root / "tools"), LINUX=False if launcher else make_game.LINUX,
-                             DARWIN=False if launcher else make_game.DARWIN,
+                             DARWIN=False,  # these existing fixtures deliberately use the COFF filename; macOS has a closure manifest
                              a=SimpleNamespace(fsr=False, no_fsr=False, update=None, fetch_fsr_runtime=False))
             exec(FINISH, namespace)
 
@@ -284,6 +285,94 @@ class FinishOutputTests(unittest.TestCase):
         self.assert_installed_unchanged()
         self.assertEqual(staged.read_bytes(), b"pre-existing staged content")
         self.assertFalse(staged.stat().st_mode & stat.S_IWRITE)
+
+
+class MacFinishOutputTests(unittest.TestCase):
+    """The same production finish statements must deploy every manifest-owned dylib."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="longshot-macos-finish-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.work, self.out = self.root / "work", self.root / "game"
+        self.built = self.work / "sa/build"
+        self.built.mkdir(parents=True)
+        self.out.mkdir()
+        # Authored bytes and hashes test copying, not Mach-O execution (test_macos_package.py does that).
+        self.package = importlib.import_module("darwin_package")
+        self.names = ["longshot", "longshot_vk.dylib", "libSDL2-2.0.0.dylib", "libMoltenVK.dylib", "libdecoder-helper.7.dylib"]
+        files = {}
+        for name in self.names:
+            src = self.built / name
+            src.write_bytes(("new authored " + name).encode())
+            src.chmod(0o755)
+            (self.out / name).write_bytes(("old authored " + name).encode())
+            files[name] = {"sha256": self.package.digest(src)}
+        manifest = {"schema": 1, "arch": "arm64", "minimum_os": "14.4", "files": files}
+        (self.built / self.package.MANIFEST).write_text(json.dumps(manifest))
+        (self.work / "sa/image").mkdir()
+        (self.work / "sa/image/image.bin").write_bytes(b"authored image, no game content")
+        (self.out / "image.bin").write_bytes(b"old authored image")
+
+    def finish(self):
+        namespace = dict(make_game.__dict__, built=str(self.built), out=str(self.out), work=str(self.work),
+                         ROOT=str(self.root / "tools"), LINUX=False, DARWIN=True, darwin_package=self.package,
+                         a=SimpleNamespace(fsr=False, no_fsr=False, update=None, fetch_fsr_runtime=False))
+        exec(FINISH, namespace)
+
+    def test_manifest_closure_not_only_fixed_sdl_and_ffmpeg_names_is_deployed(self):
+        self.finish()
+        for name in self.names + [self.package.MANIFEST]:
+            self.assertEqual((self.out / name).read_bytes(), (self.built / name).read_bytes())
+        self.assertTrue((self.out / "longshot").stat().st_mode & stat.S_IXUSR)
+        self.assertFalse((self.out / "bin").exists())
+        self.assertEqual(list(self.out.glob("*.new")), [])
+
+    def test_changed_or_missing_manifest_file_refuses_before_any_swap(self):
+        for missing in (False, True):
+            path = self.built / "libdecoder-helper.7.dylib"
+            if missing:
+                path.unlink()
+            else:
+                path.write_bytes(b"changed after packaging")
+            before = {p.name: p.read_bytes() for p in self.out.iterdir()}
+            with self.assertRaises((OSError, self.package.DependencyError)):
+                self.finish()
+            self.assertEqual({p.name: p.read_bytes() for p in self.out.iterdir()}, before)
+
+    def test_partial_dependency_copy_leaves_every_installed_file_unchanged(self):
+        before = {p.name: p.read_bytes() for p in self.out.iterdir()}
+        copy = make_game.shutil.copy2
+        def partial(src, dst, **kwargs):
+            if Path(src).name == "libdecoder-helper.7.dylib":
+                Path(dst).write_bytes(b"partial authored dependency")
+                raise OSError(errno.ENOSPC, "authored disk-full error")
+            return copy(src, dst, **kwargs)
+        with mock.patch.object(make_game.shutil, "copy2", side_effect=partial):
+            with self.assertRaises(OSError):
+                self.finish()
+        self.assertEqual({n: (self.out / n).read_bytes() for n in before}, before)
+
+    @unittest.skipIf(os.name == "nt", "macOS dependency alias uses a POSIX symlink")
+    def test_runtime_alias_stays_internal_after_maker_copy(self):
+        target = self.built / "libSDL3.0.dylib"
+        target.write_bytes(b"authored SDL3 provider")
+        (self.built / "libSDL3.dylib").symlink_to(target.name)
+        path = self.built / self.package.MANIFEST
+        manifest = json.loads(path.read_text())
+        manifest["files"][target.name] = {"sha256": self.package.digest(target), "kind": "dylib"}
+        manifest["files"]["libSDL3.dylib"] = {"sha256": self.package.digest(target), "kind": "alias", "target": target.name}
+        path.write_text(json.dumps(manifest))
+        self.finish()
+        self.assertTrue((self.out / "libSDL3.dylib").is_symlink())
+        self.assertEqual(os.readlink(self.out / "libSDL3.dylib"), target.name)
+
+    def test_unmanaged_loader_cannot_override_newly_packaged_moltenvk(self):
+        extra = self.out / "libvulkan.1.dylib"
+        extra.write_bytes(b"authored unapproved leftover loader")
+        before = {p.name: p.read_bytes() for p in self.out.iterdir()}
+        with self.assertRaisesRegex(self.package.DependencyError, "shadow this package"):
+            self.finish()
+        self.assertEqual({p.name: p.read_bytes() for p in self.out.iterdir()}, before)
 
 
 if __name__ == "__main__":

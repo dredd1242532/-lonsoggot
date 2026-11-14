@@ -1,7 +1,8 @@
 # Longshot (oot-recomp)
 
 **Longshot** is the port's name (as Skybound is TOTKPort's and BlueShell is mkw-recomp's); the maintainer's repository
-folder stays `oot-recomp`. The game builds as `longshot.exe` + `longshot_vk.dll` (`longshot` + `longshot_vk.so` on Linux).
+folder stays `oot-recomp`. The game builds as `longshot.exe` + `longshot_vk.dll` (`longshot` + `longshot_vk.so` on Linux;
+`longshot` + `longshot_vk.dylib` on the experimental macOS path).
 
 A static recompilation of the Switch 2 *The Legend of Zelda: Ocarina of Time* remake to native x86-64 Windows and Linux:
 the game's code lifted to C (NotRexed's a64-kit, Rexcomp's AArch64 kit), the Horizon OS and NVN2 implemented
@@ -38,52 +39,104 @@ The sysroot (`scripts/linux/deps.sh tools`) copies the system libraries it takes
 development alias such as `libmvec.so` becomes the library's bytes, so the packed tool does not depend on the player's
 filesystem. Only its own relative `lib -> usr/lib` stays a link.
 
-macOS has an **experimental build-command path**, not a working game port yet. It selects Mach-O rather than ELF,
-targets macOS 14.4, and defaults to arm64 on Apple Silicon (`RX_ARCH=x86_64` selects the Rosetta route). Keep the
-compiler native: compile with its `-arch x86_64`, then run the resulting program under Rosetta, not clang itself.
-Windows and Linux still form their original compiler/linker commands. `third_party/a64-kit` stays as it is: its
+macOS has an **experimental standalone build path**, not an established gameplay/support claim. It selects Mach-O,
+targets macOS 14.4, and defaults to arm64 on Apple Silicon (`RX_ARCH=x86_64` selects the Rosetta route). Keep Python
+and the compiler native: compile with `-arch x86_64`, then run that executable under Rosetta, not clang itself.
+Windows and Linux retain their frozen compiler/linker command arrays. `third_party/a64-kit` stays as it is: its
 `tools/toolchain.py` and `lift/build_emit.py` get their macOS behaviour from `nx2/darwin_toolchain.py`, which `kit.py` and
 `make_game.py` install over four of toolchain's functions (`find`, `need`, `native_target`, `native_link`) and over
-build_emit's output and build on a Mac only.
+build_emit's output and build on a Mac only. A topic branch needs all Darwin helper repairs integrated before
+attempting the complete game build; game-free fixtures are not that build.
 
-On macOS, `EMSDK` may name a normal LLVM prefix (`bin/`) or the existing emsdk layout (`upstream/bin/`); compiler
-and `llvm-profdata` discovery then tries PATH and `xcrun`. The SDK is `SDKROOT`, otherwise `xcrun --sdk macosx
---show-sdk-path`. A found `ld64.lld` links Mach-O; otherwise Apple's `ld` does. The source preflight prints each
-compiler/profile tool's actual version. LLVM 23.1.5 is the release tool pin; Apple clang is accepted, not relabelled
-as that pin. Passing tiny C/C++ links does not qualify another compiler for the full generated game or its profile.
+`EMSDK` may name a normal LLVM prefix (`bin/`) or the existing emsdk layout (`upstream/bin/`); compiler and
+`llvm-profdata` discovery then tries PATH and `xcrun`. The SDK is `SDKROOT`, otherwise `xcrun --sdk macosx
+--show-sdk-path`. A found `ld64.lld` links Mach-O; otherwise Apple's `ld` does. The preflight reports actual tool
+versions: LLVM 23.1.5 is the release pin, while Apple clang is accepted, not relabelled. Compiler bytes, target
+flags and SDK settings key macOS objects. A tiny link does not qualify a full generated corpus or play profile.
 
-macOS FFmpeg and SDL2 are found with `pkg-config` (PATH, then `/opt/homebrew/bin/pkg-config`).
-`LONGSHOT_FFMPEG` selects only that prefix's `.pc` files, including static transitive dependencies when it has no
-`lib/libavcodec.dylib`; otherwise the installed Homebrew packages can supply them. An x86_64 target needs x86_64
-libraries: an arm64-only Homebrew installation is not a Rosetta SDK. The preflight links against the selected
-FFmpeg and SDL2 to catch an incompatible architecture. `LONGSHOT_SDL2` still names a library file, a `.dylib` on
-macOS, copied as `libSDL2-2.0.0.dylib`; its own dependencies must remain installed. This is not a relocatable app
-bundle or a dependency packer. No dependency is downloaded by the preflight.
+FFmpeg and SDL2 discovery uses `pkg-config` (PATH, then `/opt/homebrew/bin/pkg-config`). `LONGSHOT_FFMPEG` selects
+only that prefix's `.pc` files; static builds must retain their transitive files, including `dav1d.pc`. Every
+non-system `-l` is resolved to an exact file before linking. Headers, target slice, declared minimum OS and the
+recursive dylib load-command closure are checked by both the maker preflight and a direct standalone build.
+Linker warnings are not compatibility evidence: an arm64-only, minimum-26 Homebrew library cannot qualify an
+x86_64 or minimum-14.4 build even when a probe returns success. No dependency is installed or downloaded here.
 
-The macOS renderer is `longshot_vk.dylib`, with install name `@rpath/longshot_vk.dylib`, `@loader_path` rpath,
-system libc++, dead stripping and a strict undefined-symbol link. The executable exports `hos_posix_*` for the
-Win32 layer's explicit `dlsym` lookups. `hot_order.txt` stays unchanged: the build writes `hot_order.txt.macos`
-with Mach-O's leading underscores. Neither `-Bsymbolic` nor a flat namespace is used; each dylib's own strong
-definitions bind locally under Mach-O's default two-level namespace. This is checked with a two-library fixture,
-not asserted as a one-for-one ELF option. ELF `nm -D` and GNU stripping are skipped with an explicit log reason.
+Runtime inputs are explicit library files:
 
-The host includes every existing `host/posix/darwin_*.c` alongside the shared Win32/SDL layer, but not Linux's
-`host/posix/prof.c`. Helpers loaded by Python (`a64emit`, `zbic`) use the Python process's architecture, not
-`RX_ARCH`, with architecture-specific dylib names and compiler/flag-sensitive cache stamps. The host/renderer's
-Darwin API, memory, signals, profiler, CPU assembly and dynamic-loader work must be integrated separately before
-LS can compile or run. The custom `RX_PGO=gen` runtime is still COFF-specific; NVIDIA NGX, the AMD FSR runtime and
-the WebGPU backend have no macOS route here. There is no macOS launcher, signing or packaging step.
+| Variable | Input and packaged name |
+|---|---|
+| `LONGSHOT_SDL2` | SDL2 or SDL2-compat dylib, packaged as `libSDL2-2.0.0.dylib`; otherwise pkg-config selects SDL2 |
+| `LONGSHOT_SDL3` | SDL3 dylib when used, packaged as `libSDL3.0.dylib`, with the internal `libSDL3.dylib` symlink SDL2-compat dlopens |
+| `LONGSHOT_MOLTENVK` | Required approved MoltenVK dylib, packaged as `libMoltenVK.dylib`; not a Vulkan loader/ICD configuration download |
+| `LONGSHOT_VK_PREBUILT` | Optional already-built `longshot_vk.dylib`; its actual target/minimum-OS/closure is checked too |
 
-Game-free command and binding checks (no source-tree `--check` or `--dry-run` needed). Real links default to the
-current Python process architecture, so an ordinary Apple Silicon suite needs no Rosetta and an Intel Mac runs
-its native x86_64 proof. Simulated command contracts always cover both targets. Repeat `--arch` for an explicit
-dual-route qualification; requesting x86_64 on Apple Silicon requires Rosetta, and an unavailable requested route
-fails rather than silently skipping it:
+SDL2-compat's SDL3 is a dynamic `dlopen` dependency, not necessarily an `LC_LOAD_DYLIB` edge: supply both SDL files,
+normally from one target-specific prefix. An SDL3-directed search path without an explicit SDL3 input is refused.
+The supported dependency recipe must account for any other dynamically loaded plugins; a load-command walk alone
+cannot discover arbitrary runtime filenames. All selected SDL3/MoltenVK/codec dependencies receive the same checks.
+
+Ordinary static archive members must declare macOS <=14.4. NASM x86_64 objects can lack that command. They remain
+unknown unless `LONGSHOT_DARWIN_ARCHIVE_RECEIPT` and `LONGSHOT_DARWIN_ARCHIVE_RECEIPT_SHA256` select one exact
+`longshot.macos-archive-qualification.v1` receipt: archive and member bytes/ordinal/name, native NASM/source/include/
+generator identities and command, actual undefined symbols with closed providers/availability evidence, and every
+exported instruction entry's baseline or guarded-dispatch ISA mapping. A separate semantic-review packet binds
+each complete member qualification by hash. Missing, ambiguous, changed or unreviewed mappings fail closed; there
+is no `approved` boolean, unknown-member waiver or cosmetic deployment stamping. Accepted exceptions are
+**receipt-qualified unversioned assembly**, not `LC_BUILD_VERSION`-proven objects. This still does not prove
+execution on an actual macOS 14.4 installation.
+
+The renderer has install name `@rpath/longshot_vk.dylib`, `@loader_path` rpath, system libc++, dead stripping and
+an explicit undefined-error link. The executable exports `_hos_posix_*` for explicit canonical service lookups.
+Neither `-Bsymbolic`, flat namespace nor blanket dynamic lookup is used. Weak optional imports with known provider
+libraries retain their linker semantics; unbound imports, including weak ones, are rejected. Host services use
+explicit `hos_posix_*` lookups rather than unbound weak linkage. `hot_order.txt` remains unchanged: the build writes
+`hot_order.txt.macos` with Mach-O underscores. GNU ELF symbol/strip commands are not used on Mach-O.
+
+After both links, `nx2/darwin_package.py` copies the admitted closure into owned staging, thins universal inputs
+to the qualified target, rewrites non-system loads to `@loader_path/<name>`, removes external rpaths, and applies
+local ad-hoc signatures (`codesign --sign -`, no account/certificate/keychain changes). Only verified copies replace
+build outputs. `longshot-macos.json` records the actual complete output set and hashes; `make_game.py` stages and
+verifies that set, including SDL aliases and transitive libraries rather than a fixed three-file list. A leftover
+unmanaged SDL3/Vulkan loader may not override the selected runtime. Inputs outside owned output storage are never
+rewritten. This is a relocatable source-build directory, not a notarized `.app`, launcher or published release.
+
+The integrated POSIX source policy is explicit in `nx2/darwin_build.py`; an unknown `darwin_*.c` stops selection
+until its dependencies are classified, rather than copying host logger/SDL dependencies into the renderer:
+
+| Images | Darwin helpers |
+|---|---|
+| Host and renderer | `darwin_fault.c`, `darwin_fiber.c`, `darwin_mem.c`, `darwin_process.c`, `darwin_wait.c` |
+| Executable only | `darwin_control_sockets.c`, `darwin_cpu.c`, `darwin_guest_mem.c`, `darwin_prof.c`, `darwin_vulkan.c`, `darwin_wait_state.c` |
+
+Both images also compile `win32_posix.c`; only the host includes `display_sdl.c` and `linux_stubs.c`. Linux's
+`prof.c` is not compiled on Darwin. Python-loaded helpers (`a64emit`, `zbic`) use the Python process architecture,
+not `RX_ARCH`. NVIDIA NGX, AMD's FSR runtime, the WebGPU backend and the custom `RX_PGO=gen` runtime have no
+qualified macOS route in this tree.
+
+A previously qualified experimental lift is not a production cache. Reusing generated sources requires a local
+compatibility decision bound to public translator/HLE/runtime/header identities and the actual compiler/flags/
+target, and new candidate-owned work storage. Never run `make_game.py --work` against the donor, invent `.lift_key`,
+kept/hash-cache stamps, or relift merely to repeat qualification. The existing `OOT_WORK=<owned work> python -I -B
+nx2/build.py --standalone --jobs 6` entry builds genuinely imported sources normally; experiment object reuse needs
+its own exact input evidence, not a newer receipt date. All imported sources, images, objects and raw logs stay local
+under work. The production builder has no experiment-specific import/exception subsystem.
+
+Game-free checks (no game, device or source-tree dry run):
 
 ```
-python -I -B tests/test_macos_build_flags.py
-python -I -B tests/test_macos_build_flags.py --arch arm64 --arch x86_64 --llvm-prefix /path/to/LLVM-23.1.5
+python -I -B tests/test_macos_build_flags.py --arch arm64 --arch x86_64
+python -I -B tests/test_macos_package.py --arch arm64 --arch x86_64
+python -I -B tests/test_finish_output.py
 ```
+
+Real fixtures default to the current process architecture. Explicit x86_64 selection requires Rosetta and fails
+if unavailable. `--fixtures-out <new directory>` retains actual commands/products. The command fixture links the
+real `darwin_wait_state.c` with production host flags and checks its canonical exported array from two distinct
+dylibs. `--wait-provider <source.c>` may name that exact reviewed input before branch integration; it is recorded
+with its header hash, not substituted with an authored provider. `--llvm-prefix` adds the second compiler route.
+Relocation fixtures move authored Mach-O products and hide their original library directory before loading them;
+they are not actual SDL/Vulkan/game execution. Earlier object-only, wait, memory or Vulkan experiments retain their
+original tested heads and limitations rather than becoming evidence for an unrun integrated build.
 
 
 On Linux, a game folder's `longshot` (`builder/linux/longshot-folder`) starts the program named by `builder=` in
@@ -695,33 +748,27 @@ See [control.md](control.md) for the fields, sampling, bounds and examples.
 |---|---|
 | `docs/design.md` | why mkw-recomp's pipeline, the architecture, MKW's lessons as rules, stages, testing |
 | `nx2/` | the lift pipeline and its tests (mkw-recomp's, made game-neutral; `kit.py` has the paths), and `make_game.py`, which the launcher and the builders run |
-| `host/` | the standalone Horizon runtime (TOTKPort's `hos/` as adapted by mkw-recomp), with the native NVN2 layer `nvn_native.c`; `host/posix` has the Win32 calls on Linux |
-| `gpu/vk/` | the Vulkan back end (`longshot_vk.dll`, `longshot_vk.so`), with Eden's shader recompiler and sirit |
+| `host/` | the standalone Horizon runtime (TOTKPort's `hos/` as adapted by mkw-recomp), with native NVN2 in `nvn_native.c`; `host/posix` has the Win32 layer and separately selected Linux/macOS helpers |
+| `gpu/vk/` | the Vulkan back end (`longshot_vk.dll`, `longshot_vk.so`, `longshot_vk.dylib`), with Eden's shader recompiler and sirit |
 | `gpu/render/`, `gpu/third_party/` | the WebGPU renderer the Windows exe falls back to when it was built with wgpu-native, its op stream (`rx_nvn.h`), suyu's decoders |
 | `builder/` | Longshot Builder, command-line only (players use the Longshot Launcher): the Windows `--cli` program (.NET 8), its setup (also a game folder's `longshot.exe`), and the Linux AppImage's `AppRun`, tools and game folder scripts |
 | `scripts/` | test runs, the profile and log readers, the save copier (`oot_saves.py`), release tooling, `scripts/linux` (dependencies, AppImage) |
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
 | `third_party/` | a64-kit (with Hookshot's changes, marked `(hookshot)`, and Longshot's, `(longshot)`: its PROVENANCE.md), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
 
-The POSIX layer's macOS wait subset is in `host/posix/darwin_wait.c` (macOS 14.4 or newer):
-public address waits, uptime deadlines and initialized SRW locks. `python -I -B tests/test_darwin_waits.py`
-compiles the actual wait functions and runs them without a game or device; on Apple Silicon,
-`--arch arm64 --arch x86_64` also checks the Rosetta route when Rosetta is installed. QPC, ticks and
-deadlines use awake uptime, like Linux's `CLOCK_MONOTONIC`; civil FILETIME remains realtime.
-`WakeByAddressSingle` broadcasts, as this layer already does on Linux; the Darwin address sequence
-buckets can also cause unrelated spurious wakes, so callers must recheck their predicates.
-The executable and the renderer each link their own copy of `darwin_wait.c`, but they share one set of address
-sequence words: the executable-only `host/posix/darwin_wait_state.c` exports `hos_posix_address_wait_sequences`
-(256 zero-initialized words for the whole process), and each copy finds it once through `dlsym(RTLD_MAIN_ONLY, ...)`.
-A wake in one image therefore reaches a waiter in the other. If the executable lacks the provider, the first
-address wait or wake aborts with `fatal: main executable has no Darwin address-wait state provider`; there is no
-private fallback. `--shared-only` runs only these two-image checks and the C++ header checks, without the timing
-campaign.
-The layer's relative-only waitable timers still ignore the wait's millisecond limit, periodic/APC
-requests and timer flags; polling wait-all still consumes ready objects before all are ready.
-This is not a complete macOS host port: thread, memory, fiber and fault-context APIs remain Linux-specific.
-The macOS build must add `darwin_wait.c` beside `win32_posix.c` in both host and renderer source lists, and
-`darwin_wait_state.c` to the host's list only; that build-script integration is separate from this wait change.
+The POSIX layer's macOS waits are in shared `host/posix/darwin_wait.c` (macOS 14.4 or newer): address comparisons of
+all requested bytes (1/2/4/8, including upper-half and cross-word differences), uptime deadlines and initialized SRW
+locks. The executable-only `darwin_wait_state.c` supplies one stable zero-initialized array of 256 sequence words
+through `hos_posix_address_wait_sequences`. Both image-local wait helpers resolve that provider once through
+`RTLD_MAIN_ONLY`; a missing provider is fatal, never a private-array fallback. Snapshot-before-compare and
+increment-before-wake preserve the cross-image protocol. Both wake wrappers broadcast; bucket collisions and wakes
+can be spurious, so callers must recheck their predicates. QPC/ticks/deadlines use awake uptime; FILETIME is realtime.
+
+`python -I -B tests/test_darwin_waits.py --shared-only --arch arm64 --arch x86_64` selects the two-image behavior
+checks without rerunning a timing campaign. The earlier failing cross-image receipts and held timing work are not
+silently superseded by source-list changes. The layer's relative-only waitable timers still ignore the wait's
+millisecond limit, periodic/APC requests and timer flags; polling wait-all still consumes ready objects before all
+are ready. Full host/runtime and game acceptance require the integrated candidate's own evidence.
 
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.

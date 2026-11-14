@@ -69,6 +69,7 @@ DARWIN = sys.platform == "darwin" and not toolchain.windows()
 if DARWIN:
     import darwin_build
     import darwin_toolchain
+    import darwin_package
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("LONGSHOT_SYSROOT", "")
 EXE = darwin_build.EXE if DARWIN else ("longshot" if LINUX else "longshot.exe")
@@ -220,7 +221,8 @@ def executable_link(cc, exe, rsp, *, wgpu=False, manifest="", resource=""):
     """The real executable command, callable with authored objects and no game or generated headers."""
     if DARWIN:
         return [cc] + target() + toolchain.native_link() + ["-o", exe] + \
-            linker("-map", exe + ".map", "-dead_strip", "-exported_symbol", "_hos_posix_*", "-rpath", "@executable_path") + \
+            linker("-map", exe + ".map", "-dead_strip", "-undefined", "error", "-headerpad_max_install_names",
+                   "-exported_symbol", "_hos_posix_*", "-rpath", "@executable_path") + \
             ["@" + rsp] + HOT_ORDER() + (["-fprofile-instr-generate"] if PGO == "gen" else []) + \
             (FFMPEG_MAC[1] if FFMPEG_MAC else [])
     if LINUX:
@@ -243,7 +245,7 @@ def renderer_link(cc, cxx, vdll, vrsp):
     """Mach-O stays two-level and rejects undefined symbols; ELF/COFF arrays are unchanged."""
     if DARWIN:
         return [cxx] + target() + toolchain.native_link() + ["-dynamiclib", "-o", vdll] + \
-            linker("-map", vdll + ".map", "-dead_strip", "-undefined", "error", "-install_name",
+            linker("-map", vdll + ".map", "-dead_strip", "-undefined", "error", "-headerpad_max_install_names", "-install_name",
                    "@rpath/" + os.path.basename(vdll), "-rpath", "@loader_path") + ["@" + vrsp, "-stdlib=libc++"]
     if LINUX:
         return [cxx] + target() + ["-fuse-ld=lld", "-shared", "-o", vdll] + \
@@ -1087,6 +1089,15 @@ def main():
     gen = os.path.join(sa if a.standalone else kit.WORK, "gen")
     out = os.path.join(sa if a.standalone else kit.WORK, "build")
     obj_dir = os.path.join(out, "obj")
+    mac_dependencies = None
+    if DARWIN and a.standalone and not kit.env_on("RX_VK_ONLY"):
+        global FFMPEG_MAC
+        try:
+            mac_dependencies = darwin_build.dependencies(FFMPEG_LIBS, prebuilt_renderer(), executable_dir=out)
+            FFMPEG_MAC = mac_dependencies.ffmpeg
+        except (darwin_package.DependencyError, OSError) as e:
+            print(str(e), flush=True)
+            return 1
     gen_dir = os.path.join(out, "gen")   # (the logo and the fonts the Vulkan back end compiles in: made with it, below)
     os.makedirs(obj_dir, exist_ok=True)
     load_hashes(out)
@@ -1188,6 +1199,8 @@ def main():
     host_deps += open(os.path.join(GPU, "vk", "dlss_math.h"), "rb").read()   # (host/rx_backend.c's DLSS jitter)
     host_deps += open(os.path.join(GPU, "vk", "compat", "longshot_env.h"), "rb").read()   # (env_on: the switches' one rule)
     host_deps += ffmpeg_version_key()
+    if mac_dependencies:
+        host_deps += mac_dependencies.header_key
     dav1d = dav1d_windows() if host_srcs else None
     dav1d_fl = ["-DLONGSHOT_DAV1D", "-I" + os.path.join(dav1d, "include")] if dav1d else []
     if dav1d:
@@ -1424,9 +1437,7 @@ def main():
             print("\n".join(undefined[:60]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
         print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.time() - t))
-        if DARWIN:
-            darwin_build.copy_sdl(out)
-        else:
+        if not DARWIN:
             sdl = os.environ.get("LONGSHOT_SDL2", "")   # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)
             if sdl and os.path.exists(sdl):
                 import shutil
@@ -1501,6 +1512,14 @@ def main():
             print("\n".join(undefined[:40]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
         print("linked %s: %d MB, no undefined symbols (%.0fs)" % (dll, os.path.getsize(dll) >> 20, time.time() - t))
+    if mac_dependencies:
+        try:
+            packaged = darwin_package.package(out, mac_dependencies)
+        except (darwin_package.DependencyError, OSError) as e:
+            print("macOS package FAILED: " + str(e), flush=True)
+            return 1
+        print("macOS package: %d target-%s files, minimum %s; no installed non-system dylib paths" %
+              (len(packaged["files"]), packaged["arch"], packaged["minimum_os"]), flush=True)
     return 0
 
 

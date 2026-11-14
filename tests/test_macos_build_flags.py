@@ -38,6 +38,7 @@ SOURCE = ROOT
 LLVM_PREFIX = None
 FIXTURES_OUT = None
 ARCHES = None
+WAIT_PROVIDER = None
 BASE = "514591a30d707fe9f3ad31eae148c3cc1e750bff"
 WORK = "/fixture/Games, Zelda"
 FUNCTIONS = {"target", "linker", "HOT_ORDER", "flags", "host_flags", "renderer_flags", "executable_link",
@@ -229,6 +230,10 @@ class CommandContracts(unittest.TestCase):
             self.assertNotIn("-fuse-ld=lld", cmd)
             self.assertFalse(any(x.startswith("-Wl,") for x in cmd), cmd)
             self.assertIn("-dead_strip", cmd)
+            self.assertIn("error", cmd)
+            self.assertIn("-headerpad_max_install_names", cmd)
+            self.assertNotIn("-flat_namespace", cmd)
+            self.assertNotIn("dynamic_lookup", cmd)
             for i, value in enumerate(cmd):
                 if value in ("-map", "-install_name", "-rpath", "-order_file", "-exported_symbol"):
                     self.assertEqual(cmd[i - 1], "-Xlinker")
@@ -241,20 +246,23 @@ class CommandContracts(unittest.TestCase):
         self.assertNotIn("dynamic_lookup", formed["renderer_link"])
         self.assertNotIn("-static-libgcc", formed["renderer_link"])
 
-    def test_darwin_source_list_takes_future_helpers(self):
+    def test_darwin_source_list_classifies_image_dependencies(self):
         ns, _ = command_space(SOURCE)
         self.assertTrue("darwin_build" in ns, "no Darwin source selection")
+        shared = {"darwin_wait.c", "darwin_mem.c", "darwin_fault.c", "darwin_fiber.c", "darwin_process.c"}
+        owned = {"darwin_cpu.c", "darwin_vulkan.c", "darwin_control_sockets.c", "darwin_wait_state.c",
+                 "darwin_guest_mem.c", "darwin_prof.c"}
         with tempfile.TemporaryDirectory() as d:
-            for n in ("darwin_wait.c", "darwin_mem.c", "darwin_cpu.c", "darwin_vulkan.c", "darwin_future.c", "darwin_wait.h", "prof.c"):
+            for n in shared | owned | {"darwin_wait.h", "prof.c"}:
                 Path(d, n).touch()
             host = [Path(p).name for p in ns["darwin_build"].posix_sources(d)]
             renderer = [Path(p).name for p in ns["darwin_build"].posix_sources(d, renderer=True)]
-        self.assertEqual(host, ["win32_posix.c", "display_sdl.c", "linux_stubs.c", "darwin_cpu.c", "darwin_future.c", "darwin_mem.c", "darwin_vulkan.c", "darwin_wait.c"])
-        self.assertNotIn("prof.c", renderer)
-        self.assertNotIn("darwin_cpu.c", renderer)
-        self.assertNotIn("darwin_vulkan.c", renderer)
-        self.assertIn("darwin_mem.c", renderer)
-        self.assertIn("darwin_wait.c", renderer)
+            self.assertEqual(host, ["win32_posix.c", "display_sdl.c", "linux_stubs.c"] + sorted(shared | owned))
+            self.assertEqual(renderer, ["win32_posix.c"] + sorted(shared))
+            Path(d, "darwin_future_logger.c").touch()
+            for image in (False, True):
+                with self.assertRaisesRegex(ValueError, "unclassified.*darwin_future_logger.c"):
+                    ns["darwin_build"].posix_sources(d, renderer=image)
 
     def test_sdk_and_compiler_change_cache_identity(self):
         ns, _ = command_space(SOURCE)
@@ -389,6 +397,36 @@ class DiscoveryContracts(unittest.TestCase):
         ns["check_windows_sdk"]("authored empty work")
         self.assertEqual(called, ["authored empty work"])
 
+    def test_macos_preflight_keeps_strict_links_without_fatal_deprecations(self):
+        tree = ast.parse((SOURCE / "nx2/make_game.py").read_text())
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "check_darwin_prerequisites")
+        for arch in ("arm64", "x86_64"):
+            ns, _ = command_space(SOURCE, arch=arch)
+            tc, commands, inspected = ns["toolchain"], [], []
+            plan = types.SimpleNamespace(ffmpeg=([], ["/authored/ffmpeg.dylib"]), sdl=([], ["/authored/SDL2.dylib"]))
+            build = types.SimpleNamespace(prebuilt_renderer=lambda: "/authored/renderer.dylib", FFMPEG_LIBS=ns["FFMPEG_LIBS"],
+                                          darwin_build=types.SimpleNamespace(dependencies=lambda *a: plan), target=ns["target"])
+            def run(command, **kwargs):
+                commands.append(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+            scope = {"os": ns["os"], "ROOT": str(self.root), "_toolchain": tc, "sys": sys, "subprocess": subprocess,
+                     "tempfile": tempfile, "fail": self.fail,
+                     "darwin_package": types.SimpleNamespace(DependencyError=ValueError,
+                         inspect=lambda path, target: inspected.append((path, target)))}
+            exec(compile(ast.Module(body=[fn], type_ignores=[]), "make_game.py", "exec"), scope)
+            with self.subTest(arch=arch), mock.patch.dict(sys.modules, {"build": build}), \
+                    mock.patch.object(tc, "version", return_value="authored command fixture"), \
+                    mock.patch.object(subprocess, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                scope["check_darwin_prerequisites"](str(self.root))
+            self.assertEqual(len(commands), 2)
+            self.assertEqual([a for _, a in inspected], [arch, arch])
+            for command in commands:
+                self.assertEqual(command[command.index("-arch") + 1], arch)
+                self.assertIn("-mmacosx-version-min=14.4", command)
+                self.assertIn("-undefined", command)
+                self.assertIn("error", command)
+                self.assertNotIn("-fatal_warnings", command)
+
     def test_real_architecture_default_and_explicit_selection(self):
         for machine, expected in (("arm64", "arm64"), ("x86_64", "x86_64"), ("AMD64", "x86_64")):
             with self.subTest(machine=machine), mock.patch.object(platform, "machine", return_value=machine):
@@ -398,6 +436,7 @@ class DiscoveryContracts(unittest.TestCase):
 
 
 C_LIBRARY = r'''#include <dlfcn.h>
+#include <stddef.h>
 int fixture_value = 11;
 __attribute__((noinline)) int fixture_collision(void) { return fixture_value; }
 int library_a(void) { return fixture_collision(); }
@@ -405,8 +444,13 @@ int library_host(void) {
     int (*fn)(void) = (int (*)(void))dlsym(RTLD_DEFAULT, "hos_posix_fixture");
     return fn ? fn() : -1;
 }
+void *library_wait_state(void) {
+    void *(*provider)(void) = (void *(*)(void))dlsym(RTLD_MAIN_ONLY, "hos_posix_address_wait_sequences");
+    return provider ? provider() : NULL;
+}
 '''
 CPP_LIBRARY = r'''#include <string>
+#include <dlfcn.h>
 extern "C" {
 int fixture_value = 22;
 __attribute__((noinline)) int fixture_collision(void) { return fixture_value; }
@@ -415,10 +459,15 @@ int library_b(const char *input) {
     text.append(64, 'x');
     return text.size() == 65 ? fixture_collision() : -1;
 }
+void *library_wait_state(void) {
+    auto provider = (void *(*)(void))dlsym(RTLD_MAIN_ONLY, "hos_posix_address_wait_sequences");
+    return provider ? provider() : nullptr;
+}
 }
 '''
 C_MAIN = r'''#include <dlfcn.h>
 #include <stdio.h>
+extern unsigned *hos_posix_address_wait_sequences(void);
 int unused_fixture(void) { return 71; }
 __attribute__((noinline)) int hos_posix_order_one(void) { return 1; }
 __attribute__((noinline)) int hos_posix_order_two(void) { return 2; }
@@ -434,6 +483,14 @@ int main(void) {
     int ok = av && bv && host && ad && bd && av() == 11 && bv("B") == 22 && host() == 99 && ad != bd;
     if (ok) { *ad = 31; *bd = 42; ok = av() == 31 && bv("B") == 42; }
     ok = ok && dlsym(RTLD_DEFAULT, "unused_fixture") == NULL;
+    void *(*as)(void) = (void *(*)(void))dlsym(a, "library_wait_state");
+    void *(*bs)(void) = (void *(*)(void))dlsym(b, "library_wait_state");
+    unsigned *cells = hos_posix_address_wait_sequences();
+    int wait_ok = cells && as && bs && as() == cells && bs() == cells;
+    if (wait_ok) for (unsigned i = 0; i < 256; i++) if (cells[i]) wait_ok = 0;
+    if (wait_ok) { cells[255] = 0xabcdef01u; wait_ok = ((unsigned *)as())[255] == 0xabcdef01u && ((unsigned *)bs())[255] == 0xabcdef01u; }
+    ok = ok && wait_ok;
+    printf("canonical_wait_export=%s words=256 host_flags=production\n", wait_ok ? "PASS" : "FAIL");
     printf("binding own_a=%d own_b=%d host_export=%d distinct_data=%d result=%s\n",
            av ? av() : -1, bv ? bv("B") : -1, host ? host() : -1, ad != bd, ok ? "PASS" : "FAIL");
     dlclose(b); dlclose(a);
@@ -507,6 +564,13 @@ class RealMachO(unittest.TestCase):
         cppflags = ns["renderer_flags"](str(SOURCE / "gpu/vk"), str(out / "spirv"), str(out / "vulkan"), str(out / "vma"), str(out / "generated"))
         for key, compiler, flags in (("a", cc, cflags), ("b", cxx, cppflags), ("main", cc, hostflags)):
             run([compiler] + flags + ["-c", paths[key], "-o", out / (key + ".o")])
+        provider = WAIT_PROVIDER or SOURCE / "host/posix/darwin_wait_state.c"
+        self.assertTrue(provider.is_file(), "canonical wait-state source must be integrated or supplied with --wait-provider")
+        provider_inputs = [provider, provider.with_name("darwin_wait.h")]
+        (out / "provider-inputs.json").write_text(json.dumps({str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                                                            for p in provider_inputs}, indent=2) + "\n")
+        run([cc] + hostflags + ["-c", provider, "-o", out / "wait-state.o"])
+        metadata = load_file("build_flags_package", SOURCE / "nx2/darwin_package.py")
         for key, name in (("a", "library A, one.dylib"), ("b", "library B, two.dylib")):
             rsp = out / (key + ".rsp")
             rsp.write_text('"%s"\n' % (out / (key + ".o")))
@@ -516,22 +580,26 @@ class RealMachO(unittest.TestCase):
             self.assertIn("@rpath/" + name, load)
             self.assertIn("minos 14.4", load)
             self.assertIn("@loader_path", load)
+            with mock.patch.dict(sys.modules, {"darwin_package": metadata}):
+                self.assertTrue(ns["darwin_build"].post_link(str(lib)))
             if key == "b":
                 imports = run(["/usr/bin/nm", "-u", lib])
                 self.assertRegex(imports, r"(__1|Znwm|ZdlPv)", "C++ work was optimized away, not a runtime-library proof")
         rsp = out / "main.rsp"
-        rsp.write_text('"%s"\n' % (out / "main.o"))
+        rsp.write_text('"%s"\n"%s"\n' % (out / "main.o", out / "wait-state.o"))
         exe = out / "host executable, test"
         run(ns["executable_link"](cc, str(exe), str(rsp)))
         self.assertTrue(Path(str(exe) + ".map").is_file())
         syms = run(["/usr/bin/nm", "-n", exe])
         self.assertLess(syms.index("_hos_posix_order_two"), syms.index("_hos_posix_order_one"))
         self.assertNotIn("_unused_fixture", syms)
+        self.assertIn("_hos_posix_address_wait_sequences", syms)
         self.assertEqual((out / "hot_order.txt.macos").read_text(), "_hos_posix_order_two\n_hos_posix_order_one\n")
         load = run(["/usr/bin/otool", "-l", exe])
         self.assertIn("minos 14.4", load)
         result = run((["/usr/bin/arch", "-x86_64"] if arch == "x86_64" else []) + [exe])
         self.assertIn("binding own_a=31 own_b=42 host_export=99 distinct_data=1 result=PASS", result)
+        self.assertIn("canonical_wait_export=PASS words=256 host_flags=production", result)
         bad = out / "undefined.c"
         bad.write_text("extern int missing_external(void); int exported(void) { return missing_external(); }\n")
         run([cc] + cflags + ["-c", bad, "-o", out / "undefined.o"])
@@ -539,7 +607,15 @@ class RealMachO(unittest.TestCase):
         badrsp.write_text('"%s"\n' % (out / "undefined.o"))
         badresult = run(ns["renderer_link"](cc, cxx, str(out / "bad.dylib"), str(badrsp)), good=False)
         self.assertIn("missing_external", badresult)
-        print("MACHO compiler=%s arch=%s min=14.4 links=3 load=PASS exports=PASS order=PASS binding=PASS undefined=rejected" %
+        weak = out / "weak_undefined.c"
+        weak.write_text("extern int optional_callback(void) __attribute__((weak));\n"
+                        "int exported_weak(void) { return optional_callback ? optional_callback() : 21; }\n")
+        run([cc] + cflags + ["-c", weak, "-o", out / "weak_undefined.o"])
+        weakrsp = out / "weak_undefined.rsp"
+        weakrsp.write_text('"%s"\n' % (out / "weak_undefined.o"))
+        weakresult = run(ns["renderer_link"](cc, cxx, str(out / "weak_bad.dylib"), str(weakrsp)), good=False)
+        self.assertIn("optional_callback", weakresult)
+        print("MACHO compiler=%s arch=%s min=14.4 links=3 load=PASS exports=PASS order=PASS binding=PASS undefined=rejected weak_unbound=rejected" %
               ("LLVM23" if prefix else "Apple21", arch), flush=True)
 
 
@@ -559,11 +635,13 @@ if __name__ == "__main__":
     parser.add_argument("--capture-main", action="store_true")
     parser.add_argument("--llvm-prefix", type=Path)
     parser.add_argument("--fixtures-out", type=Path)
+    parser.add_argument("--wait-provider", type=Path, help="canonical provider source from an explicitly named integration input")
     parser.add_argument("--arch", action="append", choices=("arm64", "x86_64"),
                         help="real fixture target; repeat for both (default: current process architecture)")
     args, rest = parser.parse_known_args()
     SOURCE, LLVM_PREFIX, FIXTURES_OUT = args.source, args.llvm_prefix, args.fixtures_out
     ARCHES = args.arch
+    WAIT_PROVIDER = args.wait_provider
     if args.capture_main:
         print(json.dumps(capture_main(), indent=2))
     else:
