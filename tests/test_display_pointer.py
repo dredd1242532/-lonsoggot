@@ -8,6 +8,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 RUN_ALL_ARGS = ["--cxx", "{cxx}"]
@@ -60,8 +61,18 @@ def main():
         includes = ["-I" + str(header_root), "-I" + str(ROOT)]
         if os.name != "nt":
             includes.append("-I" + str(ROOT / "host/posix"))
-        subprocess.run([args.cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
-                        "-pthread", *includes, str(unit), "-o", str(exe)], check=True)
+        if sys.platform == "darwin":
+            # The real POSIX SRW wrappers now use the production Darwin helper.
+            helper = Path(temp) / "darwin_wait.o"
+            subprocess.run([args.cxx, "-x", "c", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
+                            "-mmacosx-version-min=14.4", "-pthread", "-c", str(ROOT / "host/posix/darwin_wait.c"),
+                            "-o", str(helper)], check=True, timeout=60)
+            subprocess.run([args.cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
+                            "-mmacosx-version-min=14.4", "-pthread", *includes, str(unit), str(helper), "-o", str(exe)],
+                           check=True, timeout=60)
+        else:
+            subprocess.run([args.cxx, "-std=c++20", "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers",
+                            "-pthread", *includes, str(unit), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=30)
 
 
