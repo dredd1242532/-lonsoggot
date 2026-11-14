@@ -94,8 +94,11 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
        Not an execute fault (8, DEP): a jump into guest memory would fault again at once, forever; it goes on to the crash report.
        Windows only: Linux commits nothing lazily, its VirtualQuery stand-in calls every guest page committed and read-write, and
        its signal handler never sets 8, so there every SIGSEGV and SIGBUS in the window would be tried again forever, at 100% CPU,
-       rather than reach report_crash) */
-    if (mbi.State == MEM_COMMIT && mbi.Protect == PAGE_READWRITE && rec->ExceptionInformation[0] != 8)
+       rather than reach report_crash.
+       The import fence (gpu/vk/import_fence.h) gives the page after an import's range PAGE_EXECUTE_READWRITE for the length of one
+       driver call: a data fault pending on that page when another thread committed it is tried again as for a read-write page.
+       Still exact protections, so a guard or no-cache page is not, and still not an execute fault) */
+    if (mbi.State == MEM_COMMIT && (mbi.Protect == PAGE_READWRITE || mbi.Protect == PAGE_EXECUTE_READWRITE) && rec->ExceptionInformation[0] != 8)
         return EXCEPTION_CONTINUE_EXECUTION;
 #endif
     if (mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
