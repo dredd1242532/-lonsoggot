@@ -14,6 +14,12 @@ memory (8 GB and mesh shaders recommended), 16 GB of memory and about 60 GB free
 - [Download for Linux](https://longshot.magicbean.dev/download/launcher/linux)
 - [Windows, portable zip](https://longshot.magicbean.dev/download/launcher/windows-portable)
 
+**Linux and SteamOS:** before opening the `.AppImage`, open its **Properties** in your file manager and enable
+**Allow executing file as program** (the wording differs between desktops). Then open the launcher.
+
+For the full setup instructions, follow [the Windows steps](../README.md#on-windows) or
+[the Linux steps](../README.md#on-linux).
+
 ## 3. Build and play
 
 Press **Build** on the launcher’s welcome screen.
