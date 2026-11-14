@@ -18,8 +18,10 @@ Keep those dimensions separate: creating at the dynamic maximum instead of the r
 increase the cost of models L and M even when the evaluation's render subrect is smaller. NVIDIA's
 [Streamline DLSS implementation](https://github.com/NVIDIA-RTX/Streamline/blob/main/source/plugins/sl.dlss/dlssEntry.cpp)
 also creates the feature using the recommended dimensions. `tests/test_dlss_feature_size.py` compiles
-the actual preparation function with a recording SDK stand-in and checks creation, input allocations,
-range reuse, rounded sizes, native AA and failed queries for K, L and M.
+the actual preparation function with a recording SDK stand-in and checks creation, requested input
+dimensions, range reuse, rounded sizes, native AA and failed queries for K, L and M. The fixture does
+not allocate GPU images or execute NGX evaluation. In particular, a rounded Ultra Performance input
+of 1147x480 against an advertised 1146x480 maximum still needs validation with the real NGX runtime.
 
 ## PsychoV35 with DLSS/DLAA and FSR 4 (opt-in)
 
