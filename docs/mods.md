@@ -9,9 +9,11 @@ not a dump, a seed or a playable mod.
 
 A mod is a folder with a `romfs` subfolder. Paths below it replace or add to the game's RomFS; the game still has to
 understand their contents. There is no file-extension allowlist or format validator. A file mod does not supply host
-code or callbacks. An `exefs` folder is noticed and logged, but its patches are not applied: Longshot compiles the
-game's instructions ahead of time. Scripts, native libraries and a manifest beside `romfs` are not executed or read
-as a mod interface. This is not a security sandbox or a guarantee that a mod cannot damage a save.
+code or callbacks. An `exefs` folder's patches (`.ips`, IPS32, `.pchtxt`) are not applied by this loader: Longshot
+compiles the game's instructions ahead of time, so they are applied when the game is built and only reported at a
+start (the [README's Mods section](../README.md#mods)); any other file in `exefs` is ignored. A `cheats` folder holds
+Atmosphere cheats, listed on the Mods tab. Scripts, native libraries and a manifest beside `romfs` are not executed or
+read as a mod interface. This is not a security sandbox or a guarantee that a mod cannot damage a save.
 
 Generate game-derived files from the player's own supported dump and keep them local. A recipe or an authored
 example can be shared; generated game files cannot. Use separate copied saves when trying a real mod. Removing a
@@ -19,11 +21,11 @@ mod does not undo progress already saved with it, and this loader does not creat
 
 ## Discovery, ordering and disabling
 
-`host/mods.c` implements these rules in `hos_mods_init`, `find_mods`, `mod_cmp` and `index_romfs`:
+`host/mods.c` implements these rules in `hos_mods_init`, `find_mods`, `mod_cmp`, `read_state` and `index_romfs`:
 
 - The default root is `mods` beside the game executable. `HOS_MODS` selects another root; it points at the folder
   **containing mods**, not a mod's `romfs` folder. Nothing is downloaded or unpacked.
-- A directory with `romfs` or `exefs`, from one to four levels below that root, is a mod. For example,
+- A directory with `romfs`, `exefs` or `cheats`, from one to four levels below that root, is a mod. For example,
   `mods/contents/<title id>/<name>/romfs` works. Discovery stops below a directory recognized as a mod. A `romfs`
   folder directly in the root is not itself the usual `<name>/romfs` layout.
 - During discovery a directory starting with `.`, `-` or `_` is skipped, including all mods below it. Rename
@@ -32,6 +34,10 @@ mod does not undo progress already saved with it, and this loader does not creat
 - Mods are sorted by their **whole path relative to the root**, ignoring case, not just by their last folder name.
   The last mod supplying a path wins. Use distinct numbered names at the same level (`01-...`, `02-...`) when you
   need an obvious order. Avoid names that differ only by case: their order is not defined.
+- That is the order out of the box. The Insert menu's Mods tab can move a mod in the list and switch it off; it keeps
+  both in `longshot_mods.txt` beside the executable. At a start the mods that file names come first, in its order
+  and with its switches, and the others follow by path, on. The mod lower in the list still wins. Without that file
+  nothing changes from the rule above.
 - RomFS lookup normalizes slashes and case. Do not ship two file paths that differ only by case; which is indexed
   last within one mod is not defined. Use the game's exact spelling for portable files and directory listings.
 - Directory links inside a mod's RomFS, including a linked `romfs` root, are not followed. File links are supported;
@@ -48,10 +54,12 @@ checking a mod's order.
 ## Resource sizes and prompts
 
 A replacement that needs more memory must also have a suitable resource size table, or the game may reject it or
-wait at a loading screen. The loader selects **one** mod's table using the same order; it does not merge arbitrary
-mods' tables together. Combine the required entries in the mod that wins.
+wait at a loading screen. With the game's own table at hand the loader makes one table at each start: the game's, with
+the table of every mod that is on merged in (the larger entry wins) and the entry of every file a mod serves raised
+to fit, written to `modcache/rsizetable.zs` beside the executable. When that table cannot be made, **one** mod's
+table is used as before, the last one's in the same order.
 
-`host/prompts.c` merges the button prompts' entries into that winning table, taking the larger size for each entry.
+`host/prompts.c` merges the button prompts' entries into the table that is served, taking the larger size for each entry.
 It uses the table name belonging to the game's own RomFS, not a different version's table in a mod. If the table
 cannot be merged, it is used unchanged with the game's icons. The [README's Mods section](../README.md#mods) gives
 the file and size details. `tests/test_mods_size_table.py` exercises this with made-up tables, including both open
@@ -94,7 +102,7 @@ The example has these independently checked results:
 | Open `Example/message.txt` | The nested mod wins: `contents/demo-title/00-nested` sorts after `02-override`, despite `00-nested` |
 | Open `Example/only-first.txt` | The first mod's non-conflicting file remains |
 | Open `Example/nested.txt` | A nested mod is discovered |
-| Open `Example/off.txt` or `ignored.txt` | No replacement: disabled mods and ExeFS content are not loaded |
+| Open `Example/off.txt` or `ignored.txt` | No replacement: disabled mods are not loaded, and a file in `exefs` is never a RomFS file |
 | Open `example\\MESSAGE.TXT` | The same winner after slash/case normalization |
 | Open `Example` or `Example/missing.txt` | No replacement file |
 | Use the same files beside a fake game executable, with `HOS_MODS` unset | The same results from the default `mods` root |
@@ -109,7 +117,7 @@ Clawshot seed with controller prompts still need their own tests.
 
 ## What this does not decide
 
-There is no compatibility/version field, dependency solver, catalog, per-seed profile, Mods tab, chest-table format,
+There is no compatibility/version field, dependency solver, catalog, per-seed profile, chest-table format,
 item/check service or loadable native-module ABI in this contract. Those are separate decisions in issue 42. In
 particular a checked location must not be treated as a successful local item grant. Co-op's internal session hooks
 are not a mod-loading interface. Documenting the working file route does not choose core-first versus module-first

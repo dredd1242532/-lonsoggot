@@ -14,7 +14,8 @@ with the prompts' entries merged into it. On made-up tables, no game data:
   its size.
 
 The documented, authored file-mod example in docs/mods.md also goes through the same Linux filesystem fixture:
-discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and ignored ExeFS.
+discovery, whole-path order, disabling and restart, default/HOS_MODS roots, case/slash lookup and an ExeFS folder
+that is listed and never served as RomFS.
 
 python -I -B tests/test_mods_size_table.py [--cc gcc]
 """
@@ -234,7 +235,9 @@ def documented_example_checks(exe, tmp):
         return out
 
     log = run("HOS_MODS root, discovery, full-path order and lookup", mods, expected)
-    check("03-code-only: exefs patches are left out" in log, "the example's ExeFS warning is missing")
+    # (a mod with only an exefs folder is listed with what it has; its patches belong to the build, not to this loader)
+    check("03-code-only: 0 RomFS files (0 replace the game's, 0 added), ExeFS patches" in log,
+          "the example's ExeFS mod is not listed with its ExeFS folder")
     run("default root beside the executable", None, expected)
     # Every invocation is a new process: the loader deliberately indexes once per start.
     (mods / "contents").rename(mods / "-contents")

@@ -802,7 +802,8 @@ Deeper layouts such as `mods/contents/<title id>/<name>/romfs` work too. A folde
 
 The Insert menu's **Mods** tab (shown when there are mods) lists them in their order, each On or Off: Left and Right
 switch the selected one, Enter picks it up and Up and Down move it. When two mods have the same file, the one lower in
-the list wins; out of the box the list is in the folders' names' order, so `01-...`, `02-...` still set it. The order and
+the list wins; out of the box the list is in the order of the mods' paths under `mods` (ignoring case), so `01-...`,
+`02-...` still set it. The order and
 the switches are kept in `longshot_mods.txt` in the game folder and apply at the next start (closing the menu offers the
 restart). The log (`longshot_log.txt`) names each mod and the files read from it.
 
@@ -829,8 +830,8 @@ left out, and the file's line there says how many.
 memory run as Atmosphere runs them, every frame (opcodes 0 to A and C0 to C3); a cheat that writes the game's code is
 listed as not supported (make it an ExeFS patch instead). `{Master}` codes are always on.
 
-For authors: the [existing file contract and game-free example](docs/mods.md) cover discovery, conflicting files,
-disabling and what this loader does not provide. The example contains only invented text, not a seed or game data.
+For authors: the [file contract and game-free example](docs/mods.md) cover discovery, the order out of the box,
+conflicting files, disabling and what this loader does not provide. The example contains only invented text, not a seed or game data.
 
 ## Build from source
 
