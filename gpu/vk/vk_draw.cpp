@@ -8943,7 +8943,9 @@ void precompile_warm(void (*progress)(size_t done, size_t total)) {
         });
         computes_done++;
     }, [] { return prepare_stopped(); }, [&](size_t) {
-        if (progress) progress(total, total);
+        // (counted on from the notes: the --prepare-shaders watchdog stops a part whose count stands still, and this pass can
+        // take minutes when the caches lack the compute pipelines)
+        if (progress) progress(total + computes_done.load(), total + computes.size());
         prepare_progress_log("compute pipelines", computes_done.load(), computes.size(), c0, log_at);
     });
     const bool all = done == total && computes_done == computes.size();
