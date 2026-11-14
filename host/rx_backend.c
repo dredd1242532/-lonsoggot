@@ -11,6 +11,9 @@
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/dlss_math.h"
 #include "control.h"
+#if defined(__APPLE__)
+#include "posix/darwin_vulkan.h"
+#endif
 
 /* the WebGPU renderer (gpu/render, renamed) */
 int wgr_start(void *hwnd);
@@ -219,6 +222,9 @@ static const MkwVkHost vk_host = {
     host_watch_guest_writes, hos_pad_raw, hos_binding, hos_bind, host_aspect_ratio, host_take_key_press,
     hos_mouse_pointer, hos_mic_count, hos_mic_name, hos_mic_select, hos_sdl_gyro_status, hos_log_flush, hos_prompts_face,
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
+#if defined(__APPLE__)
+    hos_darwin_vulkan_library, hos_darwin_vulkan_extensions,
+#endif
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */

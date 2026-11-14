@@ -12,6 +12,9 @@
 #include "../hos.h"
 void hos_input_clear_toggles(void);
 #include "../hos_sdl.h"
+#if defined(__APPLE__)
+#include "darwin_vulkan.h"
+#endif
 
 /* (the window's app id: an applications menu entry for the game names it as its StartupWMClass) */
 #define HOS_APP_ID "dev.magicbean.Longshot"
@@ -240,7 +243,11 @@ int hos_display_init(void) {
     const char* desktop = getenv("XDG_CURRENT_DESKTOP");
     const int gamescope = desktop && strstr(desktop, "gamescope");
     if (!getenv("SDL_VIDEODRIVER") && !getenv("SDL_VIDEO_DRIVER") && !gamescope)
+#if defined(__APPLE__)
+        hos_sdl_hint(hos_sdl_load() == 3 ? "SDL_VIDEO_DRIVER" : "SDL_VIDEODRIVER", "cocoa");
+#else
         hos_sdl_hint(hos_sdl_load() == 3 ? "SDL_VIDEO_DRIVER" : "SDL_VIDEODRIVER", "wayland,x11");
+#endif
     /* (SDL2 on Wayland: libdecor from the start. SDL2 2.32 asks for the compositor's decorations before the window's first
        configure, and a compositor that answers "the client draws them" (COSMIC) has it unmap and map the window again
        with libdecor inside that wait, which then waits forever on a field the switch cleared: no window, no renderer
@@ -290,6 +297,13 @@ void hos_display_loop(void) {
         ExitProcess(1);
     }
     vk_window.window = window;
+#if defined(__APPLE__)
+    if (!hos_darwin_vulkan_capture(window)) {
+        hos_log("display: no Vulkan instance extensions for the SDL window");
+        hos_log_flush();
+        ExitProcess(1);
+    }
+#endif
     hos_posix_window[0] = 1;
     {   /* the window's icon: longshot.png beside the game (make_game.py puts it there), for X11 and the compositors that
            take one from the window; the others find it through the menu entry */

@@ -15,7 +15,11 @@
 extern "C" {
 #endif
 
+#if defined(__APPLE__)
+#define MKWVK_API_VERSION 22
+#else
 #define MKWVK_API_VERSION 21
+#endif
 enum { HOS_OPT_CHEAT_HEARTS = 32, HOS_OPT_CHEAT_FLIGHT, HOS_OPT_CHEAT_ACTION, HOS_OPT_CHEAT_CAMERA, HOS_OPT_CHEAT_SPEED };
 /* (longshot) the Gameplay tab's Text size (host/oot_text_size.c): 0 the game's, 1 110%, 2 125%, 3 150%, 4 175% */
 enum { HOS_OPT_TEXT_SIZE = 10 };
@@ -204,6 +208,12 @@ typedef struct MkwVkHost {
     /* (version 20, longshot) the main screen's size in pixels, as host/hos_main.c takes its shape at the start (Windows: the
        primary's; Linux: SDL's primary desktop), for the Insert menu's Aspect ratio and Output resolution rows: 0 when not known */
     int (*screen_size)(int *width, int *height);
+#if defined(__APPLE__)
+    /* (macOS version 22) the same library SDL loaded before making its window; retained for the process lifetime. */
+    void *(*vulkan_library)(void);
+    /* SDL's instance extensions, captured on the main thread before this one starts. 1: success; 0 names headless. */
+    int (*vulkan_extensions)(uint32_t *count, const char *const **names);
+#endif
 } MkwVkHost;
 
 /* One completed temporal-upscale sample; all zero while inactive. */

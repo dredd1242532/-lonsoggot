@@ -238,6 +238,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | Switch | What it does |
 |---|---|
 | `RX_VK_VALIDATION` (set) | The Khronos validation layer |
+| `RX_VK_LIBRARY=<path>` | macOS only: first Vulkan loader or MoltenVK dylib to try. Unset or empty: no override. Next, beside the actual game executable (including `bin/` in a packaged layout), `libvulkan.1.dylib` then `libMoltenVK.dylib`; last, `libvulkan.1.dylib` through dyld's normal library search. A failed candidate is logged before the next is tried. No Vulkan library is installed or assumed to exist on macOS. The dylib needs an arm64 slice for a native build or x86_64 for Rosetta. SDL and the renderer use the same selected library; the log names it and the selected driver. This admits an instance and device, not a qualified macOS rendering path |
 | `RX_VK_CHECKPOINTS=0` | No NVIDIA checkpoints (on by default; after a lost device they name the draw it stopped at) |
 | `RX_VK_HANG_DUMP=<file>` | Every thread's stack to the file once no frame was shown for `RX_VK_HANG_SEC` seconds (20) (Windows) |
 | `RX_VK_GPU_HANG_SEC=<s>` | Work sent to the GPU that finishes nothing for this long (30) is a hang: the lost-device report, then the game ends. `0`: the stall is logged and the game waits |
@@ -304,6 +305,15 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_NAN_GUARD=0` | No NaN guard on float colour outputs (on by default on every card: one NaN texel spreads through bloom into glowing blocks) |
 | `RX_VK_FIFO=1`, `RX_VK_IMMEDIATE=1` | V-Sync On (FIFO) or Off (immediate) for one run, over the menu's V-Sync row |
 | `HOS_VCORES=0`, `HOS_CORES=<1..8>`, `HOS_RESERVE_CORE=0` | No virtual cores; the cores the game sees (6); no core kept for the replay (one is, with 8 or more logical processors) |
+
+On macOS the window's main thread captures SDL2/SDL3's Vulkan instance extensions, rather than requesting X11 or
+Wayland extensions. Headless Vulkan startup needs no SDL and requests no Metal-surface extensions; the generic surface and
+swapchain extensions remain requirements, as on the other platforms. `VK_KHR_portability_enumeration` and its instance
+flag are enabled only when advertised. An advertised `VK_KHR_portability_subset` is enabled with its supported feature
+bits, as [VUID-VkDeviceCreateInfo-pProperties-04451](https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceCreateInfo.html)
+requires. The feature chain otherwise stays the renderer's own; a creation failure logs its `VkResult`, and a missing
+required extension, queue, or core feature is named. This does not resolve shaders, descriptor limits, formats, or
+host-memory-import correctness on Metal. Window and surface operation need separate testing.
 
 ### Building
 
