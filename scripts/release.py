@@ -555,10 +555,18 @@ def download(url, limit=1 << 20, to=None):
                         size += len(chunk)
                         f.write(chunk)
     except (urllib.error.URLError, OSError) as e:
+        _drop(to)
         fail("%s: %s" % (url, e))
     if size > limit:
+        _drop(to)
         fail("%s: larger than %d bytes" % (url, limit))
     return data
+
+
+def _drop(path):
+    """A file download(to=) wrote only part of: never left for a later step to take"""
+    if path is not None and os.path.exists(path):
+        os.remove(path)
 
 
 class _TokenStaysHome(urllib.request.HTTPRedirectHandler):
