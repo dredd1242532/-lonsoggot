@@ -1165,11 +1165,13 @@ bool temporal_upscale(VkCommandBuffer cmd, uint64_t key, bool known, Texture* in
     if (ready == 0) return fail(why ? why : "not this frame");
     if (psycho && (!engine.e->hdr || !engine.e->hdr()))
         return fail(ur::is_fsr4(mode) ? "PsychoV35 waits for the native HDR FSR 4 context"
+                    : mode == ur::FSR3 ? "PsychoV35 waits for the native HDR FSR 3.1 path"
                                        : "PsychoV35 waits for the native HDR DLSS feature");
     const bool rgba = psycho && in->format == VK_FORMAT_R16G16B16A16_SFLOAT && out->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     if (s.psycho_last != psycho || s.history_input != in->format) {
         if (psycho || s.psycho_last || s.history_input == VK_FORMAT_R16G16B16A16_SFLOAT)
-            logf("vk: PsychoV35 %s: %s route; scene format %u, network input %u, output %u", ur::is_fsr4(mode) ? "FSR 4" : "DLSS",
+            logf("vk: PsychoV35 %s: %s route; scene format %u, network input %u, output %u",
+                 ur::is_fsr4(mode) ? "FSR 4" : mode == ur::FSR3 ? "FSR 3.1" : "DLSS",
                  rgba ? "RGBA16F linear" : "packed", (unsigned)cam.scene_format, (unsigned)in->format, (unsigned)out->format);
         s.psycho_last = psycho;
         s.history_input = in->format;

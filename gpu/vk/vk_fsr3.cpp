@@ -865,12 +865,18 @@ bool chain_evaluate(VkCommandBuffer cmd, const TemporalFrame& f) {
 }
 void chain_release() { fsr3::release(); }   // (the passes stay; their images are made again when FSR 3.1 draws next)
 uint64_t chain_memory() { return fsr3::memory(); }   // (its internal images, for the chain's status line)
+// The vendored passes are already compiled with HDR_COLOR_INPUT=1. Only PsychoV35 opts into
+// the chain's linear HDR preparation/output; keep Vanilla's existing perceptual path unchanged.
+bool chain_hdr() {
+    static const bool enabled = env_switch("RX_VK_PSYCHOV35_DLSS") == 1;
+    return enabled && scene_tonemap_on();
+}
 // (fsr_depth: its passes are built with FFX_FSR3UPSCALER_OPTION_INVERTED_DEPTH, scripts/fsr3_shaders.py; retry: an
 // evaluation that fails (no room for its constants in the frame's stream) leaves that frame to the network, and the next one
 // tries again. Named, so a field added to TemporalEngine cannot shift these into another)
 const TemporalEngine kChainEngine{.name = "AMD FSR 3.1", .short_name = "FSR 3.1", .start = chain_start,
                                   .prepare = chain_prepare, .evaluate = chain_evaluate, .release = chain_release,
-                                  .memory = chain_memory, .fsr_depth = true, .retry = true};
+                                  .memory = chain_memory, .hdr = chain_hdr, .fsr_depth = true, .retry = true};
 } // namespace
 
 const TemporalEngine* fsr3_engine() { return &kChainEngine; }

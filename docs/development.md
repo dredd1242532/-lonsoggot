@@ -155,11 +155,13 @@ meter read late is the white flashes the wait is there for. `RX_VK_LOG_READBACK_
 every 3,000 calls (calls, waits and their time, how many had the newest submission as their writer, how many were read
 late), which is how the ranges worth a rule are found on a PC.
 
-`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA and AMD FSR 4 (and its Native AA)
+`RX_VK_PSYCHOV35_DLSS=1` enables the experimental RGBA16F scene path for DLSS/DLAA, AMD FSR 4 (and its Native AA), and FSR 3.1 on the shared chain
 with Native HDR and PsychoV35. The successful upscale supplies NVIDIA frame generation with depth, camera and actor
 motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature (`RX_VK_DLSS_HDR=0` prevents this
-path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
-See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-and-fsr-4-opt-in) for validation and shader regeneration.
+path), FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it), or FSR 3.1's already-HDR-capable passes. FSR 3.1 keeps
+Vanilla's existing colour path; its linear HDR path is limited to Native PsychoV35. Its legacy own-input route
+(`RX_VK_FSR3_CHAIN=0`), FSR 3.1 frame interpolation and TAAU are not enabled by this switch.
+See [the format and history rules](temporal-history.md#psychov35-with-temporal-upscalers-opt-in) for validation and shader regeneration.
 
 ### Running a test
 

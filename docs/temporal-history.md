@@ -1,14 +1,19 @@
 # Temporal history validity
 
-DLSS and FSR4 use the shared temporal chain; FSR3.1 prepares its own inputs. If camera reprojection fails, motion vectors are unavailable and the previous picture has no valid mapping to the current one. Each path must deliver a reset in that same frame rather than retaining unusable history.
+DLSS, FSR 4 and the default FSR 3.1 path use the shared temporal chain. FSR 3.1's legacy path and frame interpolation prepare their own inputs. If camera reprojection fails, motion vectors are unavailable and the previous picture has no valid mapping to the current one. Each path must deliver a reset in that same frame rather than retaining unusable history.
 
 Validate both input matrices and each result coefficient before converting to float. A finite double outside the float range is rejected before conversion. Preserve the existing algorithm, singularity threshold and age/size rules: valid consecutive camera motion retains history. This adds no camera-cut heuristic or interface change.
 
 The game-free fixture compiles actual reprojection math, both preparation policies, the shared frame reset and all three consumer assignments (DLSS, FSR4, FSR3.1). It covers singular and non-finite inputs, float overflow/boundaries, recovery, frame gaps, FSR3.1 size changes and valid perspectives at16:9 and ultrawide. Engine SDKs and a GPU are not required. CPU cases do not prove in-game frequency, visual gains or GPU handling of injected invalid matrices.
 
-## PsychoV35 with DLSS/DLAA and FSR 4 (opt-in)
+## PsychoV35 with temporal upscalers (opt-in)
 
-`RX_VK_PSYCHOV35_DLSS=1` lets NVIDIA DLSS/DLAA and AMD FSR 4 (and its Native AA) take the Native HDR PsychoV35 scene, whose gameplay network input and output are RGBA16F (`upscaler_rows.h` `takes_psychov35`: the engines the chain gives linear light in an HDR context). It is off by default. Vanilla's packed B10G11R11 route is unchanged; this switch does not enable PsychoV35 for FSR 3.1 or TAAU.
+`RX_VK_PSYCHOV35_DLSS=1` lets NVIDIA DLSS/DLAA, AMD FSR 4 (and its Native AA) and FSR 3.1 on the shared chain take the Native HDR PsychoV35 scene, whose gameplay network input and output are RGBA16F (`upscaler_rows.h` `takes_psychov35`: the engines the chain gives linear light in HDR). It is off by default. Vanilla's packed B10G11R11 route is unchanged. FSR 3.1's legacy `RX_VK_FSR3_CHAIN=0` route and FSR 3.1 frame interpolation are not enabled for PsychoV35 by this change; TAAU is also separate.
+
+FSR 3.1's passes are already compiled for HDR input (`scripts/fsr3_shaders.py`). Its shared-chain engine opts into
+linear HDR preparation/output only for Native HDR PsychoV35. Vanilla retains its existing perceptual preparation.
+Changing the tone mapper or input format resets history. The route diagnostic names FSR 3.1, and the ordinary status
+line counts its actual evaluations; a selected menu row alone does not prove the engine ran.
 
 The pre-existing Upscaler Off stretch also only writes packed output, so Off with PsychoV35 still falls back to the
 game's network, even at 100%. It must not be labelled native with no anti-aliasing in a benchmark. This
