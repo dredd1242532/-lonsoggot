@@ -9,7 +9,11 @@
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <limits.h>
+#if defined(__APPLE__)
+#include "darwin_wait.h"
+#else
 #include <linux/futex.h>
+#endif
 #include <signal.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
@@ -46,27 +50,50 @@ typedef struct { int type; } HObj;
 static int is(HANDLE h, int type) { return h && h != INVALID_HANDLE_VALUE && (uintptr_t)h > 0x10000 && ((HObj *)h)->type == type; }
 
 static int64_t now_ns(void) {
+#if defined(__APPLE__)
+    return darwin_now_ns();
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+#endif
 }
 static struct timespec abs_after_ms(DWORD ms) {
     struct timespec ts;
+#if defined(__APPLE__)
+    clock_gettime(CLOCK_UPTIME_RAW, &ts);
+#else
     clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     ts.tv_sec += ms / 1000;
     ts.tv_nsec += (long)(ms % 1000) * 1000000L;
     if (ts.tv_nsec >= 1000000000L) ts.tv_sec++, ts.tv_nsec -= 1000000000L;
     return ts;
 }
 static void monitor_init(pthread_mutex_t *mu, pthread_cond_t *cv) {
+#if defined(__APPLE__)
+    darwin_monitor_init(mu, cv);
+#else
     pthread_condattr_t a;
     pthread_condattr_init(&a);
     pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
     pthread_cond_init(cv, &a);
     pthread_condattr_destroy(&a);
     pthread_mutex_init(mu, NULL);
+#endif
 }
 /* waits for pred() under mu, at most ms: WAIT_OBJECT_0 or WAIT_TIMEOUT */
+#if defined(__APPLE__)
+#define MONITOR_WAIT(mu, cv, pred, ms, result)                                                                        \
+    do {                                                                                                           \
+        struct timespec until_ = abs_after_ms(ms);                                                                 \
+        (result) = WAIT_OBJECT_0;                                                                                  \
+        while (!(pred)) {                                                                                          \
+            if ((ms) == INFINITE) pthread_cond_wait((cv), (mu));                                                   \
+            else if (darwin_cond_timedwait((cv), (mu), &until_) == ETIMEDOUT && !(pred)) { (result) = WAIT_TIMEOUT; break; } \
+        }                                                                                                          \
+    } while (0)
+#else
 #define MONITOR_WAIT(mu, cv, pred, ms, result)                                                                        \
     do {                                                                                                              \
         struct timespec until_ = abs_after_ms(ms);                                                                    \
@@ -76,38 +103,63 @@ static void monitor_init(pthread_mutex_t *mu, pthread_cond_t *cv) {
             else if (pthread_cond_timedwait((cv), (mu), &until_) == ETIMEDOUT && !(pred)) { (result) = WAIT_TIMEOUT; break; } \
         }                                                                                                             \
     } while (0)
+#endif
 
 /* ---- futexes: condition variables, WaitOnAddress ---- */
+#if defined(__APPLE__)
+/* The sequence word is waited on through the public Darwin API below. */
+#else
 static long futex(volatile uint32_t *a, int op, uint32_t v, const struct timespec *ts) {
     return syscall(SYS_futex, a, op, v, ts, NULL, 0);
 }
+#endif
 static struct timespec rel_ms(DWORD ms) {
     struct timespec ts = {(time_t)(ms / 1000), (long)(ms % 1000) * 1000000L};
     return ts;
 }
 void WakeConditionVariable(CONDITION_VARIABLE *cv) {
     __atomic_add_fetch(&cv->seq, 1, __ATOMIC_SEQ_CST);
+#if defined(__APPLE__)
+    darwin_wake_word(&cv->seq, 0);
+#else
     futex(&cv->seq, FUTEX_WAKE_PRIVATE, 1, NULL);
+#endif
 }
 void WakeAllConditionVariable(CONDITION_VARIABLE *cv) {
     __atomic_add_fetch(&cv->seq, 1, __ATOMIC_SEQ_CST);
+#if defined(__APPLE__)
+    darwin_wake_word(&cv->seq, 1);
+#else
     futex(&cv->seq, FUTEX_WAKE_PRIVATE, INT_MAX, NULL);
+#endif
 }
 static BOOL cv_wait(CONDITION_VARIABLE *cv, DWORD ms, void (*unlock)(void *), void (*relock)(void *, ULONG), void *l, ULONG flags) {
     const uint32_t seq = __atomic_load_n(&cv->seq, __ATOMIC_SEQ_CST);
     unlock(l);
+#if defined(__APPLE__)
+    const long r = darwin_wait_word(&cv->seq, seq, ms);
+#else
     struct timespec ts = rel_ms(ms);
     const long r = futex(&cv->seq, FUTEX_WAIT_PRIVATE, seq, ms == INFINITE ? NULL : &ts);
+#endif
     const int timed_out = r == -1 && errno == ETIMEDOUT;
     relock(l, flags);
     if (timed_out) { last_error = ERROR_TIMEOUT; return FALSE; }
     return TRUE;
 }
+#if defined(__APPLE__)
+static void srw_unlock(void *l) { pthread_rwlock_unlock(&((SRWLOCK *)l)->lock); }
+static void srw_relock(void *l, ULONG flags) {
+    if (flags & CONDITION_VARIABLE_LOCKMODE_SHARED) AcquireSRWLockShared((SRWLOCK *)l);
+    else AcquireSRWLockExclusive((SRWLOCK *)l);
+}
+#else
 static void srw_unlock(void *l) { pthread_rwlock_unlock((pthread_rwlock_t *)l); }
 static void srw_relock(void *l, ULONG flags) {
     if (flags & CONDITION_VARIABLE_LOCKMODE_SHARED) pthread_rwlock_rdlock((pthread_rwlock_t *)l);
     else pthread_rwlock_wrlock((pthread_rwlock_t *)l);
 }
+#endif
 static void cs_unlock(void *l) { pthread_mutex_unlock((pthread_mutex_t *)l); }
 static void cs_relock(void *l, ULONG flags) { (void)flags; pthread_mutex_lock((pthread_mutex_t *)l); }
 BOOL SleepConditionVariableSRW(CONDITION_VARIABLE *cv, SRWLOCK *l, DWORD ms, ULONG flags) {
@@ -125,22 +177,35 @@ void InitializeCriticalSection(CRITICAL_SECTION *cs) {
 }
 /* (any size: the futex is the aligned 32-bit word holding the address, woken by any change near it) */
 BOOL WaitOnAddress(volatile void *addr, void *compare, SIZE_T size, DWORD ms) {
+#if defined(__APPLE__)
+    const long r = darwin_wait_address(addr, compare, size, ms);
+#else
     volatile uint32_t *w = (volatile uint32_t *)((uintptr_t)addr & ~(uintptr_t)3);
     const uint32_t seen = *w;
     if (memcmp((const void *)addr, compare, size)) return TRUE;
     struct timespec ts = rel_ms(ms);
     const long r = futex(w, FUTEX_WAIT_PRIVATE, seen, ms == INFINITE ? NULL : &ts);
+#endif
     if (r == -1 && errno == ETIMEDOUT) { last_error = ERROR_TIMEOUT; return FALSE; }
     return TRUE;
 }
+#if defined(__APPLE__)
+void WakeByAddressSingle(void *addr) { darwin_wake_address(addr); }
+void WakeByAddressAll(void *addr) { darwin_wake_address(addr); }
+#else
 void WakeByAddressSingle(void *addr) { futex((volatile uint32_t *)((uintptr_t)addr & ~(uintptr_t)3), FUTEX_WAKE_PRIVATE, INT_MAX, NULL); }
 void WakeByAddressAll(void *addr) { futex((volatile uint32_t *)((uintptr_t)addr & ~(uintptr_t)3), FUTEX_WAKE_PRIVATE, INT_MAX, NULL); }
+#endif
 
 /* ---- time ---- */
 void Sleep(DWORD ms) {
     if (!ms) { sched_yield(); return; }
+#if defined(__APPLE__)
+    darwin_wait_until_ns(now_ns() + (int64_t)ms * 1000000LL);
+#else
     struct timespec ts = rel_ms(ms);
     while (nanosleep(&ts, &ts) && errno == EINTR) {}
+#endif
 }
 void GetSystemTimeAsFileTime(FILETIME *ft) {
     struct timespec ts;
@@ -485,8 +550,12 @@ DWORD WaitForSingleObject(HANDLE h, DWORD ms) {
         pthread_mutex_unlock(&t->mu);
     } else if (is(h, H_TIMER)) {
         const int64_t due = ((HTimer *)h)->due;
+#if defined(__APPLE__)
+        if (darwin_wait_until_ns(due)) { fail_errno(); return WAIT_FAILED; }
+#else
         struct timespec ts = {(time_t)(due / 1000000000LL), (long)(due % 1000000000LL)};
         while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR) {}
+#endif
         r = WAIT_OBJECT_0;
     } else {
         last_error = ERROR_INVALID_HANDLE;
