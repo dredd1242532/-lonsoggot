@@ -258,8 +258,11 @@ The build reads your game and never changes it.
 
 - **Caches and logs:** the game keeps its shader and pipeline caches in the game folder's `cache` folder (several GB, made
   for this version and this graphics card) and its logs in `logs`. `cache` can be deleted at any time: the next start
-  prepares the shaders again (minutes on some PCs). A game folder from an older build has them loose beside the game: the
-  first start moves them into these folders.
+  prepares the shaders again (minutes on some PCs). It also holds `longshot_pipeline_states.bin`, the list of pipelines
+  your play built, which you can [send in](assets/pipeline_states/README.md) before deleting it. What the game decided on
+  this PC stays beside the settings, not in `cache`: `longshot_driver_faults.txt` (shaders your driver failed on, left
+  out so they can't freeze it again), `longshot_prepare_skipped` and `longshot_load_start.txt`. A game folder from an
+  older build has its caches and logs loose beside the game: the first start moves them into these folders.
 - **Saves elsewhere:** start the game with `--user <folder>` ([command line arguments](#running-the-game-from-the-command-line)).
   A `user` folder from an earlier Linux build is moved to `~/.local/share/longshot` once. To carry on with a save from
   Hookshot, an emulator (Lichii, Eglantine, Orchid, ...) or NX2navi, or to take yours there, see the

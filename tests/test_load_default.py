@@ -51,10 +51,13 @@ def check_source():
         raise SystemExit("vk_programs.cpp does not use load_default.h's rule")
     draw = (ROOT / "gpu/vk/vk_draw.cpp").read_text(encoding="utf-8")
     built = draw.index("remove(precompile_built_path().c_str());   // (notes are added here")
-    if '"longshot_load_start.txt").c_str());' not in draw[built:built + 400]:
+    if 'remove(load_fallback_path().c_str());' not in draw[built:built + 400]:
         raise SystemExit("a preparation does not remove longshot_load_start.txt")
-    if '"longshot_load_start.txt.waited").c_str());' not in draw[built:built + 700]:
+    if 'remove((load_fallback_path() + ".waited").c_str());' not in draw[built:built + 700]:
         raise SystemExit("a preparation does not remove the strike beside longshot_load_start.txt")
+    # (the marker is what this PC fell back to, not a cache: beside the settings, so deleting cache/ keeps it; host/game_layout.c)
+    if 'std::string load_fallback_path() { return game_folder_path() + "longshot_load_start.txt"; }' not in draw:
+        raise SystemExit("longshot_load_start.txt is not in the game folder (deleting cache/ would forget the fallback)")
 
 
 def main():

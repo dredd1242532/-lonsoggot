@@ -996,10 +996,11 @@ namespace {
 
 HWND main_window = nullptr;
 // (longshot) longshot --prepare-shaders (a builder, after a build): the same work with no game, its progress as
-// "@@progress" lines on stdout. A skip there leaves longshot_prepare_skipped beside the game: its own starts then
+// "@@progress" lines on stdout. A skip there leaves longshot_prepare_skipped in the game folder (not in cache/): its own starts then
 // leave the work out too (what was not prepared is built when first drawn), until a --prepare-shaders run ends it
 bool prepare_only() { return env_on("LONGSHOT_PREPARE_ONLY"); }
-std::string skipped_path() { return cache_path("longshot_prepare_skipped"); }
+// (beside the settings, not in cache/: the player's choice to skip the preparation, which deleting the caches must not undo)
+std::string skipped_path() { return game_folder_path() + "longshot_prepare_skipped"; }
 // (longshot) The --prepare-shaders run's watchdog, for any GPU and any part of it.
 // - What it waits on, in the log the builder shows: every 30 s that nothing has moved, the part, its count, and whether the
 //   GPU driver faulted; a driver fault as soon as it is caught. (The pipeline steps log their own progress every 10 s,

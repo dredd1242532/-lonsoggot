@@ -1,4 +1,4 @@
-// (longshot) The program cache: longshot_programs.bin (and its .idx) beside the game, what translation made, kept between runs; its
+// (longshot) The program cache: longshot_programs.bin (and its .idx) in the game folder's cache/, what translation made, kept between runs; its
 // reads for play, the precompile, the prediction and the prepare; and the sizes of the prepare's worker pools.
 //
 // Not part of the translator stamp (nx2/build.py hashes vk_shader.cpp, vk_bank.cpp, vk_state.h, vk_api.h and the recompiler's
@@ -73,7 +73,7 @@ uint64_t program_cache_stamp() {
     return stamp;
 }
 
-// ---- (longshot) The program cache, longshot_programs.bin beside the executable: what translation made, by the key of the
+// ---- (longshot) The program cache, longshot_programs.bin in the game folder's cache/: what translation made, by the key of the
 // stages' code and inputs. A program met for the first time stopped the frame for its translation, 9 s of it each run,
 // the long stutters when walking somewhere (replay workers in jobs_wait for up to 150 ms). The pipelines themselves were
 // already kept (longshot_vk_pipelines.bin). Written as made; good for this translator (LONGSHOT_SHADER_STAMP) and these switches only

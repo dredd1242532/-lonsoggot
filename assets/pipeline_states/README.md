@@ -67,7 +67,7 @@ With a clone:
 
 1. Build the game from current `main`. A list from an older build may hold pipelines the current build no longer asks
    for.
-2. Move the game folder's `longshot_pipeline_states.bin` aside if there is one. Play: every pipeline the game makes in
+2. Move `longshot_pipeline_states.bin` in the game folder's `cache` aside if there is one. Play: every pipeline the game makes in
    play is added to that file. A run doesn't write the pipelines that the shipped list already built before the title,
    so your list only holds what the current one misses. It does write every compute program the run used, and `add`
    keeps the ones no other contributed list has. Play what the current lists miss, such as areas, dungeons,
@@ -75,7 +75,7 @@ With a clone:
 3. Add it, from the repository's root:
 
    ```sh
-   python -I nx2/pipeline_states.py add <github user>-<what you played> <game folder>/longshot_pipeline_states.bin \
+   python -I nx2/pipeline_states.py add <github user>-<what you played> <game folder>/cache/longshot_pipeline_states.bin \
        --who "<github user>" --gpu "<GPU>, driver <version>, <OS>" --build "main at <commit>" \
        --settings "<resolution, upscaler, frame generation, mods>" --route "<what you played>"
    python -I nx2/pipeline_states.py check

@@ -1162,7 +1162,7 @@ bool depth_aspect(VkFormat f) {
 }
 
 // (longshot) The programs the driver faulted on (driver_faults.h): not asked of it again in this run, nor in later runs on the
-// same driver (longshot_driver_faults.txt beside the executable). One program's builds go to the driver one at a time on AMD,
+// same driver (longshot_driver_faults.txt in the game folder, not in cache/). One program's builds go to the driver one at a time on AMD,
 // where a build behind a faulted one hung (issue 996); other drivers keep building a program's variants in parallel.
 // RX_VK_DRIVER_FAULTS=0: off; =1: the default; =2: one at a time on every driver
 constexpr VkResult kDriverFault = (VkResult)-77;   // (what the guards below answer for a fault in the driver)
@@ -1171,7 +1171,9 @@ int driver_faults_mode() {
     return mode;
 }
 bool driver_faults_on() { return driver_faults_mode() != 0; }
-std::string driver_faults_path() { return cache_path("longshot_driver_faults.txt"); }
+// (beside the settings, not in cache/: a decision made on this PC, which deleting the caches must not undo. Re-asked, a faulted
+// program froze AMD's Windows driver, issue 996)
+std::string driver_faults_path() { return game_folder_path() + "longshot_driver_faults.txt"; }
 driver_faults::Quarantine& fault_quarantine() {
     static driver_faults::Quarantine q;
     static std::once_flag once;
@@ -1589,7 +1591,7 @@ bool pipeline_note(uint64_t key, const Program& p, const NvnState& s, const Targ
     return true;
 }
 
-// ---- (longshot) The compute programs play dispatches, each key once, in longshot_computes.bin beside the executable. The precompile
+// ---- (longshot) The compute programs play dispatches, each key once, in longshot_computes.bin in the game folder's cache/. The precompile
 // made every kept compute program ready and kept a pipeline for each: 10,328 of them, a few GB of RAM that grew a 16 GB PC out of memory
 // ("memory busted", out-of-memory crashes, Discord and issues 1228/1245, 2026-11-09), where play dispatches a few hundred. With the list
 // only those are kept ready; the rest stay on disk and are made when first dispatched, from the driver's and our pipeline cache (the
@@ -1665,7 +1667,7 @@ void compute_variant_note(uint64_t key, uint64_t variant) {
 
 // ---- (longshot) The pipeline state list: each pipeline the game asks for, by what it is made of and nothing of the game's code
 // (its stages' code keys, the vertex input and colour output types its program was translated for, the draw state baked into it), in
-// longshot_pipeline_states.bin beside the executable. Unlike longshot_pipelines.bin it is good for any build of the back end: when
+// longshot_pipeline_states.bin in the game folder's cache/. Unlike longshot_pipelines.bin it is good for any build of the back end: when
 // the shaders are prepared for a new one (prepare_run), every pipeline in it is noted for the precompile, its program translated
 // first when the seed's are not that one, so that a new release, or a new install with a list from someone else's play
 // (longshot_pipeline_states_shipped.bin, nx2/make_game.py: merged from assets/pipeline_states/), builds them before the game and not in
@@ -1978,8 +1980,8 @@ std::string state_list_bytes(bool* present) {
 void state_list_prepare(void (*progress)(size_t done, size_t total), bool open_seed = false) {
     if (env_on("RX_VK_NO_STATE_LIST")) return;
     remove(precompile_built_path().c_str());   // (notes are added here without their pipelines: precompile_run builds them)
-    remove((pipe_notes_path().substr(0, pipe_notes_path().find_last_of("\\/") + 1) + "longshot_load_start.txt").c_str());
-    remove((pipe_notes_path().substr(0, pipe_notes_path().find_last_of("\\/") + 1) + "longshot_load_start.txt.waited").c_str());   // (a preparation: loads at create are tried again, load_default.h load_fallback_path)
+    remove(load_fallback_path().c_str());
+    remove((load_fallback_path() + ".waited").c_str());   // (a preparation: loads at create are tried again, load_default.h load_fallback_path)
     const auto t0 = std::chrono::steady_clock::now();
     int shipped_version = 0;
     // (the shipped list's compute programs are not pipelines to note: precompile_run keeps them ready, computes_plan)
@@ -10276,10 +10278,8 @@ bool pipeline_keep_ready(uint64_t key, VkPipeline pl) {
     vkDestroyPipeline(dev.device, pl, nullptr);
     return false;
 }
-std::string load_fallback_path() {
-    const std::string notes = pipe_notes_path();
-    return notes.substr(0, notes.find_last_of("\\/") + 1) + "longshot_load_start.txt";
-}
+// (beside the settings, not in cache/: the load mode this PC fell back to, which deleting the caches must not undo)
+std::string load_fallback_path() { return game_folder_path() + "longshot_load_start.txt"; }
 void program_layout(Program& p) { ensure_layout(p); }
 std::vector<std::pair<uint64_t, uint64_t>> compute_variants_learned() { return compute_variants_read(); }
 void pipeline_cache_close() {

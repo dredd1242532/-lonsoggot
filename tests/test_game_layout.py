@@ -7,7 +7,10 @@ its caches and logs in, loose beside the game, started once. No game: authored p
 - the program cache's old lock files beside the game are deleted (the game locks cache/'s);
 - the button prompts an older build made in prompts/ are deleted (made again in cache/prompts); the build's own prompts stay;
 - the build's files, the settings and the saves stay where they are;
-- a file already in cache/ or logs/ is never written over: the loose one stays, and the log says so;
+- what the game decided on this PC (the driver's faults, a skipped preparation, the load mode's fallback) is no cache: it stays
+  beside the settings, and a build that put it in cache/ has it moved back out;
+- a file already in cache/ or logs/ is never written over: a loose log stays, and the log says so; a loose cache, which could
+  never move, is deleted (cache/ has its own), and the log says how much;
 - a second start changes nothing; the game in bin/ beside image.bin finds the folder above it.
 
 python -I -B tests/test_game_layout.py [--cc gcc]
@@ -38,14 +41,14 @@ int main(void) {
 
 LOGS = ("longshot_log.txt", "longshot_log.1.txt", "longshot_log.4.txt", "longshot_frames.csv")
 CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_pipelines.bin", "longshot_pipelines.bin.built",
-          "longshot_computes.bin", "longshot_pipeline_states.bin", "longshot_prepared.bin", "longshot_driver_faults.txt",
-          "longshot_load_start.txt")
+          "longshot_computes.bin", "longshot_pipeline_states.bin", "longshot_prepared.bin")
+RECORDS = ("longshot_driver_faults.txt", "longshot_prepare_skipped", "longshot_load_start.txt", "longshot_load_start.txt.waited")
 RENAMED = {"mkw_vk_pipelines.bin": "longshot_vk_pipelines.bin", "mkw_vk_pipelines_play_3.bin": "longshot_vk_pipelines_play_3.bin",
            "mkw_vk_pipelines.stamp": "longshot_vk_pipelines.stamp"}
 CUT_SHORT = ("mkw_vk_pipelines.bin.tmp", "mkw_vk_pipelines_play_4.bin.tmp", "mkw_vk_pipelines.bin.tmp-a1B2c3")
 OLD_LOCKS = ("longshot_programs.bin.lock", "longshot_programs.zst.bin.lock")
 MADE_AGAIN = ("prompts/Common.bntx.zs", "prompts/Common.key", "prompts/External.bfotf.zs", "prompts/rsizetable.mod.zs")
-STAY = ("image.bin", "language.txt", "longshot_options.ini", "longshot_env.txt", "longshot_shaders.bin",
+STAY = RECORDS + ("image.bin", "language.txt", "longshot_options.ini", "longshot_env.txt", "longshot_shaders.bin",
         "longshot_pipeline_states_shipped.bin", "prompts/Common.bntx", "prompts/External.bfotf", "prompts/rsizetable.zs",
         "prompts/xbox/textures.bin", "user/save/0100/file")
 
@@ -116,9 +119,22 @@ def main():
         (game / "logs" / "longshot_log.txt").write_text("newer log")
         out = run(exe)
         assert (game / "cache" / "longshot_programs.bin").read_text() == "newer"
-        assert (game / "longshot_programs.bin").read_text() == "longshot_programs.bin"
+        assert not (game / "longshot_programs.bin").exists()   # (a cache that could never move: deleted)
+        assert "1 loose shader caches deleted" in out, out
         assert (game / "logs" / "longshot_log.txt").read_text() == "newer log"
-        assert "2 files stayed where they were" in out, out
+        assert (game / "longshot_log.txt").read_text() == "longshot_log.txt"   # (a log is never deleted)
+        assert "1 files stayed where they were" in out, out
+
+        # what the game decided on this PC, put in cache/ by a build before this rule: moved back out, beside the settings
+        game = tmp / "r" / "game"
+        exe = game_folder(game, built)
+        (game / "cache").mkdir()
+        for name in RECORDS:
+            (game / name).unlink()
+            (game / "cache" / name).write_text("in cache " + name)
+        out = run(exe)
+        for name in RECORDS:
+            assert (game / name).read_text() == "in cache " + name and not (game / "cache" / name).exists(), name
 
         # the game in bin/ beside image.bin: the folder above bin/ is the game folder, nothing goes into bin/
         game = tmp / "c" / "game"
