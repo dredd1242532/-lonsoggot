@@ -63,11 +63,12 @@ PGO = os.environ.get("RX_PGO", "")
 # (host/posix: its windows.h is found first), the window and sound on SDL2. LONGSHOT_SYSROOT=<dir>: compile and link
 # against that root (the AppImage's: glibc 2.35, so the game runs on older systems than the one that built it).
 # LONGSHOT_VK_PREBUILT=<longshot_vk.so>: the Vulkan back end as built already (the AppImage's), not compiled here.
-SYSTEM = toolchain.system()
-LINUX = SYSTEM == "linux"
-DARWIN = sys.platform == "darwin" and SYSTEM == "macos"
+# (macOS: Mach-O, longshot_vk.dylib; nx2/darwin_build.py, and a64-kit's toolchain made for it in nx2/darwin_toolchain.py)
+LINUX = not toolchain.windows() and sys.platform != "darwin"   # (longshot: RX_TARGET=windows on Linux builds the Windows game, with llvm-mingw)
+DARWIN = sys.platform == "darwin" and not toolchain.windows()
 if DARWIN:
     import darwin_build
+    import darwin_toolchain
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("LONGSHOT_SYSROOT", "")
 EXE = darwin_build.EXE if DARWIN else ("longshot" if LINUX else "longshot.exe")
@@ -679,9 +680,9 @@ from host_cpu import host_march, host_mtune   # (make_game.py asks it too: the A
 
 MARCH = os.environ.get("RX_MARCH") or host_march()
 if DARWIN:
-    if toolchain.architecture() == "arm64" and MARCH.startswith(("x86", "znver", "haswell", "skylake")):
+    if darwin_toolchain.architecture() == "arm64" and MARCH.startswith(("x86", "znver", "haswell", "skylake")):
         raise SystemExit("RX_MARCH=%s is x86-specific; use RX_ARCH=x86_64, or an ARM level for arm64" % MARCH)
-    print("build: macOS %s%s" % (toolchain.architecture(), " -march=" + MARCH if MARCH else " (baseline ISA)"), flush=True)
+    print("build: macOS %s%s" % (darwin_toolchain.architecture(), " -march=" + MARCH if MARCH else " (baseline ISA)"), flush=True)
 elif os.environ.get("RX_MARCH"):
     if MARCH != "x86-64-v3":
         print("build: the game is built for %s (RX_MARCH)" % MARCH, flush=True)
@@ -691,7 +692,7 @@ CPU = (["-march=" + MARCH] if MARCH else []) + ["-ffp-contract=off"]
 MTUNE = os.environ.get("RX_MTUNE") or host_mtune()
 if MTUNE:
     CPU += ["-mtune=" + MTUNE]
-CX16 = [] if DARWIN and toolchain.architecture() == "arm64" else ["-mcx16"]
+CX16 = [] if DARWIN and darwin_toolchain.architecture() == "arm64" else ["-mcx16"]
 OPT = "O1"   # (the lifted code's level; code_hot.c's is RX_HOT_OPT)
 
 

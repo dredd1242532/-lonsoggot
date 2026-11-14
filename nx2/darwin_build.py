@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 
+import darwin_toolchain
 import toolchain
 
 
@@ -112,9 +113,9 @@ def compiler_key():
     """Changing compiler or SDK must invalidate cached/kept objects, even at the same path."""
     identity = []
     for name in ("clang", "clang++"):
-        identity += [toolchain.need(toolchain.find(name)), toolchain.version(name)]
+        identity += [toolchain.need(toolchain.find(name)), darwin_toolchain.version(name)]
     identity += toolchain.native_target()
-    sdk = os.path.join(toolchain.darwin_sdk(), "SDKSettings.json")
+    sdk = os.path.join(darwin_toolchain.darwin_sdk(), "SDKSettings.json")
     with open(sdk, "rb") as f:
         body = f.read()
     return hashlib.sha256("\n".join(identity).encode() + body).hexdigest()

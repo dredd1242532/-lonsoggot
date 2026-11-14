@@ -41,7 +41,10 @@ filesystem. Only its own relative `lib -> usr/lib` stays a link.
 macOS has an **experimental build-command path**, not a working game port yet. It selects Mach-O rather than ELF,
 targets macOS 14.4, and defaults to arm64 on Apple Silicon (`RX_ARCH=x86_64` selects the Rosetta route). Keep the
 compiler native: compile with its `-arch x86_64`, then run the resulting program under Rosetta, not clang itself.
-Windows and Linux still form their original compiler/linker commands.
+Windows and Linux still form their original compiler/linker commands. `third_party/a64-kit` stays as it is: its
+`tools/toolchain.py` and `lift/build_emit.py` get their macOS behaviour from `nx2/darwin_toolchain.py`, which `kit.py` and
+`make_game.py` install over four of toolchain's functions (`find`, `need`, `native_target`, `native_link`) and over
+build_emit's output and build on a Mac only.
 
 On macOS, `EMSDK` may name a normal LLVM prefix (`bin/`) or the existing emsdk layout (`upstream/bin/`); compiler
 and `llvm-profdata` discovery then tries PATH and `xcrun`. The SDK is `SDKROOT`, otherwise `xcrun --sdk macosx

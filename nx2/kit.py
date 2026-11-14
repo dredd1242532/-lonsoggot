@@ -16,6 +16,9 @@ for sub in ("lift", "tools", "hos", "rt"):
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+if sys.platform == "darwin":   # (macOS: a64-kit's toolchain and build_emit with Mach-O commands, from outside third_party/)
+    import darwin_toolchain
+    darwin_toolchain.install()
 
 WORK = os.environ.get("OOT_WORK", os.path.join(ROOT, "work"))
 

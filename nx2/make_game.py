@@ -54,9 +54,11 @@ import toolchain as _toolchain
 import disk as _disk
 # (longshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (LONGSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
-SYSTEM = _toolchain.system()
-LINUX, CROSS = SYSTEM == "linux", _toolchain.windows() and os.name != "nt"
-DARWIN = sys.platform == "darwin" and SYSTEM == "macos"
+LINUX, CROSS = not _toolchain.windows() and sys.platform != "darwin", _toolchain.windows() and os.name != "nt"
+DARWIN = sys.platform == "darwin" and not _toolchain.windows()
+if sys.platform == "darwin":   # (macOS: a64-kit's toolchain and build_emit with Mach-O commands, from outside third_party/)
+    import darwin_toolchain as _darwin
+    _darwin.install()
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
 BESIDE = ["longshot", "longshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["longshot.exe", "longshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
@@ -781,10 +783,10 @@ def check_darwin_prerequisites(work=None):
     prebuilt = build.prebuilt_renderer()
     if prebuilt:
         try:
-            r = subprocess.run([_toolchain.need(_toolchain.find("lipo")), "-verify_arch", _toolchain.architecture(), prebuilt],
+            r = subprocess.run([_toolchain.need(_toolchain.find("lipo")), "-verify_arch", _darwin.architecture(), prebuilt],
                                capture_output=True, text=True, timeout=15)
             if r.returncode:
-                missing.append("macOS renderer %s has no %s Mach-O slice: %s" % (prebuilt, _toolchain.architecture(), r.stderr.strip()))
+                missing.append("macOS renderer %s has no %s Mach-O slice: %s" % (prebuilt, _darwin.architecture(), r.stderr.strip()))
         except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
             missing.append("macOS renderer architecture check: %s" % e)
     else:
@@ -796,7 +798,7 @@ def check_darwin_prerequisites(work=None):
     for name in ("clang", "clang++", "llvm-profdata"):
         try:
             path = _toolchain.need(_toolchain.find(name))
-            print("the %s: %s (%s)" % (name, path, _toolchain.version(name)), flush=True)
+            print("the %s: %s (%s)" % (name, path, _darwin.version(name)), flush=True)
         except (OSError, SystemExit, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             missing.append("%s: %s" % (name, e))
     try:
@@ -816,13 +818,13 @@ def check_darwin_prerequisites(work=None):
                 r = subprocess.run([_toolchain.need(_toolchain.find(name))] + flags + [src, "-o", os.path.join(d, "t")] + extra,
                                    capture_output=True, text=True, timeout=60)
                 if r.returncode:
-                    missing.append("macOS %s link for %s: %s" % (name, _toolchain.architecture(), (r.stdout + r.stderr).strip()))
+                    missing.append("macOS %s link for %s: %s" % (name, _darwin.architecture(), (r.stdout + r.stderr).strip()))
     except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
         missing.append("macOS compiler/linker: %s" % e)
     if missing:
         fail("Missing macOS build prerequisites: " + "; ".join(" ".join(m.splitlines()) for m in missing))
     print("macOS build prerequisites: OK (%s, minimum 14.4; LLVM 23.1.5 is the release pin, other versions accepted)" %
-          _toolchain.architecture(), flush=True)
+          _darwin.architecture(), flush=True)
 
 
 def requested_jobs(value):

@@ -43,7 +43,7 @@ WORK = "/fixture/Games, Zelda"
 FUNCTIONS = {"target", "linker", "HOT_ORDER", "flags", "host_flags", "renderer_flags", "executable_link",
              "renderer_link", "ngx_library", "ngx_link", "ffmpeg_linux", "header_package", "cpm_dirs", "cpm_package",
              "check_vk_symbols", "flag_text"}
-CONSTANTS = {"NX2_RT", "HOST", "POSIX", "SYSROOT", "SYSTEM", "LINUX", "DARWIN", "EXE", "VK_LIB", "HOST_LIBS",
+CONSTANTS = {"NX2_RT", "HOST", "POSIX", "SYSROOT", "LINUX", "DARWIN", "EXE", "VK_LIB", "HOST_LIBS",
              "GPU", "WRITE_TRACK"}
 ROUTES = (("linux", "linux", "posix", False), ("msvc", "win32", "nt", False), ("mingw", "linux", "posix", True))
 
@@ -81,18 +81,27 @@ def command_space(source, system="darwin", name="posix", mingw=False, arch="arm6
     if not real:
         # The frozen command inputs use a virtual /fixture tree on every test host.
         osproxy.path = posixpath
+    # a64-kit's toolchain.py as main has it; on the simulated Mac, nx2/darwin_toolchain.py installed over it, as kit.py does
     tc = load_file("build_flags_toolchain", source / "third_party/a64-kit/tools/toolchain.py")
     tc.os = osproxy
     tc.sys = types.SimpleNamespace(platform=system)
+    dt = None
+    if (source / "nx2/darwin_toolchain.py").exists():
+        with mock.patch.dict(sys.modules, {"toolchain": tc}):
+            dt = load_file("build_flags_darwin_toolchain", source / "nx2/darwin_toolchain.py")
+        dt.os = osproxy
+        dt.sys = tc.sys
+        if not real:
+            dt.platform = types.SimpleNamespace(machine=lambda: "arm64")
+            dt.darwin_sdk = lambda: env["SDKROOT"]
+        if system == "darwin":
+            dt.install_toolchain()
     if not real:
-        tc.platform = types.SimpleNamespace(machine=lambda: "arm64")
         tc.find = lambda tool, host=False: "/fixture/tools/" + tool
         tc.need = lambda path: path
         tc.lld_link = lambda: "/fixture/tools/lld-link.exe"
-        if hasattr(tc, "darwin_sdk"):
-            tc.darwin_sdk = lambda: env["SDKROOT"]
     kitroot = str(source) if real else "/fixture/tree"
-    ns = {"os": osproxy, "sys": types.SimpleNamespace(platform=system), "toolchain": tc,
+    ns = {"os": osproxy, "sys": types.SimpleNamespace(platform=system), "toolchain": tc, "darwin_toolchain": dt,
           "kit": types.SimpleNamespace(ROOT=kitroot, HERE=kitroot + "/nx2", KIT=kitroot + "/third_party/a64-kit", WORK=work),
           "DARWIN": False, "PGO": env.get("RX_PGO", ""), "OPT": "O1", "FFMPEG_LIBS": ("avcodec", "swscale", "swresample", "avutil"),
           "FFMPEG_LX": ([], ["-lavcodec", "-lswscale", "-lswresample", "-lavutil"]) if extras else None,
@@ -100,14 +109,14 @@ def command_space(source, system="darwin", name="posix", mingw=False, arch="arm6
           "NGX_SDK": "/fixture/ngx" if extras else "", "WGPU": "/fixture/wgpu", "CX16": ["-mcx16"],
           "shutil": shutil, "subprocess": subprocess, "hashlib": hashlib}
     if (source / "nx2/darwin_build.py").exists():
-        with mock.patch.dict(sys.modules, {"toolchain": tc}):
+        with mock.patch.dict(sys.modules, {"toolchain": tc, "darwin_toolchain": dt}):
             darwin = load_file("build_flags_darwin", source / "nx2/darwin_build.py")
         darwin.os = host_os   # real discovery and temporary-directory fixtures keep their host's paths
         if not real:
             darwin.order_file = lambda path: path + ".macos"
         ns["darwin_build"] = darwin
     cpu_tree = ast.parse((source / "nx2/host_cpu.py").read_text())
-    cpuns = {"os": osproxy, "sys": ns["sys"], "toolchain": tc}
+    cpuns = {"os": osproxy, "sys": ns["sys"], "toolchain": tc, "darwin_toolchain": dt}
     exec(compile(ast.Module(body=[n for n in cpu_tree.body if isinstance(n, ast.FunctionDef)], type_ignores=[]),
                  "host_cpu.py", "exec"), cpuns)
     ns.update(host_march=cpuns["host_march"], host_mtune=cpuns["host_mtune"])
@@ -259,15 +268,22 @@ class CommandContracts(unittest.TestCase):
 
 class DiscoveryContracts(unittest.TestCase):
     def setUp(self):
+        # a64-kit's toolchain.py with nx2/darwin_toolchain.py installed over it, as kit.py and make_game.py do on a Mac
         self.tc = load_file("discovery_toolchain", SOURCE / "third_party/a64-kit/tools/toolchain.py")
         self.tc.sys = types.SimpleNamespace(platform="darwin")
         self.tmp = tempfile.TemporaryDirectory(prefix="longshot tools, ")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.tc.os = os_view("posix", {})
+        self.dt = None
+        if (SOURCE / "nx2/darwin_toolchain.py").is_file():
+            with mock.patch.dict(sys.modules, {"toolchain": self.tc}):
+                self.dt = load_file("discovery_darwin_toolchain", SOURCE / "nx2/darwin_toolchain.py")
+            self.dt.sys, self.dt.os = self.tc.sys, self.tc.os
+            self.dt.install_toolchain()
 
     def test_prefix_path_xcrun_order_and_missing(self):
-        self.assertTrue(hasattr(self.tc, "_xcrun"), "tool discovery never asks xcrun on main")
+        self.assertTrue(hasattr(self.dt, "_xcrun"), "tool discovery never asks xcrun on main")
         for tool in ("clang", "clang++", "llvm-profdata"):
             with self.subTest(tool):
                 prefix = self.root / "LLVM, chosen"
@@ -276,8 +292,9 @@ class DiscoveryContracts(unittest.TestCase):
                 p.write_text("authored executable sentinel\n")
                 p.chmod(0o700)
                 self.tc.os.environ["EMSDK"] = str(prefix)
-                with mock.patch.object(self.tc.shutil, "which", return_value="/path/" + tool) as which, \
-                        mock.patch.object(self.tc, "_xcrun", return_value="/xcrun/" + tool) as xcrun:
+                with mock.patch.object(self.dt.shutil, "which", return_value="/path/" + tool) as which, \
+                        mock.patch.object(self.dt, "_xcrun", return_value="/xcrun/" + tool) as xcrun:
+                    # (through toolchain's own names: the installed functions are the ones a64-kit's callers reach)
                     self.assertEqual(self.tc.find(tool), str(p))
                     which.assert_not_called()
                     xcrun.assert_not_called()
@@ -291,14 +308,14 @@ class DiscoveryContracts(unittest.TestCase):
                         self.tc.need(self.tc.find(tool))
 
     def test_host_architecture_does_not_follow_game_switch(self):
-        self.assertTrue(hasattr(self.tc, "architecture"), "no host/target architecture separation")
-        self.tc.platform = types.SimpleNamespace(machine=lambda: "arm64")
+        self.assertTrue(hasattr(self.dt, "architecture"), "no host/target architecture separation")
+        self.dt.platform = types.SimpleNamespace(machine=lambda: "arm64")
         self.tc.os.environ.update(RX_ARCH="x86_64", SDKROOT=self.tmp.name)
-        self.assertEqual(self.tc.architecture(), "x86_64")
-        self.assertEqual(self.tc.architecture(host=True), "arm64")
+        self.assertEqual(self.dt.architecture(), "x86_64")
+        self.assertEqual(self.dt.architecture(host=True), "arm64")
         self.tc.os.environ["RX_ARCH"] = "invalid"
         with self.assertRaisesRegex(SystemExit, "RX_ARCH"):
-            self.tc.architecture()
+            self.dt.architecture()
 
     def test_pkg_config_preserves_spaces_and_explicit_prefix(self):
         ns, _ = command_space(SOURCE)
@@ -319,28 +336,48 @@ class DiscoveryContracts(unittest.TestCase):
             self.assertEqual(env["PKG_CONFIG_LIBDIR"], env["PKG_CONFIG_PATH"])
 
     def test_translated_python_defaults_to_native_game_but_keeps_its_helpers(self):
-        self.assertTrue(hasattr(self.tc, "_apple_silicon"), "main has no physical/process CPU distinction")
-        self.tc.platform = types.SimpleNamespace(machine=lambda: "x86_64")
-        with mock.patch.object(self.tc, "_apple_silicon", return_value=True):
-            self.assertEqual(self.tc.architecture(), "arm64")
-            self.assertEqual(self.tc.architecture(host=True), "x86_64")
+        self.assertTrue(hasattr(self.dt, "_apple_silicon"), "main has no physical/process CPU distinction")
+        self.dt.platform = types.SimpleNamespace(machine=lambda: "x86_64")
+        with mock.patch.object(self.dt, "_apple_silicon", return_value=True):
+            self.assertEqual(self.dt.architecture(), "arm64")
+            self.assertEqual(self.dt.architecture(host=True), "x86_64")
 
     def test_helpers_use_process_architecture_not_rx_arch(self):
         ns, _ = command_space(SOURCE, arch="x86_64")
         self.assertTrue(ns["DARWIN"], "main has no macOS helper path")
-        tc = ns["toolchain"]
+        tc, dt = ns["toolchain"], ns["darwin_toolchain"]
         for process_arch in ("arm64", "x86_64"):
-            tc.platform = types.SimpleNamespace(machine=lambda a=process_arch: a)
-            with self.subTest(process_arch=process_arch), mock.patch.dict(sys.modules, {"toolchain": tc, "kit": ns["kit"]}), \
+            dt.platform = types.SimpleNamespace(machine=lambda a=process_arch: a)
+            with self.subTest(process_arch=process_arch), \
+                    mock.patch.dict(sys.modules, {"toolchain": tc, "darwin_toolchain": dt, "kit": ns["kit"]}), \
                     mock.patch.object(sys, "path", list(sys.path)), mock.patch.object(sys, "platform", "darwin"):
                 emitter = load_file("mac_emit", SOURCE / "third_party/a64-kit/lift/build_emit.py")
+                dt.install_emit(emitter)
                 zbic = load_file("mac_zbic", SOURCE / "nx2/zbic.py")
-                for module, output in ((emitter, emitter.OUT), (zbic, zbic.DLL)):
+                for output, cmd in ((emitter.OUT, dt.emit_command(emitter)), (zbic.DLL, zbic.command())):
                     self.assertIn(process_arch + ".dylib", output)
-                    cmd = module.command()
                     self.assertEqual(cmd[cmd.index("-arch") + 1], process_arch)
                     self.assertIn("-mmacosx-version-min=14.4", cmd)
                     self.assertIn("-dynamiclib", cmd)
+
+    @unittest.skipUnless(sys.platform == "darwin", "kit.py and make_game.py install the macOS toolchain on macOS only")
+    def test_kit_and_maker_install_the_macos_toolchain(self):
+        self.assertTrue(self.dt, "main has no macOS toolchain for kit.py and make_game.py to install")
+        probe = ("import sys; sys.path.insert(0, sys.argv[1]); import %s; import toolchain, build_emit, darwin_toolchain as d; "
+                 "print(toolchain.find is d.find, toolchain.need is d.need, toolchain.native_target is d.native_target, "
+                 "toolchain.native_link is d.native_link, build_emit.build.__qualname__, build_emit.OUT)")
+        arch = real_architectures()[0]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RX_", "LONGSHOT_", "OOT_"))}
+        env["OOT_WORK"] = str(self.root / "work")   # (kit.py reads work/dump.txt: an empty one of the test's)
+        for module in ("kit", "make_game"):
+            with self.subTest(module):
+                result = subprocess.run([sys.executable, "-I", "-B", "-c", probe % module, str(SOURCE / "nx2")],
+                                        capture_output=True, text=True, env=env, timeout=120)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                line = result.stdout.strip().splitlines()[-1].split(" ")
+                self.assertEqual(line[:4], ["True"] * 4, result.stdout)
+                self.assertEqual(line[4], "_emit_build.<locals>.build")
+                self.assertEqual(" ".join(line[5:]), str(SOURCE / "third_party/a64-kit/lift" / ("liba64emit-%s.dylib" % arch)))
 
     def test_maker_dispatches_to_macos_without_windows_or_linux_probe(self):
         tree = ast.parse((SOURCE / "nx2/make_game.py").read_text())

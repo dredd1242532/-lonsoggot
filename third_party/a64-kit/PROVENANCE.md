@@ -20,15 +20,6 @@ Changes made here after the copy (against Hookshot's first import of it, commit 
   history is Hookshot's: `git log 04407384.. -- third_party/a64-kit`.
 - Longshot: `tools/toolchain.py` reads `LONGSHOT_MINGW`, as the rest of Longshot's build sets it, where Hookshot read
   `HOOKSHOT_MINGW` (marked `(longshot)`). The `(hookshot)` markers and comments stay as Hookshot wrote them.
-- Longshot's macOS build-command work (2026-11-13): `tools/toolchain.py` distinguishes the output system and architecture
-  from the Python host, finds LLVM tools via an explicit `EMSDK` prefix, PATH and `xcrun`, selects the Apple SDK and
-  Mach-O linker, and sets a 14.4 deployment target. `lift/build_emit.py` names macOS helpers by the Python process's
-  architecture and keys their cache by the compiler/flags as well as source. Windows/Linux command arrays and the
-  existing upstream notices are retained. This is a deliberate local adaptation, not a refresh copied from upstream;
-  it was authorized as an exception to the third-party rule and the digest was updated with
-  `python -I scripts/check_third_party.py --update a64-kit`. New platform logic was written from Apple's `ld(1)`,
-  `xcrun(1)` and Clang's documented driver options, not another port's code. The game-free command and link checks
-  are `tests/test_macos_build_flags.py`; this does not claim a complete macOS LS build.
 
 So the copy can no longer be refreshed by copying the files again: a refresh keeps these changes, and the tree-sha256
 below is this folder's, not upstream's (python -I scripts/check_third_party.py).
@@ -36,4 +27,4 @@ below is this folder's, not upstream's (python -I scripts/check_third_party.py).
 Licensing: `lift/suyu/arm64_to_c.h` is suyu's (GPL-2.0-or-later, texts in `lift/suyu/`), so `a64emit.dll`, the
 generated runtime and all lifted C are GPL. See `NOTICE.TOTKPort.md`.
 
-tree-sha256: 0a7d1c5a94c1745cc59ac88a4a06b1ccb51b537cac19c793c13a53acff5736f9
+tree-sha256: 9e8b8a6500f0b41bd18a55c36d49ab7cc9f5dfd05beff952287acd18a01dacbd

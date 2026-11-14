@@ -10,12 +10,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # (python -I leaves the script folder off)
 import kit  # noqa: F401  (a64-kit on sys.path)
 import toolchain
+if sys.platform == "darwin":
+    import darwin_toolchain
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(os.path.dirname(HERE), "third_party", "zbic")
 DLL = os.path.join(SRC, "zbic.dll" if os.name == "nt" else "zbic.so")
 if sys.platform == "darwin":
-    DLL = os.path.join(SRC, "zbic-%s.dylib" % toolchain.architecture(host=True))
+    DLL = os.path.join(SRC, "zbic-%s.dylib" % darwin_toolchain.architecture(host=True))
 _lib = None
 
 def command():
@@ -34,7 +36,7 @@ def _build():
         import hashlib
         cmd = command()
         body = b"".join(open(os.path.join(SRC, n), "rb").read() for n in ("zstd.c", "zbic_api.c", "zstd.h", "zstd_errors.h"))
-        key = hashlib.sha256(body + ("\n".join(cmd) + "\n" + toolchain.version("clang", host=True)).encode()).hexdigest()
+        key = hashlib.sha256(body + ("\n".join(cmd) + "\n" + darwin_toolchain.version("clang", host=True)).encode()).hexdigest()
         try:
             with open(DLL + ".sha256") as f:
                 if os.path.isfile(DLL) and f.read() == key:
