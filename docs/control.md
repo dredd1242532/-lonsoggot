@@ -31,10 +31,11 @@ answers, then prints the socket's path.
 ## Security
 
 - **Opt-in.** There is no socket unless `HOS_CONTROL` names one.
-- **Local only.** There is a Unix domain socket on Linux and a named pipe on Windows, and never TCP. The pipe refuses
-  remote clients.
-- **This user only.** The socket is created with mode 0600 (the umask is set around `bind` too), and a client whose
-  `SO_PEERCRED` user differs from the game's is turned away. The pipe's DACL grants the current user alone.
+- **Local only.** There is a Unix domain socket on Linux and macOS and a named pipe on Windows, and never TCP. The pipe
+  refuses remote clients.
+- **This user only.** The socket is created with mode 0600 (the umask is set around `bind` too). The kernel reports the
+  peer's user through `SO_PEERCRED` on Linux or `getpeereid` on macOS; an unknown or different user is turned away.
+  The pipe's DACL grants the current user alone.
   `FILE_FLAG_FIRST_PIPE_INSTANCE` keeps another process from owning the name first.
 - **A folder of this user's.** The socket's folder has to be owned by the game's user and writable by no one else
   (not a shared `/tmp`): otherwise the bridge stays off and the log says why. Another user could otherwise put a link
@@ -69,6 +70,30 @@ there, and a game taken over could act through it. If both land, start the bridg
 folder allowed) or keep it off under the sandbox without ABI 8. The other way round there is nothing to gain: a client
 already runs as the game's user outside the sandbox, so reaching the game through the bridge gives it nothing it did not
 have. The socket's folder must stay writable for shots taken there.
+
+### macOS transport
+
+The socket implementation is in `host/posix/darwin_control_sockets.c`, for macOS 14.4 and newer on arm64 or x86-64.
+It does not port the rest of the game. The path is checked against the platform's `sockaddr_un.sun_path`: on macOS,
+103 bytes plus the terminating NUL fit. An overlong path is refused, never truncated. `sun_len` and the address length
+passed to `bind` and `connect` include that NUL. The existing folder ownership and mode checks are unchanged.
+A temporary datagram socket probes an existing path: a live stream socket returns `EPROTOTYPE`, even with a full
+accept queue, whereas a stale socket refuses the connection. An uncertain result leaves the path alone. A stream
+probe cannot make this distinction on Darwin, where a full live queue also returns `ECONNREFUSED`. The listener uses
+`SOMAXCONN` for pending connections so bursts can reach the bridge's busy reply; the active-client limit stays eight.
+
+`socket` and `accept` are followed immediately by checked `fcntl` calls for close-on-exec and nonblocking state; failed
+setup closes the descriptor. Reads and writes stay nonblocking, and writes keep `MSG_NOSIGNAL` so a closed peer yields
+`EPIPE`, not a process-wide signal. There is no global SIGPIPE ignore.
+Darwin's `poll` can report read EOF as `POLLHUP` for a half-close and no event once read interest is removed. After
+read EOF, a nonblocking zero-byte send distinguishes a fully closed peer without putting bytes into the JSON stream.
+This keeps a half-closed client's pending replies and drops a disconnected client's pending inputs.
+
+The interval before `F_SETFD` is **not atomic with exec or a concurrent child launch**. Configured descriptors close
+on exec, but this does not eliminate that interval. Today macOS has no relaunch path that could hit it:
+`host/hos_relaunch.c` cannot read its Linux `/proc` startup files and returns before exec. A macOS relaunch must not be
+added without quiescing socket creation and accept, or closing inherited descriptors in the child (for example with
+`POSIX_SPAWN_CLOEXEC_DEFAULT`). The renderer's child-launch close-all policy also needs a separate macOS port.
 
 ## Protocol
 
@@ -430,9 +455,9 @@ level).
   game's own.
 - `rw` lets a client change that memory. A write can corrupt or crash the game and the runtime, not only move the game
   along, and a corrupted state can be saved to disk. **Use a throwaway save.**
-- The socket is already this user's only (0600, `SO_PEERCRED`), so a client of the bridge can reach no memory that any
-  other process of the same user could not already reach. The opt-in is about what the bridge itself will do, not about
-  who can connect.
+- The socket is already this user's only (0600 and kernel peer credentials), so a client of the bridge can reach no
+  memory that any other process of the same user could not already reach. The opt-in is about what the bridge itself
+  will do, not about who can connect.
 
 Addresses are guest addresses (the image is at `0x80000000`, the heap at `0x1000000000`). An address or range outside
 the memory the runtime has mapped — the image, the system region in use, the heap, or an address region — is an error
@@ -509,6 +534,9 @@ sets `XDG_DATA_HOME` for the run, so it plays from saves of its own. `--env NAME
 - **Windows**: CI has no Windows runner, so the named pipe is tested only when a Windows tester runs the suite
   (RELEASING.md, *Needs a Windows tester*). The bridge inside a Windows game build, `launch` on Windows, and refusing
   remote pipe clients (`PIPE_REJECT_REMOTE_CLIENTS`, which needs a second machine) are not tested.
+- **macOS**: the real game and its relaunch/renderer child-launch paths are not covered by the transport fixtures.
+  The descriptor setup is not atomic with exec; the lifecycle requirement above must hold when those paths are ported.
+  A second user's connection and execution on the minimum macOS version need separate testing.
 - **The state is a guess** from the draws a frame (above). A scene with unusual counts can be misread; for OoT, `game`'s
   `event` and `loading` and `map` are the game's own.
 - **A teleport the game sent but that did not move Link**: `accepted` (the event manager's answer) is reported, not turned into an error: `false` was seen once, when the map did not change, but that it always means no move is not established. Otherwise `wait map` times out.
@@ -522,10 +550,15 @@ sets `XDG_DATA_HOME` for the run, so it plays from saves of its own. `--env NAME
 ## Tests
 
 `tests/test_control.py` builds the bridge with a fake game and drives it over its real transport: the Unix socket on
-Linux, the named pipe on Windows (a Windows tester's run: CI is Linux only). On Windows it also checks the pipe's access control:
+Linux and macOS, the named pipe on Windows (a Windows tester's run). On Windows it also checks the pipe's access control:
 another first instance of the name and a second bridge on it are refused, and the DACL, read back through a client's
-handle, is protected with a single ACE for the current user. `tests/test_longshot_ctl.py` drives the client against a
-fake bridge on the same transports.
+handle, is protected with a single ACE for the current user. On macOS, `control_darwin_test.c` additionally inspects the
+real listener and accepted descriptors, checks 103/104-byte path boundaries, keeps a live socket and replaces a stale
+one, rejects a kernel-reported UID against a deliberately different expected UID, refuses unavailable credentials,
+execs a child to check descriptor closure, and exercises `EPIPE` without SIGPIPE. That UID case does not substitute for
+a test with another account. `--arch arm64` or `--arch x86_64` compiles both fixtures for that target and runs them with
+`arch`; x86-64 needs Rosetta on Apple Silicon. `tests/test_longshot_ctl.py` drives the client against a fake bridge on
+the same transports.
 `tests/test_oot_state_tap.py` uses bounded fake guest memory and the real bridge transport for sampled values,
 per-connection watches/changes, cadence, nulls, table limits, hashes, subscription lifecycle and wiring.
 

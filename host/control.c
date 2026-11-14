@@ -23,6 +23,9 @@
 
    tests/control_test.c builds this file with a fake game (HOS_CONTROL_NO_GAME) and drives it over a real socket. */
 #include "control.h"
+#if defined(__APPLE__)
+#include "posix/darwin_control_sockets.h"
+#endif
 
 #include <ctype.h>
 #include <errno.h>
@@ -2008,21 +2011,41 @@ static int transport_open(const char *path) {
     if (strlen(path) >= sizeof a.sun_path) return ctl_log("control: %s: the socket's path is too long", path), 0;
     if (!folder_private(path)) return 0;
     strcpy(a.sun_path, path);
+#if defined(__APPLE__)
+    const socklen_t address_len = hos_darwin_control_address_length(&a);
+#endif
     struct stat st;
     if (!lstat(path, &st)) {
         if (!S_ISSOCK(st.st_mode)) return ctl_log("control: %s is there and is not a socket: not replaced", path), 0;
+#if defined(__APPLE__)
+        const int live = hos_darwin_control_probe(&a);
+        if (live < 0) return ctl_log("control: %s: cannot check existing socket: %s", path, strerror(errno)), 0;
+#else
         const int probe = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         const int live = probe >= 0 && connect(probe, (struct sockaddr *)&a, sizeof a) == 0;
         if (probe >= 0) close(probe);
+#endif
         if (live) return ctl_log("control: %s: another game listens there", path), 0;
         unlink(path);   /* (one left by a game that ended) */
     }
+#if defined(__APPLE__)
+    listen_fd = hos_darwin_control_socket();
+#else
     listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+#endif
     if (listen_fd < 0) return ctl_log("control: socket: %s", strerror(errno)), 0;
     const mode_t old = umask(077);
+#if defined(__APPLE__)
+    const int bound = bind(listen_fd, (struct sockaddr *)&a, address_len);
+#else
     const int bound = bind(listen_fd, (struct sockaddr *)&a, sizeof a);
+#endif
     umask(old);
+#if defined(__APPLE__)
+    if (bound || chmod(path, 0600) || hos_darwin_control_listen(listen_fd)) {
+#else
     if (bound || chmod(path, 0600) || listen(listen_fd, 4)) {
+#endif
         ctl_log("control: %s: %s", path, strerror(errno));
         close(listen_fd);
         listen_fd = -1;
@@ -2067,15 +2090,22 @@ static void transport_wait(int ms) {
     for (int i = 0; i < CTL_CONNS; i++) {
         Conn *c = &G.conns[i];
         if (!c->used) continue;
+#if defined(__APPLE__)
+        if (c->eof && hos_darwin_control_closed(c->fd)) c->closing = 1;
+#endif
         fds[n].fd = c->fd, fds[n].events = (short)((c->eof ? 0 : POLLIN) | (c->out.n ? POLLOUT : 0)), idx[n++] = i;
     }
     if (poll(fds, (nfds_t)n, ms) <= 0) return;
     for (int k = 1; k < n; k++) {
         Conn *c = &G.conns[idx[k]];
         if (fds[k].revents & POLLOUT) conn_write(c);
+#if defined(__APPLE__)
+        if (!c->eof && (fds[k].revents & (POLLIN | POLLHUP | POLLERR))) {
+#else
         if (c->eof) {   /* (only its replies left to send: gone altogether, they cannot be) */
             if (fds[k].revents & (POLLHUP | POLLERR)) c->closing = 1;
         } else if (fds[k].revents & (POLLIN | POLLHUP | POLLERR)) {
+#endif
             char buf[16384];
             const ssize_t r = recv(c->fd, buf, sizeof buf, MSG_DONTWAIT);
             if (r > 0) conn_feed(idx[k], buf, (size_t)r);
@@ -2084,6 +2114,13 @@ static void transport_wait(int ms) {
         }
     }
     if (fds[0].revents & POLLIN) {
+#if defined(__APPLE__)
+        const int fd = hos_darwin_control_accept(listen_fd, getuid());
+        if (fd < 0) {
+            if (errno == EACCES) ctl_log("control: a client not verified as this user turned away");
+            return;
+        }
+#else
         const int fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if (fd < 0) return;
         struct ucred cred;
@@ -2093,6 +2130,7 @@ static void transport_wait(int ms) {
             close(fd);
             return;
         }
+#endif
         int slot = -1;
         for (int i = 0; i < CTL_CONNS && slot < 0; i++)
             if (!G.conns[i].used) slot = i;
