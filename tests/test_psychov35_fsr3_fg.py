@@ -43,6 +43,9 @@ def main():
 '''
     if 'void colour_constants(' in fi:
         color = '\n'.join(block(fi, s)+';' for s in ['struct Constants {', 'struct OfConstants {'])
+        # The SDK's std140 cbFI/cbOF fields; size alone would not catch a misplaced HDR pair.
+        color += '\nstatic_assert(offsetof(Constants,back_buffer_transfer_function)==140 && offsetof(Constants,min_max_luminance)==144);'
+        color += '\nstatic_assert(offsetof(OfConstants,back_buffer_transfer_function)==20 && offsetof(OfConstants,min_max_luminance)==24);'
         color += '\n'+block(fi, 'void colour_constants(')
         start = fi.index('    const float max_luminance = in.native_pq')
         end = fi.index('    const int32_t rw =', start)
@@ -78,7 +81,7 @@ void color_cases(){
 }
 '''
     else:
-        color = 'void color_cases(){}'  # Main must first fail at real RGBA camera admission, below.
+        color = 'void color_cases(){assert(false && "missing AMD HDR colour constants");}'
     fixture = r'''
 #include <cassert>
 #include <cstdint>
@@ -87,6 +90,7 @@ void color_cases(){
 #include <initializer_list>
 #include <cmath>
 #include <limits>
+#include <cstddef>
 using VkFormat=int;
 constexpr int VK_FORMAT_B10G11R11_UFLOAT_PACK32=122,VK_FORMAT_R16G16B16A16_SFLOAT=97;
 struct Texture{int format=122;};
@@ -122,11 +126,12 @@ int main(int argc,char**){
         cpp, exe = Path(folder)/'test.cpp', Path(folder)/'test.exe'
         cpp.write_text(fixture, encoding='utf-8')
         subprocess.run([a.cxx, '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror', str(cpp), '-o', str(exe)], check=True)
-        subprocess.run([str(exe)], check=True)
         subprocess.run([str(exe), 'enabled'], check=True)
+        subprocess.run([str(exe)], check=True)
     if 'void colour_constants(' in fi:
         generate = block(fi, 'bool generate(')
         assert 'colour_constants(k, of, in.native_pq, max_luminance);' in generate
+        assert generate.index('colour_constants(k, of,') < generate.index('// This evaluation owns its constants')
     print('FSR FG: actual camera admission, both SDK colour blocks and encoding/peak/sequence resets pass')
 
 
