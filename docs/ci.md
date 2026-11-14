@@ -111,7 +111,7 @@ mise run validate
 
 ## Fork CI (forks CircleCI project)
 
-Forgejo org webhook → forks project custom trigger (`.circleci/forks.yml`): **Pull request label** and **Pull request synchronized** (JSON).
+Forgejo repo webhook (one per repo) → Longshot-forks custom trigger (`.circleci/forks.yml`): **Pull request label** and **Pull request synchronized** (JSON).
 
 Forgejo only lets people with write access add labels, so adding **`ci: approved`** is the approval. The doorbell re-reads the PR from the API (open, from a fork, labelled, head SHA matches refs/pull/N/head), posts pending, and continues with `events/fork.yml` (`fork_pr` / `fork_sha`, no secrets). The label is sticky: each new push runs again while it is on. An event for a SHA that already has a gate status is ignored, unless the label was re-added since. Remove the label to stop; re-add it to rerun. After 14 days with no push and no new approval, `mb/fork-stale` removes the label and comments once.
 
