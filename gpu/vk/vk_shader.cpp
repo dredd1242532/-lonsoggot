@@ -1049,6 +1049,12 @@ const std::vector<Code>& codes_of(const NvnState& s) {
 }
 
 std::atomic<int64_t> st_translated, st_failed, st_translate_ns;
+// (longshot) The "not translated" lines name 30 programs each, so that a log is not flooded; these count every program each
+// line stands for, the ones past its 30 too, and shader_fail_lines logs them after the preparation's "N failed". Each failure
+// st_failed counts is in exactly one of them: a Mac start's "70 failed" named 31 programs, and the other 39 networks left out
+// were counted nowhere
+constexpr int64_t kFailNamed = 30;
+std::atomic<int64_t> st_left_out, st_not_translated, st_mesh_not_translated, st_stage_failed;
 
 } // namespace
 
@@ -1505,10 +1511,9 @@ void translate_into(Program& p, const NvnState& s, const Code* vsc, const Code* 
         const bool trial = forced && !forced->want.empty();   // (an answer seed_compute tries: it may well not translate)
         if (!trial) st_failed++;
         // (a network left out on purpose is a trace line, counted apart: the dozen of them on every AMD card took the 30 lines a failure gets)
-        static std::atomic<int> logged, left_out;
         if (!strcmp(e.what(), network_left_out)) {
-            if (!trial && left_out++ < 30) logf_at(log_trace, "vk: program %016llx not translated: %s", (unsigned long long)p.key, e.what());
-        } else if (!trial && logged++ < 30) logf("vk: program %016llx not translated: %s", (unsigned long long)p.key, e.what());
+            if (!trial && st_left_out++ < kFailNamed) logf_at(log_trace, "vk: program %016llx not translated: %s", (unsigned long long)p.key, e.what());
+        } else if (!trial && st_not_translated++ < kFailNamed) logf("vk: program %016llx not translated: %s", (unsigned long long)p.key, e.what());
     }
     st_translate_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
     p.ready.store(true, std::memory_order_release);
@@ -1740,8 +1745,7 @@ void translate_mesh_into(Program& p, const NvnState& s, const Code* task, const 
     } catch (const std::exception& e) {
         p.failed = true;
         st_failed++;
-        static std::atomic<int> logged;
-        if (logged++ < 30) logf("vk: mesh program %016llx not translated: %s", (unsigned long long)p.key, e.what());
+        if (st_mesh_not_translated++ < kFailNamed) logf("vk: mesh program %016llx not translated: %s", (unsigned long long)p.key, e.what());
     }
     st_translate_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
     p.ready.store(true, std::memory_order_release);
@@ -2115,8 +2119,7 @@ Code stage_of_seed(const SeedStage& st) {
 }
 /// (longshot) A seed stage that does not parse fails its program: which one, and why (the prepare's "1 failed" named nothing)
 void seed_stage_failed(const Code& c, uint64_t program) {
-    static std::atomic<int> logged{0};
-    if (logged++ < 30)
+    if (st_stage_failed++ < kFailNamed)
         logf("vk: program %016llx not translated: its NVN stage %d (code %016llx) %s", (unsigned long long)program, c.stage,
              (unsigned long long)c.key, c.why.empty() ? "does not parse" : c.why.c_str());
 }
@@ -2538,6 +2541,20 @@ void shader_stats(int64_t* translated, int64_t* failed) {
     static int64_t hits_logged;
     if (st_cache_hits.load() >= hits_logged + 500) logf("vk: %lld programs from the program cache", (long long)(hits_logged = st_cache_hits.load()));
     *translated = st_translated, *failed = st_failed;
+}
+/// (longshot) After the preparation's "N failed" (vk_draw.cpp prepare_run): how many programs each "not translated" line stands
+/// for, whenever it stood for any. Those lines stop at kFailNamed programs each; these add up to N, so no failure goes uncounted
+void shader_fail_lines() {
+    const auto line = [](const char* what, int64_t n) {
+        if (n > kFailNamed)
+            logf("vk: not translated%s: %lld programs (the first %lld named above)", what, (long long)n, (long long)kFailNamed);
+        else if (n)
+            logf("vk: not translated%s: %lld program%s (named above)", what, (long long)n, n == 1 ? "" : "s");
+    };
+    line(", a network left out on this card", st_left_out.load());
+    line("", st_not_translated.load());
+    line(", mesh", st_mesh_not_translated.load());
+    line(", a seed stage that does not parse", st_stage_failed.load());
 }
 double shader_translate_ms() {
     return st_translate_ns.load() / 1e6;
