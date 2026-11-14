@@ -27,8 +27,9 @@ python -I -B tests/test_recorder_own_idle.py --headers <Vulkan-Headers/include> 
 3. The test has teeth: vk_recorder.h with vkEndCommandBuffer among the slot's own calls, the guard removed, the switch ignored,
    OwnSlot ignoring slot_begin(), the wait's compare taken from W instead of the r it last saw, the wake removed, or (Windows) the
    wait's timeout taken out, must fail it; so must (Windows) vk_replay.cpp's adapter with a wake that does nothing or a wait that
-   compares against W as it is now (the real_parked and real_race waits have no timeout, so only the wake or the compare ends
-   them), and the source check with recording_wait commented out or another slot's descriptor pools.
+   compares against W as it is now (the real_parked and real_race waits get a 10 s timeout, so within the 3 s a case allows
+   only the wake or the compare ends them), and the source check with recording_wait commented out or another slot's
+   descriptor pools.
 """
 import argparse
 import concurrent.futures
