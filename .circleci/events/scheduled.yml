@@ -5,4 +5,5 @@ workflows:
       - website-deploy:
           context: cloudflare-prod
       - mb/gate:
+          name: gate
           requires: [website-deploy]

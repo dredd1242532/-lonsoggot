@@ -54,6 +54,7 @@ workflows:
           dry-run: << pipeline.parameters.release_dry_run >>
           requires: [release-sign]
       - mb/gate:
+          name: gate
           requires:
             - lint
             - third-party

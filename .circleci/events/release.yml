@@ -44,5 +44,6 @@ workflows:
           requires: [release-sign]
           filters: (pipeline.git.tag or "") starts-with "v"
       - mb/gate:
+          name: gate
           requires: [release-publish]
           filters: (pipeline.git.tag or "") starts-with "v"

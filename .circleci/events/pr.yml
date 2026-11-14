@@ -38,6 +38,7 @@ workflows:
           requires: [website-preview-artifact]
           filters: pipeline.parameters.website
       - mb/gate:
+          name: gate
           requires:
             - lint
             - third-party
