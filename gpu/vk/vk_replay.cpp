@@ -2816,9 +2816,11 @@ uint64_t fence_q(uint64_t queue) {
 // (longshot, RX_VK_LOG_READBACK_RANGES: gf_note_value) this thread's last wait for the GPU
 thread_local int64_t gf_waited_ns = 0;
 int64_t gf_now() { return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+void gate_need_value(uint64_t f);   // (below, with the render thread)
 int wait(uint64_t f, uint64_t timeout_ns) {
     gf_waited_ns = gf_now();   // (RX_VK_LOG_READBACK_RANGES: this thread waited for the GPU, or asked whether it was done)
     if (completed() >= f) return 1;
+    if (timeout_ns) gate_need_value(f);   // (the render thread's whole frames: this one's submit goes on without its present)
     FpsRender fr;   // (the FPS counter's Breakdown: the replay of stopped work in here is the renderer's, the waits the GPU's)
     queue_flush_for(FR_WAIT);
     // (longshot) a fence of one queue whose work up to it is recorded whole (none of it stopped): that work, not the other
@@ -5212,6 +5214,51 @@ int q_presents = 0;
 bool q_busy = false;
 bool behind_on();
 uint64_t q_handed = 0, q_done = 0;   // (jobs handed over and done: q_mu)
+// (longshot, the render thread) Whole frames. The render thread starts a frame's jobs when the frame's present has been
+// handed over, not before, and the present is handed over after the main thread's signal for the frame (present(): the
+// signal the frame's work waits for): the game has then written the whole frame. Replaying a frame's first submits while
+// the game was still writing the rest of that frame (the render thread caught up with the game: 0.3-2 % of the presents
+// in the Market) drew the lit scene black for one frame at 5-15 % of those moments, and never at any other time: what the
+// replay reads from the game's memory and state as they are at the replay is whole once the frame is, and in the making
+// before. Measured in the Market with the flash detector and the meter log (which makes the moments frequent): 15 and 15
+// flashes a session without it and with the gate alone (the present still came before the signal), 0 with both. A frame behind, the replay still runs beside the game for the whole frame (the larger of the two, not their
+// sum), and a frame is shown no later than the replay on the submitting thread shows it. What a game's thread waits for
+// goes on at once (gate_upto: a queue finish, a texture read back, a fence of this frame), and so does a job that has
+// waited RX_VK_FRAME_GATE_MS (1000) with no present behind it (a load that submits without presenting; at 100 a game frame
+// stalled by swapping let its first jobs on, and two such frames flashed in 19,763 presents).
+// RX_VK_FRAME_GATE=0 (a test): jobs replayed as they come, as before.
+uint64_t gate_upto = 0;   // (jobs up to this hand-over number go on without their frame's present: q_mu)
+std::deque<std::pair<uint64_t, uint64_t>> gate_values;   // (the last submits' and presents' fence values and hand-over numbers: q_mu)
+struct {
+    std::atomic<int64_t> timeouts, demands, fences;
+} gate_st;
+bool gate_on() {
+    static const bool on = behind_on() && !(getenv("RX_VK_FRAME_GATE") && atoi(getenv("RX_VK_FRAME_GATE")) == 0);
+    return on;
+}
+std::chrono::milliseconds gate_ms() {
+    static const int v = getenv("RX_VK_FRAME_GATE_MS") ? std::max(0, atoi(getenv("RX_VK_FRAME_GATE_MS"))) : 1000;
+    return std::chrono::milliseconds(v);
+}
+/// (q_mu) Whether the oldest job handed over may be replayed now
+bool gate_ready() {
+    if (q_jobs.empty()) return false;
+    if (!gate_on() || q_presents > 0 || q_done < gate_upto) return true;
+    if (std::chrono::steady_clock::now() - q_jobs.front().queued < gate_ms()) return false;
+    gate_upto = q_handed, gate_st.timeouts++;   // (what is queued now goes on: none of it waits again)
+    return true;
+}
+/// (a game's thread, about to wait for fence value f) The submit that value was handed out for goes on without its present
+void gate_need_value(uint64_t f) {
+    if (!gate_on()) return;
+    std::lock_guard lk(q_mu);
+    for (const auto& [value, number] : gate_values) {
+        if (value < f) continue;
+        // (the frame before's, the usual one, has its present handed over: nothing to let on)
+        if (number > gate_upto && number > q_done && !q_presents) gate_upto = number, gate_st.fences++, q_cv.notify_all();
+        break;
+    }
+}
 // (the render thread's log, every 600 presents: what its jobs took, and what the game's threads waited for it)
 struct {
     std::atomic<int64_t> job_ns[3], room_ns, room_n, catchup_ns, catchup_n, depth, rb_fallback, held, held_ns, held_forced,
@@ -5231,6 +5278,11 @@ void bh_log() {
     const double sub = bh_st.job_ns[0].exchange(0) / 1e6 / frames, pres = bh_st.job_ns[1].exchange(0) / 1e6 / frames,
                  other = bh_st.job_ns[2].exchange(0) / 1e6 / frames;
     const int64_t rn = bh_st.room_n.exchange(0), cn = bh_st.catchup_n.exchange(0);
+    if (gate_on())
+        logf("vk: the render thread's whole frames (600 presents): %lld jobs went on before their present after %d ms, %lld times a "
+             "game's thread waited for the work handed over, %lld times for a fence of the frame in the making",
+             (long long)gate_st.timeouts.exchange(0), (int)gate_ms().count(), (long long)gate_st.demands.exchange(0),
+             (long long)gate_st.fences.exchange(0));
     logf("vk: the render thread (600 presents, %.2f ms a frame): its jobs %.2f ms a frame (submits %.2f, presents %.2f, others "
          "%.2f), idle %.2f; the game waited for room at %lld presents, %.2f ms each (%.2f a frame; %.2f jobs queued at a "
          "present); %lld catch-ups (a finish, a texture read back, a write-back not recorded yet: %lld), %.2f ms each; "
@@ -5321,14 +5373,18 @@ void replay_thread_main() {
         bool have = false;
         {
             std::unique_lock lk(q_mu);
+            // (gate_ready: the oldest job, once its frame's present is handed over or a game's thread waits for it)
             if (present_held)   // (the signal's job, or on without it)
-                q_cv.wait_for(lk, std::chrono::milliseconds(2), [] { return !q_jobs.empty(); });
+                q_cv.wait_for(lk, std::chrono::milliseconds(2), [] { return gate_ready(); });
             else if (blocked_n.load())   // (a queue stopped at a wait: the next job, or on without it after a while)
                 q_cv.wait_until(lk, blocked_since + std::chrono::milliseconds(hold_ms()),
-                                [] { return !q_jobs.empty() || drain_waiters.load() > 0; });
+                                [] { return gate_ready() || drain_waiters.load() > 0; });
             else
-                q_cv.wait(lk, [] { return !q_jobs.empty(); });
-            if (!q_jobs.empty()) j = std::move(q_jobs.front()), q_jobs.pop_front(), have = true;
+                while (!gate_ready()) {
+                    if (q_jobs.empty()) q_cv.wait(lk);
+                    else q_cv.wait_until(lk, q_jobs.front().queued + gate_ms());
+                }
+            if (gate_ready()) j = std::move(q_jobs.front()), q_jobs.pop_front(), have = true;
             q_busy = true;
         }
         if (blocked_n.load()) {   // (stopped ones: on now when another thread waits for the replay, or stopped too long)
@@ -5478,6 +5534,10 @@ void enqueue(Job&& j) {
     if (j.kind == JOB_SUBMIT || j.kind == JOB_PRESENT) j.value = ++q_values;
     if (j.kind == JOB_SUBMIT) gf_note_value(j.value);
     q_handed++;
+    if ((j.kind == JOB_SUBMIT || j.kind == JOB_PRESENT) && gate_on()) {   // (a fence of it, waited for before its present: gate_need_value)
+        gate_values.emplace_back(j.value, q_handed);
+        if (gate_values.size() > 64) gate_values.pop_front();
+    }
     q_jobs.push_back(std::move(j));
     q_cv.notify_one();
 }
@@ -5506,6 +5566,7 @@ void wait_queue_empty() {
     if (behind_on()) {   // (what was handed over before this call, replayed as far as its waits allow: nothing forced)
         const uint64_t upto = q_handed;
         if (q_done >= upto) return;
+        if (gate_on() && upto > gate_upto) gate_upto = upto, gate_st.demands++, q_cv.notify_all();   // (on without their present)
         const int64_t t0 = bh_now();
         q_idle.wait(lk, [upto] { return q_done >= upto; });
         bh_st.catchup_ns += bh_now() - t0, bh_st.catchup_n++;
@@ -5561,6 +5622,17 @@ bool bh_signal_meets(uint64_t gpu, uint32_t value) {
     for (BhWait& w : bh_waits)
         if (w.open && w.gpu == gpu && event_wait_met(value, w.mode, w.value)) w.open = false, any = true;
     return any;
+}
+/// (longshot, the render thread) Whether a submission handed over waits for an event the CPU signals that it has not
+/// signalled yet: the frame's data is not all written. submit_order_mu
+std::condition_variable bh_signal_cv;
+bool bh_cpu_wait_open() {
+    for (const BhWait& w : bh_waits) {
+        if (!w.open) continue;
+        const auto it = bh_cpu_value.find(w.gpu);
+        if (it != bh_cpu_value.end() && !event_wait_met(it->second, w.mode, w.value)) return true;
+    }
+    return false;
 }
 void submit_q(const uint64_t* handles, int n, uint64_t queue) {
     FpsRender fr;   // (the FPS counter's Breakdown: the replay, on this thread)
@@ -5625,6 +5697,28 @@ void present(const nvn_tex* t, const int crop[4]) {
             return do_present(t, crop);
         }
         return do_present(t, crop);
+    }
+    {   // (the render thread's whole frames, gate_on) The present is handed over after the CPU's signal its frame's work waits
+        // for: the main thread makes that signal when it has written the frame's data, and the presenting thread, its poll
+        // answered at once, came before it at most presents. The frame is whole at its present, which is where the render
+        // thread starts it (gate_ready). At most RX_VK_FRAME_GATE_MS. RX_VK_PRESENT_AFTER_SIGNAL=0 / 1 (a test): off / on whatever the gate
+        static const bool after = getenv("RX_VK_PRESENT_AFTER_SIGNAL") ? env_on("RX_VK_PRESENT_AFTER_SIGNAL") : gate_on();
+        // (as long as the gate gives a job: a frame the game takes longer over is waited for too, not started half written)
+        static const auto after_ms = std::max(gate_ms(), std::chrono::milliseconds(hold_ms()));
+        if (after && behind_on()) {
+            static std::atomic<int64_t> n{0}, waited{0}, ns{0}, late{0};
+            std::unique_lock lk(submit_order_mu);
+            if (bh_cpu_wait_open()) {
+                const int64_t t0 = bh_now();
+                if (!bh_signal_cv.wait_for(lk, after_ms, [] { return !bh_cpu_wait_open(); })) late++;
+                ns += bh_now() - t0, waited++;
+            }
+            if (++n % 600 == 0) {
+                const int64_t w = waited.exchange(0);
+                logf("vk: presents after the CPU's signal (600): %lld waited for it, %.2f ms each, %lld let go after RX_VK_FRAME_GATE_MS",
+                     (long long)w, w ? ns.exchange(0) / 1e6 / w : 0.0, (long long)late.exchange(0));
+            }
+        }
     }
     Job j{JOB_PRESENT};
     if (t) j.tex = *t, j.has_tex = true;
@@ -5713,6 +5807,7 @@ void event_signal_queued(uint64_t gpu, uint32_t value) {
             bh_st.sig_caps++;
         }
         enqueue(std::move(j));
+        bh_signal_cv.notify_all();
         return;
     }
     enqueue(std::move(j));
