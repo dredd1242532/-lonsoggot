@@ -1,11 +1,10 @@
-#ifdef _WIN32
 #define _CRT_SECURE_NO_WARNINGS
-#endif
 #include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <vector>
@@ -34,6 +33,15 @@ int hdr_calls = 0;
 int blits = 0, clears = 0;
 PresentRect drawn{};
 std::vector<std::string> messages;
+bool overlay_enabled = false;
+int overlay_calls = 0;
+float overlay_rect[8]{};
+bool coop_overlay_wants_camera() { return overlay_enabled; }
+void coop_overlay_viewport(float x, float y, float w, float h, float u, float v, float uw, float vh) {
+    ++overlay_calls;
+    const float values[] = {x, y, w, h, u, v, uw, vh};
+    std::copy(std::begin(values), std::end(values), overlay_rect);
+}
 void logf(const char* format, ...) {
     char b[1024]; va_list a; va_start(a, format); std::vsnprintf(b, sizeof b, format, a); va_end(a); messages.emplace_back(b);
 }
@@ -78,17 +86,24 @@ int main(int argc, char** argv) {
     CHECK(argc == 2); const bool enabled = std::atoi(argv[1]) != 0; unit_state();
     present(); CHECK(blits == 1 && drawn.w == 1720 && drawn.h == 720);
     CHECK(aspect_calls == 1); // tracing reuses the actual fit input, including when the callback could change.
+    CHECK(overlay_calls == 0); // labels off must not prepare an overlay viewport.
     if (enabled) {
         CHECK(messages.size() == 1);
         CHECK(messages.back().find("kind=game source=3440x1440") != std::string::npos);
         CHECK(messages.back().find("output=1720x720 destination=0,0 1720x720") != std::string::npos);
         CHECK(messages.back().find("route=direct") != std::string::npos);
     }
+    overlay_enabled = true;
     for (int i = 0; i < 100; ++i) present();
+    CHECK(overlay_calls == 100);
+    CHECK(overlay_rect[0] == 0 && overlay_rect[1] == 0 && overlay_rect[2] == 1720 && overlay_rect[3] == 720);
+    CHECK(overlay_rect[4] == 0 && overlay_rect[5] == 0 && overlay_rect[6] == 1 && overlay_rect[7] == 1);
     CHECK(messages.size() == size_t(enabled));
     dev.swap_extent = {3440, 1369}; present();
     if (enabled) CHECK(messages.size() == 2 && messages.back().find("output=3440x1369") != std::string::npos);
     const int crop[] = {16, 8, 2560, 1440}; present(1, 4096, 2160, crop);
+    CHECK(overlay_rect[4] == 16.0f / 4096 && overlay_rect[5] == 8.0f / 2160);
+    CHECK(overlay_rect[6] == 2560.0f / 4096 && overlay_rect[7] == 1440.0f / 2160);
     if (enabled) CHECK(messages.back().find("crop=supplied:16,8 2560x1440 content=2560x1440") != std::string::npos);
     const size_t before_requests = messages.size();
     opts.upscale = 2; opts.sharpness = 50; present(1, 4096, 2160, crop);

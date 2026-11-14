@@ -1,4 +1,4 @@
-"""Run production present route/geometry diagnostics and bounded per-kind state tracking without a GPU."""
+"""Run production present diagnostics and their co-op viewport handoff without a GPU."""
 import argparse
 from pathlib import Path
 import os
