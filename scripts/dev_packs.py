@@ -52,20 +52,28 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # (the modules' names follow the target, not this PC: RX_TARGET=windows on Linux builds the Windows game)
 WINDOWS = os.name == "nt" or os.environ.get("RX_TARGET", "").strip().lower() == "windows"
 CROSS = WINDOWS and os.name != "nt"   # (the Windows game built on Linux: it cannot run here, so it prepares on the PC that plays it)
-# (the game's own caches beside it, kept between runs and stamped by the translator (gpu/vk/vk_progcache.cpp): a stale one is
-# not used, so a base can start from an older base's)
+# (the game's own caches, in its game folder's cache/ (gpu/vk/vk_paths.h cache_path), kept between runs and stamped by the
+# translator (gpu/vk/vk_progcache.cpp): a stale one is not used, so a base can start from an older base's)
 # (all of them, from the renderer's sources, 2026-11-13: the program cache plain or compressed and its index
 # (vk_progcache.cpp, the index is the cache's name with .idx for .bin), its modules' ids (vk_programs.cpp), the pipeline
 # notes, predicted (with the predicted pipelines' keys, read by the census) and built (vk_draw.cpp pipe_notes_path,
 # predicted_keys_write, precompile_built_path), the compute pipelines and their
 # variants, the state lists (and the older one still read), the prepare's record, and the driver's pipeline cache with
 # its stamp (without it the cache and its play files are dropped, pcache_stamp.h))
+CACHE_DIR = "cache"
 CACHES = ("longshot_programs.bin", "longshot_programs.idx", "longshot_programs.zst.bin", "longshot_programs.zst.idx",
           "longshot_module_ids.bin", "longshot_pipelines.bin", "longshot_pipelines.bin.predicted", "longshot_pipelines.bin.predicted_keys",
           "longshot_pipelines.bin.built",
           "longshot_computes.bin", "longshot_compute_variants.bin", "longshot_pipeline_states.bin",
-          "longshot_pipeline_states_v1.bin", "longshot_prepared.bin", "mkw_vk_pipelines.bin", "mkw_vk_pipelines.stamp")
-PLAY_FILES = re.compile(r"mkw_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
+          "longshot_pipeline_states_v1.bin", "longshot_prepared.bin", "longshot_vk_pipelines.bin", "longshot_vk_pipelines.stamp")
+PLAY_FILES = re.compile(r"longshot_vk_pipelines_play_[0-9]+\.bin")   # (what play adds to the pipeline cache: gpu/vk/vk_draw.cpp play_path)
+# (what the game writes into its folder at run time, never a build's output: the caches (and the button prompts it makes) in
+# cache/, the logs in logs/ (host/game_layout.c)
+RUNTIME_DIRS = (CACHE_DIR + "/", "logs/")
+# (an older game folder kept its caches loose beside the game, the Vulkan pipeline cache as mkw_vk_pipelines*: a seed from
+# one is copied as it is, and the game's first start moves them into cache/ (host/game_layout.c))
+OLD_CACHES = tuple(c.replace("longshot_vk_pipelines", "mkw_vk_pipelines") for c in CACHES)
+OLD_PLAY_FILES = re.compile(r"mkw_vk_pipelines_play_[0-9]+\.bin")
 BUSY = "dev_packs.busy"   # (in a base's folder while a job builds, warms or copies from it)
 SEED = "longshot_shaders.bin"   # (the shader list the prepare goes through: a new one is prepared again)
 # (module, its map, its link list in sa/build, the object that holds the version: nx2/build.py gives hos_main.c and vk_menu.cpp
@@ -75,10 +83,11 @@ MODULES = ((("longshot.exe", "longshot.map", "objs.rsp", "host_hos_main.o"),
            (("longshot", None, "objs.rsp", "host_hos_main.o"), ("longshot_vk.so", None, "vk_objs.rsp", "vk_vk_menu.o")))
 GAME, RENDERER = MODULES[0][0], MODULES[1][0]
 STAMPED_SOURCES = ("host/hos_main.c", "gpu/vk/vk_menu.cpp")
-# (nx2/build.py's shader stamp: every file in gpu/vk/{eden,sirit,compat}/ and these four; tests/test_dev_packs.py checks they agree)
-STAMP_DIRS = ("eden", "sirit", "compat")
-STAMP_FILES = ("vk_shader.cpp", "vk_bank.cpp", "vk_state.h", "vk_api.h")
-TRANSLATOR = tuple("gpu/vk/%s/" % d for d in STAMP_DIRS) + tuple("gpu/vk/" + f for f in STAMP_FILES)
+# (nx2/build.py's shader stamp is made of the files the checkout's own nx2/translator_files.py names (translator_changed); a
+# checkout from before that module stamped every file in gpu/vk/{eden,sirit,compat}/ and these four)
+OLD_TRANSLATOR = ("gpu/vk/eden/", "gpu/vk/sirit/", "gpu/vk/compat/", "gpu/vk/vk_shader.cpp", "gpu/vk/vk_bank.cpp",
+                  "gpu/vk/vk_state.h", "gpu/vk/vk_api.h")
+TRANSLATOR_FILES = "nx2/translator_files.py"
 RENDERER_ONLY = ("gpu/vk/", "third_party/imgui/", "third_party/fidelityfx")
 INCLUDE = re.compile(r'#\s*include\s+"([^"]+)"')
 NO_MODULE = ("docs/", "tests/", ".github/", ".forgejo/", ".claude/")   # (.forgejo: Longshot's workflows and templates)
@@ -92,6 +101,18 @@ WRITTEN_IN_PLAY = ("longshot_options.ini", "longshot_log.txt", "longshot_log.1.t
                    "longshot_pipelines.bin.built.warming", "longshot_prepare_skipped", "longshot_load_start.txt",
                    "longshot_load_start.txt.waited", "longshot_pipeline_report.txt", "longshot_frames.csv",
                    "longshot_damaged_files.txt")
+
+
+def translator_changed(tree, changed):
+    """Whether the shader stamp of the checkout tree's build differs from its base's, given the files changed since (paths
+    relative to the checkout, / separated): a stamped file, or what says which files are stamped"""
+    path = os.path.join(tree, *TRANSLATOR_FILES.split("/"))
+    if not os.path.isfile(path):
+        return any(p.startswith(OLD_TRANSLATOR) for p in changed)
+    spec = importlib.util.spec_from_file_location("translator_files_for_packs", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return any(m.stamped(p) or p == TRANSLATOR_FILES for p in changed)
 
 
 def load_make_game(root=ROOT):
@@ -238,7 +259,7 @@ def build_outputs(game):
         dirs[:] = sorted(x for x in dirs if not (top == game and x == "romfs"))
         for f in sorted(fs):
             rel = os.path.relpath(os.path.join(top, f), game).replace(os.sep, "/")
-            if rel not in skip and not is_cache(rel) and not rel.endswith(".log"):   # (play caches too: a seed brings them)
+            if rel not in skip and not rel.endswith(".log") and not runtime_file(rel):   # (play caches too: a seed brings them)
                 out.append(rel)
     return out
 
@@ -255,14 +276,15 @@ def generated_changes(base_game, game, base_outputs=None):
         for f in sorted(fs):
             p = os.path.join(top, f)
             rel = os.path.relpath(p, game).replace(os.sep, "/")
-            if rel in skip or is_cache(rel):
+            if rel in skip or runtime_file(rel):
                 continue
             q = os.path.join(base_game, rel)
             if not (os.path.isfile(q) and same_file(p, q)):
                 changed.append(rel)
     # (never a cache, even in an outputs list a base recorded before the caches' family was complete)
     gone = [rel for rel in base_outputs or ()
-            if not is_cache(rel) and rel not in WRITTEN_IN_PLAY and not os.path.isfile(os.path.join(game, rel))]
+            if not is_cache(rel) and not runtime_file(rel) and rel not in WRITTEN_IN_PLAY
+            and not os.path.isfile(os.path.join(game, rel))]
     return changed, gone
 
 
@@ -279,9 +301,20 @@ def clear_output(game):
             os.remove(p)
 
 
+def object_store():
+    """(nx2/object_store.py) The object store every base and pack on this PC shares, unless LONGSHOT_OBJ_STORE names another (or
+    is empty or 0: none): a new base compiles only what no earlier one did. In the user's cache folder; on another drive than the
+    bases its objects are copied instead of linked, so set LONGSHOT_OBJ_STORE to a folder on the bases' drive"""
+    if os.name == "nt":
+        return os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Longshot", "objects")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "longshot-objects")
+
+
 def run(cmd, cwd, env=None):
     print("+ " + " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=cwd, check=True, env=dict(os.environ, **(env or {})))
+    e = dict(os.environ, **(env or {}))
+    e.setdefault("LONGSHOT_OBJ_STORE", object_store())
+    subprocess.run(cmd, cwd=cwd, check=True, env=e)
 
 
 def base_env(predict_s):
@@ -411,8 +444,14 @@ def cmd_base(a):
         sys.exit("%s has uncommitted or untracked sources (%s): a base is a commit" % (tree, ", ".join(sorted(dirty)[:5])))
     os.makedirs(game, exist_ok=True)
     if a.seed:   # (every cache file, the play files too: recent pipelines can live only in them, vk_draw.cpp play_path)
-        for c in sorted(os.listdir(a.seed)):
-            if is_cache(c) and os.path.isfile(os.path.join(a.seed, c)) and not os.path.exists(os.path.join(game, c)):
+        src_cache, dst_cache = os.path.join(a.seed, CACHE_DIR), os.path.join(game, CACHE_DIR)
+        for c in sorted(os.listdir(src_cache)) if os.path.isdir(src_cache) else []:
+            if is_cache(c) and os.path.isfile(os.path.join(src_cache, c)) and not os.path.exists(os.path.join(dst_cache, c)):
+                os.makedirs(dst_cache, exist_ok=True)
+                shutil.copy2(os.path.join(src_cache, c), os.path.join(dst_cache, c))
+        for c in sorted(os.listdir(a.seed)):   # (a seed of the older layout: moved into cache/ by the game's first start)
+            if (c in OLD_CACHES or OLD_PLAY_FILES.fullmatch(c)) and os.path.isfile(os.path.join(a.seed, c)) \
+                    and not os.path.exists(os.path.join(game, c)):
                 shutil.copy2(os.path.join(a.seed, c), os.path.join(game, c))
     b = {"commit": git(tree, "rev-parse", "HEAD"), "work": work, "game": game, "romfs": os.path.abspath(a.romfs),
          "exefs": os.path.abspath(a.exefs), "seeded_from": a.seed, "language": a.language, "predict_s": a.predict_s}
@@ -488,7 +527,7 @@ def cmd_pack(a):
             dst = os.path.join(pack, "files", rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(os.path.join(w["game_out"], rel), dst)
-    prepare = any(p.startswith(TRANSLATOR) for p in changed) or SEED in extra
+    prepare = translator_changed(tree, changed) or SEED in extra
     if a.prepare is not None:
         prepare = a.prepare
     with open(os.path.join(pack, "pack.json"), "w", encoding="utf-8") as f:
@@ -598,6 +637,12 @@ def is_cache(name):
     return name in CACHES or bool(PLAY_FILES.fullmatch(name))
 
 
+def runtime_file(rel):
+    """What the game made in its folder, not the build: anything in cache/ or logs/, and a cache of the older layout, loose
+    beside the game (a seed of one brings them, and the game's first start moves them into cache/)"""
+    return rel.startswith(RUNTIME_DIRS) or rel in OLD_CACHES or bool(OLD_PLAY_FILES.fullmatch(rel))
+
+
 def cmd_warm(a):
     """A runtime with no pack, played once by each --run command ({runtime} in it is the runtime's folder; split as a POSIX
     shell would), then the caches play made or grew copied into the base's game folder, and the runtime deleted: every
@@ -622,15 +667,17 @@ def cmd_warm(a):
         print("+ " + " ".join(argv), flush=True)
         subprocess.run(argv, check=True)
     copied = []
-    for name in sorted(os.listdir(rt)):
-        src, dst = os.path.join(rt, name), os.path.join(b["game"], name)
+    rt_cache, base_cache = os.path.join(rt, CACHE_DIR), os.path.join(b["game"], CACHE_DIR)
+    os.makedirs(base_cache, exist_ok=True)
+    for name in sorted(os.listdir(rt_cache)) if os.path.isdir(rt_cache) else []:
+        src, dst = os.path.join(rt_cache, name), os.path.join(base_cache, name)
         # (a cache the game wrote: a plain file in the runtime, never a link, whose bytes go into a new temporary file of the
         # base's own and then over the old one, so neither a link in the runtime nor one left in the base is followed)
         if os.path.islink(src) or not os.path.isfile(src) or not is_cache(name) or os.path.islink(dst):
             continue
         if os.path.isfile(dst) and same_file(src, dst):
             continue
-        fd, tmp = tempfile.mkstemp(prefix=name + ".", suffix=".tmp", dir=b["game"])
+        fd, tmp = tempfile.mkstemp(prefix=name + ".", suffix=".tmp", dir=base_cache)
         with os.fdopen(fd, "wb") as out, open(src, "rb") as f:
             shutil.copyfileobj(f, out, 1 << 22)
         shutil.copystat(src, tmp)
