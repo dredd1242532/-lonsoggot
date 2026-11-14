@@ -2,7 +2,9 @@
 from the source, its route, the presses it sends, the switches and options it runs with, its command line, its counts and merge of
 the pipeline state lists, the memory guard, and the bridge driving: a fake control bridge (a Unix socket served from a thread, as
 tests/test_longshot_ctl.py's stand-in serves one) that answers the way host/control.c does, refusing, cancelling and timing out
-where the game would, with the real client (scripts/longshot_ctl.py Bridge) in between.
+where the game would, with the real client (scripts/longshot_ctl.py Bridge) in between. And --vk-profile, the renderer's play
+profile on the tour's route: a counting renderer told apart, RX_VK_PGO_FILE's reset after control and dump at each run's end
+against a stand-in for host/pgo_rt.c's writer, the refusals when nothing counts, and merge-profile (a stand-in llvm-profdata).
 
 The tour teleports through the bridge by the destination's index and switches the age through it (host/control.c, host/hos_main.c),
 and gives the items through the live input file's "!cheat <action>" lines (host/nn_hid.c), whose numbers are the Insert menu's
@@ -21,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 RUN_ALL_SKIP = {"windows": "the tour runs on Linux (/proc, the bridge's Unix socket): checked on Linux"}
@@ -53,10 +56,21 @@ def source(tour, a):
     for cmd in ("teleport", "age", "status", "wait", "sequence", "press", "quit"):
         if '!strcmp(cmd, "%s")' % cmd not in ctl_c:
             fail("host/control.c has no %s command" % cmd)
-    if '\\"game\\":{\\"event\\":%s,\\"loading\\":%s,\\"age\\":\\"%s\\"}' not in ctl_c:
+    # (status's game: the fields as oot_state reads them, or the sampled state of host/oot_state_tap.c, whose event, loading and
+    # age are filled from oot_state where the sample could not read them)
+    tap = text("host/oot_state_tap.c")
+    if 'buf_puts(&b, ",\\"game\\":");' not in ctl_c or '"{\\"event\\":%s,\\"loading\\":%s,\\"age\\":\\"%s\\"}"' not in ctl_c or \
+            'const char *keys[] = {"event", "loading", "age"};' not in ctl_c:
         fail("host/control.c's status no longer says the game's event, loading and age, which the tour waits on")
-    if 'strcmp(units, "hos")' not in ctl_c:
-        fail("host/control.c's sequence no longer takes HOS_INPUT_SCRIPT's units (the tour's presses)")
+    for field in ('",\\"event\\":%s"', '",\\"loading\\":%s"', '",\\"age\\":%s"'):
+        if field not in tap:
+            fail("host/oot_state_tap.c's sample no longer has %s, which status's game passes on" % field)
+    # (the presses: HOS_INPUT_SCRIPT's units, which scripts/longshot_ctl.py turns into the bridge's frame steps, as
+    # host/control.c's own script reading would)
+    ctl_py = text("scripts/longshot_ctl.py")
+    if 'strcmp(units, "hos")' not in ctl_c or 'args["steps"] = hos_steps(args.pop("script"))' not in ctl_py or \
+            'const JNode *list = j_get(d, req, "steps");' not in ctl_c:
+        fail("host/control.c's sequence or scripts/longshot_ctl.py no longer takes HOS_INPUT_SCRIPT's units (the tour's presses)")
     if '"refused"' not in ctl_c or '"cancelled"' not in ctl_c:
         fail("host/control.c no longer replies refused or cancelled")
     # the refusals asking again cannot change are named in the game's words
@@ -93,10 +107,12 @@ def source(tour, a):
         fail("host/hos_main.c's clock action is not TIME_ACTION + hour")
     # the inventory: the item list's order is the action's index; kinds 0 (unlock) and 1 (a quantity)
     names = list(a["items"])
-    for must in ("Item_Bomb", "Item_Longshot", "Item_Arrow_Fire", "Item_DinFire", "Weapon_Range_Bow", "Item_Ocarina_Time"):
+    for must in ("Item_Bomb", "Item_Hookshot", "Item_Longshot", "Item_Arrow_Fire", "Item_DinFire", "Weapon_Range_Bow",
+                 "Item_Ocarina_Time"):
         if must not in a["items"]:
             fail("%s is not in the inventory list" % must)
-    if a["items"][names[0]][0] != 0 or a["items"]["Item_Bomb"][1] != 1 or a["items"]["Item_Longshot"][1] != 0:
+    if a["items"][names[0]][0] != 0 or a["items"]["Item_Bomb"][1] != 1 or a["items"]["Item_Longshot"][1] != 0 or \
+            a["items"]["Item_Hookshot"][1] != 0 or a["items"]["Item_Hookshot"][0] + 1 != a["items"]["Item_Longshot"][0]:
         fail("the inventory's indices or kinds are read wrong: %s" % list(a["items"].items())[:16])
     unlock = tour.items_unlock(a)
     count = len(re.findall(r'OOT_ITEM\("', text("gpu/vk/oot_cheat_items.h")))
@@ -123,6 +139,37 @@ def source(tour, a):
             fail("%s: no Insert menu row writes it to longshot_options.ini" % key)
     if tour.BASE_INI["frame_rate_cap"] != "6" or "Uncapped" not in re.search(r"tx_fps_cap\(int v\) \{(.*?)\}", menu, re.S).group(1).split(",")[6]:
         fail("frame_rate_cap=6 is not Uncapped")
+    # the lists the tour moves aside and reads: the notes and play's lists in the game folder's cache/, the shipped one beside the
+    # game (and a build from before's loose ones, which the game's start moves into cache/)
+    draw, paths, layout = text("gpu/vk/vk_draw.cpp"), text("gpu/vk/vk_paths.h"), text("host/game_layout.c")
+    if 'return strstr(name, "_shipped") ? game_folder_path() + name : cache_path(name);' not in draw or \
+            'std::string pipe_notes_path() { return cache_path("longshot_pipelines.bin"); }' not in draw or \
+            'cache_path(const char* name) { return game_sub_path("cache", name); }' not in paths:
+        fail("the pipeline notes and lists are no longer in the game folder's cache/ (vk_draw.cpp, vk_paths.h)")
+    if tour.LIST != "cache/longshot_pipeline_states.bin" or tour.LIST not in tour.STATE_FILES:
+        fail("the tour's list is not cache/longshot_pipeline_states.bin: %s" % tour.LIST)
+    for name in ("longshot_pipelines.bin", "longshot_pipeline_states.bin", "longshot_pipeline_states_v1.bin"):
+        if '"%s"' % name not in layout.split("to_cache[] = {", 1)[1].split("};", 1)[0] or "cache/" + name not in tour.STATE_FILES \
+                or name not in tour.STATE_FILES:
+            fail("%s: not put aside in cache/ and beside the game, or the game no longer moves it into cache/" % name)
+    if "longshot_pipeline_states_shipped.bin" not in tour.STATE_FILES or len({tour.aside_name(n) for n in tour.STATE_FILES}) != \
+            len(tour.STATE_FILES):
+        fail("the shipped list is not put aside, or two files are put aside under one name")
+    # the renderer's counters (--vk-profile): RX_VK_PGO_FILE, <file>.reset and <file>.dump as host/pgo_rt.c reads them in the
+    # renderer's copy, and its raw format's magic
+    pgo, build = text("host/pgo_rt.c"), text("nx2/build.py")
+    if '-DPGO_ENV="RX_VK_PGO_FILE"' not in build or tour.PGO_ENV != "RX_VK_PGO_FILE" or tour.PGO_MARK != b"RX_VK_PGO_FILE\x00":
+        fail("the renderer's copy of host/pgo_rt.c no longer reads RX_VK_PGO_FILE (nx2/build.py -DPGO_ENV)")
+    for want in ('snprintf(dump, sizeof dump, "%s.dump", path);', 'snprintf(reset, sizeof reset, "%s.reset", path);',
+                 "memset(PGO_CNT_BEGIN, 0,", "pgo_write(path);\n            DeleteFileA(dump);", "DeleteFileA(reset);",
+                 "const char *e = getenv(PGO_ENV);"):
+        if want not in pgo:
+            fail("host/pgo_rt.c no longer has %r (the tour's reset and dump)" % want)
+    magic = re.search(r"(0x[0-9a-f]+)ULL,\s*/\* magic", pgo)
+    if not magic or struct.pack("<Q", int(magic.group(1), 16)) != tour.PGO_RAW_MAGIC or "ndata, 0, ncnt" not in pgo:
+        fail("host/pgo_rt.c's raw profile header is not the one merge-profile checks")
+    if '"longshot_vk.dll"' not in text("host/rx_backend.c") or set(tour.RENDERERS) != {"longshot_vk.so", "longshot_vk.dll"}:
+        fail("the renderer module the tour looks at is not the one the game loads (host/rx_backend.c)")
 
 
 def routes(tour, a):
@@ -250,6 +297,14 @@ def cli(tour, a):
             "--mem", "soft_mb=5000", "--first", "Fire Temple (child)", "--stops", "3", "--skip-opening", "--cpus", "6-11"]
     if cmd[3:] != want:
         fail("the tour's run: %s" % cmd[3:])
+    # --vk-profile: off by default (the runs' commands and switches as above); on, each run is given the folder
+    if r.vk_profile is not None or t.vk_profile is not None or tour.PGO_ENV in tour.run_env(r):
+        fail("--vk-profile is on by default")
+    t.vk_profile = "/prof"
+    if tour.run_command(t, "dungeons", "play-dungeons-1", None, None, True)[-2:] != ["--vk-profile", "/prof"]:
+        fail("the tour's run is not given --vk-profile")
+    if p.parse_args(["run", "--game", "g", "--out", "o", "--vk-profile", "d"]).vk_profile != "d":
+        fail("run --vk-profile")
     if tour.cpu_list("0-3,12-13,20") != {0, 1, 2, 3, 12, 13, 20}:
         fail("cpu_list")
 
@@ -281,12 +336,19 @@ def lists(tour, states, rec):
                                    {"name": "t", "seconds": 2, "env": {"X": "1"}, "ini": [], "completed": False, "error": "x"})
         if "3 pipelines" not in report or "NOT COMPLETED: x" not in report or not os.path.exists(os.path.join(d, "report.json")):
             fail("the report: %s" % report)
+        if "renderer profile" in report:
+            fail("a report without --vk-profile speaks of the renderer's profile")
+        report = tour.write_report(d, [], {"name": "t", "seconds": 2, "env": {}, "ini": [],
+                                           "vk_profile": {"file": "/p/t.profraw", "reset": True, "why": None}})
+        if "renderer profile: /p/t.profraw" not in report:
+            fail("the report does not say where the renderer's counters went: %s" % report)
     # --publish: the tour's source written by nx2/pipeline_states.py tour, its note from what the runs' bridges said
     with tempfile.TemporaryDirectory() as d:
         part = os.path.join(d, "run-child")
         os.makedirs(part)
         open(os.path.join(part, "states.bin"), "wb").write(head + rec(1, 2, 3) + rec(5, 0, 3))
-        json.dump({"meta": {"seconds": 120, "env": {"HOS_OUTPUT_RES": "640x360"}, "version": "v9.9.9-1-gabc",
+        json.dump({"meta": {"seconds": 120, "env": {"HOS_OUTPUT_RES": "640x360", "RX_VK_PGO_FILE": "/run/vk.profraw"},
+                            "version": "v9.9.9-1-gabc",
                             "renderer": "Vulkan: Some GPU 9000, driver 1.2.3"}, "stops": []},
                   open(os.path.join(part, "report.json"), "w"))
         sources = os.path.join(d, "sources")
@@ -299,6 +361,8 @@ def lists(tour, states, rec):
         for want in ("Some GPU 9000", "v9.9.9-1-gabc", "640x360", "parts child", "frame_rate_cap=6"):
             if want not in note:
                 fail("the tour's note lacks %r:\n%s" % (want, note))
+        if "RX_VK_PGO_FILE" in note or "vk.profraw" in note:
+            fail("the tour's note names the renderer counters' file as a setting:\n%s" % note)
 
 
 # ---- a fake bridge ----
@@ -337,13 +401,18 @@ class FakeGame:
                 if req.get("buttons") == "A" and self.frame >= self.title_at:
                     self.a_presses += 1
                 r.update(queued=1, frames=req.get("frames", 8))
-            elif cmd == "sequence":
-                if req.get("units") != "hos":
-                    return {"id": req.get("id"), "ok": False, "error": "bad_request", "message": "units"}
-                self.inputs.append(req["script"])
-                span = max(float(p.split(":")[0]) + int((p.split("/") + ["200"])[1]) / 1000 for p in req["script"].split(","))
+            elif cmd == "sequence":   # (steps in frames, as scripts/longshot_ctl.py sends HOS units; or a script in them)
+                if isinstance(req.get("steps"), list) and req["steps"]:
+                    self.inputs.append(req["steps"])
+                    span = max(s["at"] + s["frames"] for s in req["steps"])
+                elif req.get("units") == "hos" and req.get("script"):
+                    self.inputs.append(req["script"])
+                    span = int(60 * max(float(p.split(":")[0]) + int((p.split("/") + ["200"])[1]) / 1000
+                                        for p in req["script"].split(",")))
+                else:
+                    return {"id": req.get("id"), "ok": False, "error": "bad_request", "message": "steps or a script in hos units"}
                 start = self.frame
-                self.advance(int(span * 60) + 1)
+                self.advance(span + 1)
                 r.update(start=start, end=self.frame)
             elif cmd == "wait":
                 if req["event"] == "present":
@@ -427,6 +496,7 @@ def bridge_driving(tour, a, states, rec):
         live = os.path.join(d, "live.txt")
         open(live, "w").close()
         lst = os.path.join(d, tour.LIST)
+        os.makedirs(os.path.dirname(lst), exist_ok=True)
         open(lst, "wb").write(states.MAGIC + struct.pack("<I", states.SIZE) + rec(1, 2, 3))
         g = tour.Game(b, d, lst, live, cheat_gap=0)
         phases = tour.new_game(g)
@@ -449,7 +519,7 @@ def bridge_driving(tour, a, states, rec):
         # the presses go as HOS_INPUT_SCRIPT's units, the reply once they are over
         before = fake.frame
         g.press(tour.LOOK)
-        if fake.inputs[-1] != tour.LOOK or fake.frame - before < int((tour.LOOK_SPAN - 0.2) * 60):
+        if fake.inputs[-1] not in (tour.LOOK, ctl.hos_steps(tour.LOOK)) or fake.frame - before < int((tour.LOOK_SPAN - 0.2) * 60):
             fail("the look around is not one sequence over its span")
         # the items: the Debug tab's actions in the live file, one a line
         g.cheat(a["item"] + 200)
@@ -617,6 +687,184 @@ def worth(tour, states, rec):
         fail("worth: the players' lists not taken away: %s" % rows["B"])
 
 
+class CountingWriter:
+    """host/pgo_rt.c's thread as an RX_VK_PGO=gen renderer runs it: every `period` s <file>.reset clears the counters and
+    <file>.dump writes them to <file> (a raw profile with one counted function), each deleted once done"""
+    def __init__(self, file, period=0.05):
+        self.file, self.period, self.cleared, self.dumps, self.done = file, period, 0, 0, threading.Event()
+        threading.Thread(target=self.loop, daemon=True).start()
+
+    def loop(self):
+        while not self.done.wait(self.period):
+            if os.path.exists(self.file + ".reset"):
+                self.cleared += 1
+                os.remove(self.file + ".reset")
+            if os.path.exists(self.file + ".dump"):
+                self.dumps += 1
+                with open(self.file, "wb") as f:
+                    f.write(RAW_MAGIC + struct.pack("<QQQ", 10, 0, 1) + bytes(64) + struct.pack("<Q", self.cleared))
+                os.remove(self.file + ".dump")
+
+
+RAW_MAGIC = struct.pack("<Q", 0xff6c70726f667281)
+
+
+def vk_profile(tour, a):
+    """--vk-profile: a counting renderer told apart from another; the counters cleared once the new game gives control and
+    written at a run's end, failed or not, then moved to <dir>/<name>.profraw; a renderer that takes neither request refused
+    rather than leaving nothing; merge-profile's llvm-profdata merge, its refusals and --publish (xz -9e and the note)"""
+    import lzma
+    import types
+    with tempfile.TemporaryDirectory() as d:
+        # the renderer beside the game: the counting one names RX_VK_PGO_FILE (here across a read's 1 MB boundary)
+        counting, plain, none = (os.path.join(d, n) for n in ("counting", "plain", "none"))
+        for folder in (counting, plain, none):
+            os.makedirs(folder)
+        open(os.path.join(counting, "longshot_vk.so"), "wb").write(b"x" * ((1 << 20) - 5) + tour.PGO_MARK + b"y" * 100)
+        open(os.path.join(plain, "longshot_vk.so"), "wb").write(b"x" * 5000 + b"RX_VK_PGO\x00HOS_PGO\x00")
+        if tour.counting_renderer(counting) != os.path.join(counting, "longshot_vk.so") or tour.counting_renderer(plain) or \
+                tour.counting_renderer(none):
+            fail("a counting renderer is not told apart from another")
+        # run and tour refuse a game whose renderer does not count, before anything in its folder is touched
+        open(os.path.join(plain, "longshot"), "w").close()
+        p = tour.parser()
+        for argv in (["run", "--game", plain, "--out", os.path.join(d, "out"), "--vk-profile", os.path.join(d, "prof"),
+                      "--no-mem-guard"],
+                     ["tour", "--game", plain, "--out", os.path.join(d, "out"), "--vk-profile", os.path.join(d, "prof")]):
+            try:
+                (tour.run if argv[0] == "run" else tour.tour)(p.parse_args(argv))
+                fail("%s --vk-profile ran with a renderer that does not count" % argv[0])
+            except SystemExit as e:
+                if "RX_VK_PGO=gen" not in str(e):
+                    raise
+            if os.path.exists(os.path.join(plain, ".pipeline_tour_aside")) or os.path.exists(os.path.join(plain, tour.OPTIONS)) \
+                    or os.path.exists(plain + "-tour"):
+                fail("%s --vk-profile touched the game folder before refusing it" % argv[0])
+        # a run's counters: an earlier run's files gone, cleared on request, written at the end and moved
+        out = os.path.join(d, "prof")
+        file = os.path.join(d, "vk.profraw")
+        for stale in (file, file + ".dump", file + ".reset"):
+            open(stale, "w").close()
+        prof = tour.Profile(file, out, "play-child-0", wait_s=5)
+        if any(os.path.exists(f) for f in (file, file + ".dump", file + ".reset")):
+            fail("an earlier run's counter files are kept")
+        meta, why = tour.profile_end(prof, True)
+        if why or meta["file"] or meta["reset"] or os.path.exists(file + ".dump"):
+            fail("counters never cleared after control are dumped, or the run failed for it: %s %s" % (meta, why))
+        writer = CountingWriter(file)
+        prof.reset()
+        if writer.cleared != 1 or not prof.was_reset or os.path.exists(file + ".reset"):
+            fail("the counters are not cleared on request (%d)" % writer.cleared)
+        meta, why = tour.profile_end(prof, True)
+        to = os.path.join(out, "play-child-0.profraw")
+        if why or meta["file"] != to or not os.path.isfile(to) or os.path.exists(file) or writer.dumps != 1 or tour.raw_problem(to):
+            fail("the counters are not written and moved to <dir>/<name>.profraw: %s %s" % (meta, why))
+        meta, why = tour.profile_end(prof, False)
+        if why or meta["file"] or writer.dumps != 1:
+            fail("a game that ended is asked for its counters: %s" % meta)
+        writer.done.set()
+        # a renderer that takes neither request: the reset fails the run, a dump that never comes fails it too
+        lone = tour.Profile(os.path.join(d, "lone.profraw"), out, "play-adult-0", wait_s=0.3)
+        try:
+            lone.reset()
+            fail("a reset nothing took passed")
+        except tour.Failed as e:
+            if "RX_VK_PGO=gen" not in str(e) or os.path.exists(lone.file + ".reset"):
+                raise
+        lone.was_reset = True
+        meta, why = tour.profile_end(lone, True)
+        if not why or "RX_VK_PGO=gen" not in why or meta["file"] or os.path.exists(os.path.join(out, "play-adult-0.profraw")) or \
+                os.path.exists(lone.file + ".dump"):
+            fail("a dump nothing wrote does not fail the run: %s %s" % (meta, why))
+        if tour.profile_end(None, True) != (None, None):
+            fail("a run without --vk-profile has a profile")
+    # the reset comes once the new game has given control, before the items; none without --vk-profile
+    for with_profile in (True, False):
+        order, saved = [], tour.new_game
+        tour.new_game = lambda g: order.append("control") or {}
+        try:
+            prof = types.SimpleNamespace(reset=lambda: order.append("reset")) if with_profile else None
+            g = types.SimpleNamespace(mem=None, dry=False, profile=prof, note=lambda w: None,
+                                      cheat=lambda n: order.append("cheat") if "cheat" not in order else None,
+                                      frames=lambda n: None)
+            rows = []
+            tour.play(g, a, [("newgame",), ("items",)], rows, lambda label: (order.append("count"), rows.append({"stop": label})),
+                      None)
+        finally:
+            tour.new_game = saved
+        if order != (["control", "reset", "count", "cheat", "count"] if with_profile else ["control", "count", "cheat", "count"]):
+            fail("the counters are not cleared right after control (%s): %s" % ("on" if with_profile else "off", order))
+    src = TOUR.read_text(encoding="utf-8")
+    if "env[PGO_ENV] = os.path.join(run_dir, \"vk.profraw\")" not in src or "g.profile = Profile(env[PGO_ENV], vk_out, args.name)" \
+            not in src or "profile_end(g.profile, proc is not None and proc.poll() is None, hard)" not in src:
+        fail("the run does not set RX_VK_PGO_FILE for the game, or does not write its counters at its end")
+    if src.index("profile_end(g.profile") > src.index("stop_game(proc, bridge if not hard"):
+        fail("the counters are asked for after the game was stopped")
+    # merge-profile: llvm-profdata merge -o <out> <dir>/*.profraw; --publish: xz -9e and the note; refused with nothing counted
+    with tempfile.TemporaryDirectory() as d:
+        root, prof = os.path.join(d, "root"), os.path.join(d, "prof")
+        os.makedirs(os.path.join(root, "assets", "profiles"))
+        os.makedirs(prof)
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[1:] == ["--version"]:
+                return types.SimpleNamespace(returncode=0, stdout="LLVM (http://llvm.org/):\n  LLVM version 23.1.5\n")
+            with open(cmd[3], "wb") as f:
+                for raw in cmd[4:]:
+                    f.write(open(raw, "rb").read())
+            return types.SimpleNamespace(returncode=0, stdout="")
+        args = types.SimpleNamespace(dir=prof, out=None, publish=True, llvm_profdata="/kit/llvm-profdata")
+        try:
+            tour.merge_profile(args, root, fake_run)
+            fail("merge-profile merged an empty folder")
+        except SystemExit as e:
+            if "no .profraw" not in str(e):
+                raise
+        raws = []
+        for k, part in enumerate(("child-overworld", "dungeons")):
+            raw = os.path.join(prof, "play-%s-%d.profraw" % (part, k))
+            open(raw, "wb").write(RAW_MAGIC + struct.pack("<QQQ", 10, 0, 2) + bytes(64))
+            json.dump({"name": "play-%s-%d" % (part, k), "part": part, "seconds": 600, "completed": k == 0,
+                       "version": "v0.0.0-test", "renderer": "Vulkan: Fake GPU, driver 1"}, open(raw[:-8] + ".json", "w"))
+            raws.append(raw)
+        tour.merge_profile(args, root, fake_run)
+        merged = os.path.join(root, "work", "longshot_vk.profdata")
+        if calls[0] != ["/kit/llvm-profdata", "merge", "-o", merged] + sorted(raws):
+            fail("merge-profile's command: %s" % calls[0])
+        data = open(merged, "rb").read()
+        if lzma.decompress(open(os.path.join(root, tour.VK_PROFILE), "rb").read()) != data or \
+                "preset=9 | lzma.PRESET_EXTREME" not in src:
+            fail("--publish does not write the merged profile as xz -9e")
+        note = open(os.path.join(prof, "README-note.md"), encoding="utf-8").read()
+        for want in ("Fake GPU, driver 1", "child-overworld, dungeons", "2 games", "v0.0.0-test", "LLVM version 23.1.5",
+                     "play-dungeons-1", time.strftime("%Y-%m-%d", time.gmtime())[:4]):
+            if want not in note:
+                fail("the profile's note lacks %r:\n%s" % (want, note))
+        os.remove(os.path.join(root, tour.VK_PROFILE))
+        tour.merge_profile(types.SimpleNamespace(dir=prof, out=os.path.join(d, "own.profdata"), publish=False,
+                                                 llvm_profdata="/kit/llvm-profdata"), root, fake_run)
+        if not os.path.isfile(os.path.join(d, "own.profdata")) or os.path.exists(os.path.join(root, tour.VK_PROFILE)):
+            fail("merge-profile --out without --publish")
+        for bad, why in ((b"not a profile at all, no" + bytes(16), "not an LLVM raw profile"),
+                         (RAW_MAGIC + struct.pack("<QQQ", 10, 0, 0) + bytes(64), "no counted functions")):
+            open(os.path.join(prof, "zz.profraw"), "wb").write(bad)
+            try:
+                tour.merge_profile(args, root, fake_run)
+                fail("merge-profile merged a file that is %s" % why)
+            except SystemExit as e:
+                if why not in str(e):
+                    raise
+        os.remove(os.path.join(prof, "zz.profraw"))
+        try:
+            tour.merge_profile(args, root, lambda cmd, **kw: types.SimpleNamespace(returncode=1, stdout=""))
+            fail("merge-profile passed though llvm-profdata failed")
+        except SystemExit as e:
+            if "wrote no profile" not in str(e):
+                raise
+
+
 def main():
     tour = load("pipeline_tour", TOUR)
     a = tour.actions()
@@ -636,7 +884,8 @@ def main():
     bridge_driving(tour, a, states, rec)
     memory_guard(tour, a)
     worth(tour, states, rec)
-    print("pipeline tour: source, route, presses, command line, lists, bridge, memory guard and worth ok")
+    vk_profile(tour, a)
+    print("pipeline tour: source, route, presses, command line, lists, bridge, memory guard, worth and renderer profile ok")
 
 
 if __name__ == "__main__":

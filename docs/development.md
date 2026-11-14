@@ -541,9 +541,22 @@ its place, and `RX_VK_PGO` set by hand (`gen`, or another file) in place of both
 2. **Record a run**: start the game with `RX_VK_PGO_FILE=<file>` in the environment. Create `<file>.reset` once the
    place has loaded (the counters start again), play the places the profile should know, then create `<file>.dump`:
    the counters are written to `<file>` within half a second and the `.dump` file goes. Several places can each be
-   dumped to a file of their own.
+   dumped to a file of their own. [The pipeline tour](#the-pipeline-tour) does this on its whole route (on Linux), with
+   a runtime of the counting pack as its game folder:
+   ```
+   python -I scripts/dev_packs.py rt <dir> <runtime> vk-count
+   python -I scripts/pipeline_tour.py tour --game <runtime> --out <tour dir> --name play --vk-profile <tour dir>/vk
+   ```
+   Each of its games runs with `RX_VK_PGO_FILE` set, clears the counters once it has control of Link (the loading, the
+   prepare and the title left out) and writes them at its end, failed or not, as `<tour dir>/vk/<game>.profraw`, with a
+   `.json` beside it saying where it was recorded. A renderer that doesn't count is refused before the game starts, and
+   one that takes neither request fails the run, so a recording never ends with nothing in it.
 3. **Merge** with the `llvm-profdata` of the compiler that built it:
-   `llvm-profdata merge -o work/longshot_vk.profdata <file> [<file> ...]`.
+   `llvm-profdata merge -o work/longshot_vk.profdata <file> [<file> ...]`, or for the tour's
+   `python -I scripts/pipeline_tour.py merge-profile <tour dir>/vk` (the toolchain's `llvm-profdata`, or
+   `--llvm-profdata <path>`; `--out <file>` for another place than `work/longshot_vk.profdata`). With `--publish` it also
+   writes `assets/profiles/longshot_vk.profdata.xz` (xz -9e) and the lines for `assets/profiles/README.md` (when, the
+   GPU and driver, the build, the route's parts, the compiler) to `<tour dir>/vk/README-note.md`.
 4. **Build with it**: `make_game.py` copies `work/longshot_vk.profdata` to its work folder and passes it
    (`RX_VK_PGO=<file>`), unless `RX_VK_PGO` is set already; without one it unpacks the committed profile there
    (`longshot_vk.shipped.profdata`) and passes that. Either only when this compiler reads it, on every system (a
@@ -773,7 +786,8 @@ record it again, and make a new tour list. The folder's layout stays the same.
 ### The pipeline tour
 
 `scripts/pipeline_tour.py` plays the game for the tour's list, unattended, on Linux, and writes `tour.bin.xz` with its note
-(ported from Hookshot's draft #2048, now driven through the [control bridge](control.md)):
+(ported from Hookshot's draft [pull request 2048](https://github.com/NotRexed/Hookshot/pull/2048), now driven through the
+[control bridge](control.md)):
 
 ```sh
 python -I scripts/pipeline_tour.py tour --game <game folder> --out <tour dir> --name play --publish
@@ -818,6 +832,10 @@ it. Each run writes `states.bin`, `report.txt` and `report.json` (each step's pi
 seconds and the game's memory: a flattening curve says the list is nearly whole), `log.txt`, `steps.txt` (each request, at
 its frame) and a small picture every 600 frames (`shots/`). `tests/test_pipeline_tour.py` checks it without the game,
 against a fake bridge.
+
+`--vk-profile <dir>` (`run` and `tour`) records [the renderer's play profile](#the-renderers-play-profile) on the same
+route, with a counting renderer (`RX_VK_PGO=gen`): each game's counters, from control of Link to its end, go to
+`<dir>/<game>.profraw`, and `merge-profile <dir> [--publish]` merges them. The lists are made as without it.
 
 ## The options file
 

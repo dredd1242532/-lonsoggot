@@ -4,20 +4,23 @@ adult, with the items, their effects and the menus, so that its graphics pipelin
 assets/pipeline_states/tour.bin.xz and tour.md (nx2/pipeline_states.py tour): the first start prepares those pipelines before the
 title.
 
-Ported from Hookshot's draft pull request #2048 (NotRexed/Hookshot) by HumanBean (hckrman101 on GitHub), and changed to drive the
-game through the control bridge (host/control.c, docs/control.md) instead of a live input file and the log.
+Ported from Hookshot's draft pull request https://github.com/NotRexed/Hookshot/pull/2048 by HumanBean (hckrman101 on GitHub), and
+changed to drive the game through the control bridge (host/control.c, docs/control.md) instead of a live input file and the log.
 
     python -I scripts/pipeline_tour.py tour --game <game folder> --out <dir> [--name play] [--parts ...] [--publish] [--env ...] [--ini ...]
+                                            [--vk-profile <dir>]
     python -I scripts/pipeline_tour.py run  --game <game folder> --out <dir> [--name play] [--part <part>] [--first <stop>] [--stops N]
                                             [--skip-opening] [--env NAME=VALUE ...] [--ini key=value ...] [--window WxH] [--dry-run]
+                                            [--vk-profile <dir>]
+    python -I scripts/pipeline_tour.py merge-profile <vk-profile dir> [--out <file>] [--publish] [--llvm-profdata <path>]
     python -I scripts/pipeline_tour.py merge --out <file> <list> ...
     python -I scripts/pipeline_tour.py report <out>/<name>
     python -I scripts/pipeline_tour.py value <run dir> ... [--sub] [--floor 10]
 
-run: one game. The game folder is used as it is, so give it a copy (cp -a --reflink=always): its longshot_pipelines.bin (the pipeline
-notes), longshot_pipeline_states.bin and longshot_pipeline_states_shipped.bin are moved aside for the run (a precompiled pipeline is
-not noted again, and only what this run meets counts) and put back after it. The run starts with no save at all (an empty data folder
-of its own, <out>/<name>/data): the title, New Game, the opening, then control of Link. Then every item, and each destination: the
+run: one game. The game folder is used as it is, so give it a copy (cp -a --reflink=always): its cache/longshot_pipelines.bin (the
+pipeline notes), cache/longshot_pipeline_states.bin (and _v1) and longshot_pipeline_states_shipped.bin are moved aside for the run
+(a precompiled pipeline is not noted again, and only what this run meets counts) and put back after it. The run starts with no save
+at all (an empty data folder of its own, <out>/<name>/data): the title, New Game, the opening, then control of Link. Then every item, and each destination: the
 teleport, its loading, the camera all around, at a few the sword, the shield and an item from the pause menu, until no new pipeline
 came for a while.
 
@@ -37,6 +40,16 @@ fresh game each), at nice 19 on --cpus, each under the memory guard (MEM: it wai
 holds too much or leaves the machine too little, the next game going on from there; on Linux the game runs in a systemd scope
 with a MemoryMax); merged; --publish writes the repository's tour list from them (nx2/pipeline_states.py tour, with the GPU,
 build, settings and route the runs logged).
+
+--vk-profile <dir> (run and tour): the renderer's play profile recorded on the tour's route (docs/development.md, "The
+renderer's play profile"). The game folder's renderer must be an RX_VK_PGO=gen one (a counting pack: RX_VK_PGO=gen python -I
+scripts/dev_packs.py pack <base> vk-count): it is refused otherwise. Each game runs with RX_VK_PGO_FILE set; once it has control
+of Link the counters are cleared (<file>.reset: the loading, the prepare and the title left out), and at its end, failed or not,
+they are written (<file>.dump) and moved to <dir>/<run name>.profraw, with <run name>.json saying where they were recorded. A
+renderer that takes neither request fails the run rather than leaving nothing. The pipeline lists are made as without it (the
+counting renderer is slower, its pipelines the same). merge-profile then merges <dir>/*.profraw with the toolchain's
+llvm-profdata into work/longshot_vk.profdata (what nx2/make_game.py builds with); --publish also writes
+assets/profiles/longshot_vk.profdata.xz (xz -9e) and the note for assets/profiles/README.md (<dir>/README-note.md).
 
 value: each step's pipelines over runs that the players' lists (the shipped list's contrib/ sources) and the other steps do not
 have, its seconds, and which steps add too little to keep.
@@ -60,8 +73,13 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATE_FILES = ("longshot_pipelines.bin", "longshot_pipeline_states.bin", "longshot_pipeline_states_shipped.bin")
-LIST = "longshot_pipeline_states.bin"
+# (in the game folder: the pipeline notes and the lists play adds to are in cache/, the shipped list beside the game
+# (gpu/vk/vk_draw.cpp state_list_path, pipe_notes_path; host/game_layout.c), and a build from before left its loose beside the
+# game, which the game's start moves into cache/)
+STATE_FILES = ("cache/longshot_pipelines.bin", "cache/longshot_pipeline_states.bin", "cache/longshot_pipeline_states_v1.bin",
+               "longshot_pipeline_states_shipped.bin", "longshot_pipelines.bin", "longshot_pipeline_states.bin",
+               "longshot_pipeline_states_v1.bin")
+LIST = "cache/longshot_pipeline_states.bin"
 OPTIONS = "longshot_options.ini"
 
 # no window, no sound, no controller, no pacing, the cap Uncapped with a 60th of a second of game time a frame, the smallest
@@ -429,6 +447,112 @@ class Failed(Exception):
     pass
 
 
+def aside_name(rel):
+    """A STATE_FILES path's name in the folder it is put aside in, and in the run's folder: cache/'s by their own names, a loose
+    one beside the game that cache/ has too as loose_<name>"""
+    if rel.startswith("cache/"):
+        return rel[len("cache/"):]
+    return "loose_" + rel if "cache/" + rel in STATE_FILES else rel
+
+
+# ---- the renderer's play profile (--vk-profile) ----
+# An RX_VK_PGO=gen renderer (nx2/build.py) counts its branches, and its copy of host/pgo_rt.c, reading RX_VK_PGO_FILE=<file>,
+# looks every 500 ms for <file>.reset (the counters cleared) and <file>.dump (the counters written to <file>), deleting each once
+# done. A run with --vk-profile clears them once the new game has given control of Link (the loading, the prepare and the
+# title left out) and writes them at its end, failed or not, as <dir>/<run name>.profraw with <run name>.json (where it was
+# recorded); merge-profile merges them with llvm-profdata (docs/development.md, "The renderer's play profile")
+PGO_ENV = "RX_VK_PGO_FILE"
+PGO_MARK = b"RX_VK_PGO_FILE\x00"   # (the counting renderer's getenv: only its copy of pgo_rt.c names it, -DPGO_ENV)
+PGO_RAW_MAGIC = struct.pack("<Q", 0xff6c70726f667281)   # (LLVM's raw profile, host/pgo_rt.c pgo_write: \xfflprofr\x81)
+PGO_WAIT_S = 10           # (the writer looks every 500 ms; a written file comes within a second)
+RENDERERS = ("longshot_vk.so", "longshot_vk.dll")   # (beside the game's executable: host/rx_backend.c load_vulkan)
+VK_PROFILE = os.path.join("assets", "profiles", "longshot_vk.profdata.xz")
+VK_PROFILE_WORK = os.path.join("work", "longshot_vk.profdata")   # (what nx2/make_game.py builds with, before the committed one)
+
+
+def drop(path):
+    """path deleted if it is there (the renderer's writer may delete it at the same time)"""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def counting_renderer(exe_dir):
+    """The renderer beside the game's executable is an RX_VK_PGO=gen one (it reads RX_VK_PGO_FILE): its path, else None"""
+    for name in RENDERERS:
+        path = os.path.join(exe_dir, name)
+        if not os.path.isfile(path):
+            continue
+        tail = b""
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                if PGO_MARK in tail + chunk:
+                    return path
+                tail = chunk[-len(PGO_MARK):]
+    return None
+
+
+class Profile:
+    """The renderer's counters in one game: file is RX_VK_PGO_FILE's, out the --vk-profile folder, name the run's"""
+    def __init__(self, file, out, name, wait_s=PGO_WAIT_S, sleep=time.sleep, clock=time.monotonic):
+        self.file, self.out, self.name, self.wait_s, self.sleep, self.clock = file, out, name, wait_s, sleep, clock
+        self.was_reset = False
+        for stale in (file, file + ".reset", file + ".dump"):   # (an earlier run's: not this one's counters)
+            drop(stale)
+
+    def _until(self, done, wait_s):
+        end = self.clock() + wait_s
+        while not done():
+            if self.clock() > end:
+                return False
+            self.sleep(0.1)
+        return True
+
+    def reset(self):
+        """The counters cleared (from here on only play counts): Failed when the renderer does not take the request, as one
+        that does not count never does"""
+        open(self.file + ".reset", "w").close()
+        if not self._until(lambda: not os.path.exists(self.file + ".reset"), self.wait_s):
+            drop(self.file + ".reset")
+            raise Failed("--vk-profile: the renderer did not take %s.reset in %g s: not an RX_VK_PGO=gen renderer" % (
+                self.file, self.wait_s))
+        self.was_reset = True
+
+    def dump(self, wait_s=None):
+        """The counters written and moved to <out>/<name>.profraw: its path, None when the renderer wrote nothing"""
+        drop(self.file)
+        open(self.file + ".dump", "w").close()
+        written = lambda: not os.path.exists(self.file + ".dump") and os.path.isfile(self.file) and os.path.getsize(self.file) > 0
+        if not self._until(written, self.wait_s if wait_s is None else wait_s):
+            drop(self.file + ".dump")
+            return None
+        os.makedirs(self.out, exist_ok=True)
+        to = os.path.join(self.out, self.name + ".profraw")
+        shutil.move(self.file, to)
+        return to
+
+
+def profile_end(profile, alive, hard=False):
+    """A run's end with --vk-profile: the counters written if the game is there and they were cleared after control.
+    ({file, reset, why}, the run's error or None): a renderer that writes nothing fails the run, never an empty profile"""
+    if profile is None:
+        return None, None
+    if not profile.was_reset:   # (no control of Link yet: the counters hold the loading and the title, not play)
+        return {"file": None, "reset": False, "why": "the counters were never cleared (no control of Link): not kept"}, None
+    if not alive:
+        return {"file": None, "reset": True, "why": "the game ended before its counters were written"}, None
+    to = profile.dump(3 if hard else None)   # (a hard memory stop: a few seconds at most)
+    if to is None:
+        why = "--vk-profile: the renderer wrote no counters to %s in %g s: not an RX_VK_PGO=gen renderer" % (
+            profile.file, 3 if hard else profile.wait_s)
+        return {"file": None, "reset": True, "why": why}, why
+    return {"file": to, "reset": True, "why": None}, None
+
+
 # ---- the game, through the bridge ----
 
 class Game:
@@ -446,6 +570,7 @@ class Game:
         self.frame = 0          # (the game's presents so far, as the last reply said)
         self.marks = []         # (the current step's parts: [(what, records so far)])
         self.last = None        # (the last status)
+        self.profile = None     # (--vk-profile: the renderer's counters, Profile)
 
     def now(self):
         return time.monotonic() - self.t0
@@ -695,6 +820,12 @@ def new_game(g, limit_s=1200, title_draws=15, first_frame_s=1800):
     return phases
 
 
+def game_exe(game):
+    """The game's executable in its folder (a game folder's, or one with it in bin/)"""
+    exe = os.path.join(game, "longshot")
+    return exe if os.path.exists(exe) else os.path.join(game, "bin", "longshot")
+
+
 def start_game(game, run_dir, data, env, prefix=(), timeout=900, ctl=None):
     """The game in its folder with the bridge on (a socket in a 0700 folder of the run's own, docs/control.md) and the live input
     file: (process, bridge, live file path). Waits until the bridge answers (a first start prepares the shaders first)"""
@@ -710,9 +841,7 @@ def start_game(game, run_dir, data, env, prefix=(), timeout=900, ctl=None):
     full = dict(os.environ)
     full.update(env)
     full.update({"XDG_DATA_HOME": data, "HOS_INPUT_LIVE": live, "HOS_CONTROL": sock})
-    exe = os.path.join(game, "longshot")
-    if not os.path.exists(exe):
-        exe = os.path.join(game, "bin", "longshot")
+    exe = game_exe(game)
     logf = open(os.path.join(run_dir, "log.txt"), "wb")
     proc = subprocess.Popen(list(prefix) + [exe], cwd=game, env=full, stdout=logf, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL, start_new_session=True)
@@ -785,6 +914,9 @@ def write_report(run_dir, rows, meta):
     if meta.get("peak_mb") or meta.get("memory_stop"):
         out.append("memory: the game held %s MB at most%s" % (meta.get("peak_mb") or "?", "; stopped: %s; left: %s" % (
             meta["memory_stop"], ", ".join(meta.get("left") or []) or "none") if meta.get("memory_stop") else ""))
+    if "vk_profile" in meta:
+        vk = meta["vk_profile"] or {}
+        out.append("renderer profile: %s" % (vk.get("file") or "none (%s)" % (vk.get("why") or "the game did not start")))
     out.append("settings: %s" % " ".join("%s=%s" % kv for kv in sorted(meta["env"].items())))
     if meta.get("ini"):
         out.append("options: %s" % " ".join(meta["ini"]))
@@ -836,6 +968,9 @@ def play(g, a, steps, rows_out, count, args):
                                  soft=True)
         if kind == "newgame":
             phases = new_game(g)
+            if g.profile is not None and not g.dry:   # (control: the counters from here on are play's)
+                g.profile.reset()
+                g.note("vk profile: counters cleared")
             count("new game: title, opening, Link's house")
             rows_out[-1]["phases"] = phases
         elif kind == "items":
@@ -919,6 +1054,13 @@ def run(args):
     os.makedirs(run_dir, exist_ok=True)
     env = run_env(args)
     game = os.path.abspath(args.game)
+    vk_out = os.path.abspath(args.vk_profile) if getattr(args, "vk_profile", None) else None
+    if vk_out and not args.dry_run and not counting_renderer(os.path.dirname(game_exe(game))):
+        raise SystemExit("pipeline_tour: --vk-profile: the renderer beside %s does not count (no %s in %s): build a counting "
+                         "pack (RX_VK_PGO=gen python -I scripts/dev_packs.py pack <base> vk-count) and run a runtime of it"
+                         % (game_exe(game), PGO_ENV, " or ".join(RENDERERS)))
+    if vk_out:   # (the renderer's counters: written here, then moved to <vk_out>/<name>.profraw)
+        env[PGO_ENV] = os.path.join(run_dir, "vk.profraw")
     tool = state_tool()
     mem = mem_settings(args)
     prefix = []
@@ -940,7 +1082,7 @@ def run(args):
         os.makedirs(aside)
         for name in STATE_FILES:
             if os.path.exists(os.path.join(game, name)):
-                os.replace(os.path.join(game, name), os.path.join(aside, name))
+                os.replace(os.path.join(game, name), os.path.join(aside, aside_name(name)))
         shutil.rmtree(data, ignore_errors=True)
         os.makedirs(data)   # (no save: the run makes its own)
         ini = dict(BASE_INI)
@@ -957,13 +1099,15 @@ def run(args):
         os.nice(max(0, args.nice - os.nice(0)))
     proc = bridge = None
     error, memory_stop, left, hard = None, None, [], False
-    g = None
+    g = profile_meta = None
     try:
         if not args.dry_run:
             proc, bridge, live = start_game(game, run_dir, data, env, prefix)
         else:
             live = None
         g = Game(bridge, run_dir, os.path.join(game, LIST), live, proc, mem, args.dry_run)
+        if vk_out and not args.dry_run:
+            g.profile = Profile(env[PGO_ENV], vk_out, args.name)
         g.at = 0
         mark = [0.0, 0]
 
@@ -991,15 +1135,23 @@ def run(args):
         if g:
             g.note("FAILED: " + error)
     finally:
+        if g is not None and g.profile is not None:   # (failed or not: what the game counted since control)
+            try:
+                profile_meta, why = profile_end(g.profile, proc is not None and proc.poll() is None, hard)
+            except OSError as e:
+                profile_meta, why = {"file": None, "reset": g.profile.was_reset, "why": str(e)}, "--vk-profile: %s" % e
+            if why and error is None:
+                error = why
+            g.note("vk profile: %s" % profile_meta)
         stop_game(proc, bridge if not hard else None, 3 if hard else 15)
         if not args.dry_run:
             if os.path.exists(os.path.join(game, LIST)):
                 shutil.copyfile(os.path.join(game, LIST), os.path.join(run_dir, "states.bin"))
             for name in STATE_FILES:
                 if os.path.exists(os.path.join(game, name)):
-                    os.replace(os.path.join(game, name), os.path.join(run_dir, name))
-                if os.path.exists(os.path.join(aside, name)):
-                    os.replace(os.path.join(aside, name), os.path.join(game, name))
+                    os.replace(os.path.join(game, name), os.path.join(run_dir, aside_name(name)))
+                if os.path.exists(os.path.join(aside, aside_name(name))):
+                    os.replace(os.path.join(aside, aside_name(name)), os.path.join(game, name))
             os.rmdir(aside)
             if old_ini is not None:
                 with open(os.path.join(game, OPTIONS), "w", encoding="utf-8") as f:
@@ -1011,6 +1163,12 @@ def run(args):
             "completed": error is None and not left, "error": error, "fps": frames / seconds if seconds else None,
             "memory_stop": memory_stop, "memory_soft": memory_stop is not None and not hard, "left": left,
             "peak_mb": (g.peak or None) if g else None, "version": last.get("version"), "renderer": last.get("renderer")}
+    if vk_out:
+        meta["vk_profile"] = profile_meta
+        if profile_meta and profile_meta.get("file"):   # (where the counters were recorded, for merge-profile's note)
+            with open(os.path.join(vk_out, args.name + ".json"), "w", encoding="utf-8") as f:
+                json.dump({k: meta[k] for k in ("name", "part", "seconds", "frames", "completed", "error", "version", "renderer")},
+                          f, indent=1)
     print(write_report(run_dir, rows, meta), end="")
     return 1 if error is not None else 4 if left else 0
 
@@ -1098,6 +1256,8 @@ def run_command(args, part, name, first, stops, skip_opening):
         cmd += ["--cpus", args.cpus]
     if args.window:
         cmd += ["--window", args.window]
+    if getattr(args, "vk_profile", None):
+        cmd += ["--vk-profile", os.path.abspath(args.vk_profile)]
     return cmd
 
 
@@ -1109,6 +1269,17 @@ def tour(args):
     for part in parts:
         if part not in PARTS:
             raise SystemExit("pipeline_tour: no part %r (%s)" % (part, ", ".join(PARTS)))
+    if getattr(args, "vk_profile", None):   # (refused before the copy, as each run would refuse it)
+        args.vk_profile = os.path.abspath(args.vk_profile)
+        if not counting_renderer(os.path.dirname(game_exe(os.path.abspath(args.game)))):
+            raise SystemExit("pipeline_tour: --vk-profile: the renderer beside %s does not count (no %s in %s): build a counting "
+                             "pack (RX_VK_PGO=gen python -I scripts/dev_packs.py pack <base> vk-count) and run a runtime of it"
+                             % (game_exe(os.path.abspath(args.game)), PGO_ENV, " or ".join(RENDERERS)))
+        os.makedirs(args.vk_profile, exist_ok=True)
+        had = [n for n in os.listdir(args.vk_profile) if n.endswith(".profraw")]
+        if had:
+            print("tour: %s holds %d .profraw files already (merge-profile takes every one): %s" % (
+                args.vk_profile, len(had), ", ".join(sorted(had))), flush=True)
     args.out_dir = out = os.path.abspath(args.out)
     os.makedirs(out, exist_ok=True)
     t0 = time.monotonic()
@@ -1153,6 +1324,10 @@ def tour(args):
         print("tour %s: not published (a run failed or made no list: --publish-partial publishes anyway)" % args.name)
     print("tour %s: %.0f s in all, parts %s, %d runs%s" % (args.name, time.monotonic() - t0, ",".join(parts), len(results),
                                                          "" if not rc else " (a run failed)"))
+    if getattr(args, "vk_profile", None):
+        raws = sorted(n for n in os.listdir(args.vk_profile) if n.endswith(".profraw")) if os.path.isdir(args.vk_profile) else []
+        print("tour %s: the renderer's counters of %d games in %s; merged by: python -I %s merge-profile %s [--publish]" % (
+            args.name, len(raws), args.vk_profile, os.path.relpath(os.path.abspath(__file__), ROOT), args.vk_profile))
     return rc
 
 
@@ -1175,7 +1350,8 @@ def publish(lists, run_dirs, parts, sources=None):
                 log = ""
             m = re.search(r"vk: (.+?), Vulkan [\d.]+, driver (\S+); mesh shaders", log)
             gpu = (m and "%s (driver %s)" % (m.group(1), m.group(2))) or ""
-        settings = settings or {k: v for k, v in meta.get("env", {}).items() if k.startswith(("HOS_OUTPUT", "HOS_FPS", "RX_VK"))}
+        settings = settings or {k: v for k, v in meta.get("env", {}).items() if k.startswith(("HOS_OUTPUT", "HOS_FPS", "RX_VK"))
+                                and k != PGO_ENV}   # (a path of the run's: no setting)
         minutes += meta.get("seconds", 0) / 60
     ini = " ".join("%s=%s" % kv for kv in sorted(BASE_INI.items()))
     cmd = [sys.executable, "-I", os.path.join(ROOT, "nx2", "pipeline_states.py"), "tour"] + lists + [
@@ -1197,6 +1373,101 @@ def merge(args):
         seen |= recs
     ran = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "nx2", "pipeline_states.py"), "--out", args.out] + args.lists)
     return ran.returncode
+
+
+def raw_problem(path):
+    """Why a --vk-profile file is not one llvm-profdata should merge (None: it is): LLVM's raw format, with counted functions"""
+    with open(path, "rb") as f:
+        head = f.read(32)
+    if head[:8] != PGO_RAW_MAGIC:
+        return "not an LLVM raw profile (host/pgo_rt.c's)"
+    if len(head) < 32 or struct.unpack_from("<Q", head, 24)[0] == 0:
+        return "no counted functions in it (a renderer built without RX_VK_PGO=gen counting)"
+    return None
+
+
+def profdata_tool():
+    """The toolchain's llvm-profdata (the compiler that builds the renderer: third_party/a64-kit/tools/toolchain.py)"""
+    sys.path.insert(0, os.path.join(ROOT, "third_party", "a64-kit", "tools"))
+    import toolchain
+    return toolchain.need(toolchain.find("llvm-profdata"))
+
+
+def profile_note(d, raws, tool, run=subprocess.run, today=None):
+    """The block for assets/profiles/README.md: when, where (GPU and driver, the build), the route's parts, the compiler"""
+    games = []
+    for raw in raws:
+        try:
+            with open(raw[:-len(".profraw")] + ".json", encoding="utf-8") as f:
+                games.append(json.load(f))
+        except (OSError, ValueError):
+            games.append({})
+    parts = []
+    for m in games:
+        if m.get("part") and m["part"] not in parts:
+            parts.append(m["part"])
+    gpus = sorted({m["renderer"] for m in games if m.get("renderer")})
+    builds = sorted({m["version"] for m in games if m.get("version")})
+    minutes = sum(m.get("seconds") or 0 for m in games) / 60
+    failed = [m["name"] for m in games if m.get("name") and not m.get("completed")]
+    try:
+        version = run([tool, "--version"], capture_output=True, text=True).stdout
+    except OSError:
+        version = ""
+    llvm = next((line.strip() for line in version.splitlines() if "LLVM version" in line), "llvm-profdata (version unknown)")
+    cpu = ""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as f:
+            cpu = next((line.split(":", 1)[1].strip() for line in f if line.startswith("model name")), "")
+    except OSError:
+        pass
+    import platform
+    return "\n".join([
+        "- Recorded: %s, the pipeline tour (`scripts/pipeline_tour.py tour --vk-profile`), parts %s from a new save: %d games, "
+        "%.0f minutes, an `RX_VK_PGO=gen` renderer on build %s; each game's counters cleared once it had control of Link and "
+        "written at its end%s" % (today or time.strftime("%Y-%m-%d", time.gmtime()), ", ".join(parts) or "unknown", len(raws),
+                                   minutes, ", ".join(builds) or "unknown",
+                                   "" if not failed else " (not completed, their counters kept: %s)" % ", ".join(failed)),
+        "- GPU and driver: %s, %s%s" % ("; ".join(gpus) or "unknown", platform.system() or "unknown", "; " + cpu if cpu else ""),
+        "- Compiler: %s (the llvm-profdata that merged it)" % llvm]) + "\n"
+
+
+def merge_profile(args, root=ROOT, run=subprocess.run):
+    """The --vk-profile folder's counters merged by llvm-profdata into the renderer's play profile (work/longshot_vk.profdata,
+    which nx2/make_game.py builds with); --publish also writes the committed one, assets/profiles/longshot_vk.profdata.xz (xz
+    -9e), and the note for assets/profiles/README.md. Refused when there is nothing counted to merge"""
+    d = os.path.abspath(args.dir)
+    raws = sorted(os.path.join(d, n) for n in os.listdir(d) if n.endswith(".profraw")) if os.path.isdir(d) else []
+    if not raws:
+        raise SystemExit("pipeline_tour: merge-profile: no .profraw in %s (a run or tour with --vk-profile %s writes them)" % (d, d))
+    for raw in raws:
+        why = raw_problem(raw)
+        if why:
+            raise SystemExit("pipeline_tour: merge-profile: %s: %s" % (raw, why))
+    tool = args.llvm_profdata or profdata_tool()
+    out = os.path.abspath(args.out) if args.out else os.path.join(root, VK_PROFILE_WORK)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if os.path.exists(out):
+        os.remove(out)
+    cmd = [tool, "merge", "-o", out] + raws
+    print(" ".join(cmd), flush=True)
+    if run(cmd).returncode or not os.path.isfile(out) or not os.path.getsize(out):
+        raise SystemExit("pipeline_tour: merge-profile: llvm-profdata wrote no profile (%s)" % out)
+    print("merge-profile: %d games' counters in %s (%d bytes)" % (len(raws), out, os.path.getsize(out)))
+    if args.publish:
+        import lzma
+        with open(out, "rb") as f:
+            data = f.read()
+        shipped = os.path.join(root, VK_PROFILE)
+        with open(shipped, "wb") as f:   # (as xz -9e: the preset 9, extreme)
+            f.write(lzma.compress(data, format=lzma.FORMAT_XZ, preset=9 | lzma.PRESET_EXTREME))
+        note = profile_note(d, raws, tool, run)
+        with open(os.path.join(d, "README-note.md"), "w", encoding="utf-8") as f:
+            f.write(note)
+        print("merge-profile: %s written (%d bytes). Its note, for assets/profiles/README.md in place of the Recorded, GPU and "
+              "driver, and Compiler lines (also in %s):\n%s" % (shipped, os.path.getsize(shipped),
+                                                                 os.path.join(d, "README-note.md"), note), end="")
+    return 0
 
 
 # ---- what each step is worth ----
@@ -1336,6 +1607,8 @@ def parser():
     r.add_argument("--mem", action="append", default=[], metavar="KEY=VALUE",
                    help="the memory guard's limits over its defaults (%s)" % ", ".join("%s=%s" % kv for kv in sorted(MEM.items())))
     r.add_argument("--no-mem-guard", action="store_true", help="no memory guard (no waiting, no limits, no scope)")
+    r.add_argument("--vk-profile", metavar="DIR", help="an RX_VK_PGO=gen renderer's counters, from control of Link to the "
+                   "run's end, to DIR/<name>.profraw (merge-profile merges them)")
     t = sub.add_parser("tour", help="the parts, one game at a time, merged")
     t.add_argument("--game", required=True)
     t.add_argument("--out", required=True)
@@ -1354,6 +1627,15 @@ def parser():
     t.add_argument("--window", metavar="WxH", help="the games in a window")
     t.add_argument("--publish", action="store_true",
                    help="write the repository's tour list (assets/pipeline_states/tour.bin.xz and tour.md) from the parts' lists")
+    t.add_argument("--vk-profile", metavar="DIR", help="each game's RX_VK_PGO=gen renderer counters to DIR/<game>.profraw "
+                   "(run --vk-profile; merge-profile merges them)")
+    mp = sub.add_parser("merge-profile", help="the --vk-profile counters merged into the renderer's play profile")
+    mp.add_argument("dir", help="the --vk-profile folder (its *.profraw)")
+    mp.add_argument("--out", help="the merged profile (default work/longshot_vk.profdata, which nx2/make_game.py builds with)")
+    mp.add_argument("--publish", action="store_true", help="also write assets/profiles/longshot_vk.profdata.xz (xz -9e) and "
+                    "the note for assets/profiles/README.md")
+    mp.add_argument("--llvm-profdata", metavar="PATH", help="this llvm-profdata, not the toolchain's (the compiler's that "
+                    "built the counting renderer)")
     m = sub.add_parser("merge", help="lists merged, and what each added")
     m.add_argument("--out", required=True)
     m.add_argument("lists", nargs="+")
@@ -1374,7 +1656,7 @@ def main(argv=None):
     a = parser().parse_args(argv)
     if a.cmd == "run" and a.dry_run:
         return dry_route(a)
-    return {"run": run, "tour": tour, "merge": merge, "report": report, "value": value}[a.cmd](a)
+    return {"run": run, "tour": tour, "merge": merge, "report": report, "value": value, "merge-profile": merge_profile}[a.cmd](a)
 
 
 if __name__ == "__main__":
