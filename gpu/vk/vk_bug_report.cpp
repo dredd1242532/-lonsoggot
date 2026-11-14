@@ -90,7 +90,7 @@ std::string when(std::time_t t, const char* format) {
     if (t && local_time(t, &tm)) strftime(b, sizeof b, format, &tm);
     return b;
 }
-bool exists(const std::string& path, std::time_t* written = nullptr) {
+bool exists(const std::string& path, std::time_t* written = nullptr, uint64_t* size = nullptr) {
 #ifdef _WIN32
     struct _stat64 st;
     if (_stat64(path.c_str(), &st)) return false;
@@ -98,6 +98,14 @@ bool exists(const std::string& path, std::time_t* written = nullptr) {
     struct stat st;
     if (stat(path.c_str(), &st)) return false;
 #endif
+    if (size) {
+#ifdef _WIN32
+        if ((st.st_mode & _S_IFMT) != _S_IFREG || st.st_size < 0) return false;
+#else
+        if (!S_ISREG(st.st_mode) || st.st_size < 0) return false;
+#endif
+        *size = (uint64_t)st.st_size;
+    }
     if (written) *written = st.st_mtime;
     return true;
 }
@@ -117,17 +125,27 @@ bool make_dir(const std::string& path, std::string* why) {
     return false;
 #endif
 }
-uint64_t file_size(FILE* f) {
+bool file_size(FILE* f, uint64_t& size) {
 #ifdef _WIN32
-    _fseeki64(f, 0, SEEK_END);
+    if (_fseeki64(f, 0, SEEK_END)) return false;
     const int64_t n = _ftelli64(f);
-    _fseeki64(f, 0, SEEK_SET);
+    if (_fseeki64(f, 0, SEEK_SET)) return false;
 #else
-    fseeko(f, 0, SEEK_END);
+    if (fseeko(f, 0, SEEK_END)) return false;
     const int64_t n = ftello(f);
-    fseeko(f, 0, SEEK_SET);
+    if (fseeko(f, 0, SEEK_SET)) return false;
 #endif
-    return n > 0 ? (uint64_t)n : 0;
+    if (n < 0) return false;
+    size = (uint64_t)n;
+    return true;
+}
+bool put_file(const std::string& path, const std::string& text) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+    const bool closed = fclose(f) == 0;
+    if (!ok || !closed) std::remove(path.c_str());
+    return ok && closed;
 }
 /// Whether two paths name one file (the log this run writes, and longshot_log.txt in the game folder)
 bool same_file(const std::string& a, const std::string& b, bool windows) {
@@ -165,8 +183,8 @@ std::string report_shown, report_why;
 
 /// A log as it was copied: what the report says of it
 struct LogFacts {
-    bool copied = false, cut = false;
-    uint64_t size = 0;
+    bool copied = false, cut = false, failed = false;
+    uint64_t size = 0, bytes = 0;
     std::time_t written = 0;
     std::string version, map, trouble;   // (its first line's version, the last map it names, its first sign of trouble)
 };
@@ -183,9 +201,10 @@ void take_facts(const std::string& line, LogFacts& f) {
 LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& in) {
     LogFacts f;
     FILE* src = fopen(from.c_str(), "rb");
-    if (!src) return f;
+    if (!src) { f.failed = errno != ENOENT; return f; }
+    f.failed = true;
     exists(from, &f.written);
-    f.size = file_size(src);
+    if (!file_size(src, f.size)) { fclose(src); return f; }
     FILE* dst = fopen(to.c_str(), "wb");
     if (!dst) {
         fclose(src);
@@ -196,21 +215,27 @@ LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& 
     std::string line;
     std::vector<char> buf(1 << 16);
     uint64_t read = 0, start = 0;   // (bytes read; where the line being gathered starts in the log)
+    bool write_ok = true;
+    const auto put_text = [&](const std::string& text) {
+        const size_t n = fwrite(text.data(), 1, text.size(), dst);
+        f.bytes += n;
+        if (n != text.size()) write_ok = false;
+    };
     bool said_gap = false;
     const auto put = [&] {   // (a whole line, its '\n' kept, or the last part of the log)
         const std::string clean = redact(line, in.home, in.user, in.windows);
         take_facts(clean, f);
         if (start < gap_from || start >= gap_to) {
-            fwrite(clean.data(), 1, clean.size(), dst);
+            put_text(clean);
         } else if (!said_gap) {
             said_gap = true;
-            fprintf(dst, "[bug report: %s of this log's middle left out here: the copy keeps its first and its last part]\n",
-                    megabytes(gap_to - gap_from).c_str());
+            put_text("[bug report: " + megabytes(gap_to - gap_from) +
+                     " of this log's middle left out here: the copy keeps its first and its last part]\n");
         }
         start += line.size();
         line.clear();
     };
-    while (read < f.size) {
+    while (read < f.size && write_ok) {
         const size_t n = fread(buf.data(), 1, (size_t)std::min<uint64_t>(buf.size(), f.size - read), src);
         if (!n) break;
         read += n;
@@ -222,9 +247,13 @@ LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& 
             if (nl || line.size() >= (1u << 20)) put();   // (a line, or a MB of one that has no end)
         }
     }
-    if (!line.empty()) put();
+    if (!line.empty() && write_ok) put();
+    const bool read_ok = read == f.size && !ferror(src);
     fclose(src);
-    f.copied = fclose(dst) == 0;
+    const bool closed = fclose(dst) == 0;
+    f.copied = read_ok && write_ok && closed;
+    f.failed = !f.copied;
+    if (f.failed) std::remove(to.c_str());   // (a failed copy is not an attachment)
     return f;
 }
 
@@ -467,7 +496,37 @@ std::string write(const Inputs& in) {
     LogFacts now, last;
     if (!in.current_log.empty()) now = copy_log(in.current_log, dir + "longshot_log.txt", in);
     if (!same_file(before, in.current_log, in.windows)) last = copy_log(before, dir + "longshot_log.1.txt", in);
-    const bool picture = asked && wait_picture(ticket, picture_path, in.picture_wait_ms);
+    const bool captured = asked && wait_picture(ticket, picture_path, in.picture_wait_ms);
+    uint64_t picture_size = 0;
+    const bool picture = captured && exists(picture_path, nullptr, &picture_size);
+
+    // Metadata and the human inventory describe the same collection results, not a second file scan.
+    struct Item { std::string name, status, reason; uint64_t size = 0; bool shareable = false; };
+    std::vector<Item> items;
+    items.reserve(12);
+    const auto omit = [&](const char* name, const char* reason, bool error = false) {
+        items.push_back({name, error ? "failed" : "omitted", reason, 0, false});
+    };
+    const auto log_item = [&](const char* name, const LogFacts& facts, const char* purpose) {
+        if (facts.copied) {
+            std::string detail = purpose;
+            if (facts.cut) detail += "; middle omitted (bounded copy)";
+            detail += "; home/user paths redacted; diagnostic register and nearby-memory rows are not filtered";
+            items.push_back({name, "included", std::move(detail), facts.bytes, true});
+        } else omit(name, !strcmp(name, "longshot_log.txt") && in.current_log.empty() ?
+                    "this run's log is not a file (terminal or pipe)" : "log could not be read or copied", facts.failed);
+    };
+    log_item("longshot_log.txt", now, "this run so far");
+    log_item("longshot_log.1.txt", last, "the run before; not automatically an incident's log");
+    if (picture) items.push_back({"picture.png", "included", "next game-source frame, without the menu", picture_size, true});
+    else omit("picture.png", captured ? "picture size could not be read" : "no new frame or capture failed", captured);
+    omit("save/", "excluded; no save content read or copied");
+    omit("game-files/", "excluded; no game files or keys collected");
+    omit("longshot_options.ini", "excluded; only the existing safe settings summary is collected");
+    omit("longshot_env.txt", "excluded; only the existing safe switch summary is collected");
+    omit("pending/", "excluded; crash and unclean-end texts remain separate in bug-reports/pending; not scanned or acknowledged");
+    omit("running/", "excluded; private running markers are not examined");
+    omit("local-only/", "excluded; private dumps and outcome notes are never collected");
 
     // (the first line answers the form's one-line field, as the link fills it in; the second says where it comes from)
     std::string where;
@@ -494,7 +553,7 @@ std::string write(const Inputs& in) {
     } else {
         logs += in.current_log.empty() ? "This run's log is not here: it is not in a file (the game was started from a terminal, or by a "
                                          "program that reads its output).\n"
-                                       : "This run's log could not be read.\n";
+                                       : "This run's log could not be copied.\n";
     }
     if (last.copied) {
         logs += "longshot_log.1.txt: the run before's log";
@@ -505,16 +564,13 @@ std::string write(const Inputs& in) {
         logs += ", " + megabytes(last.size) + ".\n";
         if (last.cut) logs += "  Only its first and its last part are in the copy: it is longer than " + megabytes(kLogCap) + ".\n";
     } else {
-        logs += "No log of an earlier run was found in the game folder.\n";
+        logs += last.failed ? "The earlier run's log could not be copied.\n"
+                            : "No log of an earlier run was found in the game folder.\n";
     }
     if (!now.trouble.empty()) logs += "This run's first sign of trouble: " + now.trouble + "\n";
     if (!last.trouble.empty()) logs += "The run before's first sign of trouble: " + last.trouble + "\n";
     logs += in.windows ? "In both, the home folder is written %USERPROFILE% and the user's name <user>.\n"
                        : "In both, the home folder is written ~ and the user's name <user>.\n";
-    std::string files = "report.txt (this file)";
-    for (const auto& [here, name] : {std::pair{now.copied, "longshot_log.txt"}, std::pair{last.copied, "longshot_log.1.txt"},
-                                     std::pair{picture, "picture.png"}})
-        if (here) files += std::string(", ") + name;
     const std::string gpu = in.gpu.empty() ? "Not known: the game has no Vulkan device." : in.gpu;
     // (the link fills in the form's one-line answers and, while the whole link stays within kLinkMax, the options changed, the
     // rows that depend on this PC and the switches' names: never a switch's value, which only report.txt has. When they do not
@@ -557,22 +613,64 @@ std::string write(const Inputs& in) {
     text += std::string("### Screenshots or video\n\n") +
             (picture ? "picture.png: the game's picture when the report was made, without the menu.\n\n"
                      : "No picture: the game showed no new frame while the report was made, or its picture could not be written.\n\n");
-    text += "### What this folder holds\n\n" + files + ". Nothing else from this PC: no saves, no game files, not the options file "
-            "itself.\n\nThe link with the answers filled in" +
-            (link_short ? std::string(in.pc_options.empty() ? " (the changes from the defaults in short: the switches' names did not fit in a link)"
-                                                              : " (the changes from the defaults in short: not all of them fit in a link)") : "") +
-            ":\n" + link + "\n";
-    FILE* f = fopen((dir + "report.txt").c_str(), "wb");
-    const bool written = f && fwrite(text.data(), 1, text.size(), f) == text.size();
-    if (f) fclose(f);
-    if (!written) {
+    const std::string intro = std::move(text) +
+        "Review these files before sharing. Nothing is sent or opened automatically. Path redaction does not guarantee privacy.\n"
+        "Only included, shareable files below are attachment candidates, not permission to send them. Excluded directory names are "
+        "categories, not folders to attach. No saves, game files, keys or private dumps go in.\n";
+    const auto quoted = [](const std::string& s) {
+        std::string out = "\"";
+        for (unsigned char c : s) {
+            if (c == '"' || c == '\\') out += '\\', out += (char)c;
+            else if (c < 32) { char hex[7]; snprintf(hex, sizeof hex, "\\u%04x", c); out += hex; }
+            else out += (char)c;
+        }
+        return out + "\"";
+    };
+    const size_t report_index = items.size();
+    items.push_back({"report.txt", "included", "issue-form answers and human-readable manifest", 0, true});
+    const size_t manifest_index = items.size();
+    items.push_back({"manifest.json", "included", "attachment metadata; published last", 0, true});
+    const auto render_report = [&] {
+        std::string value = intro + "\n### What this folder holds\n\n";
+        for (const auto& item : items)
+            value += item.name + ": " + item.status + ", " + std::to_string(item.size) + " bytes, " +
+                     (item.shareable ? "shareable; " : "not shared; ") + item.reason + "\n";
+        return value + "\nThe link with the answers filled in" + (link_short ? " (answers in short where they did not fit)" : "") +
+               ":\n" + link + "\n";
+    };
+    const auto render_manifest = [&] {
+        std::string value = "{\n  \"schema\": 1,\n  \"report_id\": " + quoted(rel.substr(rel.find_last_of("\\/") + 1)) +
+            ",\n  \"when\": " + quoted(when(in.now, "%Y-%m-%dT%H:%M:%S%z")) + ",\n  \"files\": [\n";
+        for (size_t i = 0; i < items.size(); ++i) {
+            const auto& item = items[i];
+            value += "    {\"name\": " + quoted(item.name) + ", \"size\": " + std::to_string(item.size) +
+                     ", \"status\": " + quoted(item.status) + ", \"reason\": " + quoted(item.reason) +
+                     ", \"shareable\": " + (item.shareable ? "true" : "false") + "}" +
+                     (i + 1 < items.size() ? ",\n" : "\n");
+        }
+        return value + "  ]\n}\n";
+    };
+    // Only decimal digit widths depend on these two sizes. Stabilize both inventories before writing.
+    std::string metadata;
+    bool stable = false;
+    for (int pass = 0; pass < 16; ++pass) {
+        text = render_report(); metadata = render_manifest();
+        if (items[report_index].size == text.size() && items[manifest_index].size == metadata.size()) { stable = true; break; }
+        items[report_index].size = text.size(); items[manifest_index].size = metadata.size();
+    }
+    const std::string staged_manifest = dir + "manifest.json.new";
+    const char* failed = !stable || !put_file(dir + "report.txt", text) ? "report.txt" : nullptr;
+    if (!failed && (!put_file(staged_manifest, metadata) ||
+                    std::rename(staged_manifest.c_str(), (dir + "manifest.json").c_str()))) failed = "manifest.json";
+    if (failed) {
+        std::remove(staged_manifest.c_str());
         std::lock_guard lk(report_mu);
-        report_why = "report.txt could not be written in " + rel;
+        report_why = std::string(failed) + " could not be written in " + rel;
         if (in.log) in.log(("menu: bug report not written: " + report_why).c_str());
         return "";
     }
     if (in.log) {
-        std::string line = "menu: bug report written to " + rel + ": report.txt";
+        std::string line = "menu: bug report written to " + rel + ": report.txt, manifest.json";
         if (now.copied) line += ", longshot_log.txt (" + megabytes(now.size) + ")";
         if (last.copied) line += ", longshot_log.1.txt (" + megabytes(last.size) + ")";
         line += picture ? ", picture.png" : ", no picture";

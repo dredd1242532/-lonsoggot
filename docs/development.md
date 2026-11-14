@@ -185,6 +185,46 @@ See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-a
 | `HOS_HEAP_COMMIT=1` | Windows: the whole heap committed at `SetMemoryHeapSize`, as before. By default it is only reserved and committed 64 KB at a time as it is first touched (`commit_on_touch`, `host/mkw_glue.c`), and host calls that hand guest memory to the kernel (`nn_fs.c`'s reads and writes) commit their range first; a commit refused at Windows' commit limit then shows mid-play instead of at the heap's setup. For A/B |
 | `HOS_PAGES_LIMIT=1` | A diagnostic: `AllocateMemoryPages` is refused past the console's total (heap and mapped pages), as on the console. Keep it off: OoT retries a refused allocation forever |
 
+### Local bug-report inventory
+
+**Gameplay → Bug report** writes its existing `report.txt`, current/previous log copies and optional `picture.png`
+under `bug-reports/<date>_<time>/`. `manifest.json` describes that same collection. Nothing is uploaded, no browser
+opens and no launcher is started. No new diagnostic probe, input history, save scan or ZIP is added.
+
+The manifest uses **schema 1**: `schema`, `report_id` (the report directory's basename), `when` (local report time
+with UTC offset when available), and a `files` array. This is a local file contract, not a network envelope.
+Each entry has:
+
+| Field | Meaning |
+|---|---|
+| `name` | Relative filename; a trailing slash denotes an excluded category, not a directory to attach |
+| `size` | Actual output bytes for an included file, including `report.txt` and `manifest.json` themselves; zero for omitted/failed entries, not an observed source size |
+| `status` | `included`, `omitted` (missing/unavailable or deliberately excluded), or `failed` (an attempted copy failed) |
+| `reason` | Purpose or omission/failure explanation. An included shortened log says `middle omitted (bounded copy)` |
+| `shareable` | Only included ordinary report files are candidates for review; `true` is not consent or permission to send |
+
+Human-readable inventory lines in `report.txt` come from the same entries. Log sizes count redacted bytes as they
+are written, not a second scan. The existing long-log rule keeps the first 1 MiB and last 9 MiB with whole-line
+boundaries and an omission note. Empty logs remain included with size zero. Read/seek/short-copy/write/close
+failures cannot be listed as successful copies; failed output files are removed on a best-effort basis.
+
+Excluded entries have `status: "omitted"`, `shareable: false` and a reason beginning `excluded;`:
+`save/`, `game-files/` (keys too), raw `longshot_options.ini`/`longshot_env.txt`, `pending/`, `running/` and
+`local-only/`. These categories are not scanned. In particular, crash and unclean-end texts remain in
+`bug-reports/pending`; the inventory neither copies nor acknowledges them. Private running markers and all
+`bug-reports/local-only` files, including Windows dumps and their outcome notes, must not be attached.
+
+Copied logs keep the existing path redaction and diagnostic content. Both inventories explicitly disclose that
+register and nearby-memory rows are not filtered. Review files before sharing; neither a `shareable` flag nor
+path redaction guarantees that a log contains no private or game data.
+
+The manifest is closed and renamed from `manifest.json.new` only after `report.txt` is written. Failure of either
+required file gives the existing failed-report state; missing optional files still allow a useful report with
+their reasons. A missing/invalid manifest is not a completed schema-1 report. Consumers must reject unknown schema
+versions, ignore unknown fields, review only included/shareable entries, and never recurse into excluded categories.
+This slice emits no `incident_id`; that optional schema-1 field belongs to a later incident importer. Launcher
+consent, sending, deduplication and acknowledgement are separate work.
+
 ### Crash and unclean-end records
 
 The game keeps a local text record in `bug-reports/pending/crash-<UTC time>.txt`

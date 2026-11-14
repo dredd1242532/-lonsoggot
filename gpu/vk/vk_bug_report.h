@@ -6,6 +6,8 @@
 // their paths, and a picture of the game's frame without the menu (vk_replay.cpp's shot_ask takes it at its next present). Nothing is
 // sent anywhere: the player attaches the files to an issue. What is read and how it is written is here, apart from Vulkan
 // and the menu, for tests/test_bug_report.py.
+// manifest.json (schema 1) and report.txt describe the same included files, omissions and failures. The manifest is
+// published last. Pending incident records, running markers and local-only dumps stay separate and untouched.
 #pragma once
 
 #include <cstdint>

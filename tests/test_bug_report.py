@@ -5,8 +5,8 @@ folder: this run's log and the run before's, with the home folder and the user's
 The driver answers the picture request as vk_replay.cpp's shot_ask does (a PNG of a later present, written on a thread).
 Checked:
 
-- the report's folder holds report.txt, both logs and the picture, and nothing else; no file in it names the home folder,
-  the user's name as a folder, or the game folder's path;
+- the report's folder holds report.txt, manifest.json, both logs and the picture, and nothing else; no file in it names the
+  home folder, the user's name as a folder, or the game folder's path;
 - report.txt's sections are the issue form's (.forgejo/ISSUE_TEMPLATE/1-game-problem.yml), and scripts/hardware_report.py
   reads the GPU's vendor and class and the system from it as it reads an issue; its link fills in the form's own fields
   (Forgejo's field:<id> query, for ids the form has) and stays within 2000 characters: more switches than fit are
@@ -20,6 +20,8 @@ Checked:
 - started from a terminal (no log file), the run before's log is the game folder's longshot_log.txt, and without a frame
   the report says it has no picture; a picture that comes after the report went without it is removed again; a second
   report in the same second gets a folder of its own; a folder that cannot be made is reported with the system's reason;
+- the schema-1 manifest and human inventory agree on names, sizes, omissions, failures, truncation and shareability;
+  pending crash/unclean texts, running markers and private dumps stay separate and unchanged;
 - the wiring: the Gameplay tab's row and its help, the press, the picture asked of shot_ask (its own image, copied from the
   game's frame without the menu), the host's map line.
 
@@ -27,6 +29,7 @@ python -I -B tests/test_bug_report.py [--cxx g++]
 """
 import argparse
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -43,6 +46,7 @@ DRIVER = r'''#include "vk_bug_report.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <thread>
 using namespace mkwvk::bug_report;
@@ -64,6 +68,11 @@ static bool ask_late(const char* path, uint64_t ticket) { late_path = path, late
 static std::atomic<bool> held{true};   // (the menu's way: the report is still saving until the driver lets its picture ask go)
 static bool ask_held(const char*, uint64_t) {   // (no frame comes: the report goes without a picture)
     while (held.load()) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    return false;
+}
+static std::string failed_name;
+static bool ask_failure(const char* path, uint64_t) {
+    std::filesystem::create_directory(std::filesystem::path(path).parent_path() / failed_name);
     return false;
 }
 
@@ -104,6 +113,10 @@ int main(int argc, char** argv) {
     in.picture_wait_ms = mode == "picture" ? 30000 : 300;   // (a picture ends the wait as soon as it is written)
     if (mode == "picture") in.ask_picture = ask;
     if (mode == "late") in.ask_picture = ask_late;
+    if (mode.compare(0, 5, "fail-") == 0) {
+        failed_name = mode.substr(5);
+        in.ask_picture = ask_failure;
+    }
     if (mode == "start") {   // (the menu's way: on a thread of its own, its state read each frame)
         in.ask_picture = ask_held;
         CHECK(start(in));
@@ -181,6 +194,38 @@ def no_private(files, home, user, game):
             check(needle.lower() not in text.lower(), "%s names %s" % (name, needle))
         check(not re.search(r"[/\\]" + re.escape(user) + r"(?![A-Za-z0-9._-])", text, re.I), "%s names the user as a folder" % name)
 
+def inventory(folder, current="included", previous="included", picture="included"):
+    path = folder / "manifest.json"
+    check(path.is_file(), "manifest.json is missing")
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    check(meta["schema"] == 1 and meta["report_id"] == folder.name, "manifest identity")
+    check(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:[+-]\d{4})?", meta["when"]), "manifest time")
+    entries = {entry["name"]: entry for entry in meta["files"]}
+    excluded = {"save/", "game-files/", "longshot_options.ini", "longshot_env.txt", "pending/", "running/", "local-only/"}
+    expected = {"report.txt": "included", "manifest.json": "included", "longshot_log.txt": current,
+                "longshot_log.1.txt": previous, "picture.png": picture, **{name: "omitted" for name in excluded}}
+    check(len(entries) == len(meta["files"]) and {k: v["status"] for k, v in entries.items()} == expected,
+          "manifest entries: %s" % entries)
+    report = (folder / "report.txt").read_text(encoding="utf-8")
+    for name, entry in entries.items():
+        check(not Path(name).is_absolute() and ".." not in Path(name).parts, "manifest path escaped folder")
+        check(set(entry) == {"name", "size", "status", "reason", "shareable"}, "unexpected entry fields")
+        included = entry["status"] == "included"
+        check((folder / name).is_file() == included and entry["shareable"] == included, "manifest presence: " + name)
+        check(entry["size"] == ((folder / name).stat().st_size if included else 0), "manifest size differs for " + name)
+        line = f'{name}: {entry["status"]}, {entry["size"]} bytes, ' + ("shareable; " if included else "not shared; ") + entry["reason"]
+        check(line in report, "human inventory disagrees: " + name)
+        if name in excluded:
+            check(entry["reason"].startswith("excluded;"), "category not disclosed as excluded: " + name)
+    for name in ("longshot_log.txt", "longshot_log.1.txt"):
+        if entries[name]["status"] == "included":
+            check("register and nearby-memory rows are not filtered" in entries[name]["reason"], "diagnostic policy hidden")
+    check("crash and unclean-end" in entries["pending/"]["reason"], "pending record kinds not named")
+    check("not permission to send" in report, "shareable mistaken for permission")
+    check(not (folder / "manifest.json.new").exists(), "staged manifest remained after publication")
+    return entries
+
+
 
 def wiring():
     menu = (ROOT / "gpu" / "vk" / "vk_menu.cpp").read_text(encoding="utf-8")
@@ -236,9 +281,12 @@ def wiring():
 
 
 def main():
+    global ROOT
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cxx", default="g++")
+    p.add_argument("--source-root", type=Path, default=ROOT, help="compile and inspect another source tree (negative control)")
     a = p.parse_args()
+    ROOT = a.source_root.resolve()
     wiring()
     hw = load_hardware_report()
     windows = os.name == "nt"
@@ -274,15 +322,28 @@ def main():
             "[hos Main] map: Market_Child (child)\n"
             "[hos host] CRASH: exception 0xc0000005 (read 0x0, guest 0x0) at longshot+0x1234\n"
             "[hos host] CRASH: thread Main, sp 0x1000\n", encoding="utf-8")
+        # The manifest must not turn the recorder's separate artifacts into attachments or acknowledge them.
+        separate = {
+            "pending/crash-20261114T120000Z.txt": "Longshot crash record 1\nrecord_complete: yes\n",
+            "pending/unclean-20261114T120001Z.txt": "ended from outside or lost power, not necessarily a crash\n",
+            "running/123.running": "private marker: " + home,
+            "local-only/crash.dmp": "private dump",
+        }
+        for name, text in separate.items():
+            target = game_path / "bug-reports" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
 
         # 1. started from its icon: this run logs to longshot_log.txt, the one before is longshot_log.1.txt; a picture comes
         folders, out = run(exe, "picture", game, str(now_log), home, user, windows)
         check(len(folders) == 1 and folders[0].startswith("bug-reports" + sep), "no report folder: %s" % out)
         folder = game_path / folders[0]
         files = files_of(folder)
-        check(set(files) == {"report.txt", "longshot_log.txt", "longshot_log.1.txt", "picture.png"},
+        check(set(files) == {"report.txt", "manifest.json", "longshot_log.txt", "longshot_log.1.txt", "picture.png"},
               "the folder holds %s" % sorted(files))
-        check(set(p.name for p in (game_path / "bug-reports").iterdir()) == {folder.name}, "more than the report's folder")
+        check(set(p.name for p in (game_path / "bug-reports").iterdir()) ==
+              {folder.name, "pending", "running", "local-only"}, "more than the report and separate record folders")
+        inventory(folder)
         no_private(files, home, user, game)
         copy = files["longshot_log.txt"]
         for kept in (home_as + sep + "Games" + sep + "Longshot" + sep + "romfs", home_as + "/Games/Longshot/user\\save",
@@ -326,6 +387,7 @@ def main():
         files = files_of(game_path / folders[0])
         check("picture.png" not in files and "No picture" in hw.section(files["report.txt"], "Screenshots or video"),
               "a report without a frame: %s" % sorted(files))
+        inventory(game_path / folders[0], picture="omitted")
 
         # 2b. the picture comes after the report went without it (no present in time): the report says it has none, and the
         # file is removed when it comes
@@ -333,12 +395,15 @@ def main():
         files = files_of(game_path / folders[0])
         check("LATE removed (asked for the report's own picture.png)" in out and "picture.png" not in files and
               "No picture" in hw.section(files["report.txt"], "Screenshots or video"), "a late picture: %s %s" % (out, sorted(files)))
+        inventory(game_path / folders[0], picture="omitted")
 
         # 3. started from a terminal: no log file this run; the run before's is the game folder's longshot_log.txt
         folders, out = run(exe, "terminal", game, "", home, user, windows)
         check(len(folders) == 2 and folders[0] != folders[1] and all(folders), "two reports in a second: %s" % folders)
         files = files_of(game_path / folders[0])
-        check(set(files) == {"report.txt", "longshot_log.1.txt"}, "from a terminal the folder holds %s" % sorted(files))
+        check(set(files) == {"report.txt", "manifest.json", "longshot_log.1.txt"}, "from a terminal the folder holds %s" % sorted(files))
+        entries = inventory(game_path / folders[0], current="omitted", picture="omitted")
+        check("terminal or pipe" in entries["longshot_log.txt"]["reason"], "missing current log not explained")
         check("HyruleField_Child" in files["longshot_log.1.txt"], "the run before's log is not the game folder's last one")
         report = files["report.txt"]
         check("terminal" in hw.section(report, "Where in the game") and "terminal" in hw.section(report, "longshot_log.txt"),
@@ -365,6 +430,8 @@ def main():
         report = (game_path / folders[0] / "report.txt").read_text(encoding="utf-8")
         check(hw.section(report, "Where in the game").startswith("DeathMountainTrail_Child (child)"), "the middle's map")
         check(home not in copy, "the long log's copy names the home folder")
+        entries = inventory(game_path / folders[0], picture="omitted")
+        check("middle omitted (bounded copy)" in entries["longshot_log.txt"]["reason"], "truncation not disclosed")
 
         # 4b. more switches than a link takes: the link stays within 2000 characters and carries the options and how many
         # switches there are; report.txt lists them all
@@ -400,6 +467,7 @@ def main():
         check(copy == nul_text.replace(home, home_as).encode("utf-8"), "the copy of a log with NUL bytes differs: %r" % copy[-200:])
         report = (game_path / folders[0] / "report.txt").read_text(encoding="utf-8")
         check(hw.section(report, "Where in the game").startswith("LostWoods_Child (child)"), "the map after a NUL is lost")
+        inventory(game_path / folders[0], picture="omitted")
 
         # 7. a report's folder that cannot be made (bug-reports is a file here): the system's reason, GetLastError's on Windows
         blocked = tmp / "blocked" / "Longshot"
@@ -447,8 +515,28 @@ def main():
                       "Depends on this PC: 80, listed in the attached report.txt." in settings and
                       "Authored PC row" not in settings and "in short" in report,
                       "the short link does not keep the changes first and count the PC rows: " + settings)
+        empty = tmp / "empty.log"
+        empty.touch()
+        folders, _ = run(exe, "plain", game, str(empty), home, user, windows)
+        entries = inventory(game_path / folders[0], picture="omitted")
+        check(entries["longshot_log.txt"]["size"] == 0, "empty included log has a nonzero size")
+        folders, _ = run(exe, "plain", game, str(tmp / "absent.log"), home, user, windows)
+        inventory(game_path / folders[0], current="omitted", picture="omitted")
+        folders, _ = run(exe, "fail-longshot_log.txt", game, str(now_log), home, user, windows)
+        inventory(game_path / folders[0], current="failed", picture="omitted")
+        for name in ("report.txt", "manifest.json", "manifest.json.new"):
+            failed = tmp / ("fail-" + name)
+            failed.mkdir()
+            folders, lines = run(exe, "fail-" + name, str(failed) + os.sep, str(now_log), home, user, windows)
+            said = "report.txt" if name == "report.txt" else "manifest.json"
+            check(folders == [""] and any(said + " could not be written" in line for line in lines),
+                  "failed publication reported success: " + name)
+            check(not any(path.is_file() for path in (failed / "bug-reports").glob("*/manifest.json")),
+                  "failed publication left a completed manifest: " + name)
+        for name, text in separate.items():
+            check((game_path / "bug-reports" / name).read_text(encoding="utf-8") == text, "separate artifact changed: " + name)
     print("bug report: ok (report.txt as the issue form, both logs redacted, the picture, the long log, the terminal start, "
-          "switch values, NUL bytes, the folder's reason)")
+          "switch values, NUL bytes, the folder's reason, schema-1 manifest sizes/statuses, publication failures, private exclusions)")
 
 
 if __name__ == "__main__":

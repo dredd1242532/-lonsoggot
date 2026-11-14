@@ -530,11 +530,14 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   holds the frames to its refresh rate: V-Sync on, or the driver's FIFO mode. `HOS_FPS_MAX=<61-1000>` sets a cap for one
   run.
 - **Bug report** writes a folder `bug-reports/<date>_<time>` in the game folder with what an issue needs: `report.txt`,
-  which answers the [game problem form](https://github.com/NotRexed/Hookshot/issues/new?template=1-game-problem.yml)'s
+  which answers the [game problem form](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new?template=.forgejo/ISSUE_TEMPLATE/1-game-problem.yml)'s
   questions under its own headings (the version, the map you are in, your graphics card and driver, CPU, RAM and
   system, the menu options and the `RX_`/`HOS_` switches you changed) and ends with a link that opens the form with them
   filled in (the switches by name only); `longshot_log.txt` (this run's log so far) and `longshot_log.1.txt` (the run
   before's, which has the crash if the game crashed last time); and `picture.png`, the game's picture without the menu.
+  `manifest.json` is the same [file inventory](docs/development.md#local-bug-report-inventory) in machine-readable
+  form: each file's size, whether it was included, missing or failed, shortened logs and deliberately excluded
+  categories. It adds no collected data and sends nothing.
   Settings whose defaults depend on the display, upscaler, Auto preset or other run-time context are listed after the
   changes, in the same answer, under a **Depends on this PC** line, with their current value and “default depends on this
   PC”. They are not counted as changed settings; the report does not invent a default from a run-time list index. The rows
@@ -545,10 +548,13 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   Your home folder is written `~` (`%USERPROFILE%` on Windows) and your user name `<user>` in the logs' paths. A switch's
   value is written only when it is a number, a size or on/off, and never for a name with `TOKEN`, `KEY`, `ROOM`,
   `SECRET`, `PASS`, `SERVER` or `USER` in it; other values read `(value left out)`. Nothing else goes in (no saves, no
-  game files, not `longshot_options.ini` or `longshot_env.txt` themselves), and nothing is sent: open the form, write
-  what happened, and drag the folder's files into it (from File Explorer on Windows, a file manager on Linux; on a Steam
-  Deck, in Desktop Mode). The row then shows the folder's name. A game that stops before its menu can be used leaves its
-  log as `longshot_log.1.txt`: start it again, or attach that file yourself.
+  game files, not `longshot_options.ini` or `longshot_env.txt` themselves), and nothing is sent. Review the files before
+  sharing: diagnostic register and nearby-memory rows in logs are not filtered, and path redaction cannot guarantee
+  privacy. Open the form, write what happened, and attach only the included files in this report folder (from File
+  Explorer on Windows, a file manager on Linux; on a Steam Deck, in Desktop Mode). Crash and unclean-end texts in
+  `bug-reports/pending` stay separate. Never attach `bug-reports/running` markers or `bug-reports/local-only` dumps.
+  The row then shows the folder's name. A game that stops before its menu can be used leaves its log as
+  `longshot_log.1.txt`: start it again, or inspect and attach that file yourself.
 - **The scaling rows**, in the picture's order: **Output resolution** is the size of the game's whole frame, HUD
   included. The **Upscaler** fills it from the 3D: the game's own network, NVIDIA DLSS or DLAA (the 3D at full size,
   edges smoothed), AMD FSR 3.1, or AMD FSR 4 or its Native AA (below). DLSS and DLAA look softer than the game's own: set
