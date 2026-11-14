@@ -2805,17 +2805,22 @@ VkImageView texture_view(Texture* tex, const nvn_tex* t, const nvn_view* v, VkIm
         unsigned sw[4] = {d.swizzle_r, d.swizzle_g, d.swizzle_b, d.swizzle_a};
         if (v && v->set_swizzle)
             for (int i = 0; i < 4; i++) sw[i] = v->swz[i];
-        // (X formats read alpha as one)
+        // (X formats read alpha as one, RGB5 too)
         switch (nf) {
         case NVN_FORMAT_RGBX8: case NVN_FORMAT_RGBX8SN: case NVN_FORMAT_RGBX8UI: case NVN_FORMAT_RGBX8I:
         case NVN_FORMAT_RGBX16F: case NVN_FORMAT_RGBX16: case NVN_FORMAT_RGBX16SN: case NVN_FORMAT_RGBX16UI:
         case NVN_FORMAT_RGBX16I: case NVN_FORMAT_RGBX32F: case NVN_FORMAT_RGBX32UI: case NVN_FORMAT_RGBX32I:
-        case NVN_FORMAT_RGBX8_SRGB: case NVN_FORMAT_BGRX8: case NVN_FORMAT_BGRX8_SRGB:
+        case NVN_FORMAT_RGBX8_SRGB: case NVN_FORMAT_BGRX8: case NVN_FORMAT_BGRX8_SRGB: case NVN_FORMAT_RGB5:
             for (unsigned& s : sw)
                 if (s == NVN_TEXTURE_SWIZZLE_A) s = NVN_TEXTURE_SWIZZLE_ONE;
             break;
         default: break;
         }
+        // (RGB5A1 and RGB5 hold red in bits 0-4 and blue in 10-14, and their image is A1R5G5B5, the other way round
+        // (vk_formats.cpp): what reads red reads the image's blue, and the other way)
+        if (nf == NVN_FORMAT_RGB5A1 || nf == NVN_FORMAT_RGB5)
+            for (unsigned& s : sw)
+                s = s == NVN_TEXTURE_SWIZZLE_R ? NVN_TEXTURE_SWIZZLE_B : s == NVN_TEXTURE_SWIZZLE_B ? NVN_TEXTURE_SWIZZLE_R : s;
         static const bool swap_9e5 = env_on("RX_VK_9E5_SWAP");   // (longshot, diagnosis: R and B swapped)
         if (swap_9e5 && nf == NVN_FORMAT_RGB9E5F) std::swap(sw[0], sw[2]);
         cm = {component(sw[0]), component(sw[1]), component(sw[2]), component(sw[3])};
