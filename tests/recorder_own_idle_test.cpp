@@ -449,7 +449,10 @@ int main(int argc, char** argv) {
             real_wake(&rec::g_rec.W);   // (back round into a wait entered with the 10 s timeout)
             bool woken = false;
             int published = 0;   // (packets published so far: an attempt that returned early publishes none)
-            for (int attempt = 0; attempt < 5 && !woken; attempt++) {
+            // (an attempt can be inconclusive when the recorder is between waits at an unlucky moment: each one starts 30 ms after
+            // the last, when its wakes and the unlock's kicks are done with, and up to 20 are made)
+            for (int attempt = 0; attempt < 20 && !woken; attempt++) {
+                if (attempt) std::this_thread::sleep_for(std::chrono::milliseconds(30));
                 if (!wait_until([] { return in_real_wait == 1 && entered_without_timeout; })) fail("the recorder never waited on W");
                 const int r0 = real_wait_returns;
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
