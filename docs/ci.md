@@ -86,7 +86,7 @@ sequenceDiagram
 
 ## Main push: CI before nightly release
 
-On **`main.yml`**, `release-version` requires the same check and builder jobs as production CI (`lint`, `third-party`, `test-linux`, `builder-cli`, `spirv-fixtures`, `linux-appimage`, `windows-builder`, `windows-vulkan`). A failing main does not publish a nightly. `mb/gate` also requires `release-publish` and the website jobs when they run.
+On **`main.yml`**, `release-version` requires the same check and builder jobs as production CI (`lint`, `third-party`, `test-linux`, `spirv-fixtures`, `linux-appimage`, `windows-builder`, `windows-vulkan`). Setup passes `nightly: true` on main so `release-version` can mint a nightly tag while `release_dry_run` keeps sign/publish/deploy dry until cutover. `mb/gate` posts as **`ci/circleci: gate`** (`name: gate` on `mb/gate`). PR `gate` does not require the preview comment job.
 
 ## Dry-run until cutover
 
