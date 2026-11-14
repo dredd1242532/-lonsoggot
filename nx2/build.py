@@ -555,6 +555,15 @@ class MemoryGate:
 
 
 GATE = None   # (main's MemoryGate; None: compiles start as the jobs allow)
+ANNOUNCE_LOCK = threading.Lock()
+
+
+def announce(line):
+    """One line of the compile's output, from any thread: a single write under a lock, so a worker's @@work and the
+    compile loop's @@file cannot interleave"""
+    with ANNOUNCE_LOCK:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
 
 
 FFMPEG = next((os.path.join(d, n) for d in [os.path.join(r, "ffmpeg") for r in cpm_dirs()] if os.path.isdir(d)
@@ -1013,8 +1022,8 @@ def compile_one(job):
     lease = GATE.enter(c_src) if GATE else None
     t = time.time()
     try:
-        print("@@work %s %d %s" % (os.path.basename(src), os.path.getsize(src) >> 20,
-                                  threading.current_thread().name), flush=True)
+        announce("@@work %s %d %s" % (os.path.basename(src), os.path.getsize(src) >> 20,
+                                      threading.current_thread().name))
         with subprocess.Popen([cc] + fl + ["-c", c_src, "-o", obj], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
             no_throttle(getattr(p, "_handle", None))
             if GATE:
@@ -1341,8 +1350,8 @@ def main():
         pending = list(estimate)
         for job, seconds in zip(work_jobs, estimate):
             expected.setdefault(job[1], []).append(seconds)
-        print("@@plan %d %d" % (len(work_jobs), len(jobs)), flush=True)
-        print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
+        announce("@@plan %d %d" % (len(work_jobs), len(jobs)))
+        announce("@@eta %d" % eta_left(pending, eta_jobs))
     print("%d files, %d jobs, %s" % (len(jobs), a.jobs, " ".join(f for f in fl if f.startswith("-D") or f.startswith("-O"))),
           flush=True)
     t0, failed = time.time(), []
@@ -1354,16 +1363,16 @@ def main():
             size = src_size(src) >> 20
             if err:
                 failed.append(submitted[future])
-                print("not compiled yet: %s (%d MB, %.0fs), tried again alone at the end:\n%s"
-                      % (os.path.basename(src), size, secs, err[-1500:]), flush=True)
+                announce("not compiled yet: %s (%d MB, %.0fs), tried again alone at the end:\n%s"
+                         % (os.path.basename(src), size, secs, err[-1500:]))
             else:
-                print("  %-16s %4d MB  %6.0fs  (%.0fs)" % (os.path.basename(src), size, secs, time.time() - t0), flush=True)
+                announce("  %-16s %4d MB  %6.0fs  (%.0fs)" % (os.path.basename(src), size, secs, time.time() - t0))
             if counted:
-                print("@@file %s %.1f %s" % (os.path.basename(src), secs,
-                                             "failed" if err else "cached" if secs <= 0 else "new"), flush=True)
+                announce("@@file %s %.1f %s" % (os.path.basename(src), secs,
+                                                "failed" if err else "cached" if secs <= 0 else "new"))
                 if not err and expected.get(src):
                     pending.remove(expected[src].pop())
-                    print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
+                    announce("@@eta %d" % eta_left(pending, eta_jobs))
     # (a compiler that ran out of memory beside the others dies "due to signal": a player's 24 MB code_021.c, 2026-11-08. The
     # files that failed are compiled again one at a time, with all the memory, before the build gives up)
     still = 0
@@ -1372,14 +1381,14 @@ def main():
         size = src_size(src) >> 20
         if err:
             still += 1
-            print("FAILED %s (%d MB, %.0fs, alone too):\n%s" % (os.path.basename(src), size, secs, err), flush=True)
+            announce("FAILED %s (%d MB, %.0fs, alone too):\n%s" % (os.path.basename(src), size, secs, err))
         else:
-            print("  %-16s %4d MB  %6.0fs  (%.0fs, alone)" % (os.path.basename(src), size, secs, time.time() - t0), flush=True)
+            announce("  %-16s %4d MB  %6.0fs  (%.0fs, alone)" % (os.path.basename(src), size, secs, time.time() - t0))
         if counted:
-            print("@@file %s %.1f %s" % (os.path.basename(src), secs, "failed" if err else "again"), flush=True)
+            announce("@@file %s %.1f %s" % (os.path.basename(src), secs, "failed" if err else "again"))
             if not err and expected.get(src):
                 pending.remove(expected[src].pop())
-                print("@@eta %d" % eta_left(pending, eta_jobs), flush=True)
+                announce("@@eta %d" % eta_left(pending, eta_jobs))
     print("compiled in %.0fs, %d failed" % (time.time() - t0, still), flush=True)
     if still:
         return 1

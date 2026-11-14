@@ -2,6 +2,7 @@
 import argparse
 import ast
 import hashlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -16,6 +17,30 @@ BUILD = ROOT / 'nx2/build.py'
 
 
 class CompilerFailureTests(unittest.TestCase):
+    def test_actual_announce_keeps_each_line_whole_under_threads(self):
+        source = ast.parse(BUILD.read_text(encoding='utf-8'))
+        functions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == 'announce']
+        self.assertEqual(len(functions), 1)
+        env = dict(sys=sys, threading=threading, ANNOUNCE_LOCK=threading.Lock())
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(BUILD), 'exec'), env)
+        saved = sys.stdout
+        buffer = io.StringIO()
+        sys.stdout = buffer
+        try:
+            threads = [threading.Thread(target=env['announce'], args=("@@work f%03d 1 w%d" % (i, i),))
+                       for i in range(200)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            sys.stdout = saved
+        lines = buffer.getvalue().splitlines()
+        self.assertEqual(len(lines), 200, 'one write per line, no interleaving')
+        self.assertEqual(len(set(lines)), 200)
+        for line in lines:
+            self.assertRegex(line, r'^@@work f\d{3} 1 w\d+$')
+
     def test_actual_compile_one_releases_the_gate_when_stdout_is_gone(self):
         source = ast.parse(BUILD.read_text(encoding='utf-8'))
         functions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == 'compile_one']
@@ -38,7 +63,8 @@ class CompilerFailureTests(unittest.TestCase):
                     self.leases -= 1
 
             gate = Gate()
-            env = dict(os=os, subprocess=subprocess, time=time, threading=threading, GATE=gate, PLANNED={},
+            env = dict(os=os, subprocess=subprocess, time=time, threading=threading,
+                       announce=lambda line: print(line, flush=True), GATE=gate, PLANNED={},
                        OBJ_CACHE=str(folder / 'cache'), no_throttle=lambda handle: None,
                        object_key=lambda src, flags, deps: 'authored-key')
             exec(compile(ast.Module(body=functions, type_ignores=[]), str(BUILD), 'exec'), env)
@@ -87,7 +113,8 @@ elif mode == 'killed':
     os.kill(os.getpid(), signal.SIGKILL)
 raise SystemExit(7)
 ''', encoding='utf-8')
-            env = dict(os=os, subprocess=subprocess, time=time, threading=threading, GATE=None, PLANNED={},
+            env = dict(os=os, subprocess=subprocess, time=time, threading=threading,
+                       announce=lambda line: print(line, flush=True), GATE=None, PLANNED={},
                        OBJ_CACHE=str(folder / 'cache'), no_throttle=lambda handle: None,
                        object_key=lambda src, flags, deps: hashlib.sha1(repr((src, flags, deps)).encode()).hexdigest())
             exec(compile(ast.Module(body=functions, type_ignores=[]), str(BUILD), 'exec'), env)

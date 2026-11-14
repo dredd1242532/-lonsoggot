@@ -92,7 +92,7 @@ class FailedCompileTests(unittest.TestCase):
         """make_game takes the files that failed from build.py's last word on each: "FAILED <name> (... alone too)" """
         src = (ROOT / "nx2" / "make_game.py").read_text(encoding="utf-8")
         build = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
-        self.assertIn('print("FAILED %s (%d MB, %.0fs, alone too):\\n%s" % (os.path.basename(src), size, secs, err), flush=True)', build)
+        self.assertIn('announce("FAILED %s (%d MB, %.0fs, alone too):\\n%s" % (os.path.basename(src), size, secs, err))', build)
         pattern = re.search(r're\.match\(r"(FAILED [^"]+)", line\)', src).group(1)
         line = "FAILED %s (%d MB, %.0fs, alone too):\n%s" % ("hos_update.c", 0, 0.4, "error: ...")
         self.assertEqual(re.match(pattern, line).group(1), "hos_update.c")
