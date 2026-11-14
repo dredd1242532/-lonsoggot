@@ -663,6 +663,42 @@ rupees, A-button prompt and music. `subscribe` with `events:["oot"]`, `every`, `
 samples and optional watched/changed flags. There is no separate state file; off unless `HOS_CONTROL` is set.
 See [control.md](control.md) for the fields, sampling, bounds and examples.
 
+## macOS fault-context bridge
+
+`host/posix/darwin_fault.c` supplies the signal-context part of the POSIX layer for macOS 14.4 and later; this
+alone is not a working macOS host build. It must be included alongside `win32_posix.c` in a Darwin build's source
+list. The Linux signal code and Windows implementation are unchanged.
+
+The layer's existing x64-shaped `CONTEXT` keeps its layout. On Darwin x86-64 it carries the integer registers,
+instruction and stack pointers and flags. On arm64, `Rip` means the native program counter and `Rsp` the native
+stack pointer, with `CONTEXT_CONTROL`; x64-only integer, flags and debug fields are zero, not aliases for ARM
+registers. The native ARM registers, flags and SIMD state remain in the signal frame, untouched on return.
+`ExceptionAddress` is the faulting PC; `ExceptionInformation[1]` is `si_addr`. The access kind is 0 for a read,
+1 for a write and 8 for an instruction fetch when the architecture's fault syndrome identifies it. Other
+syndromes are not classified as writes. `EXCEPTION_CONTINUE_EXECUTION` copies supported context edits back:
+fixing a page retries the original instruction; changing `Rip` resumes at the replacement PC.
+
+Both SIGBUS and SIGSEGV enter the bridge. A declined fault reaches the previous signal handler with the original
+signal context. Darwin keeps synchronous faults deliverable: blocking one can retry it indefinitely. A per-thread
+guard terminates a nested fault instead of dispatching callbacks again. An existing per-thread alternate signal
+stack is used, but the bridge does not create one or promise recovery from stack exhaustion. The crash reporter's
+logging/unwinding and the platform's lazy TLS access are not made async-signal-safe here. Callbacks, including prior
+signal handlers, must return normally (not jump out past the bridge). Thread suspension, sampling and hardware watchpoints are
+not implemented by this bridge. The optional NVN write watch still assumes 4 KiB host pages and needs separate
+host-page accounting before use on native 16 KiB hosts.
+
+`python -I -B tests/test_darwin_fault_context.py` compiles the real helper and source-extracted bridge for the
+running Python process's architecture by default: an ordinary native arm64 suite does not need Rosetta. To
+qualify both routes on Apple Silicon with Rosetta installed, use:
+
+```
+python -I -B tests/test_darwin_fault_context.py --arch arm64 --arch x86_64
+```
+
+Apple clang builds both targets natively; the x86-64 test executes with `arch -x86_64`. No game or graphics
+device is needed. Each target's protected-handler-stack child intentionally terminates; core dumps are
+disabled, but macOS can write crash reports.
+
 ## Layout
 
 | Path | What |
