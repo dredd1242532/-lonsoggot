@@ -1370,14 +1370,25 @@ VkResult guarded_compute_held(VkPipelineCache cache, const VkComputePipelineCrea
     return guarded_compute(cache, ci, pl);
 }
 bool compiles_nothing(VkPipelineCreateFlags flags) { return (flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT) != 0; }
+/// (longshot) Windows Intel: an ask, or a dispatch's module, left to a worker because another thread held Intel's compiler gate
+/// (IntelDriverGate: a worker's compile). There is no lookup of the driver's cache or ours that does not enter the driver, so
+/// the pipeline may be in a cache all the same: its draw or dispatch is left out, as a cold one is, until a worker has made it.
+/// Counted and logged (the first 8, then at each power of two), so the Intel runs show how often it happens
+std::atomic<int64_t> st_intel_gate_busy{0};
+VkResult intel_gate_busy() {
+    const int64_t n = ++st_intel_gate_busy;
+    if (n <= 8 || (n & (n - 1)) == 0)
+        logf("vk: asked cold: Intel's gate busy (a worker compiles); left to a worker, %lld so far", (long long)n);
+    return VK_PIPELINE_COMPILE_REQUIRED;
+}
 VkResult cached_graphics(const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     IntelDriverGate gate(compiles_nothing(ci->flags));
-    if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;
+    if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_graphics_held, ci, pl);
 }
 VkResult cached_compute(const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     IntelDriverGate gate(compiles_nothing(ci->flags));
-    if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;
+    if (gate.busy) return intel_gate_busy();
     return create_cached(guarded_compute_held, ci, pl);
 }
 /// (longshot) What a compute program's pipeline is made from: its one stage, pinned to 32 lanes where the GPU can, and its
@@ -1407,7 +1418,7 @@ VkPipeline compute_pipeline_cached(const Program& q, bool noopt) {
 VkResult graphics_with(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     if (cache && cache == pcache) return cached_graphics(ci, pl);
     IntelDriverGate gate(compiles_nothing(ci->flags));
-    if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;
+    if (gate.busy) return intel_gate_busy();
     return guarded_graphics_held(cache, ci, pl);
 }
 
@@ -9747,11 +9758,17 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
     if (!compute_wait && !p.compute_pipeline && !taau_key(p.key) && p.compute_state.load(std::memory_order_acquire) != 2) {
         int none = 0;
         // (a program read from the cache without its code, vk_progcache.cpp: its module made now, by the dispatch that starts its
-        // pipeline. One whose code does not read is failed, and left out below. On Windows Intel the module is made on the
-        // worker instead: here it would wait for the compiler's gate behind a worker's whole compile, IntelDriverGate)
-        const bool on_worker = p.code_words && intel_gate_on();
+        // pipeline. One whose code does not read is failed, and left out below. On Windows Intel the compiler's gate is only
+        // tried for it (program_cache_complete_ask, IntelDriverGate): free, the module is made here and the pipeline asked of
+        // the caches below, as on other GPUs; held by a worker's compile, both are left to the worker (on_worker) rather than
+        // waited for here. Its code is looked at once the CAS is won, under the cache's lock: before that, a worker started by
+        // another dispatch may be clearing it, complete_from)
+        bool on_worker = false;
         const bool fresh = p.compute_state.compare_exchange_strong(none, 1) &&
-                           (on_worker || program_cache_complete(p) || (p.compute_state.store(2, std::memory_order_release), false));
+                           (program_cache_complete_ask(p, &on_worker) || on_worker ||
+                            (p.compute_state.store(2, std::memory_order_release), false));
+        if (on_worker) intel_gate_busy();
+        std::shared_ptr<std::atomic<uint8_t>> made_how;   // (on_worker: how the worker made it, for the census)
         if (fresh) {
             { ParLock lk; pcache_init(); }
             const Program* job = &p;
@@ -9761,8 +9778,10 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
             // (one the prepare left in our cache is only asked for here: it comes back at once. Queued, it waited for a worker
             // behind their graphics builds, and its dispatch was left out)
             const VkPipeline cached = on_worker ? VK_NULL_HANDLE : compute_pipeline_cached(p, true);
-            auto build = [job, on_worker] {
+            if (on_worker) made_how = std::make_shared<std::atomic<uint8_t>>(0);
+            auto build = [job, on_worker, made_how] {
                 Program& q = const_cast<Program&>(*job);
+                use_counters.made_how = 0;
                 if (on_worker) {
                     if (!program_cache_complete(q)) {
                         q.failed = true;
@@ -9772,6 +9791,8 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                     if (const VkPipeline c = compute_pipeline_cached(q, true)) {
                         q.compute_pipeline = c;
                         st_pipelines++;
+                        // (from a cache: the play caches say which, create_cached; before play, the start's, as below)
+                        made_how->store(use_counters.made_how ? use_counters.made_how : 2, std::memory_order_relaxed);
                         q.compute_state.store(2, std::memory_order_release);
                         return;
                     }
@@ -9791,9 +9812,12 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
                 st_pipeline_us += ms * 1000;
                 st_pipelines++;
                 pcache_built_since_save++;
+                if (made_how) made_how->store(use_counters.made_how ? use_counters.made_how : 3, std::memory_order_relaxed);
                 q.compute_state.store(2, std::memory_order_release);
             };
-            if (use.on) use.pipeline(false, true), use.pipeline_made(cached ? 2 : 3);   // (from a cache, or compiled on a worker)
+            // (from a cache, or compiled on a worker; on_worker: as the worker made it, once it has, below)
+            if (use.on) use.pipeline(false, true);
+            if (use.on && !on_worker) use.pipeline_made(cached ? 2 : 3);
             if (cached) {
                 p.compute_pipeline = cached;
                 st_pipelines++;
@@ -9815,6 +9839,8 @@ void dispatch(VkCommandBuffer cmd, NvnState& s, uint32_t x, uint32_t y, uint32_t
         while (fresh && p.compute_state.load(std::memory_order_acquire) != 2 &&
                std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(50))
             std::this_thread::sleep_for(std::chrono::microseconds(200));
+        if (use.on && made_how && p.compute_state.load(std::memory_order_acquire) == 2)
+            use.pipeline_made(made_how->load(std::memory_order_relaxed));
         if (p.compute_state.load(std::memory_order_acquire) != 2) {
             static std::atomic<int> told{0};
             if (told++ < 40) logf_at(log_debug, "vk: dispatch of %016llx left out: its compute pipeline is still compiling", (unsigned long long)p.key);

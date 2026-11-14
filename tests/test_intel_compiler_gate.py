@@ -77,14 +77,34 @@ def main():
         body = block(draw, fn)
         need(body.index("IntelDriverGate") < body.index("create_cached"), fn + " compiles before it takes the lock")
         need("IntelDriverGate gate(compiles_nothing(ci->flags));" in body and
-             "if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;" in body, fn + " makes an ask wait for a compile")
+             "if (gate.busy) return intel_gate_busy();" in body, fn + " makes an ask wait for a compile")
     graphics = block(draw, "VkResult graphics_with(")
     need("return cached_graphics" in graphics, "the play-cache path takes the lock twice")
-    need("if (gate.busy) return VK_PIPELINE_COMPILE_REQUIRED;" in graphics, "graphics_with makes an ask wait for a compile")
-    dispatch = draw[draw.index("const bool on_worker = p.code_words && intel_gate_on();"):]
+    need("if (gate.busy) return intel_gate_busy();" in graphics, "graphics_with makes an ask wait for a compile")
+    # (an ask answered cold because the gate was busy is counted and logged: the pipeline may be in a cache all the same)
+    busy = block(draw, "VkResult intel_gate_busy()")
+    need("++st_intel_gate_busy" in busy and "logf(" in busy and "return VK_PIPELINE_COMPILE_REQUIRED;" in busy,
+         "an ask answered cold for a busy gate is not counted")
+    # (a dispatch's module, for a program read without its code: made on the replay thread when the gate is free, so a
+    # prepared pipeline is had at once, and left to the worker, not waited for, while a worker holds it. Its code is looked
+    # at under the cache's lock once the CAS is won, not before)
+    dispatch = draw[draw.index("bool on_worker = false;"):]
     dispatch = dispatch[:dispatch.index("jobs_push_serial")]
-    need("(on_worker || program_cache_complete(p)" in dispatch and "if (!program_cache_complete(q))" in dispatch,
-         "on Intel a dispatch makes its module on the replay thread, behind the lock")
+    need("(program_cache_complete_ask(p, &on_worker) || on_worker ||" in dispatch and "if (!program_cache_complete(q))" in dispatch,
+         "on Intel a dispatch waits for the gate to make its module on the replay thread")
+    need("code_words" not in dispatch, "the dispatch reads a program's code_words before its CAS is won")
+    need("if (on_worker) intel_gate_busy();" in dispatch, "a dispatch's module left to the worker is not counted")
+    # (the census: a pipeline the worker found in a cache is not counted as compiled)
+    need("if (use.on && !on_worker) use.pipeline_made(cached ? 2 : 3);" in dispatch and
+         "made_how->store(use_counters.made_how ? use_counters.made_how : 2" in dispatch,
+         "a pipeline the worker took from a cache is counted as compiled")
+    need("use.pipeline_made(made_how->load(" in draw, "the census never hears how the worker made it")
+    cache = (ROOT / "gpu/vk/vk_progcache.cpp").read_text(encoding="utf-8")
+    ask = block(cache, "bool program_cache_complete_ask(")
+    need("complete_from(p, disk_in, &disk_mu, busy)" in ask, "the dispatch's ask waits for the gate")
+    complete = block(cache, "bool complete_from(")
+    need("make_module(spirv, p.key, busy)" in complete and "p.code_at = code_at, p.code_words = words;" in complete,
+         "a busy gate fails the program, or loses its code")
     link = block(draw, "VkPipeline gpl_link(")
     need(link.index("IntelDriverGate") < link.index("guarded_graphics"), "gpl_link's pipeline is not guarded")
     need("vkCreateGraphicsPipelines" not in link, "gpl_link still calls the driver with no guard")
@@ -106,6 +126,8 @@ def main():
     module = block((ROOT / "gpu/vk/vk_shader.cpp").read_text(encoding="utf-8"),
                    "VkShaderModule make_module(")
     need("IntelDriverGate" in module and "guarded_shader_module" in module, "translation still creates a module unguarded")
+    need("IntelDriverGate gate(busy != nullptr);" in module and "*busy = true;" in module,
+         "make_module waits for the gate where the dispatch only tries it")
     need(module.index("driver_faulted_program(program)") < module.index("IntelDriverGate"),
          "a program the driver faulted on is handed to it again")
     need("if (r == (VkResult)-77) driver_faulted_module(program);" in module,

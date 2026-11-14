@@ -718,14 +718,18 @@ std::unique_ptr<Translation> translate(Env& env, bool graphics, bool one_exit = 
 } // namespace
 
 thread_local uint64_t module_program = 0;   // (translate_into's program, for make_module's callers that do not name it)
-VkShaderModule make_module(const std::vector<uint32_t>& spirv, uint64_t program) {
+VkShaderModule make_module(const std::vector<uint32_t>& spirv, uint64_t program, bool* busy) {
     if (!program) program = module_program;
     if (driver_faulted_program(program)) return VK_NULL_HANDLE;
     VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     ci.codeSize = spirv.size() * 4;
     ci.pCode = spirv.data();
     VkShaderModule m = VK_NULL_HANDLE;
-    IntelDriverGate gate;
+    IntelDriverGate gate(busy != nullptr);   // (busy given: Intel's gate only tried, the dispatch's program_cache_complete_ask)
+    if (gate.busy) {
+        *busy = true;
+        return VK_NULL_HANDLE;
+    }
     if (const VkResult r = extern_guarded_shader_module(&ci, &m); r != VK_SUCCESS) {
         if (r == (VkResult)-77) driver_faulted_module(program);
         return VK_NULL_HANDLE;

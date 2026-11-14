@@ -221,7 +221,6 @@ using mkwvk::PipelineCacheFile;
 // (the census's counters, gpu/vk/vk_programs.h: counted, not checked here)
 struct { std::atomic<int64_t> play_from_driver{0}, play_from_start{0}, play_compiled{0}; } census;
 thread_local struct { uint8_t made_how = 0; } use_counters;
-struct IntelDriverGate { IntelDriverGate() {} };   // (gpu/vk/vk_internal.h's: Intel's compiler gate, a no-op here)
 #include "pipeline_play_cache.inc"
 
 VkResult make(uint64_t key, unsigned flags = 0) {

@@ -57,7 +57,7 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 | Ultrawide and 4:3 | ✅ Works. The Aspect ratio row's default, Monitor's shape, widens the 3D to the screen and keeps the HUD and movies in the middle 16:9 ([#2119](https://github.com/NotRexed/Hookshot/pull/2119)) |
 | NVIDIA cards | ✅ Works. The most tested |
 | AMD cards | ⚠️ Many tested: reports from the RX 6600, RX 6800 XT, RX 7800 XT, RX 7900 XTX and RX 9070 XT. On Windows, the RX 6600 to RX 6950 XT and their mobile and Pro models (Navi 21, 22 and 23) draw task and mesh shaders through the compute fallback by default: the driver lost the GPU on their own mesh shaders on an RX 6700 XT, an RX 6800 XT and, in one report in Mako, an RX 6600 ([#1747](https://github.com/NotRexed/Hookshot/pull/1747), [#1992](https://github.com/NotRexed/Hookshot/pull/1992), [#2215](https://github.com/NotRexed/Hookshot/pull/2215)); another RX 6600 played 15-20 minutes on them ([Longshot #130](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/130)). The RX 6400 and 6500 XT (Navi 24) keep their own mesh shaders, as no report has them losing the GPU; `RX_VK_TASK_MESH_FALLBACK=1` tries the fallback. Driver crashes and device lost are still reported ([#996](https://github.com/NotRexed/Hookshot/issues/996)) |
-| Intel cards | ❓ Few reports, many of them black screens or crashes ([#999](https://github.com/NotRexed/Hookshot/issues/999)). On Windows, Intel's shader compiler and its pipeline cache are entered by one thread, and a shader it faults on is left out instead of closing the game, on later starts too ([#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252)). Made for an Intel UHD laptop with 4 threads and 16 GB that crashed in `igvk64.dll` (see [Intel laptops](#intel-laptops)): not yet tested on an Intel GPU |
+| Intel cards | ❓ Few reports, many of them black screens or crashes ([#999](https://github.com/NotRexed/Hookshot/issues/999)). On Windows, Intel's shader compiler is entered by one thread, and a shader it faults on is left out instead of closing the game, on later starts too ([#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252)). Made for an Intel UHD laptop with 4 threads and 16 GB that crashed in `igvk64.dll` (see [Intel laptops](#intel-laptops)): not yet tested on an Intel GPU |
 | Pre-rendered movies on a slow CPU | ⚠️ Shown rather than skipped when the decoder is slower than the movie, so the picture can fall behind the sound. With 4 logical processors or fewer the decoder uses 2 threads, leaving the game its own. The first picture can still be black on some PCs |
 | Cards without mesh shaders (such as NVIDIA GTX 10 and AMD RX 5000) | ⚠️ Run through the compute fallback (since v2.0.6), which runs the mesh programs as compute shaders on cards with buffer device addresses: slower, and it leaves out the mesh draws that take their count from a buffer ([#640](https://github.com/NotRexed/Hookshot/issues/640)) |
 | Linux | ✅ Works with the AppImage. Tested on several distributions (CachyOS, Fedora, Bazzite, SteamOS) and cards, with open problems on some AMD cards ([#1000](https://github.com/NotRexed/Hookshot/issues/1000)) |
@@ -111,7 +111,7 @@ frame rate: the game runs on more than this, and performance depends on the reso
 | **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
 
 **Below the minimum:** a laptop with Intel UHD graphics and a 4-thread CPU is below both minimums. The game has been
-reported to start on one (Unity's: Intel UHD, 4 threads, 16 GB, Windows), at about 35 fps on the title and with crashes
+reported to start on one (Intel UHD, 4 threads, 16 GB, Windows), at about 35 fps on the title and with crashes
 in Intel's driver that [#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252) is meant to fix. See
 [Intel laptops](#intel-laptops) for what to set and what to send.
 
@@ -311,7 +311,7 @@ line with the video memory in use against what the driver allows, and DLSS's det
 | **Starting** | |
 | The game opens and closes, or the log says "device lost" | Update your graphics driver. AMD cards have known crashes ([#708](https://github.com/NotRexed/Hookshot/issues/708), [#614](https://github.com/NotRexed/Hookshot/issues/614)). |
 | Windows, Intel: the game closes in the first scene, and the log names `igvk64.dll` | Keep the Debug tab's **Intel shader compiles** row on **One at a time** (the default) and update the graphics driver. See [Intel laptops](#intel-laptops). |
-| The build said "the GPU driver stopped responding", or the log says `the shaders' preparation was skipped at the build` | The game then builds every shader when it is first drawn, and stutters or leaves things out for a long time. Delete `longshot_prepare_skipped` from the game folder so that the next start prepares them, or build again with **Prepare shaders now** ticked. |
+| The build said "the GPU driver stopped responding", or the log says `the shaders' preparation was skipped at the build` | The game then builds every shader when it is first drawn, and stutters or leaves things out for a long time. Delete `longshot_prepare_skipped` from the game folder's `cache` folder so that the next start prepares them, or build again with **Prepare shaders now** ticked. |
 | Linux: the game doesn't start, or the picture is broken | The game needs a Vulkan 1.3 driver, ideally with mesh shaders: `vulkaninfo \| grep mesh` should list `VK_EXT_mesh_shader`. Update Mesa or the NVIDIA driver. |
 | Linux: low-memory warning, or the whole desktop becomes unresponsive while loading | Close other programs and check `free -h`: the `Mem` and `Swap` rows are separate. Below 10 GiB of physical RAM the game warns even with plenty of swap; absence of that warning does not mean a run will fit. Do not keep retrying a load that locks up the PC. After restarting, keep the failed session's log before launching again, and check `journalctl -k -b -1` for an out-of-memory kill or a GPU reset (if the previous boot's journal was saved). |
 | **Graphics** | |
@@ -348,20 +348,20 @@ report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
 
 #### Intel laptops
 
-What [#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252) changes was made from one laptop's logs (Unity's:
-Intel UHD Graphics with driver 101.7088, a 4-thread CPU of which the game reserves 2, 16 GB, Windows, 1920x1080 at
-60 Hz, the Auto preset: Minimum; later an i3-1115G4). There the game closed in Intel's driver (`igvk64.dll`+0x14d102,
-an access violation) in 5 of 7 runs of v3.0.0-rc.3, each time in the background save of the pipeline cache
-(`vkGetPipelineCacheData`) while other threads built pipelines into the same cache. The build's shader preparation had
-stopped, so every run built its shaders in play, and the title ran at about 35 fps. It has not been tested on an Intel
-GPU yet. On such a PC:
+What [#252](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/252) changes was made from the logs of a laptop with
+Intel UHD Graphics, a 4-thread CPU, 16 GB and Windows. There the game closed in Intel's driver (`igvk64.dll`) in the
+background save of the pipeline cache while other threads built pipelines into the same cache; main now fetches a
+cache's data with no build under way on Intel ([#190](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/190)).
+The build's shader preparation had stopped, so every run built its shaders in play, and the title ran at about 35 fps.
+It has not been tested on an Intel GPU yet. On such a PC:
 
-1. Build with **Prepare shaders now** ticked. If the folder has a `longshot_prepare_skipped` file from an earlier build,
-   delete it first.
+1. Build with **Prepare shaders now** ticked. If the game folder's `cache` folder has a `longshot_prepare_skipped` file
+   from an earlier build, delete it first.
 2. Keep the Debug tab's **Intel shader compiles** row on **One at a time** (the default). Side by side builds faster on a
    CPU with many cores, but Intel's driver can crash the game then.
-3. A shader the driver faulted on is listed in `longshot_driver_faults.txt` and left out, with its draws, on later starts
-   on the same driver. After a driver update the list starts again; delete the file to try them all again sooner.
+3. A shader the driver faulted on is listed in `longshot_driver_faults.txt` (in the `cache` folder) and left out, with
+   its draws, on later starts on the same driver. After a driver update the list starts again; delete the file to try
+   them all again sooner.
 4. Leave **ASTC as RGBA8** off: it is the [AMD texture workaround](#amd-texture-workaround), and its larger textures
    come out of the memory that integrated graphics share with the rest of the PC.
 5. If it still crashes or runs slowly, [report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with
@@ -1081,19 +1081,22 @@ most one picture's time in a frame. With a decoder slower than the movie, the pi
 (`HOS_VIDEO_ACQUIRE_TRIES=1`: a count of sleeps instead of the clock). After a movie stops or is flushed, and nothing new
 has been submitted, there is no wait. The first picture can still be black on some PCs; why is not known yet.
 
-On Windows, a PC with 4 logical processors or fewer decodes the movies on 2 threads rather than one per processor, so
-the decoder leaves the game's own threads their time. Unity's laptop (Intel UHD Graphics, 4 threads, 16 GB) showed the
-title and the opening movie at about 35 fps of 60, with the game's thread waiting 14 to 24 ms on most frames; that report
-was not run again with this change. `HOS_DAV1D_THREADS=<n>` sets the count on any PC.
+A PC with 4 logical processors or fewer decodes the movies on 2 threads rather than one per processor, so the decoder
+leaves the game's own threads their time. A 4-thread laptop with Intel UHD Graphics showed the title and the opening
+movie at about 35 fps of 60, with the game's thread waiting 14 to 24 ms on most frames; that report was not run again
+with this change. `HOS_DAV1D_THREADS=<n>` sets the count on any PC.
 
 On Windows, Intel's compiler (UHD and Arc) is entered by one thread. A fault inside it leaves that shader out instead
-of closing the game, and the program is written to `longshot_driver_faults.txt` so that later starts on the same driver
-leave it out too (delete the file to try again). This covers the game's shaders and the renderer's own (texture
+of closing the game, and the program is written to `longshot_driver_faults.txt` so that later starts on the same
+driver leave it out too (delete the file to try again). This covers the game's shaders and the renderer's own (texture
 decoding, upscaling, frame generation). A draw that only asks whether its pipeline is ready never waits behind another
-thread's compile: while one is compiling, the answer is "not yet". Whether the driver keeps working after a caught fault
+thread's compile: while one is compiling, the answer is "not yet", even for a pipeline already in a cache, and the
+draw is left out until a worker has made it (the log's `vk: asked cold: Intel's gate busy` lines count these). The
+renderer's own pipelines made at their first use (the movie's upscale, the texture decoders, a masked clear, the
+write-back and late-page fixes) do wait for a compile under way. Whether the driver keeps working after a caught fault
 has not been tested. The first scene can still pause while shaders compile, especially when they were not prepared at
 the build. If a build's preparation stopped ("the GPU driver stopped responding"), the game leaves a
-`longshot_prepare_skipped` file and every start after that builds shaders only when first drawn, as on Unity's laptop.
+`longshot_prepare_skipped` file in its `cache` folder and every start after that builds shaders only when first drawn.
 Build again with **Prepare shaders now** ticked, or delete that file, to prepare them with this fix.
 The Debug tab's **Intel shader compiles** row (Developer section, shown on Intel graphics on Windows) chooses: **One at
 a time**, the default and the safe choice on a CPU with 4 cores or fewer, or **Side by side**, faster builds on a CPU
