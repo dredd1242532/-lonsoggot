@@ -1175,7 +1175,8 @@ class LongshotCtl(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(got)), ["account.sav", "option.sav", "slot_03"])
             with open(self.log) as f:
                 starts = [json.loads(line) for line in f if '"_start"' in line]
-            self.assertEqual([s["xdg"] for s in starts if s["control"] == info["socket"]], [os.path.join(run, "data")])
+            self.assertEqual([s["xdg"] for s in starts if s["control"] == info["socket"]],
+                             [os.path.join(os.path.realpath(run), "data")])   # (launch resolves --run; macOS's /tmp is a link)
             ctl("--sock", info["socket"], "quit", check=0)
             r = ctl("launch", self.game, "--slot", "03", check=2)
             self.assertIn("--slot goes with --save", r.stderr)
