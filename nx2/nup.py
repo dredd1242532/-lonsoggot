@@ -718,10 +718,12 @@ def stand_in_for(path, damaged=()):
     return best and best[1]
 
 
-def stand_in_damaged(romfs, progress=None, damaged=None):
+def stand_in_damaged(romfs, progress=None, damaged=None, refused=None):
     """Each damaged .zs file in an unpacked romfs replaced by a copy of its stand-in: (damaged, stand-in or None) each.
     Only for a romfs this tool unpacked: the player's own folder is never written to. progress: damaged_game_files'.
-    damaged: the paths already known (the extraction's HEADS_NAME), so no file is opened to find them"""
+    damaged: the paths already known (the extraction's HEADS_NAME), so no file is opened to find them. refused: a list for
+    the files whose replacement Windows refuses (read-only, or open elsewhere; linked from the player's folder), left as they are; without
+    one, that refusal is raised"""
     done = []
     if damaged is None:
         damaged = damaged_game_files(romfs, progress)
@@ -729,8 +731,16 @@ def stand_in_damaged(romfs, progress=None, damaged=None):
     for path in damaged:
         other = stand_in_for(path, excluded)
         if other:
+            with suppress(FileNotFoundError):   # (a .part linked in from the player's folder is not written through)
+                os.remove(long_path(path + ".part"))
             shutil.copyfile(long_path(other), long_path(path + ".part"))
-            os.replace(long_path(path + ".part"), long_path(path))
+            try:
+                os.replace(long_path(path + ".part"), long_path(path))
+            except PermissionError:
+                if refused is None:
+                    raise
+                os.remove(long_path(path + ".part"))
+                refused.append(path)
         done.append((path, other))
     return done
 

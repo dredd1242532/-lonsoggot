@@ -100,6 +100,8 @@ class NupCacheTests(unittest.TestCase):
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(data)
                 return
+            if "nx2/unpack.py" in cmd:   # (a chosen exefs folder: its authored module is already unpacked)
+                return
             if "nx2/lift.py" in cmd:
                 raise Prepared
             self.fail("Unexpected build subprocess: %r" % cmd)
@@ -306,6 +308,124 @@ class NupCacheTests(unittest.TestCase):
         self.assertIn("1 damaged file with no replacement", self.output)
         self.assertIn("missing.bfres.zs", self.output)
         self.assertFalse((self.out / ".longshot_romfs_checked").exists())
+
+    def folder_dump(self, romfs, files):
+        """A chosen dump: romfs with the authored files given (and the dictionary and System/Resource the build reads), and
+        an exefs beside it"""
+        for name, data in {"Pack/ZsDic.pack.zs": b"\x28\xb5\x2f\xfd" + b"authored dictionary", **files}.items():
+            (romfs / name).parent.mkdir(parents=True, exist_ok=True)
+            (romfs / name).write_bytes(data)
+        (romfs / "System" / "Resource").mkdir(parents=True, exist_ok=True)
+        exefs = self.root / "dump" / "exefs"
+        exefs.mkdir(parents=True, exist_ok=True)
+        (exefs / "main").write_bytes(module_bytes())
+        return romfs, exefs
+
+    def test_folder_dump_damaged_texture_is_stood_in_without_writing_the_players_file(self):
+        # (the folder way linked a damaged texture in as it was: the game left out the walls using it, the Water Temple's)
+        donor = b"\x28\xb5\x2f\xfd" + b"authored counterpart"
+        romfs, exefs = self.folder_dump(self.root / "dump" / "romfs",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32), "Tex/other_Alb.bntx.zs": donor})
+        damaged = romfs / "Tex" / "only_Alb.bntx.zs"
+        other_name = self.root / "dump" / "other-name.zs"   # (a second name of the player's file)
+        os.link(damaged, other_name)
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("in its place other_Alb.bntx.zs", self.output)
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), donor)
+        self.assertEqual(damaged.read_bytes(), bytes(32))
+        self.assertEqual(other_name.read_bytes(), bytes(32))
+        self.assertEqual(damaged.stat().st_nlink, 2)   # (the game folder's name now holds its own file)
+        self.assertIn("only_Alb.bntx.zs", (self.out / make_game.DAMAGED_NOTE).read_text())
+        self.assertTrue((self.out / ".longshot_romfs_checked").exists())
+        # (the next build from the same folder opens no file again)
+        import nup
+        with mock.patch.object(nup, "damaged_game_files", side_effect=AssertionError("checked again")), \
+                mock.patch.object(nup, "stand_in_damaged", side_effect=AssertionError("checked again")):
+            with self.assertRaises(Prepared):
+                self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertNotIn("checking your game files", self.output)
+
+    def test_folder_dump_stand_in_does_not_write_through_a_linked_part_file(self):
+        # (a damaged file's .part in the player's folder is linked in too: the stand-in was copied into it)
+        donor = b"\x28\xb5\x2f\xfd" + b"authored counterpart"
+        romfs, exefs = self.folder_dump(self.root / "dump" / "romfs",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32), "Tex/other_Alb.bntx.zs": donor,
+                                         "Tex/only_Alb.bntx.zs.part": b"authored leftover"})
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), donor)
+        self.assertEqual((romfs / "Tex" / "only_Alb.bntx.zs.part").read_bytes(), b"authored leftover")
+        self.assertEqual((romfs / "Tex" / "only_Alb.bntx.zs").read_bytes(), bytes(32))
+        # (the next build links the .part in again and looks again: the list of what was replaced stays)
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("only_Alb.bntx.zs", (self.out / make_game.DAMAGED_NOTE).read_text())
+
+    def test_folder_dump_file_windows_will_not_replace_is_listed_and_the_build_goes_on(self):
+        # (Windows refuses to replace a read-only file, through a hard link the player's file's own attribute, or one open elsewhere)
+        donor = b"\x28\xb5\x2f\xfd" + b"authored counterpart"
+        romfs, exefs = self.folder_dump(self.root / "dump" / "romfs",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32), "Tex/fixed_Alb.bntx.zs": bytes(24),
+                                         "Tex/other_Alb.bntx.zs": donor})
+        original_replace = os.replace
+
+        def refuse_one(src, dst, *args, **kwargs):
+            if str(dst).endswith("only_Alb.bntx.zs"):
+                raise PermissionError(13, "Access is denied", str(dst))
+            return original_replace(src, dst, *args, **kwargs)
+
+        with mock.patch.object(os, "replace", side_effect=refuse_one), self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("only_Alb.bntx.zs: not replaced, Windows refused it (read-only in your folder, or open in another program); "
+                      "the next build tries again", self.output)
+        self.assertIn("fixed_Alb.bntx.zs: in its place other_Alb.bntx.zs", self.output)
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), bytes(32))
+        self.assertEqual((self.out / "romfs/Tex/fixed_Alb.bntx.zs").read_bytes(), donor)
+        self.assertFalse((self.out / "romfs/Tex/only_Alb.bntx.zs.part").exists())
+        note = (self.out / make_game.DAMAGED_NOTE).read_text()
+        self.assertIn("Windows refused it (read-only in your folder, or open in another program)", note)
+        self.assertIn("in its place other_Alb.bntx.zs", note)
+        self.assertNotIn("no replacement", self.output)
+        self.assertFalse((self.out / ".longshot_romfs_checked").exists())
+        # (once the attribute is cleared, the next build from the same folder replaces it)
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), donor)
+        self.assertEqual((romfs / "Tex" / "only_Alb.bntx.zs").read_bytes(), bytes(32))
+        self.assertTrue((self.out / ".longshot_romfs_checked").exists())
+
+    def test_folder_dump_file_linked_in_again_is_checked_again(self):
+        # (a stand-in removed from the game folder came back from the player's folder damaged, and the check was skipped)
+        donor = b"\x28\xb5\x2f\xfd" + b"authored counterpart"
+        romfs, exefs = self.folder_dump(self.root / "dump" / "romfs",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32), "Tex/other_Alb.bntx.zs": donor})
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        (self.out / "romfs/Tex/only_Alb.bntx.zs").unlink()
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("in its place other_Alb.bntx.zs", self.output)
+        self.assertEqual((self.out / "romfs/Tex/only_Alb.bntx.zs").read_bytes(), donor)
+
+    def test_folder_dump_inside_the_game_folders_romfs_is_only_reported(self):
+        romfs, exefs = self.folder_dump(self.out / "romfs" / "original",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32),
+                                         "Tex/other_Alb.bntx.zs": b"\x28\xb5\x2f\xfd" + b"authored counterpart"})
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("They were not replaced", self.output)
+        self.assertEqual((romfs / "Tex" / "only_Alb.bntx.zs").read_bytes(), bytes(32))
+
+    def test_folder_dump_that_is_the_game_folders_romfs_is_only_reported(self):
+        romfs, exefs = self.folder_dump(self.out / "romfs",
+                                        {"Tex/only_Alb.bntx.zs": bytes(32),
+                                         "Tex/other_Alb.bntx.zs": b"\x28\xb5\x2f\xfd" + b"authored counterpart"})
+        with self.assertRaises(Prepared):
+            self.run_to_lift(self.new_nup, folders=(romfs, exefs))
+        self.assertIn("They were not replaced: the game folder's romfs is your own folder", self.output)
+        self.assertEqual((romfs / "Tex" / "only_Alb.bntx.zs").read_bytes(), bytes(32))
+        self.assertIn("Tex/only_Alb.bntx.zs".replace("/", os.sep), (self.out / make_game.DAMAGED_NOTE).read_text())
 
     def test_failed_extraction_preserves_the_previous_cache_and_save(self):
         before = self.cache()

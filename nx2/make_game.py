@@ -504,22 +504,35 @@ def keep_heads(out, game, stamp):
 DAMAGED_NOTE = "longshot_damaged_files.txt"   # (in the game folder: the damaged game files the last unpack replaced)
 
 
-def stand_in_damaged_files(out, romfs):
+def stand_in_damaged_files(out, romfs, source=None):
     """An incomplete dump's damaged textures replaced by whole ones of the same kind, and said: without them the game
-    leaves out the walls and floors that use them (the Water Temple, #1002). Only in a romfs this builder unpacked (its
-    .longshot_romfs stamp), and once per unpack: .longshot_romfs_checked holds the stamp it was checked under"""
+    leaves out the walls and floors that use them (the Water Temple, #1002). In a romfs this builder unpacked (its
+    .longshot_romfs stamp), or linked from the player's folder (source): a stand-in replaces the game folder's own name of
+    the file (nup.stand_in_damaged writes a new file over it), so the player's file is not written. Only said, not replaced,
+    when the game folder's romfs is the player's folder itself. Once per unpack or folder: .longshot_romfs_checked holds the
+    stamp it was checked under"""
     good = os.path.join(out, ".longshot_romfs")
     checked = os.path.join(out, ".longshot_romfs_checked")
-    if not os.path.isfile(good) or not os.path.isdir(romfs):
+    if not os.path.isdir(romfs) or (source is None and not os.path.isfile(good)):
         return
-    check_cache_paths(out, (good, checked, romfs))
-    stamp = read_stamp(good)
+    own = False
+    if source is None:
+        check_cache_paths(out, (good, checked, romfs))
+        stamp = read_stamp(good)
+    else:
+        check_cache_paths(out, (checked, romfs))
+        with contextlib.suppress(OSError, ValueError):   # (the player's folder is the game folder's romfs, or inside it)
+            mine, theirs = os.path.realpath(romfs), os.path.realpath(source)
+            own = os.path.samefile(long_path(romfs), long_path(source)) or os.path.commonpath((mine, theirs)) == mine
+        files = sum(len(names) for _, _, names in os.walk(long_path(source)))
+        stamp = "linked from your folder %s (%d files)%s" % (os.path.abspath(source), files, ", not written" if own else "")
     checked_stamp = "resolved-v2\n" + stamp   # (v2: also files still in the .nup's zstd frame, #2361)
     if os.path.isfile(checked):
         if read_stamp(checked) == checked_stamp:
             return
         os.remove(checked)   # Earlier checks also marked files with no replacement as checked.
     import nup
+    refused = [] if source is not None else None   # (a folder's file Windows will not replace: read-only, or open elsewhere)
     heads = os.path.join(out, HEADS)
     known = None
     try:
@@ -530,15 +543,28 @@ def stand_in_damaged_files(out, romfs):
     except OSError:
         pass
     if known is None:
-        print("checking your game files for damaged textures (once after an unpack): every .zs file is opened, which can take "
+        print("checking your game files for damaged textures (once per unpack or folder): every .zs file is opened, which can take "
               "minutes", flush=True)
-        done = nup.stand_in_damaged(romfs, file_progress("checked"))
+        done = ([(path, None) for path in nup.damaged_game_files(romfs, file_progress("checked"))] if own else
+                nup.stand_in_damaged(romfs, file_progress("checked"), refused=refused))
     else:   # (found while the .nup was extracted: no file opened again)
-        done = nup.stand_in_damaged(romfs, damaged=[os.path.normpath(os.path.join(romfs, rel)) for rel in known])
+        done = nup.stand_in_damaged(romfs, damaged=[os.path.normpath(os.path.join(romfs, rel)) for rel in known],
+                                    refused=refused)
     note = os.path.join(out, DAMAGED_NOTE)
     if not done:
-        with contextlib.suppress(FileNotFoundError):   # (a whole dump unpacked over a damaged one)
-            os.remove(note)
+        if source is None:   # (a whole dump unpacked over a damaged one; a folder's linked files keep their stand-ins)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(note)
+    elif own:
+        lines = ["Your game dump is incomplete: %d game file%s in it %s damaged (a complete dump is about 23.8 GB, an incomplete "
+                 "one 23.3 GB). The game leaves out what uses %s. They were not replaced: the game folder's romfs is your own "
+                 "folder, which the build does not write to. Dump the game again, or build into another folder:" %
+                 (len(done), "" if len(done) == 1 else "s", "is" if len(done) == 1 else "are", "it" if len(done) == 1 else "them")]
+        lines += ["  %s" % os.path.relpath(path, romfs) for path, _ in done]
+        for line in lines:
+            print(line, flush=True)
+        with open(note, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
     else:
         lines = ["Your game dump is incomplete: %d game file%s in it %s damaged (a complete dump is about 23.8 GB, an incomplete "
                  "one 23.3 GB). Similar files are used where available, "
@@ -546,6 +572,9 @@ def stand_in_damaged_files(out, romfs):
                  (len(done), "" if len(done) == 1 else "s", "is" if len(done) == 1 else "are")]
         for path, other in done:
             lines.append("  %s: %s" % (os.path.relpath(path, romfs),
+                                       "not replaced, Windows refused it (read-only in your folder, or open in another program); the next build "
+                                       "tries again"
+                                       if path in (refused or ()) else
                                        "in its place " + os.path.basename(other) if other else "no replacement found; build cannot continue"))
         for line in lines:
             print(line, flush=True)
@@ -557,7 +586,8 @@ def stand_in_damaged_files(out, romfs):
             fail("The game dump still has %d damaged file%s with no replacement. The build stopped before compiling. "
                  "Dump the game again and select the complete dump in Longshot Builder. The affected files are listed above." %
                  (unresolved, "" if unresolved == 1 else "s"))
-    write_stamp(checked, checked_stamp)
+    if not refused:   # (a refused file is tried again on the next build)
+        write_stamp(checked, checked_stamp)
     with contextlib.suppress(FileNotFoundError):
         os.remove(heads)
 
@@ -1548,13 +1578,15 @@ def long_path(p):
 
 
 def link_or_copy(src, dst):
-    """the romfs by hard links where the disk allows: 26 GB not written twice"""
+    """the romfs by hard links where the disk allows: 26 GB not written twice. Returns how many files it put in"""
     src, dst = long_path(src), long_path(dst)
     files = [os.path.join(d, f) for d, _, fs in os.walk(src) for f in fs]
+    added = 0
     for i, s in enumerate(files):
         t = os.path.join(dst, os.path.relpath(s, src))
         os.makedirs(os.path.dirname(t), exist_ok=True)
         if not os.path.exists(t):
+            added += 1
             try:
                 os.link(s, t)
             except OSError:
@@ -1573,6 +1605,7 @@ def link_or_copy(src, dst):
                     raise
         if i % 500 == 0:
             say("progress", "%.3f" % (i / max(1, len(files))))
+    return added
 
 
 def shader_census_cmd(romfs, out):
@@ -2259,9 +2292,12 @@ def main(a=None):
         refuse_dump_links(a.romfs)
         shutil.copytree(a.exefs, exefs)   # (unpacked in place: the user's copy stays as it is)
         run(PY + ["nx2/unpack.py", exefs])
-        link_or_copy(a.romfs, romfs)
+        if link_or_copy(a.romfs, romfs):   # (a file linked in afresh, also one a stand-in had replaced: checked again)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(os.path.join(out, ".longshot_romfs_checked"))
         shutil.rmtree(kept, ignore_errors=True)
         shutil.copytree(exefs, kept)
+        stand_in_damaged_files(out, romfs, a.romfs)
     check_supported_build(exefs)
 
     # (made once on the development PC: lists of addresses and counts, no game code)

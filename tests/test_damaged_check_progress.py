@@ -72,7 +72,7 @@ class DamagedFilesProgressTests(unittest.TestCase):
         body = source[source.index("def stand_in_damaged_files("):]
         body = body[:body.index("\ndef ")]
         self.assertIn("checking your game files for damaged textures", body)
-        self.assertIn('nup.stand_in_damaged(romfs, file_progress("checked"))', body)
+        self.assertIn('nup.stand_in_damaged(romfs, file_progress("checked")', body)
 
 
 if __name__ == "__main__":

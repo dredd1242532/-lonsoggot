@@ -88,7 +88,7 @@ mg_spec.loader.exec_module(make_game)
 calls = []
 reported = []   # (whether each call was given a progress(done, total): the check says how far it is, #1764)
 sys.modules["nup"] = type(sys)("nup")
-sys.modules["nup"].stand_in_damaged = lambda romfs, progress=None: calls.append(romfs) or reported.append(callable(progress)) or []
+sys.modules["nup"].stand_in_damaged = lambda romfs, progress=None, refused=None: calls.append(romfs) or reported.append(callable(progress)) or []
 with tempfile.TemporaryDirectory() as out:
     romfs = os.path.join(out, "romfs")
     os.makedirs(romfs)
