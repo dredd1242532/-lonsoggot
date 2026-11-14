@@ -87,6 +87,12 @@ def check_source():
                          "the compile's time counts its wait at the gate")):
         if needle not in turn:
             raise SystemExit(why)
+    # (ComputeTurn reads what compute_pipeline_info or the mesh fallback described last on this thread: the back end's own
+    # pipelines (vk_fsr3.cpp, vk_fsr4.cpp, some held to 32 or 64 lanes) come in with none, or they would be weighed, refused
+    # (compute_refused) and logged as that game program)
+    shared = function(draw, "VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeline* out) {")
+    if shared.find("compute_described = {};") < 0 or shared.index("compute_described = {};") > shared.index("cached_compute(ci, out)"):
+        raise SystemExit("shared_compute_pipeline reaches the gate with the description of the game program this thread made last")
     if turn.index("prepare_compiled();") > turn.index("compiling.erase(mine);"):
         raise SystemExit("a compile leaves the active list before the watchdog hears it ended: the short timeout can race the completion")
     if turn.index("gate->leave(weight);") > turn.index("malloc_trim(0);"):

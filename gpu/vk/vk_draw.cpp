@@ -4289,6 +4289,8 @@ std::string state_list_snapshot(bool* present) { return state_list_bytes(present
 /// in across runs (longshot_vk_pipelines.bin), as theirs are: in play through the play caches (create_cached), so that it does not grow
 /// the start's cache; before the cache is loaded, with none. (Outside the unnamed namespace: vk_fsr3.cpp links to it)
 VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeline* out) {
+    // (not a game program: ComputeTurn must not weigh, refuse or name it as the game program this thread described last)
+    compute_described = {};
     return cached_compute(ci, out);
 }
 /// (longshot) The driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute): the preparation's
