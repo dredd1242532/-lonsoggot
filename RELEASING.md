@@ -60,6 +60,10 @@ Players on the nightly channel keep the last good nightly until then.
 
 ## A release candidate
 
+0. **(Longshot) The renderer's play profile.** Before the first candidate of a minor, when the renderer changed much since
+   `assets/profiles/README.md`'s recording: record it again (docs/development.md, "The renderer's play profile") and merge
+   the new `assets/profiles/longshot_vk.profdata.xz` and its note in a pull request first. An old one still builds: what
+   changed since is built as if there were no profile.
 1. **Preview.** Run `python -I scripts/release.py next` on an up-to-date `main` (`jj git fetch --remote forge` and
    `jj new main@forge`, or `git fetch forge` and `git switch --detach forge/main`). It prints:
    - the number the commits since the last stable call for (feat: minor, fix and perf: patch, `!` or `BREAKING CHANGE:`:
