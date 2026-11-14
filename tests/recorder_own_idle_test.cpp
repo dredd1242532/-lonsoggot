@@ -350,10 +350,10 @@ constexpr uint32_t kLongWaitMs = 10000;
 static std::atomic<bool> entered_without_timeout{false};   // (the wait in progress was entered with the 10 s timeout)
 static std::atomic<uint64_t> last_call_ns{0}, last_return_ns{0};   // (the last wait that returned: its start and end)
 struct WaitSpan {
-    std::atomic<uint64_t> call{0}, ret{0};
+    std::atomic<uint64_t> call{0}, ret{0}, seq{0};   // (seq: its number + 1, written last: a half-written entry is skipped)
 };
-static WaitSpan spans[256];   // (every returned wait's start and end, in order: the first return after a publish is found
-static std::atomic<int> nspans{0};   // even when later ones, early or kicked, follow it)
+static WaitSpan spans[256];   // (the returned waits' starts and ends, a ring of the last 256: the first return after a publish is
+static std::atomic<uint64_t> nspans{0};   // found even when later ones, early or kicked, follow it)
 static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) {
     const bool inf = no_timeout;
     entered_without_timeout = inf;
@@ -365,7 +365,9 @@ static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) 
 #endif
     const uint64_t ret = rec::now_ns();
     last_call_ns = call, last_return_ns = ret;   // (a pair, written at the return: the next wait does not touch them)
-    if (const int i = nspans.load(); i < 256) spans[i].call = call, spans[i].ret = ret, nspans = i + 1;
+    const uint64_t i = nspans.fetch_add(1);
+    WaitSpan& e = spans[i % 256];
+    e.call = call, e.ret = ret, e.seq = i + 1;
     in_real_wait--;
     real_wait_returns++;
     return r;
@@ -396,11 +398,15 @@ static bool publish_runs(int want) {
 }
 /// the first wait that returned at or after `pub`: the one the publish ended (the recorder writes it before it runs the packet)
 static bool first_return_after(uint64_t pub, uint64_t& call, uint64_t& ret) {
-    for (int i = 0, n = nspans.load(); i < n; i++)
-        if (spans[i].ret >= pub) {
-            call = spans[i].call, ret = spans[i].ret;
+    const uint64_t n = nspans.load();
+    for (uint64_t i = n > 256 ? n - 256 : 0; i < n; i++) {
+        const WaitSpan& e = spans[i % 256];
+        if (e.seq != i + 1) continue;   // (being written, or already overwritten)
+        if (e.ret >= pub) {
+            call = e.call, ret = e.ret;
             return true;
         }
+    }
     return false;
 }
 /// the recorder stopped through the renderer's own teardown (vkDestroyDevice's boundary), joined within 3 s, and a normal return:
