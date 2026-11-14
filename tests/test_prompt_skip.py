@@ -27,14 +27,14 @@ spec = importlib.util.spec_from_file_location("prompt_make_game", SOURCE / "make
 M = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(M)
 
-# The actual finish-stage call site, including its no-fontTools fallback and packaged/source decision.
+# The actual prompt assignment and complete conditional, including its no-fontTools fallback
+# and packaged/source decision. Later finish-stage generators are not prompt-cache calls.
 main = next(n for n in ast.parse((SOURCE / "make_game.py").read_text(encoding="utf-8")).body
             if isinstance(n, ast.FunctionDef) and n.name == "main")
 start = next(i for i, n in enumerate(main.body) if isinstance(n, ast.Assign) and
              any(isinstance(t, ast.Name) and t.id == "prompts" for t in n.targets))
-end = next(i for i in range(start + 1, len(main.body)) if isinstance(main.body[i], ast.Assign) and
-           any(isinstance(t, ast.Name) and t.id == "icon" for t in main.body[i].targets))
-FINISH = compile(ast.Module(body=main.body[start:end], type_ignores=[]), str(SOURCE / "make_game.py"), "exec")
+assert isinstance(main.body[start + 1], ast.If), "prompt generation must keep its complete conditional"
+FINISH = compile(ast.Module(body=main.body[start:start + 2], type_ignores=[]), str(SOURCE / "make_game.py"), "exec")
 
 
 class PromptSkipTests(unittest.TestCase):
@@ -88,6 +88,8 @@ class PromptSkipTests(unittest.TestCase):
             self.during(out)
 
     def child(self, command, **kwargs):
+        self.assertIn(os.path.join(M.HERE, "prompt_assets.py"), command,
+                      "the prompt fixture must never draw for another finish-stage generator")
         a = types.SimpleNamespace(**vars(self.args))
         a.out = command[command.index("--out") + 1]
         try:
