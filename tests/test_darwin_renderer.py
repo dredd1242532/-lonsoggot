@@ -79,9 +79,10 @@ def import_excerpts(root, legacy=False):
         retired = block(memory, "void retired_imports_give_back() {")
         if retired.index("dead_imports.emplace_back()") > retired.index("std::move(p.import_view)"):
             raise AssertionError("dead-import transfer can destroy ownership on failed queue allocation")
-    # Keep the real raw-import eviction gate, without the unrelated pressure-selection policy that follows it.
+    # Keep the real raw-import eviction gate, without the unrelated pressure-selection policy that follows it (its comment
+    # opens "(longshot) Default by OS and vendor" since main's #324).
     eviction = block(memory, "void imports_give_back() {")
-    code += eviction[:eviction.index("    // (longshot) Off by default")] + "}\n"
+    code += eviction[:eviction.index("    // (longshot) Default by OS and vendor")] + "}\n"
     code = select(code, True, False).replace("#ifdef __linux__", "#if 0")
     return select(types, True, False), code
 

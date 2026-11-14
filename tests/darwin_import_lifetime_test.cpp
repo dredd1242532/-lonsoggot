@@ -224,6 +224,7 @@ static int64_t st_bg_waits, st_prefetch_dropped, st_prefetch_used, st_prefetch_s
 static std::deque<std::map<uint64_t, Pool>::node_type> retired_pools, evicted_pools;
 #endif
 static std::vector<Pool*> mirror_wanted;
+static std::vector<Pool*> sparse_wanted;   // (main's #250: pools a binding found a sparse block with no memory in)
 #if !HAVE_DARWIN_IMPORTS
 static std::deque<DeadImport> dead_imports;
 #endif
