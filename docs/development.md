@@ -242,6 +242,10 @@ still does not prove the GPU is idle: read GPU timestamps, present intervals and
 Query-result reads with `VK_QUERY_RESULT_WAIT_BIT` count separately as `queries` (the optional draw-statistics read);
 ordinary timestamp-result polls without that bit do not count.
 
+The game-free `test_gpu_wait_stats`, `test_recorder_sync` and `test_recorder_own_idle` checks use the real accounting
+header. The recorder's source check ignores comments, but still requires every boundary macro to drain first and
+call its own driver function, including sparse-memory release.
+
 ### The GPU
 
 Pipeline-cache file ownership, temporary storage and failure behavior are described in
