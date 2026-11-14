@@ -29,6 +29,10 @@ void rules() {
     expect(compute_gate::weight(true, 2190) == compute_gate::kHeavyMB && compute_gate::weight(true, 1892) == kPinnedMB &&
                compute_gate::weight(false, 12329) == kFreeMB && compute_gate::kHeavyMB > kPinnedMB,
            "a pinned compile of 2,000 phis or more weighs the most; at the driver's lanes the phis do not count");
+    expect(compute_gate::weight(true, 58, true) == compute_gate::kMeshMB && compute_gate::kMeshMB > kPinnedMB &&
+               compute_gate::kHeavyMB > compute_gate::kMeshMB && compute_gate::weight(true, 80000, true) == compute_gate::kHeavyMB &&
+               compute_gate::weight(false, 58, true) == kFreeMB && compute_gate::weight(true, 58) == kPinnedMB,
+           "a pinned mesh fallback stage weighs more than an ordinary pinned compile, whatever its phis");
     expect(budget_for(0) == 0 && budget_for(kReserveMB) == 0 && budget_for(kUnknownMB) == 0, "no budget: one at a time");
     expect(budget_for(kReserveMB + 100) == 100, "the budget: what is past the reserve");
 

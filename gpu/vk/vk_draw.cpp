@@ -1482,11 +1482,12 @@ compute_gate::Gate& compute_compiles() {
                                                        : "little memory is available");
             else
                 logf("vk: compute pipelines: as many compiled at once as %llu MB hold (%llu MB available now, %llu left to the PC), "
-                     "%llu MB for one held to 32 lanes (%llu MB with %u phis or more) and %llu MB for another, at most %u "
-                     "(Mesa's Intel compiler; RX_VK_COMPUTE_AT_ONCE=<n> or 0 says otherwise)", (unsigned long long)budget,
-                     (unsigned long long)avail, (unsigned long long)compute_gate::kReserveMB,
+                     "%llu MB for one held to 32 lanes (%llu MB with %u phis or more, %llu MB for a mesh fallback stage) and %llu MB for "
+                     "another, at most %u (Mesa's Intel compiler; RX_VK_COMPUTE_AT_ONCE=<n> or 0 says otherwise)",
+                     (unsigned long long)budget, (unsigned long long)avail, (unsigned long long)compute_gate::kReserveMB,
                      (unsigned long long)compute_gate::kPinnedMB, (unsigned long long)compute_gate::kHeavyMB,
-                     compute_gate::kHeavyPhis, (unsigned long long)compute_gate::kFreeMB, compute_gate::kMost);
+                     compute_gate::kHeavyPhis, (unsigned long long)compute_gate::kMeshMB,
+                     (unsigned long long)compute_gate::kFreeMB, compute_gate::kMost);
         }
     });
     return gate;
@@ -1594,7 +1595,7 @@ bool compute_refused(const ComputeDescribed& d, bool pinned) {
 struct ComputeTurn {
     explicit ComputeTurn(const VkComputePipelineCreateInfo& ci)
         : gate((ci.flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT) ? nullptr : &compute_compiles()),
-          weight(compute_gate::weight(compute_pinned(ci), compute_described.phis)) {
+          weight(compute_gate::weight(compute_pinned(ci), compute_described.phis, compute_described.fallback)) {
         if (gate && compute_refused(compute_described, compute_pinned(ci))) gate = nullptr, stopped = true;
         if (gate && !gate->enter(weight, memory_available_mb, [] { return prepare_stopped(); })) gate = nullptr, stopped = true;
         began = std::chrono::steady_clock::now();   // (the turn is taken: the compile starts)

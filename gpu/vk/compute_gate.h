@@ -19,6 +19,11 @@
 // list) past 5.6 GB and not done after 15 minutes; others there took 24-34 s and 1-2.2 GB, and nothing below 2,000 took more
 // than 2.2 GB. So a pinned compile of kHeavyPhis or more weighs kHeavyMB: beside it only what still fits. The preparation's
 // watchdog lets a compile with a CPU at work run long (vk_main.cpp).
+// The mesh fallback's compute stages (the GPU has no mesh shaders) are large, and their phis do not show what they cost: with
+// their records written unrolled (emit_spirv_mesh.cpp MeshFallbackEpilogue, before its loop) 6fcc901fbc8b73c7 (58 phis) took
+// 3.8 GB and 207 s, and three at once took a test run on that PC from 7 GB to 14.7 GB, with 1.5 GB left to the desktop, when
+// each weighed kPinnedMB. Written by a loop, the largest measured (6fcc901fbc8b73c7, 1cd6ed71bb3f651e, 0c2412f39d385c07)
+// peak at 1.55 GB; most take under 200 MB. So a pinned one weighs kMeshMB, twice that, as kPinnedMB is.
 //
 // What a finished compile held does not go back to the system by itself: the compile runs on whichever worker's turn it
 // is, glibc gives each thread its own heap, and the little the compile leaves behind (the pipeline) sits on top of the
@@ -42,13 +47,16 @@ constexpr uint64_t kReserveMB = 4096;   // (memory left to the rest of the PC, a
 constexpr uint64_t kPinnedMB = 2048;    // (an ordinary compile held to 32 lanes: twice 16a842f009aff538's measured peak)
 constexpr uint32_t kHeavyPhis = 2000;   // (a pinned program this big may take minutes and gigabytes)
 constexpr uint64_t kHeavyMB = 8192;     // (7a548525c239b91b's measured 7.6 GB)
+constexpr uint64_t kMeshMB = 3072;     // (a mesh fallback stage: twice the largest measured, 1.55 GB)
 constexpr uint64_t kFreeMB = 512;       // (one at the lanes the driver chooses: the largest measured, with room)
 constexpr unsigned kMost = 16;
 constexpr uint64_t kUnknownMB = UINT64_MAX;   // (the system does not say what is available: one at a time)
 constexpr int64_t kTrimAfterMs = 1000;        // (a compile this long held memory worth handing back; the short ones did not)
 
-/// A compile's weight: held to 32 lanes or not, and how many phis its SPIR-V has
-inline uint64_t weight(bool pinned, uint32_t phis) { return !pinned ? kFreeMB : phis >= kHeavyPhis ? kHeavyMB : kPinnedMB; }
+/// A compile's weight: held to 32 lanes or not, how many phis its SPIR-V has, and whether it is a mesh fallback stage
+inline uint64_t weight(bool pinned, uint32_t phis, bool mesh_fallback = false) {
+    return !pinned ? kFreeMB : phis >= kHeavyPhis ? kHeavyMB : mesh_fallback ? kMeshMB : kPinnedMB;
+}
 
 /// What the compiles may hold together, with avail_mb available when the first one starts: what is past kReserveMB.
 /// 0 (one at a time) when the system does not say
