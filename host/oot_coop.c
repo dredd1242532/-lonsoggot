@@ -210,8 +210,8 @@ static struct {
        accepted what the room is (the engine's offer: identities, rules and their key, the save) and a copy of the save
        exists to go back to; coop_sync_take checks it again under the lock */
     CoopView view;
-    unsigned view_seen;     /* the view's version last handled */
-    int view_any;
+    unsigned view_seen;     /* the view's version last applied to the engine */
+    int view_any;           /* a copied view before engine creation is still pending */
     char first_rooms[8][COOP_SECRET_TEXT + 1];   /* rooms whose first copy of the save was made in this start */
     unsigned nfirst;
     uint32_t logged;        /* the offer last logged */
@@ -832,7 +832,9 @@ static void view_changed(const CoopView *v) {
         __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
     }
     G.view = *v;
+    G.view_any = G.eng != NULL;   /* JOINED can arrive before the presenting thread creates the engine */
     if (G.eng) {
+        G.view_seen = v->version;
         coop_sync_name(G.eng, v->name);   /* the player's own name, signed: the relay's roster may say another */
         if (in_room && G.has_room_key) coop_sync_room_seed(G.eng, v->code, G.room_key);
         coop_sync_room(G.eng, in_room ? v->code : "", v->self, ids, sessions, n, in_room ? v->maker : 0, coop_now_ms());
@@ -865,7 +867,6 @@ static void on_view(const CoopView *v, void *user) {
         return;
     }
     sync_on();
-    G.view_seen = v->version, G.view_any = 1;
     view_changed(v);
 }
 
@@ -1309,7 +1310,7 @@ static void on_tick(uint64_t now, void *user) {
     {   /* a room joined before these hooks were registered, or a view hook that came and went: the view as it is */
         CoopView v;
         coop_view_get(&v);
-        if (!G.view_any || v.version != G.view_seen) G.view_seen = v.version, G.view_any = 1, view_changed(&v);
+        if (!G.view_any || v.version != G.view_seen) view_changed(&v);
     }
     if (!coop_profile_active()) make_snapshot();
     char asked[sizeof G.want_remove];

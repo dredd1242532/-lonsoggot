@@ -45,6 +45,9 @@ where each network's joins went.
   a game-thread context read between publication and the consent callback could briefly revoke body permission
   and delete/recreate a friend who never left. Member IDs, sessions, flags, names, count and order still publish
   real changes immediately; the stale-view consent fence is unchanged.
+  The consent consumer acknowledges a view only after applying it to its engine. If JOINED arrives before the
+  native engine exists, the next session tick applies the current view once it does; no changed roster or
+  periodic republication is needed to initialize identity and the signed charter.
 - Limits: a source address answers a cookie challenge before the relay sends it anything larger than it sent; each
   member is limited to 480 forwarded copies and 256 KiB per second, a datagram forwarded to seven counted seven times
   in both budgets (bursts 960 copies and 512 KiB). `--member-copies` and `--member-bytes` change the rates; each burst
@@ -250,6 +253,12 @@ HOS_COOP_SERVER=127.0.0.1:<port>`, the first with `HOS_COOP_AUTO=create HOS_COOP
 session view publication and its consumer callback. Unchanged roster heartbeats preserve presence, view and
 body-ticket generations on normal and temporary saves; real roster changes still revoke before the consumer
 acknowledges them. The fixture also covers receive freshness, struct padding and a separately pending publication.
+
+`tests/test_coop_join_publication.py` drives real JOINED and identical ROSTER packets, encrypted queued messages
+over loopback and the signed engine to a manually accepted two-member room. It covers the engine before JOINED,
+JOINED before engine creation, and hooks registered after JOINED, then requires unchanged-heartbeat continuity.
+Only native save-backup completion and unrelated renderer callbacks are stand-ins; identities, charter signatures,
+offer generation and acceptance are production code.
 
 The game and relay reserve their requested UDP addresses on Windows with `SO_EXCLUSIVEADDRUSE` before binding.
 Without it, Windows permits another program of the same user to bind a specific IPv4 address beside a wildcard
