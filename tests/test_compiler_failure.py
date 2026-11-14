@@ -16,6 +16,55 @@ BUILD = ROOT / 'nx2/build.py'
 
 
 class CompilerFailureTests(unittest.TestCase):
+    def test_actual_compile_one_releases_the_gate_when_stdout_is_gone(self):
+        source = ast.parse(BUILD.read_text(encoding='utf-8'))
+        functions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == 'compile_one']
+        self.assertEqual(len(functions), 1)
+        with tempfile.TemporaryDirectory(prefix='longshot-broken-pipe-') as temporary:
+            folder = Path(temporary)
+
+            class Gate:
+                def __init__(self):
+                    self.leases = 0
+
+                def enter(self, src):
+                    self.leases += 1
+                    return object()
+
+                def started(self, lease, proc):
+                    pass
+
+                def leave(self, lease):
+                    self.leases -= 1
+
+            gate = Gate()
+            env = dict(os=os, subprocess=subprocess, time=time, threading=threading, GATE=gate, PLANNED={},
+                       OBJ_CACHE=str(folder / 'cache'), no_throttle=lambda handle: None,
+                       object_key=lambda src, flags, deps: 'authored-key')
+            exec(compile(ast.Module(body=functions, type_ignores=[]), str(BUILD), 'exec'), env)
+            source_file = folder / 'authored.cpp'
+            source_file.write_text('/* authored */\n', encoding='ascii')
+            job = (sys.executable, str(source_file), str(folder / 'authored.o'), [], b'authored deps')
+
+            class Broken:
+                def write(self, text):
+                    raise BrokenPipeError()
+
+                def flush(self):
+                    pass
+
+            saved = sys.stdout
+            raised = False
+            sys.stdout = Broken()
+            try:
+                env['compile_one'](job)
+            except BrokenPipeError:
+                raised = True
+            finally:
+                sys.stdout = saved
+            self.assertTrue(raised, 'the @@work print must reach the closed stdout')
+            self.assertEqual(gate.leases, 0, 'the memory gate lease must be released when stdout is gone')
+
     def test_actual_compile_one_reports_failures_without_stamping_or_caching(self):
         source = ast.parse(BUILD.read_text(encoding='utf-8'))
         functions = [node for node in source.body if isinstance(node, ast.FunctionDef)

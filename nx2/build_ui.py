@@ -4,9 +4,10 @@
 
 Runs nx2/build.py (--standalone) itself, or nx2/make_game.py with --make; -- attaches the arguments. On a terminal it
 takes the screen and redraws ten times a second; elsewhere (CI, a pipe) or with --plain it prints the build's own lines
-with a short summary. --attach follows a log another process is writing, and --demo runs a made-up build for the screen
-itself (no game files). Control-C stops the build and its compilers; the full log is kept in --log (work/build_ui.log
-by default).
+with a short summary. --attach follows a log another process is writing and stops when the log says the build ended
+(Control-C only stops following, not the build), and --demo runs a made-up build for the screen itself (no game files).
+Control-C stops the build and its compilers; the full log is kept in --log (<work>/build_ui.log by default, where
+OOT_WORK is the build's work folder).
 
 The events are make_game.py's docstring's: @@stage, @@progress, @@plan, @@work, @@file, @@eta, @@times, @@done, @@error.
 @@work is the new one, printed by build.py when a module's compiler starts (the others say when it ended).
@@ -15,6 +16,7 @@ import argparse
 import collections
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -32,6 +34,8 @@ LABELS = {"read": "Read", "lift": "Lift", "compile": "Compile", "link": "Link", 
 ON = {"done": "\x1b[32m", "now": "\x1b[36;1m", "wait": "\x1b[2m", "bad": "\x1b[31;1m", "dim": "\x1b[2m",
       "off": "\x1b[0m"}
 LOGS = 2000   # (the raw lines kept for the tail and for a summary; the file has all of them)
+PLAIN_PREFIX = "build_ui: "   # (build.py prints its own "build: ..." lines, so the dashboard's are distinct)
+PLAIN_EVENTS = ("@@stage ", "@@plan ", "@@done ", "@@error ")
 
 
 def fmt_time(seconds):
@@ -72,6 +76,61 @@ def short_worker(name):
     return name
 
 
+def work_dir():
+    """The work folder build.py and make_game.py use: OOT_WORK, or work/ under the repository"""
+    work = os.environ.get("OOT_WORK") or os.path.join(ROOT, "work")
+    return work if os.path.isabs(work) else os.path.join(ROOT, work)
+
+
+def build_env(make):
+    """The child's environment: LONGSHOT_TIMES makes build.py report its plan and per-file times; make_game.py sets it
+    itself, and a value already in the environment is kept."""
+    env = os.environ.copy()
+    if not make:
+        env.setdefault("LONGSHOT_TIMES", os.path.join(work_dir(), "build_times.json"))
+    return env
+
+
+def plain_event(text):
+    """The line --plain prints for one of the build's lines, or None when the line is only for the screen"""
+    if text.startswith(PLAIN_EVENTS):
+        return PLAIN_PREFIX + text[2:]
+    if text.startswith("@@"):
+        return None
+    return text
+
+
+def draw_text(lines):
+    """The ANSI text of one redraw: no newline after the last line, so a full screen does not scroll"""
+    out = ["\x1b[H"]
+    for i, line in enumerate(lines):
+        out.append(line + "\x1b[K")
+        if i + 1 < len(lines):
+            out.append("\n")
+    out.append("\x1b[J")
+    return "".join(out)
+
+
+def attach_done(state):
+    """A log that says the build ended: @@done or @@error, a build.py log's linked line, or a make_game log's @@times"""
+    if state.error is not None or state.done is not None:
+        return True
+    return (state.linked or state.times is not None) and not state.full
+
+
+def install_interrupts():
+    """SIGHUP (a closed terminal) and SIGTERM stop the build like Ctrl+C does"""
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+    for name in ("SIGHUP", "SIGTERM"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, interrupt)
+            except (OSError, ValueError):
+                pass
+
+
 class BuildState:
     """What the @@ lines say, kept for the screen and for the tests. No game, no build, no clock beyond the events."""
 
@@ -99,6 +158,9 @@ class BuildState:
         self.last_file = ""
         self.lines = 0
         self.finished = None             # (monotonic, exit code, cancelled)
+        self.following = False           # (--attach: the build is another process, and its clock is not ours)
+        self.linked = False              # (a build.py log ends at "linked ..."; a make_game log goes on to @@done)
+        self.compile_reported = None     # (build.py's "compiled in Ns": the compile time an attached log carries)
 
     # ---- the events ----
 
@@ -147,8 +209,9 @@ class BuildState:
             self.files_cached += 1
         else:
             self.files_new += 1
-        for worker in [w for w, v in self.in_flight.items() if v[0] == name]:
-            self.in_flight.pop(worker, None)
+        matches = [(v[2], worker) for worker, v in self.in_flight.items() if v[0] == name]
+        if matches:                      # (two sources can share a base name: one @@file clears one row, not both)
+            self.in_flight.pop(min(matches)[1], None)
 
     def feed(self, line):
         """One line of the build's stdout; plain lines are kept for the tail, @@ lines change the state"""
@@ -209,13 +272,20 @@ class BuildState:
         is"""
         if line.startswith("version:") and not self.version:
             self.version = line
-        elif line.startswith("compiled in") and "link" not in self.by_id:
-            self.stage("link", "Linking")
+        elif line.startswith("compiled in"):
+            if "link" not in self.by_id:
+                self.stage("link", "Linking")
+            try:
+                self.compile_reported = float(line.split()[2].rstrip("s,"))
+            except (IndexError, ValueError):
+                pass
         elif line.startswith("linked ") and "finish" not in self.by_id:
             self.stage("finish", "Finishing")
+            self.linked = True
 
     def finish(self, code, cancelled=False):
         self.finished = (time.monotonic(), code, cancelled)
+        self.in_flight.clear()
         if self.current and self.by_id.get(self.current) and self.by_id[self.current]["end"] is None:
             self.by_id[self.current]["end"] = self.finished[0]
 
@@ -227,11 +297,17 @@ class BuildState:
         return known
 
     def elapsed(self, now=None):
+        if self.following:
+            return self.times[0] if self.times else None
         return (time.monotonic() if now is None else now) - self.started
 
     def compile_seconds(self):
         if self.times:
             return self.times[1]
+        if self.compile_reported is not None:
+            return self.compile_reported
+        if self.following:
+            return None
         if self.compile_start is not None:
             return (self.finished[0] if self.finished else time.monotonic()) - self.compile_start
         return None
@@ -245,6 +321,8 @@ class BuildState:
             return "failed"
         if self.done is not None:
             return "done"
+        if self.following:
+            return "attached"
         return "running"
 
 
@@ -288,12 +366,9 @@ class Screen:
             return
         size = shutil.get_terminal_size((100, 30))
         lines = render_lines(state, size.columns, size.lines, command, log_path, self.colour)
-        # (each line is erased to its end: a shorter line must not leave the tail of the one before it)
-        out = ["\x1b[H"]
-        for line in lines:
-            out.append(line + "\x1b[K\n")
-        out.append("\x1b[J")
-        sys.stdout.write("".join(out))
+        # (each line is erased to its end: a shorter line must not leave the tail of the one before it; the last line
+        # has no newline, or a full screen would scroll and lose the title)
+        sys.stdout.write(draw_text(lines))
         sys.stdout.flush()
 
 
@@ -356,13 +431,15 @@ def render_lines(state, width, height, command, log_path, colour=True):
         lines.append(clip("  %s" % state.by_id.get(state.current, {}).get("text", ""), width))
 
     # the files being compiled: one row a worker, as @@work says them
-    worker_rows = min(6, max(0, height - len(lines) - 5))
+    worker_rows = max(0, height - len(lines) - 7)   # (the heading, a "more" line, the log's heading and the footer)
     workers = sorted(state.in_flight.items(), key=lambda kv: kv[1][2])
     if workers:
         lines.append(clip("  workers:", width))
         for worker, (name, mb, t0) in workers[:worker_rows]:
             lines.append(clip("    %-6s %-34s %3d MB  %4ds" % (short_worker(worker), name,
                                                               mb, int(now - t0)), width))
+        if len(workers) > worker_rows:
+            lines.append(clip("    ... and %d more" % (len(workers) - worker_rows), width))
     elif state.status() == "running" and "compile" in state.by_id:
         lines.append(clip("  workers: waiting for the next file...", width))
 
@@ -376,7 +453,9 @@ def render_lines(state, width, height, command, log_path, colour=True):
         lines.append(clip("    " + paint(text, "bad", colour) if bad else "    " + text, width))
     if not tail:
         lines.append("    (nothing yet)")
-    footer = "  Ctrl+C stops the build" + ("   log: %s" % log_path if width > 70 else "")
+    footer = "  Ctrl+C stops following" if state.following else "  Ctrl+C stops the build"
+    if width > 70:
+        footer += "   log: %s" % log_path
     if state.finished:
         footer = "  done in %s   log: %s" % (fmt_time(state.elapsed(now)), log_path)
     lines.append(paint(clip(footer, width), "dim", colour))
@@ -407,14 +486,14 @@ def stop_tree(proc):
             pass
 
 
-def run_build(cmd, state, screen, log_path, plain):
+def run_build(cmd, state, screen, log_path, plain, env=None):
     """Start the command, feed its lines to the state and the log, draw until it ends; returns its exit code"""
     log = open(log_path, "w", encoding="utf-8", errors="replace", buffering=1)
     creation = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", bufsize=1,
-                                creationflags=creation, start_new_session=(os.name != "nt"))
+                                creationflags=creation, start_new_session=(os.name != "nt"), env=env)
     except OSError as e:
         state.error = str(e)
         state.finish(-1)
@@ -429,10 +508,9 @@ def run_build(cmd, state, screen, log_path, plain):
                 state.feed(line)
                 if not screen.tty:
                     text = line.rstrip("\r\n")
-                    if text.startswith(("@@stage ", "@@plan ", "@@eta ", "@@done ", "@@error ")):
-                        print("build: " + text[2:], flush=True)
-                    elif not text.startswith("@@"):
-                        print(text, flush=True)
+                    shown = plain_event(text)
+                    if shown is not None:
+                        print(shown, flush=True)
                 screen.event.set()
         finally:
             log.close()
@@ -472,22 +550,48 @@ def run_build(cmd, state, screen, log_path, plain):
 
 
 def follow(path, state, screen, plain):
-    """--attach: follow a log another build is writing (the same @@ lines); Ctrl+C leaves the build alone"""
-    while not os.path.exists(path):
-        time.sleep(0.2)
-    with open(path, encoding="utf-8", errors="replace") as f:
+    """--attach: follow a log another build is writing (the same @@ lines); Ctrl+C stops following, not the build"""
+    state.following = True
+    if not os.path.exists(path):
+        if plain:
+            print("build_ui: waiting for " + path, flush=True)
+        else:
+            while not os.path.exists(path):
+                screen.draw(state, "waiting for " + path, path)
+                time.sleep(0.2)
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError as e:
+        state.error = str(e)
+        state.finish(1)
+        return 1
+    with f:
         while True:
             line = f.readline()
             if line:
                 state.feed(line)
-                if not screen.tty and not line.startswith("@@"):
-                    print(line.rstrip("\r\n"), flush=True)
+                if not screen.tty:
+                    shown = plain_event(line.rstrip("\r\n"))
+                    if shown is not None:
+                        print(shown, flush=True)
                 screen.event.set()
+                if attach_done(state):
+                    break
             else:
                 if screen.tty:
                     screen.draw(state, "attached to " + path, path)
                 screen.event.wait(0.2)
                 screen.event.clear()
+                if attach_done(state):
+                    break
+    code = 1 if state.error else 0
+    state.finish(code)
+    if screen.tty:
+        end = time.monotonic() + 0.9
+        while time.monotonic() < end:
+            screen.draw(state, "attached to " + path, path)
+            time.sleep(0.15)
+    return code
 
 
 def demo_events():
@@ -531,8 +635,9 @@ def run_demo(state, screen, log_path, plain):
             log.write(line + "\n")
             state.feed(line)
             if not screen.tty:
-                text = line.rstrip("\r\n")
-                print(text if not text.startswith("@@") else "build: " + text[2:], flush=True)
+                shown = plain_event(line)
+                if shown is not None:
+                    print(shown, flush=True)
             else:
                 screen.draw(state, "demo (no game files)", log_path)
             time.sleep(0.45 if line.startswith("@@work") else 0.12)
@@ -553,14 +658,15 @@ def main():
     p.add_argument("--no-color", action="store_true", help="no ANSI colours")
     p.add_argument("--demo", action="store_true", help="a made-up build, for the screen itself")
     p.add_argument("--attach", metavar="LOG", help="follow a log another build is writing")
-    p.add_argument("--log", help="the full log (default: work/build_ui.log)")
+    p.add_argument("--log", help="the full log (default: <work>/build_ui.log)")
     p.add_argument("--make", action="store_true", help="run nx2/make_game.py instead of build.py --standalone")
     p.add_argument("args", nargs=argparse.REMAINDER, help="arguments for the build, after --")
     a = p.parse_args()
+    install_interrupts()
     extra = [x for x in a.args if x != "--"]
     state = BuildState()
     screen = Screen(a.plain, not a.no_color)
-    log_path = a.log or os.path.join(ROOT, "work", "build_ui.log")
+    log_path = a.log or os.path.join(work_dir(), "build_ui.log")
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     if a.demo:
         screen.enter()
@@ -572,14 +678,14 @@ def main():
             screen.leave()
         code = 0 if not state.error else 1
     elif a.attach:
+        log_path = a.attach
         screen.enter()
         try:
-            follow(a.attach, state, screen, a.plain)
+            code = follow(a.attach, state, screen, a.plain)
         except KeyboardInterrupt:
-            pass
+            code = 0
         finally:
             screen.leave()
-        code = 0
     else:
         tool = os.path.join(ROOT, "nx2", "make_game.py") if a.make else os.path.join(ROOT, "nx2", "build.py")
         cmd = PY + [tool] + ([] if a.make else ["--standalone"]) + extra
@@ -589,7 +695,7 @@ def main():
             print("build_ui: " + " ".join(cmd), flush=True)
         screen.enter()
         try:
-            code = run_build(cmd, state, screen, log_path, a.plain)
+            code = run_build(cmd, state, screen, log_path, a.plain, build_env(a.make))
         except KeyboardInterrupt:
             code = 130
         finally:
@@ -600,7 +706,9 @@ def main():
     print("build %s in %s (compile %s); log: %s" % (status, total, compile_time, log_path))
     if state.error:
         print("error: %s" % state.error)
-    sys.exit(0 if a.attach or (status == "done" and code == 0) else 130 if status == "cancelled" else 1)
+    if a.attach:
+        sys.exit(1 if state.error else 0)
+    sys.exit(0 if status == "done" and code == 0 else 130 if status == "cancelled" else 1)
 
 
 if __name__ == "__main__":
