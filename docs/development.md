@@ -650,9 +650,9 @@ Builder's own command line: 24 jobs (the default), Compile shaders Most, no DLSS
 - **Run 2 is a player's first build:** it started with an empty NVIDIA shader cache. Run 1 started with a warm one,
   which saved about 20 s of the shader preparation.
 - **Memory:** about 14-15 GB above what was already in use, at its peak during the compile.
-- **No hot pieces.** A release ships no hot list and no play profile (its `tools.lock` has no `profile` line), so
-  every lifted file is built at `-O1`. A checkout with `work/hot_funcs.txt` also builds the eight hot pieces at `-O2`,
-  which takes longer ([above](#a-faster-build-for-development)).
+- **No hot pieces.** A release ships no hot list and no game-side play profile (they are parked; when they come back
+  they are committed in `assets/profiles/`), so every lifted file is built at `-O1`. A checkout with
+  `work/hot_funcs.txt` also builds the eight hot pieces at `-O2`, which takes longer ([above](#a-faster-build-for-development)).
 - **Slower PCs:** the compile and the shader preparation use every CPU thread, so a 6-core PC can take twice as long or
   more. That is an estimate, not a measurement.
 
