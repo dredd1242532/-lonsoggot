@@ -27,6 +27,7 @@ struct Stage {
     // program cache (vk_progcache.cpp), which every translated program passes. Not in vk_shader.cpp, whose bytes are part of
     // the translator's stamp: a change there translates every player's programs again
     mutable uint32_t phis = 0;
+    mutable uint32_t calls = 0;   // (longshot) its OpFunctionCall instructions, noted with the phis (fallback_size_policy.h)
 };
 
 /// A texture handle the stage reads from a storage buffer: its handle program (Shader::Info::handle_programs, Eden's

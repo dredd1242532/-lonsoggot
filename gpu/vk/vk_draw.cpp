@@ -6871,31 +6871,66 @@ bool fallback_compute_pipelines(Program& p) {
     }
     // (longshot) none of its stages given to a compiler that would never finish one: RADV on GCN 1-4 grew past 25 GB on the two
     // biggest mesh programs and kept the memory on its thread (fallback_size_policy.h). Left out, as a refused one is below.
-    // RX_VK_FALLBACK_PHI_LIMIT=<n>: another limit, 0 none
-    static const uint32_t phi_limit = [] {
-        uint32_t limit = fallback_size::kRadvGcnPhiLimit;
+    // (longshot) Mesa's Intel compiler as well, with its own limit: alone it took the 80,000- and the 29,000-phi ones to 14 GB in
+    // minutes, unfinished. RX_VK_FALLBACK_PHI_LIMIT=<n>: another limit, 0 none
+    const bool mesa_intel = dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
+    static const uint32_t phi_limit = [mesa_intel] {
+        const uint32_t standard = mesa_intel ? fallback_size::kIntelPhiLimit : fallback_size::kRadvGcnPhiLimit;
+        uint32_t limit = standard;
         const char* e = getenv("RX_VK_FALLBACK_PHI_LIMIT");
         if (e && !fallback_size::parse_limit(e, limit)) {
-            limit = fallback_size::kRadvGcnPhiLimit;
+            limit = standard;
             logf("vk: RX_VK_FALLBACK_PHI_LIMIT=%s is not a number from 0 to 4294967295: ignored", e);
         }
-        if (dev.radv_gcn || e)
-            logf("vk: mesh fallback compute stages with more than %u phis are not built on RADV GCN 1-4 cards%s", limit,
-                 limit ? "" : " (0: none left out)");
+        if (dev.radv_gcn || mesa_intel || e)
+            logf("vk: mesh fallback compute stages with more than %u phis are not built on %s%s", limit,
+                 mesa_intel ? "Mesa's Intel driver" : "RADV GCN 1-4 cards", limit ? "" : " (0: none left out)");
         return limit;
     }();
     for (size_t i = 0; i < p.stages.size(); i++) {
         const Stage& st = p.stages[i];
-        if (st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT || !fallback_size::too_big(dev.radv_gcn, st.phis, phi_limit)) continue;
+        if (st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT || !fallback_size::too_big(dev.radv_gcn || mesa_intel, st.phis, phi_limit))
+            continue;
         {
             std::lock_guard lk(mu);
             failed.insert({p.key, p.variant});
         }
         static std::atomic<int> told{0};
         if (told++ < 8)
-            logf("vk: fallback: the compute pipeline of %016llx (stage %zu of %zu, %u phis, the most %u) is not built: RADV on this GCN "
-                 "card would not finish it (RX_VK_FALLBACK_PHI_LIMIT); its draws are left out",
-                 (unsigned long long)p.key, i, p.stages.size(), st.phis, phi_limit);
+            logf("vk: fallback: the compute pipeline of %016llx (stage %zu of %zu, %u phis, the most %u) is not built: %s would not "
+                 "finish it (RX_VK_FALLBACK_PHI_LIMIT); its draws are left out",
+                 (unsigned long long)p.key, i, p.stages.size(), st.phis, phi_limit,
+                 mesa_intel ? "Mesa's Intel compiler" : "RADV on this GCN card");
+        return false;
+    }
+    // (longshot) nor to Mesa's Intel compiler a stage of more calls than it finishes: one of the four took it to a 14 GB cap in 27
+    // minutes unfinished (fallback_size_policy.h). RX_VK_FALLBACK_CALL_LIMIT=<n>: another limit, 0 none
+    static const uint32_t call_limit = [] {
+        uint32_t limit = fallback_size::kIntelCallLimit;
+        const char* e = getenv("RX_VK_FALLBACK_CALL_LIMIT");
+        if (e && !fallback_size::parse_limit(e, limit)) {
+            limit = fallback_size::kIntelCallLimit;
+            logf("vk: RX_VK_FALLBACK_CALL_LIMIT=%s is not a number from 0 to 4294967295: ignored", e);
+        }
+        if (dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA || e)
+            logf("vk: mesh fallback compute stages with more than %u calls are not built on Mesa's Intel driver%s", limit,
+                 limit ? "" : " (0: none left out)");
+        return limit;
+    }();
+    for (size_t i = 0; i < p.stages.size(); i++) {
+        const Stage& st = p.stages[i];
+        if (st.vk_stage != VK_SHADER_STAGE_COMPUTE_BIT ||
+            !fallback_size::too_many_calls(dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA, st.calls, call_limit))
+            continue;
+        {
+            std::lock_guard lk(mu);
+            failed.insert({p.key, p.variant});
+        }
+        static std::atomic<int> told{0};
+        if (told++ < 8)
+            logf("vk: fallback: the compute pipeline of %016llx (stage %zu of %zu, %u calls, the most %u) is not built: Mesa's Intel "
+                 "compiler would not finish it (RX_VK_FALLBACK_CALL_LIMIT); its draws are left out",
+                 (unsigned long long)p.key, i, p.stages.size(), st.calls, call_limit);
         return false;
     }
     std::vector<VkPipeline> made(p.stages.size(), VK_NULL_HANDLE);
