@@ -1150,9 +1150,12 @@ read or wrote meanwhile, and its first and last page when it shares them, are wr
 trade-off: a range the CPU first touches only after that (read more rarely than every 8 frames) gets the stale copy
 once, and is written back from then on; the log names each one (`in a binding whose write-back was left out`).
 Unset or `0`, every written binding is copied back whole. It is off by default because, measured so far (an RTX 3060 Ti
-on Windows, an RX 580 on Linux with its mirror forced on), it copies back ~50 MB a frame less at the same frame rate:
-results from laptops and other slow PCIe links are wanted. `RX_VK_LOG_WB_SKIPS=1` lists the bindings left out every
-600 submits.
+on Windows, an RX 580 on Linux with its mirror forced on), it copies back ~50 MB a frame less at the same frame rate.
+One card gains so far: an RX 5600 XT on Windows (no mesh shaders, so the compute fallback) copies back 44 MB a frame
+less and its GPU frame is 2.5 ms shorter where the walk repeats, 54-56 fps against 46-48 in Kokiri Forest and 44-47
+against 39-42 at the Desert Colossus (`docs/tested/2026-11-14-wb-max-waryxxful-run01.md` to `run04.md`). Results from
+other cards without mesh shaders, laptops and other slow PCIe links are wanted. `RX_VK_LOG_WB_SKIPS=1` lists the
+bindings left out every 600 submits.
 
 `RX_VK_PROGRAM_CACHE_ZSTD=1` keeps the translated shader programs in `longshot_programs.zst.bin`, each record
 compressed with zstd and unpacked when it is read. The uncompressed cache is about 6.9 GB; in the reference cache
