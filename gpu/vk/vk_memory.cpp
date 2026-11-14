@@ -39,6 +39,9 @@
 #include "sparse_mirror.h"
 #include <atomic>
 #include <unordered_set>
+#if defined(__APPLE__)
+#include "darwin_import.h"
+#endif
 #ifdef __linux__
 #include <cerrno>
 #include <dlfcn.h>
@@ -66,11 +69,56 @@ void destroy_import_buffer(VkBuffer buffer) {
     vkDestroyBuffer(dev.device, buffer, nullptr);
 }
 
+#if defined(__APPLE__)
+// The full imported host payload owns one host pin. Buffer views and retirement queues retain this owner until
+// their final Vulkan destruction. Sharing an owner is not, by itself, an alias-visibility proof.
+struct DarwinImportBacking {
+    uint64_t lo = 0, hi = 0;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    uint32_t type = UINT32_MAX;
+    bool pinned = false;
+    ~DarwinImportBacking() {
+        if (memory) vkFreeMemory(dev.device, memory, nullptr);
+        if (pinned) host->guest_import_unpin(lo, hi);
+    }
+};
+
+// Move-only and inline in Pool/DeadImport: no extra allocation per view. An unpublished pool unwinding after a
+// failed container insertion still destroys the buffer before the memory owner can unpin its backing.
+struct DarwinImportView {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    std::shared_ptr<DarwinImportBacking> backing;
+    DarwinImportView() = default;
+    DarwinImportView(const DarwinImportView&) = delete;
+    DarwinImportView& operator=(const DarwinImportView&) = delete;
+    DarwinImportView(DarwinImportView&& other) noexcept : buffer(other.buffer), backing(std::move(other.backing)) {
+        other.buffer = VK_NULL_HANDLE;
+    }
+    DarwinImportView& operator=(DarwinImportView&& other) noexcept {
+        if (this != &other) {
+            reset();
+            buffer = other.buffer, other.buffer = VK_NULL_HANDLE;
+            backing = std::move(other.backing);
+        }
+        return *this;
+    }
+    void reset() {
+        if (buffer) destroy_import_buffer(buffer);
+        buffer = VK_NULL_HANDLE;
+        backing.reset();
+    }
+    ~DarwinImportView() { reset(); }
+};
+#endif
+
 struct Pool {
     uint64_t lo = 0, hi = 0;   // guest range imported (aligned outwards)
     uint64_t range_lo = 0, range_hi = 0;   // (the game's pool range it was found for: pool_of's last hit)
     VkDeviceMemory memory = VK_NULL_HANDLE;
     std::vector<VkDeviceMemory> pieces;   // (a pool imported as several dma-bufs: the ones after `memory`)
+#if defined(__APPLE__)
+    DarwinImportView import_view;
+#endif
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceAddress address = 0;
     // its VRAM mirror (see "the VRAM mirror" below)
@@ -124,6 +172,20 @@ struct Pool {
     std::vector<std::pair<uint64_t, uint64_t>> refill;   // (offset, size: written in guest memory where blocks had memory)
     bool shadow_wanted = false;   // (its write-back was worth one: one given back under VRAM pressure is made again)
 };
+
+// Published views are released only at their existing completion gates. Move-only Apple ownership also unwinds
+// unpublished/failed imports, always destroying the buffer before the final memory owner releases its host pin.
+template<class T> void destroy_import(T& p) {
+#if defined(__APPLE__)
+    p.import_view.reset();
+#else
+    if (p.buffer) destroy_import_buffer(p.buffer);
+    if (p.memory) vkFreeMemory(dev.device, p.memory, nullptr);
+    for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
+#endif
+    p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE;
+    p.pieces.clear();
+}
 uint64_t mem_rec_value = 0, mem_completed = 0;   // (the recording being made, and the GPU's progress)
 
 struct GuestPool {
@@ -132,7 +194,14 @@ struct GuestPool {
 
 std::vector<GuestPool> guest_pools;   // by lo, from the host
 std::atomic<uint64_t> guest_pools_gen{1};   // (bumped when that table is replaced: a span cached without the lock goes stale)
+#if defined(__APPLE__)
+// As vk_recorder's process-owned recorder: exit/dlclose is not a GPU-completion gate, and the loader may already
+// be tearing down. Published imports live in process-owned containers; ONLY the runtime retirement gates release
+// them. Local/unpublished Pool values still unwind their views and pins on failure.
+auto& imported = *new std::map<uint64_t, Pool>;
+#else
 std::map<uint64_t, Pool> imported;    // by lo, made on first use
+#endif
 Pool* last_pool = nullptr;            // (the last pool_of hit: draws in a row bind buffers of the same pools)
 extern Pool* pool_cache[4096];
 void retire_pool(std::map<uint64_t, Pool>::iterator it);
@@ -170,6 +239,138 @@ constexpr VkBufferUsageFlags kUsage =
     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
     VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
     VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+
+#if defined(__APPLE__)
+int darwin_guest_imported(uint64_t lo, uint64_t hi);   // Existing resource owners only; no second guest lifetime registry.
+
+bool darwin_import_commit(uint64_t lo, uint64_t hi) {
+    uint8_t* const base = host->guest_base();
+    for (uint64_t at = lo; at < hi;) {
+        MEMORY_BASIC_INFORMATION mi{};
+        if (VirtualQuery(base + at, &mi, sizeof mi) != sizeof mi || !mi.RegionSize) return false;
+        const uintptr_t start = (uintptr_t)mi.BaseAddress, here = (uintptr_t)(base + at);
+        if (start > here || mi.RegionSize > UINTPTR_MAX - start || start + mi.RegionSize <= here) return false;
+        const uint64_t end = at + std::min<uint64_t>(hi - at, start + mi.RegionSize - here);
+        if (mi.State == MEM_RESERVE) {
+            if (VirtualAlloc(base + at, (SIZE_T)(end - at), MEM_COMMIT, PAGE_READWRITE) != base + at) return false;
+        } else if (mi.State != MEM_COMMIT || (mi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
+        at = end;   // Existing committed pages (including read-only write watches) are never recommitted.
+    }
+    return true;
+}
+
+std::shared_ptr<DarwinImportBacking> darwin_pin_backing(darwin_import::Range range) {
+    darwin_import::Range checked;
+    if (!darwin_import::rounded(range.lo, range.hi, align, host->guest_size(), checked) ||
+        checked.lo != range.lo || checked.hi != range.hi || range.hi - range.lo > max_import_size) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return {};
+    }
+    std::shared_ptr<DarwinImportBacking> b;
+    try { b = std::make_shared<DarwinImportBacking>(); }
+    catch (const std::bad_alloc&) { import_result = VK_ERROR_OUT_OF_HOST_MEMORY; return {}; }
+    b->lo = range.lo, b->hi = range.hi;
+    if (!host->guest_import_pin || !host->guest_import_unpin || host->guest_import_pin(range.lo, range.hi) != 1) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return {};
+    }
+    b->pinned = true;
+    return b;
+}
+
+bool darwin_allocate_backing(DarwinImportBacking& b, uint32_t buffer_types) {
+    if (!darwin_import_commit(b.lo, b.hi)) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return false;
+    }
+    VkMemoryHostPointerPropertiesEXT hp{VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
+    import_result = vkGetMemoryHostPointerPropertiesEXT(dev.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                       host->guest_base() + b.lo, &hp);
+    if (import_result != VK_SUCCESS) return false;
+    const VkMemoryPropertyFlags need = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    for (uint32_t i = 0; i < dev.memory.memoryTypeCount; ++i)
+        if ((hp.memoryTypeBits & buffer_types & (1u << i)) && (dev.memory.memoryTypes[i].propertyFlags & need) == need) {
+            b.type = i;
+            break;
+        }
+    if (b.type == UINT32_MAX) {
+        import_result = VK_ERROR_FEATURE_NOT_PRESENT;
+        return false;
+    }
+    VkMemoryAllocateFlagsInfo flags{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+    flags.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VkImportMemoryHostPointerInfoEXT im{VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT};
+    im.pNext = &flags;
+    im.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+    im.pHostPointer = host->guest_base() + b.lo;
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.pNext = &im, ai.allocationSize = b.hi - b.lo, ai.memoryTypeIndex = b.type;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    import_result = vkAllocateMemory(dev.device, &ai, nullptr, &memory);
+    if (import_result != VK_SUCCESS) return false;   // The output of a failed allocation is not an owned handle.
+    b.memory = memory;
+    return true;
+}
+
+bool darwin_import_view(uint64_t lo, uint64_t hi, Pool& p, std::shared_ptr<DarwinImportBacking> b, bool extend_unallocated = false) {
+    if (!b || !b->pinned || lo < b->lo || hi > b->hi || hi <= lo || p.buffer || p.memory) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return false;
+    }
+    VkExternalMemoryBufferCreateInfo eb{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
+    eb.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.pNext = &eb, bi.size = hi - lo, bi.usage = kUsage;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    import_result = vkCreateBuffer(dev.device, &bi, nullptr, &buffer);
+    if (import_result != VK_SUCCESS) return false;
+    DarwinImportView view;
+    view.buffer = buffer;
+    view.backing = b;
+    VkMemoryRequirements req{};
+    vkGetBufferMemoryRequirements(dev.device, buffer, &req);
+    if (extend_unallocated && !b->memory && req.size > b->hi - lo) {
+        darwin_import::Range full;
+        if (req.size > UINT64_MAX - lo || !darwin_import::rounded(b->lo, lo + req.size, align, host->guest_size(), full)) {
+            import_result = VK_ERROR_MEMORY_MAP_FAILED;
+            return false;
+        }
+        auto enlarged = darwin_pin_backing(full);
+        if (!enlarged) return false;
+        b = std::move(enlarged);   // Full new pin before the preparatory pin ends; no driver payload exists yet.
+        view.backing = b;
+    }
+    const uint64_t offset = lo - b->lo;
+    if (!req.alignment || offset % req.alignment || req.size < hi - lo || req.size > b->hi - lo ||
+        (b->memory && !(req.memoryTypeBits & (1u << b->type)))) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return false;
+    }
+    if (!b->memory && !darwin_allocate_backing(*b, req.memoryTypeBits)) return false;
+    import_result = vkBindBufferMemory(dev.device, buffer, b->memory, offset);
+    if (import_result != VK_SUCCESS) return false;
+    VkBufferDeviceAddressInfo da{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    da.buffer = buffer;
+    const VkDeviceAddress address = vkGetBufferDeviceAddress(dev.device, &da);
+    if (!address) {
+        import_result = VK_ERROR_UNKNOWN;
+        return false;
+    }
+    p.lo = lo, p.hi = hi, p.buffer = buffer, p.memory = b->memory, p.address = address;
+    p.import_view = std::move(view);
+    return true;
+}
+
+bool darwin_import_pool(uint64_t lo, uint64_t hi, Pool& p) {
+    darwin_import::Range backing;
+    if (!darwin_import::rounded(lo, hi, align, host->guest_size(), backing)) {
+        import_result = VK_ERROR_MEMORY_MAP_FAILED;
+        return false;
+    }
+    auto b = darwin_pin_backing(backing);
+    return b && darwin_import_view(backing.lo, backing.hi, p, std::move(b), true);
+}
+#endif
 
 #ifdef __linux__
 // Guest memory handed to the GPU as a dma-buf over the game's own pages: the window is a memfd's (host/hos_main.c),
@@ -390,6 +591,11 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         import_remember_failure(lo, hi);
         return false;
     }
+#if defined(__APPLE__)
+    const bool ok = darwin_import_pool(lo, hi, p);
+    if (!ok && import_result != VK_NOT_READY) import_remember_failure(lo, hi);
+    return ok;
+#else
     p.lo = lo;
     p.hi = hi;
     uint8_t* ptr = host->guest_base() + lo;
@@ -489,6 +695,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
              (unsigned long long)p.address, (unsigned long long)(p.address + (hi - lo)));
     t4 = clk::now();
     return true;
+#endif
 }
 
 } // namespace
@@ -598,6 +805,12 @@ bool memory_init() {
         logf("vk: no VK_EXT_external_memory_host: the guest memory cannot be imported (needed for now)");
         return false;
     }
+#if defined(__APPLE__)
+    if (!host->guest_import_pin || !host->guest_import_unpin) {
+        logf("vk: macOS host import pin/unpin callbacks are required");
+        return false;
+    }
+#endif
     VkPhysicalDeviceExternalMemoryHostPropertiesEXT hp{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT};
     VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -609,6 +822,12 @@ bool memory_init() {
     vkGetPhysicalDeviceProperties2(dev.physical, &p2);
     align = std::max<uint64_t>(hp.minImportedHostPointerAlignment, 4096);
     max_import_size = std::min(p11.maxMemoryAllocationSize, p13.maxBufferSize);
+#if defined(__APPLE__)
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    align = std::max<uint64_t>(align, system.dwPageSize);
+    if (!align || (align & (align - 1)) || max_import_size < align) return false;
+#endif
     logf("vk: guest memory imported in place (alignment %llu)", (unsigned long long)align);
     return true;
 }
@@ -2726,7 +2945,11 @@ std::mutex bg_mu;
 std::condition_variable bg_cv, bg_done_cv;
 std::deque<std::pair<uint64_t, uint64_t>> bg_queue;
 std::vector<uint64_t> bg_inflight;           // (lo of the ranges queued or being imported)
+#if defined(__APPLE__)
+auto& bg_ready = *new std::vector<std::pair<uint64_t, Pool>>;
+#else
 std::vector<std::pair<uint64_t, Pool>> bg_ready;
+#endif
 int64_t st_bg_imports, st_bg_waits, st_prefetch_sent, st_prefetch_used, st_prefetch_dropped;
 void bg_main();
 void bg_start() {   // (bg_mu held)
@@ -2751,7 +2974,7 @@ void bg_main() {
         const bool ok = import_pool(r.first, r.second, p);
         std::lock_guard lk(bg_mu);
         p.prefetched = true;
-        if (ok) bg_ready.push_back({r.first, p}), st_bg_imports++;
+        if (ok) bg_ready.push_back({r.first, std::move(p)}), st_bg_imports++;
         std::erase(bg_inflight, r.first);
         bg_done_cv.notify_all();
     }
@@ -2768,9 +2991,7 @@ void bg_drain() {
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
         if (imp != imported.end() && imp->second.hi >= p.hi) {
-            destroy_import_buffer(p.buffer);
-            vkFreeMemory(dev.device, p.memory, nullptr);
-            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
+            destroy_import(p);
             continue;
         }
         bool overlap = false;   // (amd-fix: a chunk imported ahead that an import made since covers in part: the pools stay disjoint)
@@ -2786,14 +3007,12 @@ void bg_drain() {
         }
         if (overlap) {
             st_prefetch_dropped++;
-            destroy_import_buffer(p.buffer);
-            vkFreeMemory(dev.device, p.memory, nullptr);
-            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
+            destroy_import(p);
             continue;
         }
         if (imp != imported.end()) retire_pool(imp);
-        imported.emplace(lo, p);
-        guest_pages_set(p.lo, p.hi, p.address);
+        const auto added = imported.emplace(lo, std::move(p)).first;
+        guest_pages_set(added->second.lo, added->second.hi, added->second.address);
     }
 }
 
@@ -2998,13 +3217,14 @@ Pool* pool_lookup(uint64_t guest, uint64_t size) {
                 p.gpu_only |= o->second.gpu_only, p.gpu_written |= o->second.gpu_written, p.trims = std::max(p.trims, o->second.trims),
                     p.trim_epoch = std::max(p.trim_epoch, o->second.trim_epoch), retire_pool(o);
         }
-        imp = imported.emplace(p.lo, p).first;
-        guest_pages_set(p.lo, p.hi, p.address);
-        if (chunk) prefetch_chunks(p.lo, p.hi, chunk);
+        imp = imported.emplace(p.lo, std::move(p)).first;
+        const Pool& made = imp->second;
+        guest_pages_set(made.lo, made.hi, made.address);
+        if (chunk) prefetch_chunks(made.lo, made.hi, chunk);
         if (overlapped.size() > 1) {
             static int logged_merge;
             if (logged_merge++ < 16)
-                logf("vk: pool %#llx..%#llx took in %zu pools", (unsigned long long)p.lo, (unsigned long long)p.hi,
+                logf("vk: pool %#llx..%#llx took in %zu pools", (unsigned long long)made.lo, (unsigned long long)made.hi,
                      overlapped.size());
         }
         static int logged;
@@ -3455,7 +3675,11 @@ void cut_cpu_words(const Pool& p, std::vector<VkBufferCopy>& runs) {
 // daytime title scene, whose pools cross chunk ends). Retired pools are kept (a few, never reused). ----
 // (Extracted from the table, not erased: the node, and the Pool in it, stay where they were, so the mirror's lists and
 // a parallel replay thread's pool cache still point at a live one.)
+#if defined(__APPLE__)
+auto& retired_pools = *new std::deque<std::map<uint64_t, Pool>::node_type>;
+#else
 std::deque<std::map<uint64_t, Pool>::node_type> retired_pools;
+#endif
 
 void retire_pool(std::map<uint64_t, Pool>::iterator it) {
     Pool* old = &it->second;
@@ -3473,7 +3697,8 @@ void retire_pool(std::map<uint64_t, Pool>::iterator it) {
     static const bool no_inherit = env_on("RX_VK_NO_INHERIT");
     if (old->mstate == Pool::MIRROR_ON && !no_inherit) old->inherit_pending = true, old->retired_epoch = mirror_epoch;
     pools_gen++;
-    retired_pools.push_back(imported.extract(it));
+    retired_pools.emplace_back();   // Allocate the queue slot before extracting ownership from the live table.
+    retired_pools.back() = imported.extract(it);
     last_pool = nullptr;
     std::fill(std::begin(pool_cache), std::end(pool_cache), nullptr);
     static int logged;
@@ -3856,6 +4081,9 @@ void memory_pool_created(uint64_t gpu, uint64_t size) {
 extern std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;   // (imports_give_back's, below)
 int memory_guest_imported(uint64_t lo, uint64_t hi) {
     std::lock_guard lk(pools_mu);
+#if defined(__APPLE__)
+    return darwin_guest_imported(lo, hi);
+#else
     auto it = imported.upper_bound(hi);   // (pools by lo: those starting below hi, the last ones checked first)
     while (it != imported.begin()) {
         --it;
@@ -3870,6 +4098,7 @@ int memory_guest_imported(uint64_t lo, uint64_t hi) {
     for (const auto& nh : evicted_pools)
         if (nh.mapped().memory && nh.mapped().lo < hi && lo < nh.mapped().hi) return 1;
     return 0;
+#endif
 }
 
 bool mirror_make(Pool& pool);   // (below)
@@ -4138,8 +4367,17 @@ std::deque<DeadMirror> dead_mirrors;
 // Forest ~1.3 GB of imports, 15-45 ms a submission (3-4 fps on an RX 7800 XT with 11 ms of GPU time; issues 312, 413). Its
 // table entries went at its retirement, and its mirror goes before (mstate), so once the GPU is past retired_value nothing
 // reaches it. The node stays (pointers to it are kept elsewhere); only its buffer and memory go. RX_VK_KEEP_RETIRED=1: kept
-struct DeadImport { VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes; std::vector<VkDeviceMemory> pieces; };
+struct DeadImport {
+    VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes; std::vector<VkDeviceMemory> pieces;
+#if defined(__APPLE__)
+    DarwinImportView import_view;
+#endif
+};
+#if defined(__APPLE__)
+auto& dead_imports = *new std::deque<DeadImport>;
+#else
 std::deque<DeadImport> dead_imports;
+#endif
 uint64_t st_retired_imports_freed = 0, st_retired_import_bytes_freed = 0;
 uint64_t dead_import_bytes = 0;   // (queued in dead_imports: still in the heap's use until the GPU is past them)
 void reap_mirrors() {   // (pools_mu held)
@@ -4154,9 +4392,7 @@ void reap_mirrors() {   // (pools_mu held)
         dead_mirrors.pop_front();
     }
     while (!dead_imports.empty() && dead_imports.front().value <= mem_completed) {
-        destroy_import_buffer(dead_imports.front().buffer);
-        vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
-        for (VkDeviceMemory m : dead_imports.front().pieces) vkFreeMemory(dev.device, m, nullptr);
+        destroy_import(dead_imports.front());
         st_retired_imports_freed++, st_retired_import_bytes_freed += dead_imports.front().bytes;
         dead_import_bytes -= std::min(dead_import_bytes, dead_imports.front().bytes);
         dead_imports.pop_front();
@@ -4222,7 +4458,12 @@ void retired_imports_give_back() {   // (pools_mu held)
         if ((p.mstate == Pool::MIRROR_NONE || p.mstate == Pool::MIRROR_REFUSED) && !p.inherit_pending &&
             p.retired_value <= mem_completed &&
             p.last_value <= mem_completed && retired_give_back::due(mode, idle, idle_ms, floor_ms, want > 0)) {
-            dead_imports.push_back({p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo, std::move(p.pieces)});
+            DeadImport& dead = dead_imports.emplace_back();   // A failed queue allocation leaves p's ownership intact.
+            dead.buffer = p.buffer, dead.memory = p.memory, dead.value = std::max(mem_rec_value, p.last_value), dead.bytes = p.hi - p.lo;
+            dead.pieces = std::move(p.pieces);
+#if defined(__APPLE__)
+            dead.import_view = std::move(p.import_view);
+#endif
             dead_import_bytes += p.hi - p.lo;
             p.pieces.clear();
             p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE, p.address = 0;
@@ -4334,7 +4575,11 @@ void mirrors_give_back(uint64_t want_bytes) {   // (pools_mu held)
 // reaching a pool through the page table; a pool only reached that way would read zeros until it is bound again. Not seen in
 // play: the pools given back were long unbound.) ----
 bool system_heap_usage(uint64_t* used, uint64_t* budget);   // (vk_vma.cpp)
+#if defined(__APPLE__)
+auto& evicted_pools = *new std::deque<std::map<uint64_t, Pool>::node_type>;
+#else
 std::deque<std::map<uint64_t, Pool>::node_type> evicted_pools;
+#endif
 int64_t st_imports_evicted = 0;
 uint64_t st_import_bytes_evicted = 0;
 constexpr uint64_t kImportIdle = 600;
@@ -4342,9 +4587,7 @@ constexpr uint64_t kImportIdle = 600;
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
-        destroy_import_buffer(p.buffer);
-        vkFreeMemory(dev.device, p.memory, nullptr);
-        for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
+        destroy_import(p);
         evicted_pools.pop_front();
     }
     // (longshot) Default by OS and vendor: on off Windows, and on Windows NVIDIA (below); off on Windows AMD and Intel (device
@@ -4421,7 +4664,8 @@ void imports_give_back() {   // (pools_mu held)
         if (grace) p.retired_value = ~0ull, p.retired_ms = import_now_ms();   // (AMD, Intel on Windows: after the wait, above)
         freed += p.hi - p.lo;
         n++;
-        evicted_pools.push_back(imported.extract(it));
+        evicted_pools.emplace_back();
+        evicted_pools.back() = imported.extract(it);
     }
     if (!n) {
         static int logged_none;
@@ -4441,6 +4685,27 @@ void imports_give_back() {   // (pools_mu held)
              (unsigned long long)(used >> 20), (unsigned long long)(budget >> 20), n, (unsigned long long)(freed >> 20),
              (long long)st_imports_evicted, (unsigned long long)(st_import_bytes_evicted >> 20));
 }
+
+#if defined(__APPLE__)
+namespace {
+// pools_mu is held. The host pin already protects an in-progress import before its view can be published here;
+// this informational query is never the discard/remap authority. All completed view owners use their FULL backing.
+int darwin_guest_imported(uint64_t lo, uint64_t hi) {
+    if (hi <= lo) return 0;
+    const auto overlaps = [&](const DarwinImportView& view) {
+        const auto& b = view.backing;
+        return b && b->memory && darwin_import::overlaps({lo, hi}, {b->lo, b->hi});
+    };
+    for (const auto& [start, p] : imported) if (overlaps(p.import_view)) return 1;
+    for (const auto& node : retired_pools) if (overlaps(node.mapped().import_view)) return 1;
+    for (const auto& node : evicted_pools) if (overlaps(node.mapped().import_view)) return 1;
+    for (const auto& p : dead_imports) if (overlaps(p.import_view)) return 1;
+    std::lock_guard lk(bg_mu);
+    for (const auto& [start, p] : bg_ready) if (overlaps(p.import_view)) return 1;
+    return 0;
+}
+} // namespace
+#endif
 
 // ---- (longshot) an import trimmed back to the game's live pools (mirror_trim.h) ----
 // Every 64 submissions, while VRAM is short: the mirrored import that has been mostly outside every game pool the longest
@@ -4492,9 +4757,7 @@ bool mirrors_trim() {   // (pools_mu held; true when one was trimmed: its parts 
         Pool np;
         if (!import_pool(r.lo, r.hi, np)) {
             for (Pool& m : made) {
-                destroy_import_buffer(m.buffer);
-                vkFreeMemory(dev.device, m.memory, nullptr);
-                for (VkDeviceMemory piece : m.pieces) vkFreeMemory(dev.device, piece, nullptr);
+                destroy_import(m);
             }
             pick->dead_since = mirror_epoch;   // (not again for a while)
             return false;
@@ -4509,7 +4772,7 @@ bool mirrors_trim() {   // (pools_mu held; true when one was trimmed: its parts 
     trims_waiting++;
     for (Pool& m : made) {
         m.gpu_only = gpu_only, m.gpu_written = gpu_written, m.trims = trims, m.trim_epoch = mirror_epoch;
-        auto it = imported.emplace(m.lo, m).first;
+        auto it = imported.emplace(m.lo, std::move(m)).first;
         guest_pages_set(it->second.lo, it->second.hi, it->second.address);
         it->second.mstate = Pool::MIRROR_WANTED;
         mirror_wanted.push_back(&it->second);

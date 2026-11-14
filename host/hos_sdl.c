@@ -406,6 +406,14 @@ int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user,
     CALL(void (*)(uint32_t, int), PauseAudioDevice)(dev, 0);
     return 1;
 }
+#if defined(__APPLE__)
+/* Executable-owned service for the shared Win32 shim. The renderer never links or initializes a second SDL. */
+__attribute__((visibility("default")))
+int hos_posix_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user) {
+    return hos_sdl_audio_open(freq, channels, s16, pull, user);
+}
+#endif
+
 /* SDL3's format of the default device; SDL2's default audio info (2.24 on: the bundled 2.32 has it). Looked up here,
    not at load: an SDL without it still plays, in stereo. */
 int hos_sdl_audio_channels(void) {

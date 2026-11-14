@@ -34,7 +34,15 @@ bool vma_init(PFN_vkGetInstanceProcAddr gipa) {
     ci.vulkanApiVersion = VK_API_VERSION_1_3;
     ci.pVulkanFunctions = &f;
     ci.preferredLargeHeapBlockSize = 64ull << 20;   // (64 MB blocks: Eglantine found 256 MB ones wasted VRAM)
-    return vmaCreateAllocator(&ci, &vma) == VK_SUCCESS;
+    VmaAllocator made = nullptr;
+    if (vmaCreateAllocator(&ci, &made) != VK_SUCCESS) return false;
+    vma = made;
+    return true;
+}
+
+void vma_startup_rollback() {
+    if (vma) vmaDestroyAllocator(vma);
+    vma = nullptr;
 }
 
 // Images come from a pool of 128 MB blocks: on their own, VMA gave most of them dedicated memory (the driver prefers it

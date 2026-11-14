@@ -2,7 +2,8 @@
 
 Compile the actual loader/instance code and device-extension selection against authored call recorders, plus the pure
 Darwin decisions. Windows' System32 loader and Linux's names/surface list are pinned to main 514591a3. A fixed semantic
-contract pins the non-Apple API version, host size and named member offsets; Apple appends two callbacks at version 22.
+contract pins the non-Apple API version, host size and named member offsets; Apple retains version 22's Vulkan callbacks
+and appends typed import pin/unpin callbacks at version 23.
 SDL2/SDL3's loader and extension bridge is exercised with ABI-correct stand-ins, not a real video driver.
 
     python -I -B tests/test_vk_darwin_admission.py --cxx clang++ --headers <Vulkan-Headers/include>
@@ -383,14 +384,18 @@ def abi_fixture(api):
         code += f'static_assert(offsetof(MkwVkHost, {field}) == {offset});\n'
     code += r'''
 template<class T> static void apple_abi() {
-    if constexpr (requires(T host) { host.vulkan_library; host.vulkan_extensions; }) {
+    if constexpr (requires(T host) { host.vulkan_library; host.vulkan_extensions; host.guest_import_pin; host.guest_import_unpin; }) {
         static_assert(offsetof(T, vulkan_library) == 352);
         static_assert(offsetof(T, vulkan_extensions) == 360);
-        static_assert(sizeof(T) == 368);
+        static_assert(offsetof(T, guest_import_pin) == 368);
+        static_assert(offsetof(T, guest_import_unpin) == 376);
+        static_assert(sizeof(T) == 384);
         static_assert(std::is_same_v<decltype(T::vulkan_library), void* (*)(void)>);
         static_assert(std::is_same_v<decltype(T::vulkan_extensions), int (*)(uint32_t*, const char* const**)>);
+        static_assert(std::is_same_v<decltype(T::guest_import_pin), int (*)(uint64_t, uint64_t)>);
+        static_assert(std::is_same_v<decltype(T::guest_import_unpin), void (*)(uint64_t, uint64_t)>);
     } else {
-        check(false, "Apple host has no Vulkan library/extension callbacks");
+        check(false, "Apple host has no Vulkan library/extension and import lifetime callbacks");
     }
 }
 #if defined(__APPLE__)
@@ -400,10 +405,10 @@ static_assert(sizeof(MkwVkHost) == 352 && MKWVK_API_VERSION == 21);
 #endif
 static void abi_run() {
     const int before = failures;
-    check(FIXTURE_APPLE_API_VERSION == 22, "Apple host API version is 22");
+    check(FIXTURE_APPLE_API_VERSION == 23, "Apple host API version is 23");
     apple_abi<AppleHost>();
     if (before == failures)
-        std::printf("PASS: fixed non-Apple ABI: version 21, size %zu, all 44 named offsets; Apple version 22, size %zu, typed callbacks at 352/360\n",
+        std::printf("PASS: fixed non-Apple ABI: version 21, size %zu, all 44 named offsets; Apple version 23, size %zu, typed callbacks at 352/360/368/376\n",
                     sizeof(NonAppleHost), sizeof(AppleHost));
 }
 '''

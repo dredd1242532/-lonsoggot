@@ -13,6 +13,7 @@
 #include "control.h"
 #if defined(__APPLE__)
 #include "posix/darwin_vulkan.h"
+#include "posix/darwin_mem.h"
 #endif
 
 /* the WebGPU renderer (gpu/render, renamed) */
@@ -279,6 +280,7 @@ static const MkwVkHost vk_host = {
     host_romfs_dir, host_wide_menus, host_slept_ns, host_fps_timing, hos_prompts_live_parts, host_screen_size,
 #if defined(__APPLE__)
     hos_darwin_vulkan_library, hos_darwin_vulkan_extensions,
+    hos_posix_guest_import_pin, hos_posix_guest_import_unpin,
 #endif
 };
 

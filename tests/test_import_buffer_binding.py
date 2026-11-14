@@ -2,6 +2,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 # (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
@@ -28,7 +29,12 @@ def main():
     p.add_argument("--headers", type=Path, required=True)
     p.add_argument("--cxx", default="g++")
     p.add_argument("--sanitize", action="store_true")
+    p.add_argument("--arch", choices=("arm64", "x86_64"))
     a = p.parse_args()
+    if a.arch and sys.platform != "darwin":
+        p.error("--arch is macOS-only")
+    arch_flags = (["-mmacosx-version-min=14.4"] + (["-arch", a.arch] if a.arch else [])) if sys.platform == "darwin" else []
+    run_prefix = ["arch", "-" + a.arch] if a.arch else []
     source = (a.source / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
     owner_release = block(source, "void destroy_import_buffer(") if "void destroy_import_buffer(" in source else ""
     actual = owner_release + "\n" + "\n".join(block(source, marker) for marker in [
@@ -36,6 +42,8 @@ def main():
     # Select both platform routes independently of the machine running the game-free test.
     assert actual.count("#ifdef __linux__") == 1
     actual = actual.replace("#ifdef __linux__", "#if TEST_DMA_FALLBACK")
+    # Keep the existing Windows/Linux factories under test on a Mac too. Apple owners are checked separately.
+    actual = actual.replace("#if defined(__APPLE__)", "#if 0")
     fixture = (ROOT / "tests/import_buffer_binding_test.cpp").read_text(encoding="utf-8")
     fixture = fixture.replace("/* ACTUAL */", actual)
     cases = [(route, case) for route in ["host", "dma"] for case in [
@@ -46,16 +54,22 @@ def main():
         cpp.write_text(fixture, encoding="utf-8")
         for platform in [0, 1]:
             exe = Path(temp) / ("fixture-" + str(platform) + ".exe")
-            subprocess.run([a.cxx, "-std=c++20", "-include", ENV_ON_H, "-O1", "-Wall", "-Wextra", "-Werror",
-                            "-Wno-missing-field-initializers", "-pthread", "-DTEST_DMA_FALLBACK=" + str(platform),
-                            "-I" + str(a.headers), "-I" + str(ROOT / "gpu/vk"),
-                            *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"] if a.sanitize else []),
-                            str(cpp), "-o", str(exe)], check=True)
+            command = [a.cxx, "-std=c++20", "-include", ENV_ON_H, "-O1", "-Wall", "-Wextra", "-Werror",
+                       "-Wno-missing-field-initializers", "-pthread", "-DTEST_DMA_FALLBACK=" + str(platform),
+                       "-I" + str(a.headers), "-I" + str(ROOT / "gpu/vk"), *arch_flags,
+                       *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"] if a.sanitize else []),
+                       str(cpp), "-o", str(exe)]
+            print("COMPILE:", " ".join(command), flush=True)
+            subprocess.run(command, check=True)
             for route, case in cases:
-                subprocess.run([str(exe), route, case], check=True, timeout=15)
+                command = run_prefix + [str(exe), route, case]
+                print("RUN:", " ".join(command), flush=True)
+                subprocess.run(command, check=True, timeout=15)
             if platform:
                 for case in ["dma-bind-fallback", "dma-create-fallback", "dma-allocate-fallback", "both-bind-fail", "nvidia"]:
-                    subprocess.run([str(exe), "pool", case], check=True, timeout=15)
+                    command = run_prefix + [str(exe), "pool", case]
+                    print("RUN:", " ".join(command), flush=True)
+                    subprocess.run(command, check=True, timeout=15)
     print(f"{len(cases) * 2 + 5} factory/rollback/fallback/hold cases passed")
 
 

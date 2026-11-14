@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 #if defined(__APPLE__)
-#define MKWVK_API_VERSION 22
+#define MKWVK_API_VERSION 23
 #else
 #define MKWVK_API_VERSION 21
 #endif
@@ -213,6 +213,11 @@ typedef struct MkwVkHost {
     void *(*vulkan_library)(void);
     /* SDL's instance extensions, captured on the main thread before this one starts. 1: success; 0 names headless. */
     int (*vulkan_extensions)(uint32_t *count, const char *const **names);
+    /* (macOS version 23) Pin the FULL outward-rounded import backing, as half-open guest offsets.
+       A successful pin (1) prevents replacement/discard remapping until its matching unpin, including
+       duplicate ranges. Pin before import preparation; unpin only after the final Vulkan owner is destroyed. */
+    int (*guest_import_pin)(uint64_t lo, uint64_t hi);
+    void (*guest_import_unpin)(uint64_t lo, uint64_t hi);
 #endif
 } MkwVkHost;
 

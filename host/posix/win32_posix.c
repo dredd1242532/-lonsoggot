@@ -1419,17 +1419,33 @@ int MessageBoxA(HWND w, LPCSTR text, LPCSTR caption, UINT type) {
     (void)w, (void)type;
     fprintf(stderr, "%s: %s\n", caption ? caption : "Longshot", text ? text : "");
     typedef int (*ShowFn)(uint32_t, const char *, const char *, void *);   /* (SDL3's and SDL2's alike; its result unread) */
+#if defined(__APPLE__)
+    void *sdl = dlopen("libSDL3.0.dylib", RTLD_NOW | RTLD_NOLOAD);
+    if (!sdl) sdl = dlopen("libSDL2-2.0.0.dylib", RTLD_NOW | RTLD_NOLOAD);
+#else
     void *sdl = dlopen("libSDL3.so.0", RTLD_NOW | RTLD_NOLOAD);
     if (!sdl) sdl = dlopen("libSDL2-2.0.so.0", RTLD_NOW | RTLD_NOLOAD);
+    #endif
     ShowFn show = sdl ? (ShowFn)dlsym(sdl, "SDL_ShowSimpleMessageBox") : NULL;
     if (show) show(0x10, caption ? caption : "Longshot", text ? text : "", NULL);
+    if (sdl) dlclose(sdl);   /* RTLD_NOLOAD still takes a reference; the already loaded SDL keeps its own. */
     return 1;
 }
 
 /* ---- waveOut on SDL's audio (host/hos_sdl.c): a callback takes the written blocks in order and marks them done ---- */
 /* (the executable's: this file is in the Vulkan back end too, which plays no sound and has no hos_sdl.c) */
+typedef int (*WaveAudioOpenFn)(int, int, int, void (*)(void *, uint8_t *, int), void *);
+#if defined(__APPLE__)
+static WaveAudioOpenFn darwin_audio_open;
+static pthread_once_t darwin_audio_once = PTHREAD_ONCE_INIT;
+static void darwin_audio_resolve(void) {
+    /* Strict two-level dylib links have no unresolved weak SDL import. The executable alone owns SDL/audio. */
+    darwin_audio_open = (WaveAudioOpenFn)dlsym(RTLD_MAIN_ONLY, "hos_posix_audio_open");
+}
+#else
 int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user)
     __attribute__((weak));
+#endif
 typedef struct {
     pthread_mutex_t mu;
     WAVEHDR *q[64];
@@ -1456,10 +1472,17 @@ static void wave_pull(void *user, uint8_t *out, int len) {
 MMRESULT waveOutOpen(HWAVEOUT *out, UINT device, const WAVEFORMATEX *f, DWORD_PTR cb, DWORD_PTR inst, DWORD flags) {
     (void)device, (void)cb, (void)inst, (void)flags;
     /* (the same SDL as the window's and the controllers', beside the executable first: hos_sdl.c) */
-    if (!hos_sdl_audio_open) return MMSYSERR_ERROR;
+#if defined(__APPLE__)
+    pthread_once(&darwin_audio_once, darwin_audio_resolve);
+    const WaveAudioOpenFn open_audio = darwin_audio_open;
+#else
+    const WaveAudioOpenFn open_audio = hos_sdl_audio_open;
+#endif
+    if (!open_audio) return MMSYSERR_ERROR;
     WaveOut *w = (WaveOut *)calloc(1, sizeof *w);
-    pthread_mutex_init(&w->mu, NULL);
-    if (!hos_sdl_audio_open((int)f->nSamplesPerSec, (int)f->nChannels, f->wBitsPerSample == 16, wave_pull, w)) {
+    if (!w) return MMSYSERR_ERROR;
+    if (pthread_mutex_init(&w->mu, NULL)) { free(w); return MMSYSERR_ERROR; }
+    if (!open_audio((int)f->nSamplesPerSec, (int)f->nChannels, f->wBitsPerSample == 16, wave_pull, w)) {
         pthread_mutex_destroy(&w->mu);
         free(w);
         return MMSYSERR_ERROR;

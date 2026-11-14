@@ -340,6 +340,7 @@ bool has_stencil(VkFormat f);
 
 // device memory (vk_vma.cpp, Vulkan Memory Allocator)
 bool vma_init(PFN_vkGetInstanceProcAddr gipa);
+void vma_startup_rollback();   // Only after failed replay_start, before images or buffers have been allocated.
 /// (textures: from the textures' own pool, the one image_compact_* moves allocations in: vk_texture.cpp's compaction)
 bool create_image(const VkImageCreateInfo& ci, VkImage& image, VmaAllocation& allocation, bool dedicated = false, bool target = false,
                   bool textures = false);

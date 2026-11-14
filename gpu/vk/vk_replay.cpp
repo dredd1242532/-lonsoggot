@@ -5452,6 +5452,29 @@ bool init_pools_make(const VkCommandPoolCreateInfo& pi) {
 
 } // namespace
 
+// Only for a failed replay_start, before any recording/image/stream can use these resources.
+bool replay_start_rollback() {
+    init_pools_destroy();
+    for (Recording& r : recordings) {
+        if (r.upload_pool) vkDestroyCommandPool(dev.device, r.upload_pool, nullptr);
+        if (r.pool) vkDestroyCommandPool(dev.device, r.pool, nullptr);
+        if (r.fence) vkDestroyFence(dev.device, r.fence, nullptr);
+        r = {};
+    }
+    for (Frame& f : frames) {
+        if (f.pool) vkDestroyCommandPool(dev.device, f.pool, nullptr);
+        if (f.done) vkDestroyFence(dev.device, f.done, nullptr);
+        if (f.acquired) vkDestroySemaphore(dev.device, f.acquired, nullptr);
+        f = {};
+    }
+    if (timeline) vkDestroySemaphore(dev.device, timeline, nullptr);
+    if (batch_tl) vkDestroySemaphore(dev.device, batch_tl, nullptr);
+    if (rec_timeline) vkDestroySemaphore(dev.device, rec_timeline, nullptr);
+    timeline = batch_tl = rec_timeline = VK_NULL_HANDLE;
+    vma_startup_rollback();
+    return false;
+}
+
 bool replay_start() {
     menu_init();
     if (!memory_init() || !vma_init(instance_proc())) return false;
@@ -5459,7 +5482,10 @@ bool replay_start() {
     ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
     VkSemaphoreCreateInfo tsi{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     tsi.pNext = &ti;
-    if (vkCreateSemaphore(dev.device, &tsi, nullptr, &timeline) != VK_SUCCESS) return false;
+    if (vkCreateSemaphore(dev.device, &tsi, nullptr, &timeline) != VK_SUCCESS) {
+        timeline = VK_NULL_HANDLE;
+        return replay_start_rollback();
+    }
     if (vkCreateSemaphore(dev.device, &tsi, nullptr, &batch_tl) != VK_SUCCESS) batch_tl = VK_NULL_HANDLE;
     if (vkCreateSemaphore(dev.device, &tsi, nullptr, &rec_timeline) != VK_SUCCESS) rec_timeline = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -5471,27 +5497,45 @@ bool replay_start() {
     for (Recording& r : recordings) {
         r.slot = slot++;
         VkFenceCreateInfo rfi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        if (vkCreateFence(dev.device, &rfi, nullptr, &r.fence) != VK_SUCCESS) return false;
-        if (vkCreateCommandPool(dev.device, &pi, nullptr, &r.pool) != VK_SUCCESS) return false;
-        if (vkCreateCommandPool(dev.device, &pi, nullptr, &r.upload_pool) != VK_SUCCESS) return false;
+        if (vkCreateFence(dev.device, &rfi, nullptr, &r.fence) != VK_SUCCESS) {
+            r.fence = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
+        if (vkCreateCommandPool(dev.device, &pi, nullptr, &r.pool) != VK_SUCCESS) {
+            r.pool = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
+        if (vkCreateCommandPool(dev.device, &pi, nullptr, &r.upload_pool) != VK_SUCCESS) {
+            r.upload_pool = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
         ai.commandPool = r.pool;
         ai.commandBufferCount = 1;
-        vkAllocateCommandBuffers(dev.device, &ai, &r.cmd);
+        if (vkAllocateCommandBuffers(dev.device, &ai, &r.cmd) != VK_SUCCESS) return replay_start_rollback();
         ai.commandPool = r.upload_pool;
-        vkAllocateCommandBuffers(dev.device, &ai, &r.upload);
+        if (vkAllocateCommandBuffers(dev.device, &ai, &r.upload) != VK_SUCCESS) return replay_start_rollback();
     }
     ai.commandBufferCount = 1;
     for (Frame& f : frames) {
-        if (vkCreateCommandPool(dev.device, &pi, nullptr, &f.pool) != VK_SUCCESS) return false;
+        if (vkCreateCommandPool(dev.device, &pi, nullptr, &f.pool) != VK_SUCCESS) {
+            f.pool = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
         ai.commandPool = f.pool;
-        vkAllocateCommandBuffers(dev.device, &ai, &f.cmd);
+        if (vkAllocateCommandBuffers(dev.device, &ai, &f.cmd) != VK_SUCCESS) return replay_start_rollback();
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        vkCreateFence(dev.device, &fi, nullptr, &f.done);
+        if (vkCreateFence(dev.device, &fi, nullptr, &f.done) != VK_SUCCESS) {
+            f.done = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
         VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        vkCreateSemaphore(dev.device, &si, nullptr, &f.acquired);
+        if (vkCreateSemaphore(dev.device, &si, nullptr, &f.acquired) != VK_SUCCESS) {
+            f.acquired = VK_NULL_HANDLE;
+            return replay_start_rollback();
+        }
     }
-    if (par_threads() >= 2 && !init_pools_make(pi)) return false;   // (last: nothing after it fails and leaves them made)
+    if (par_threads() >= 2 && !init_pools_make(pi)) return replay_start_rollback();   // (last fallible step)
     logf("vk: replay ready (%s; push descriptors %s (%u), extended dynamic state 3 %s, custom border colours %s)",
          dev.offscreen ? "offscreen" : "window", dev.push_descriptor ? "yes" : "no", dev.max_push_descriptors,
          dev.eds3_blend ? "yes" : "no", dev.custom_border_color ? "yes" : "no");

@@ -83,9 +83,11 @@ def main():
     have_pools = "bool init_pools_make(" in replay
     if have_pools:   # (the last fallible step of replay_start: no later failure returns with them made)
         start = block(replay, "bool replay_start() {")
-        call = "if (par_threads() >= 2 && !init_pools_make(pi)) return false;"
-        if call not in start or start.index(call) < start.index("for (Frame& f : frames)") or                 "return false" in start[start.index(call) + len(call):]:
-            raise SystemExit("FAIL: replay_start does not make the init pools last (a later failure would leave them made)")
+        call = "if (par_threads() >= 2 && !init_pools_make(pi)) return replay_start_rollback();"
+        if call not in start or start.index(call) < start.index("for (Frame& f : frames)") or "return replay_start_rollback" in start[start.index(call) + len(call):]:
+            raise SystemExit("FAIL: replay_start does not make the init pools last")
+        if "init_pools_destroy();" not in block(replay, "bool replay_start_rollback() {"):
+            raise SystemExit("FAIL: failed startup does not destroy its parallel init pools")
     inc = {
         "init_upload.inc": cut(texture, "// ---- the recording's upload command buffer ----", "// ---- staging:"),
         "init_create.inc": create,

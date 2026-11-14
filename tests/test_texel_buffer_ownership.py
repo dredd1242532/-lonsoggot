@@ -2,6 +2,7 @@
 import argparse
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 # (env_on, the switches' rule, before the code cut out of the sources: gpu/vk/compat/longshot_env.h)
@@ -28,7 +29,12 @@ def main():
     p.add_argument("--headers", type=Path, required=True)
     p.add_argument("--cxx", default="g++")
     p.add_argument("--sanitize", action="store_true")
+    p.add_argument("--arch", choices=("arm64", "x86_64"))
     a = p.parse_args()
+    if a.arch and sys.platform != "darwin":
+        p.error("--arch is macOS-only")
+    arch_flags = (["-mmacosx-version-min=14.4"] + (["-arch", a.arch] if a.arch else [])) if sys.platform == "darwin" else []
+    run_prefix = ["arch", "-" + a.arch] if a.arch else []
     texture = (a.source / "gpu/vk/vk_texture.cpp").read_text(encoding="utf-8")
     memory = (a.source / "gpu/vk/vk_memory.cpp").read_text(encoding="utf-8")
     start = texture.index("using TexelViewKey =")
@@ -43,6 +49,7 @@ def main():
         state,
         block(texture, "void release_texel_buffer_views("),
         block(memory, "void destroy_import_buffer("),
+        block(memory, "template<class T> void destroy_import("),
         block(memory, "BufferRef gpu_buffer("),
         block(texture, "VkBufferView texel_buffer_view("),
         block(memory, "void reap_mirrors("),
@@ -51,9 +58,14 @@ def main():
     # Rollback, prefetch drops, a trim's rollback (mirrors_trim) and both published-import reapers must share the same
     # owner-release point.
     assert memory.count("vkDestroyBuffer(") == 1
-    assert memory.count("destroy_import_buffer(") == 10
+    for marker in ("void bg_drain(", "bool mirrors_trim(", "void imports_give_back(", "void reap_mirrors("):
+        body = block(memory, marker)
+        assert "destroy_import(" in body and "vkFreeMemory(" not in body, marker
+    # These original factory consumers exercise the non-Apple owner; Apple sharing has its own compiled lifetime test.
+    actual = actual.replace("#if defined(__APPLE__)", "#if 0")
     fixture = (ROOT / "tests/texel_buffer_ownership_test.cpp").read_text(encoding="utf-8")
-    fixture = fixture.replace("/* DEAD IMPORT */", block(memory, "struct DeadImport {") + ";")
+    dead = block(memory, "struct DeadImport {").replace("#if defined(__APPLE__)", "#if 0")
+    fixture = fixture.replace("/* DEAD IMPORT */", dead + ";")
     fixture = fixture.replace("/* ACTUAL */", actual)
     cases = ["healthy", "remap", "offset", "format", "range", "liveness", "late-map",
              "host-oom", "device-oom", "other-error", "registry-commit", "view-commit",
@@ -62,12 +74,16 @@ def main():
     with tempfile.TemporaryDirectory(prefix="texel-buffer-ownership-") as temp:
         cpp, exe = Path(temp) / "fixture.cpp", Path(temp) / "fixture.exe"
         cpp.write_text(fixture, encoding="utf-8")
-        subprocess.run([a.cxx, "-std=c++20", "-include", ENV_ON_H, "-O1", "-Wall", "-Wextra", "-Werror",
-                        "-Wno-missing-field-initializers", "-pthread", "-I" + str(a.headers),
-                        *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"] if a.sanitize else []),
-                        str(cpp), "-o", str(exe)], check=True)
+        command = [a.cxx, "-std=c++20", "-include", ENV_ON_H, "-O1", "-Wall", "-Wextra", "-Werror",
+                   "-Wno-missing-field-initializers", "-pthread", "-I" + str(a.headers), *arch_flags,
+                   *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie"] if a.sanitize else []),
+                   str(cpp), "-o", str(exe)]
+        print("COMPILE:", " ".join(command), flush=True)
+        subprocess.run(command, check=True)
         for case in cases:
-            subprocess.run([str(exe), case], check=True, timeout=20)
+            command = run_prefix + [str(exe), case]
+            print("RUN:", " ".join(command), flush=True)
+            subprocess.run(command, check=True, timeout=20)
     print(f"{len(cases)} binding/view/retirement cases passed")
 
 

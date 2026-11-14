@@ -24,7 +24,14 @@ class SdlAudioLibraryTests(unittest.TestCase):
         text = POSIX.read_text(encoding="utf-8")
         start = text.index("MMRESULT waveOutOpen")
         fn = text[start:text.index("MMRESULT waveOutPrepareHeader", start)]
-        self.assertIn("hos_sdl_audio_open(", fn)
+        self.assertIn("const WaveAudioOpenFn open_audio = hos_sdl_audio_open;", fn)
+        self.assertIn("const WaveAudioOpenFn open_audio = darwin_audio_open;", fn)
+        self.assertIn("pthread_once(&darwin_audio_once, darwin_audio_resolve);", fn)
+        self.assertIn('dlsym(RTLD_MAIN_ONLY, "hos_posix_audio_open")', text)
+        sdl = SDL.read_text(encoding="utf-8")
+        start = sdl.index("int hos_posix_audio_open(")
+        provider = sdl[start:sdl.index("\n}", start)]
+        self.assertIn("return hos_sdl_audio_open(freq, channels, s16, pull, user);", provider)
         self.assertNotIn("LoadLibraryA", fn)
 
     def test_audio_device_buffer_matches_audio_frame_quantum(self):
