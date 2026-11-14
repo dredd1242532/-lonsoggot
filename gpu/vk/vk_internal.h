@@ -434,6 +434,9 @@ void prepare_guess(size_t out[3]);   // (the three parts' counts from the files,
 void prepare_stop();
 bool prepare_stopped();
 int driver_faults();   // (longshot, vk_draw.cpp) the driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute)
+/// (longshot, vk_draw.cpp) the pipelines the driver refused for want of memory so far (VK_ERROR_OUT_OF_DEVICE_MEMORY or
+/// _HOST_MEMORY): texture_frame gives textures up when it grows
+extern std::atomic<int64_t> st_driver_out_of_memory;
 void prepare_left_workers_note();   // (longshot, vk_draw.cpp) predict_run or precompile_run left workers inside the driver
 bool prepare_left_workers();
 void fill_replay_table(MkwVkRenderer& t);     // vk_replay.cpp

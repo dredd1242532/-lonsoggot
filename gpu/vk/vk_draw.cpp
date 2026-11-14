@@ -1367,13 +1367,18 @@ int test_slow_ms() {
 thread_local VkPipelineCache driver_ask_cache = VK_NULL_HANDLE;
 /// (with the pipeline cache: from it, or in play into the play generation's, create_cached)
 /// (the guards with the cache held from a fetch, PcacheFetch)
+VkResult note_out_of_memory(VkResult r) {
+    if (r == VK_ERROR_OUT_OF_DEVICE_MEMORY || r == VK_ERROR_OUT_OF_HOST_MEMORY)
+        st_driver_out_of_memory.fetch_add(1, std::memory_order_relaxed);
+    return r;
+}
 VkResult guarded_graphics_held(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {
     PcacheUse use(cache);
-    return guarded_graphics(cache, ci, pl);
+    return note_out_of_memory(guarded_graphics(cache, ci, pl));
 }
 VkResult guarded_compute_held(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pl) {
     PcacheUse use(cache);
-    return guarded_compute(cache, ci, pl);
+    return note_out_of_memory(guarded_compute(cache, ci, pl));
 }
 bool compiles_nothing(VkPipelineCreateFlags flags) { return (flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT) != 0; }
 /// (longshot) Windows Intel: an ask, or a dispatch's module, left to a worker because another thread held Intel's compiler gate
@@ -4048,6 +4053,7 @@ VkResult shared_compute_pipeline(const VkComputePipelineCreateInfo* ci, VkPipeli
 /// (longshot) The driver faults the pipeline compiles caught so far (guarded_graphics, guarded_compute): the preparation's
 /// watchdog says so (vk_main.cpp). Outside the unnamed namespace: vk_main.cpp links to it
 int driver_faults() { return st_driver_faults.load(std::memory_order_relaxed); }
+std::atomic<int64_t> st_driver_out_of_memory{0};
 /// (longshot) The guarded driver calls, for vk_shader.cpp and vk_temporal.cpp. Declaring guarded_* itself in the header
 /// is a second function (the definitions sit in the unnamed namespace) and every call in this file is ambiguous.
 VkResult extern_guarded_graphics(VkPipelineCache cache, const VkGraphicsPipelineCreateInfo* ci, VkPipeline* pl) {

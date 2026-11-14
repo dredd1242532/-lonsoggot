@@ -4397,9 +4397,11 @@ void texture_frame(uint64_t completed) {
     // 14-25 fps; v2.0.14, without this wait, squeezed there. Ported from Revens2's a4c7cb3). RX_VK_SQUEEZE_ALWAYS=1: as before
     static const bool squeeze_always = env_on("RX_VK_SQUEEZE_ALWAYS");
     // (longshot) an integrated GPU's line is lower: vram_compact::count_line_pct
-    static const uint64_t line_pct = vram_compact::count_line_pct(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+    static const bool integrated = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+    static const uint64_t line_pct = vram_compact::count_line_pct(integrated);
     const uint64_t count_line = allowed / 100 * line_pct;
-    const bool room_in_blocks = !squeeze_always && used <= allowed && block_free >= allowed / 8;
+    // (longshot) and on an integrated GPU no room in the blocks spares it: vram_compact::room_in_blocks
+    const bool room_in_blocks = !squeeze_always && vram_compact::room_in_blocks(used, allowed, block_free, integrated);
     // (nor while the textures' pool is down to its blocks made at the start, which VMA keeps: what this evicts would leave the
     // count as it is, the same ratchet, past the allowance too: there no eviction can bring the count down (#2711).
     // RX_VK_SQUEEZE_ALWAYS=1 squeezes there too)
@@ -4408,6 +4410,21 @@ void texture_frame(uint64_t completed) {
         budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
         rule_budget = std::min(rule_budget, total_bytes > over ? total_bytes - over : 0);
     }
+    // (longshot) and pipelines the driver refused for want of memory since the last look: what vram_compact::short_excess asks,
+    // whatever the count said
+    static int64_t refusals_seen = 0;
+    const int64_t refusals = st_driver_out_of_memory.load(std::memory_order_relaxed);
+    if (refusals != refusals_seen && known && !by_blocks && !(kept_only && !squeeze_always)) {
+        const uint64_t over = vram_compact::short_excess(used, count_line);
+        budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
+        rule_budget = std::min(rule_budget, total_bytes > over ? total_bytes - over : 0);
+        static int told;
+        if (told++ < 8)
+            logf("vk: the driver refused %lld pipeline(s) for want of memory (%llu MB used of %llu allowed): the textures give up %llu MB",
+                 (long long)(refusals - refusals_seen), (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),
+                 (unsigned long long)(over >> 20));
+    }
+    refusals_seen = refusals;
     // (longshot) and Windows' commit limit (RAM plus the page file): every VRAM block is charged to the process's commit, as the
     // guest's memory is. A run on an RTX 4060 Ti held private commit at the VRAM blocks plus ~21 GB the whole way (19.3 GB at the
     // start, 35.4 GB in Hyrule Field with 13.3 GB of blocks); a 16 GB PC with a fixed 32 GB page file reached its 47.9 GB limit at
