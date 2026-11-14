@@ -86,7 +86,8 @@ def main():
          "the quick builds row is not limited to Intel graphics on Windows")
     need('if (const char* e = getenv("RX_VK_COMPUTE_QUICK_FIRST")) env_override(&opts.intel_quick, !env_value_off(e));'
          in block(menu, "void menu_init() {"), "RX_VK_COMPUTE_QUICK_FIRST does not set the row")
-    need("bool intel_quick_compute() { return opts.intel_quick != 0; }" in menu, "the renderer does not read the row")
+    need("bool intel_quick_compute() { return opts.intel_quick != 0 && intel_compiler_row(); }" in menu,
+         "the quick builds do not follow the row, or run where it is hidden (Mesa's ANV ignores DISABLE_OPTIMIZATION)")
     header = (ROOT / "gpu/vk/vk_menu.h").read_text(encoding="utf-8")
     need("int intel_quick = 1;" in header, "quick compute builds are not on by default")
 
