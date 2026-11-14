@@ -2,8 +2,9 @@
 
 Extracts the exception section of win32_posix.c verbatim and links darwin_fault.c when present. --source lets the
 same check compile main's unported bridge (it must fail there, not skip a missing helper). No game or GPU needed.
-Apple clang builds each target natively; arch executes x86_64 under Rosetta on Apple Silicon. One child per target
-intentionally dies on its handler's protected stack, with core dumps disabled; macOS can still write crash reports.
+By default Apple clang builds the running Python process's architecture; repeated --arch options select targets
+explicitly. arch executes x86_64 under Rosetta on Apple Silicon. One child per target intentionally dies on its
+handler's protected stack, with core dumps disabled; macOS can still write crash reports.
 
 python -I -B tests/test_darwin_fault_context.py [--source TREE] [--arch arm64 --arch x86_64] [--out NEW_FOLDER]
 """
@@ -325,12 +326,12 @@ def run(a, out):
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     crash_dir = Path.home() / "Library/Logs/DiagnosticReports"
-    before = set(crash_dir.iterdir()) if crash_dir.is_dir() else None
+    before = {p for p in crash_dir.iterdir() if p.is_file()} if crash_dir.is_dir() else None
     src = out / "fault_fixture.c"
     src.write_text(fixture(a.source), encoding="utf-8")
     helpers = [a.source / "host/posix/darwin_fault.c"]
     helpers = [str(p) for p in helpers if p.is_file()]
-    targets = a.arch or (["arm64", "x86_64"] if platform.machine() == "arm64" else ["x86_64"])
+    targets = a.arch or [platform.machine()]
     failed = False
     for arch in targets:
         binary = out / ("fault-" + arch)
@@ -354,7 +355,7 @@ def run(a, out):
     if before is None:
         print("CRASH_REPORTS unavailable: HOME has no DiagnosticReports directory (the suite wrapper counts the real one)")
     else:
-        after = set(crash_dir.iterdir())
+        after = {p for p in crash_dir.iterdir() if p.is_file()}
         print("CRASH_REPORTS before=%d after=%d new=%d" % (len(before), len(after), len(after - before)))
         for p in sorted(after - before):
             print("new_crash_report=" + p.name)

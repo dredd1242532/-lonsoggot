@@ -662,9 +662,17 @@ signal handlers, must return normally (not jump out past the bridge). Thread sus
 not implemented by this bridge. The optional NVN write watch still assumes 4 KiB host pages and needs separate
 host-page accounting before use on native 16 KiB hosts.
 
-`python -I -B tests/test_darwin_fault_context.py` compiles the real helper and source-extracted bridge for arm64
-and x86-64 on Apple Silicon, and executes the latter with Rosetta. It needs no game or graphics device. Its
-protected-handler-stack child intentionally terminates; core dumps are disabled, but macOS can write crash reports.
+`python -I -B tests/test_darwin_fault_context.py` compiles the real helper and source-extracted bridge for the
+running Python process's architecture by default: an ordinary native arm64 suite does not need Rosetta. To
+qualify both routes on Apple Silicon with Rosetta installed, use:
+
+```
+python -I -B tests/test_darwin_fault_context.py --arch arm64 --arch x86_64
+```
+
+Apple clang builds both targets natively; the x86-64 test executes with `arch -x86_64`. No game or graphics
+device is needed. Each target's protected-handler-stack child intentionally terminates; core dumps are
+disabled, but macOS can write crash reports.
 
 ## Layout
 
