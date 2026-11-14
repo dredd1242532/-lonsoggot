@@ -3779,12 +3779,12 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
 }
 
 /// (longshot) The Co-op tab from the top down: the room's state, its players and the relay's round trip, with the session's
-/// own words under them (or, when it has none, what the state means), in a box of a fixed height, so the rows never move; the
+/// own words under them (or, when it has none, what the state means), with a separate save-domain note; the
 /// rows (sel selected): the name's and the relay's fields, then what can be done now; then "In the room", a line a member:
 /// its number, its name, you, the maker, away, and its key's fingerprint at the right (gold once accepted; "not identified
 /// yet" while the room waits for it). The hits are the tab's row numbers, as the list's
 void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, int sel) {
-    const float s = c.s, pitch = 48 * s, rh = 40 * s, box_h = 70 * s;
+    const float s = c.s, pitch = 48 * s, rh = 40 * s, box_h = (70 + (coop_now.save_note[0] ? 24 : 0)) * s;
     const float left = cx0 + 44 * s, right = cx1 - 44 * s, split = left + (right - left) * 0.45f;
     const MkwVkCoopView& v = coop_now;
     static const char* const states[] = {"Co-op is off", "In no room", "Connecting", "In a room", "Reconnecting"};
@@ -3800,8 +3800,11 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
     if (v.ping_ms && v.state == HOS_COOP_STATE_JOINED)
         ui::text_mid_right(c, c.f.body, 16 * s, right - 20 * s, top + 22 * s, ui::kSoft, (std::to_string(v.ping_ms) + " ms").c_str());
     if (const char* line = coop_accept_notice ? coop_accept_notice :
-                           v.save_note[0] ? v.save_note : v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
+                           v.status[0] ? v.status : known ? meaning[v.state] : nullptr)
         ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 50 * s, ui::kSoft, fit(c, c.f.body, 16 * s, right - left - 40 * s, line, false).c_str());
+    if (v.save_note[0])
+        ui::text_mid(c, c.f.body, 16 * s, left + 20 * s, top + 74 * s, ui::kSoft,
+                     fit(c, c.f.body, 16 * s, right - left - 40 * s, v.save_note, false).c_str());
     const int count = tab_row_count(TAB_COOP);
     float y = top + box_h + 16 * s;
     for (int i = 0; i < count; i++, y += pitch) {

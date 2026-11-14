@@ -782,7 +782,8 @@ Outside a room, **Temporary save** copies the saved checkpoints and restarts int
 that copy. Save in the game first, wait for saving to finish, then press twice.
 The same row in the copy leaves the room and restarts with the normal saves.
 It never replaces or renames the normal save folder and never copies progress back.
-The tab identifies the temporary domain. Normal progress synchronization is
+The tab identifies the temporary domain on its own line, alongside the room status:
+a refusal never disappears behind the copy banner. Normal progress synchronization is
 suspended there until a separately consented progress-return policy is available.
 The capability owner refuses durable writers for this domain as well as stopping the
 native progress scan. Renderer API 26 combines the signed received terms (API 25)
