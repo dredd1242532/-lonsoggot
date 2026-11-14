@@ -283,17 +283,43 @@ even the dedicated worker can fail or stall after heap/loader corruption.
 | `RX_VK_MENU_SCRIPT=<seconds>:<key>,...` | Timed Insert menu keys: `INS`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ESC`, `ENTER`, `TABL`, `TABR`, the pad's face buttons `PADS`, `PADE`, `PADW`, `PADN`; and for a text field, `TYPE:<text>` (typed as the keyboard would, up to the next comma) and, while it has the keyboard, `HOME`, `END`, `BACK`, `DEL` besides `LEFT`, `RIGHT`, `ENTER`, `ESC`; `ROW:<name>` selects the shown tab's row of that name if it shows (rows come and go with the GPU and the Co-op tab's room, so a script need not count them) |
 | `RX_VK_UI_PROMPTS=pad` or `keys` | The menu's button prompts for a controller or the keys, whatever was used last (screenshots) |
 | `HOS_COOP_DEMO=1` | The Insert menu's Co-op tab on a made-up room (`host/coop_menu.c`), for screenshots and trying the tab without a relay: Make a room connects in a second; two other players come in, one not identified for three seconds; the room is offered for acceptance and one player is away for a while; Join a room (any valid secret) puts you third in another room; Accept and Leave work. The co-op session never starts and nothing is sent |
+| `HOS_COOP_AUTO=create` or `join` | Test/automation setting, off when unset, empty or `off`: while co-op is enabled, make or join a room at startup, then recreate or wait for it after relay loss. The tester sets it in the launch environment; it neither switches co-op on by itself nor accepts the room. Copy/Return suppresses inherited automatic joining |
+| `HOS_COOP_ROOM=<secret>` | Test/automation setting, unset by default: the tester's private room secret for automatic create/join, or for the menu's Make action. Make/create without one generates a fresh secret; automatic join needs a valid one. It grants no acceptance. Keep its value private and leave it unset for ordinary menu-driven play |
+| `HOS_COOP_ACCEPT=always` | Test-only automatic acceptance of a valid ordinary room offer, set by the tester in the launch environment. Unset or any other value keeps manual acceptance. Signed-identity and backup checks remain; this grants neither copy-only see-and-talk, downloads nor a kit. Copy/Return clears it. Use only disposable test saves, never a normal playing save |
+| `HOS_COOP_DROP=<percent>` | Test-only incoming-datagram loss, set by the tester; default 0, capped at 100. Randomly drops that share of received co-op datagrams before processing. Keep 0 for ordinary play; the resulting counter is simulated loss, not a measurement of the network |
+| `HOS_COOP_PROBE=1` | Development diagnostic, off by default: once a normal save reaches play, log the flag table and compare reads with the game's getter. The developer enables it explicitly; no room is needed and the probe itself writes nothing. The separate test setter below can write. Keep generated flag details private |
+| `HOS_COOP_TEST_SET=<hash>=<value>@<frame>,...` | Test-only local Boolean/integer flag writes through the game's setters, scheduled by the tester for frames of play, up to 8 entries. Unset means no writes. The ordinary co-op/probe update must be active; native temporary copies never run this aid. It can change saved progress: use a disposable normal save root, never a normal playing save |
 | `HOS_COOP_HITS_TRACE=1` | Local native combat diagnostics, off by default: attack setup/instance renewal/sensor-off and committed life with its pre-clamp aggregate. No damage is applied; dropped records are reported. See [co-op](coop.md#native-combat-observations-not-playable-pvp) |
+| `HOS_COOP_PLAYERS=1` | The player's local body display, over `coop_players` in the options file (default Off). Shows only currently accepted peers whose age the signed presence rules permit; animation uses the locally generated assets when available. Turning it on grants no room permission |
+| `HOS_COOP_PLAYERS_ANIM=0` or `1` | Local development override: unset uses animation automatically when the generated body assets are ready; 0 disables it and uses standing models of the correct age. 1 requests animation but does not supply missing normal assets. Custom diagnostic actors need an explicit on value to animate |
+| `HOS_COOP_PLAYERS_ACTOR=<child>[,<adult>]` | Local development override for the body actor names, unset by default (the built-in age-specific choices). The developer supplies names from their own game, never from a packet; custom actors animate only with an explicit `HOS_COOP_PLAYERS_ANIM=1`. Consent and presentation checks still apply |
+| `HOS_COOP_PLAYERS_TEST=<file>` | Local test-only position feed, unset by default. The tester supplies a file for a diagnostic peer; body display and that peer's current accepted presentation ticket are still required. A feed cannot manufacture consent and is not evidence of a real network peer |
+| `HOS_COOP_TRACE=1` | Local development/test diagnostics, off by default: packet and relay-address lines, progress sends/receives/applies, and body creation, animation and removal details. The person collecting a diagnostic enables it for that run. The room secret is not logged, but relay addresses and flag details need care before sharing a log; leave off for ordinary play |
 | `coop_labels=0/1/2` in `longshot_options.ini` | Co-op tab's local Friend labels: Off / Names (default) / Names and arrows. Live; no environment override. Signed presence/privacy rules still apply. See [finding friends](coop.md#finding-your-friends) |
 | `RX_VK_MENU_SCRIPT` chat action | `CHAT` opens the accepted room's chat field; `TYPE:<text>`, `ENTER` and `ESC` then use its ordinary text owner. It cannot bypass consent, signed chat permission or the native event gate. Chat input never reaches Link. |
 | `coop_social_permissions`, `coop_notices`, `key_chat` (options file) | Signed chat rule101 bit0 (default0); local notices0 Off/1 Joins only/2 Everything (default2); bindable chat key (default T). No chat text is saved. See [Chat and notices](coop.md#chat-and-notices). |
 | `HOS_COOP_ARENA_FILE=<local file>` | With `HOS_COOP_HITS_TRACE=1`, diagnostic Ready validates one private surveyed arena descriptor after room acceptance and temporary-copy checks. No coordinates ship; no combat starts. See [arena readiness](coop.md#diagnostic-arena-readiness-and-duel-ledger) |
+| `HOS_COOP=0` or `1` | The player's startup co-op choice, over `coop` in `longshot_options.ini` (default Off). Off opens no co-op socket or thread; the menu's Make/Join can enable the session for this run. Enabling a session is not acceptance |
+| `HOS_COOP_NAME=<name>` | The player's room name, over `coop_name`. Unset uses the saved name; an empty name becomes `Player-` and four random hex digits. Names are bounded to 24 UTF-8 bytes and cleaned for display, not proof of identity |
+| `HOS_COOP_SERVER=<host[:port]>` | The player's relay address, over `coop_server`. Unset uses the saved value; the default is no remote relay, with port 24680 when omitted from an address. IPv6 is accepted too. A player hosting on this PC must name a local address or leave Relay empty |
+| `HOS_COOP_PORT=<port>` | The player's local client UDP port, over `coop_port` (default 0, any free port). It is not the hosted relay's port. Values outside 0 to 65535 fall back to a free port; normally leave 0 |
+| `HOS_COOP_HOST=1` | The maker's opt-in to host the relay inside this game, over `coop_host` (default Off). Make hosts; Join never does. Relay empty uses UDP 24680, or a local address with a port selects another. It changes no router or firewall rule; see [hosting](coop.md#hosting-a-room-on-your-own-pc) |
 | `RX_VK_UI_GAME_FONT=0` | The menu, the counter and the start-up screen in the included Libertinus, not the game's own font |
+
+Set `HOS_COOP*` variables only in the player's own launch environment or an explicitly selected test file named by
+`HOS_ENV_FILE`. The shared `longshot_env.txt` deliberately accepts none of them. Room categories use the maker's
+signed settings, not these local display/diagnostic choices; their environment overrides are listed with the
+[options file](#the-options-file) below. Leave test-only and development overrides unset for ordinary play.
 
 Go to friend uses the maker's named `coop_warp` setting (0 off, 1 allowed; default0), not a debug travel switch.
 No `HOS_COOP_WARP` environment override is added. For an owned scripted proof,
 `RX_VK_MENU_SCRIPT` can select `ROW:Go to friend`, use Left/Right, then Enter twice.
 See [Go to friend](coop.md#go-to-friend) for supported places, consent and cancellation at the native map boundary.
+
+| Switch | What it does |
+|---|---|
+| `HOS_OOT_TELEPORT_EVENT=<event>` | Existing local development override for the debug Teleport event, set only for a focused investigation. Unset or empty uses the built-in map-change event. Go to friend refuses while any nonempty override is set; a peer never selects an event |
+| `HOS_OOT_TELEPORT_STARTER=0` | Existing local development override for debug Teleport. Unset includes Link as the request's starter; exactly `0` omits him, and other values retain him. Go to friend refuses any nonempty value, including `0` or `1`. Leave unset for ordinary play; it is not a co-op travel workaround |
 
 The presses are `<seconds>:<button>[+<button>...][/<ms>]`, separated by commas, for example `2:A,5.5:LUP/1500,9:ZL+R`.
 The buttons are `A B X Y L R ZL ZR PLUS MINUS LS RS LEFT UP RIGHT DOWN`, and the sticks pushed to their edge `LUP
@@ -778,6 +804,19 @@ its Room rules page's Co-op at start, and the menu keeps `coop_port` as it keeps
 ([coop.md](coop.md)). The page's other rows are a room's rules, `coop_progress`, `coop_items`, `coop_songs`,
 `coop_quest` (0 Per player, 1 Shared) and `coop_keys`, `coop_rupees`, `coop_ammo` (0 Per player, 2 One pool), which
 `host/oot_coop.c` reads from the file when the room's maker signs its rules.
+
+The maker may set these category overrides in its own launch environment. A nonempty value overrides the saved
+`coop_*` key; unset or empty leaves that key in use, then the default below. These are inputs to the signed room
+rules, not permission to apply progress before acceptance and a completed backup. With Shared progress,
+Items/Songs/Quest are normalized to Shared; with Own progress, Keys is normalized to Own. Changed terms need fresh
+acceptance. Native temporary copies and PvP setup still share no ordinary progress.
+
+| Switch | What it does |
+|---|---|
+| `HOS_COOP_PROGRESS`, `HOS_COOP_ITEMS`, `HOS_COOP_SONGS`, `HOS_COOP_QUEST` | The maker's `shared` or `own` choice for progress, items, songs and quest items respectively, over `coop_progress`, `coop_items`, `coop_songs`, `coop_quest`. Each defaults to Shared when neither environment nor saved key supplies a valid mode, subject to the normalization above |
+| `HOS_COOP_KEYS` | The maker's `pool` or `own` choice for dungeon small keys, over `coop_keys`. Default Pool, normalized to Own when progress is Own |
+| `HOS_COOP_RUPEES`, `HOS_COOP_AMMO` | The maker's `pool` or `own` choice for rupees and ammunition respectively, over `coop_rupees` and `coop_ammo`. Both default to Own |
+
 `coop_hit_events` (0 Off, 1 On, default Off) adds **Native hit observations** on Room rules. Explicit signed rule 30
 permits accepted peers to receive committed native loss diagnostics, never a damage command. The local trace switch
 is independent of this disclosure permission.
@@ -793,9 +832,14 @@ resets; a key held across Insert/focus return must be released before it can swi
 
 Temporary sword-practice kits use signed `coop_loadout_version=1`, `coop_loadout_age=0|1` and
 `coop_loadout_bits_0=3|12` in the maker's options file, with the remaining kit masks/counts zero. Default version0
-is off. No new environment switch bypasses consent or the temporary mount check; `HOS_COOP_ACCEPT=always` remains
-an explicit test aid only. See [temporary kits](coop.md#temporary-sword-practice-kit) for the full numbered contract,
+is off. No new environment switch bypasses consent or the temporary mount check; automatic room acceptance is not
+kit permission. See [temporary kits](coop.md#temporary-sword-practice-kit) for the full numbered contract,
 per-entry logs and unsupported families. There is no ordinary-save grant or item-palette UI.
+
+`HOS_COOP_PROFILE_TICKET` is internal one-use restart state, not a player or developer setting. It is absent on an
+ordinary start; the game's Copy/Return restart code supplies and consumes it. A bad ticket stops before any save
+mounts. Never set, copy or manufacture one by hand; use the menu's two-press action. See
+[temporary local saves](coop.md#temporary-local-saves).
 
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`

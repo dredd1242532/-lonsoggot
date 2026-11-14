@@ -1082,6 +1082,12 @@ A save whose minimap stopped showing after a Teleport on an earlier build (the a
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then
 save from the game's System menu. The minimap then stays after a restart.
 
+`HOS_OOT_TELEPORT_EVENT` and `HOS_OOT_TELEPORT_STARTER` are local development overrides, not player settings.
+Leave both unset: debug Teleport then uses its built-in map-change event with Link as the starter.
+For an investigation, the first can replace that event; exactly `0` in the second omits the starter.
+Go to friend refuses while either has any nonempty value, including `HOS_OOT_TELEPORT_STARTER=1`;
+these are not co-op travel workarounds. See the [switch reference](docs/development.md#input-for-scripted-runs).
+
 `RX_VK_UI_GAME_FONT=0` draws the menu with the included font (Libertinus) even when the game's files have the game's own
 menu font. `RX_VK_UI_PROMPTS=pad` (or `keys`) shows the controller's (or the keyboard's) prompts whatever was used last,
 for screenshots.
