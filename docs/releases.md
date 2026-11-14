@@ -324,9 +324,10 @@ launcher says before installing one.
   The launcher's own releases have no pull request builds. A launcher with no pull request key built in lists the pull
   requests but installs none, and says so. `LONGSHOT_LAUNCHER_PR_TRUST=<public key .pem>` trusts one more, for a test key.
 - The open pull requests from `GET /api/v1/repos/MagicBeanDev/Longshot/pulls?state=open` (public, no sign-in), matched on the
-  player's PC: a number (`332`, `#332`), or words of the title or the author, as typed or as letters in order (`rendr targts`).
-  *Testing wanted* (on by default) keeps those with the label. Each shows its build: **ready** (a build of its head), **built
-  from an earlier push**, or none (not installable, with the reason). *Read* opens it on git.magicbean.dev.
+  player's PC: a number (`332`, `#332`), or words of the title or the author, as typed or as letters in order within one
+  word (`rendr targts`). A draft is never listed (CI builds none). *Testing wanted* (on by default) keeps those with the
+  label; off, every other one shows. Each shows its build: **ready** (a build of its head), **built from an earlier push**,
+  or none (not installable, with the reason). *Read* opens it on git.magicbean.dev.
 - A pull request's build is a version of its own (`Versions.PullRequest`, "pr"), on no channel: no channel's version is
   offered to it, and it is offered to none. Its only update is a newer build of the same pull request (a new push), which the
   update check finds in the release list it reads anyway, and installs in place: one build per pull request. The home says
