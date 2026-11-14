@@ -19,17 +19,16 @@ FORGEJO_UPLOAD_API as release.py takes it.
 """
 import argparse
 import base64
-import calendar
+import datetime
 import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,8 +51,9 @@ ARTIFACTS = {
     "Longshot-linux-x86_64": "Longshot-{tag}-x86_64.AppImage",
     "LongshotBuilder-windows": "LongshotBuilder-{tag}-windows-x64.zip",
 }
-# (a run that built, or is building: an edit of its head builds nothing more)
-BUILDING = ("success", "running", "waiting", "blocked")
+# (a run that is building, or will: an edit of its head builds nothing more. A run that passed counts only with its builders'
+# artifacts: an edit's run that built nothing passes too)
+BUILDING = ("running", "waiting", "blocked")
 MAX_FILE = 4 << 30
 DRAFT_AGE = 6 * 3600   # (a pull request build's draft older than this was left by a failed run)
 
@@ -94,17 +94,22 @@ def payload_of(run):
         return {}
 
 
+def has_builders(run_id, artifacts=None):
+    have = {a["name"] for a in (artifacts or run_artifacts)(run_id) if not a.get("expired")}
+    return set(ARTIFACTS) <= have
+
+
 def built_run(run, number):
     """A run of pull request number that built (it was not a draft then): its payload's pull request"""
     pr = payload_of(run).get("pull_request") or {}
     return pr.get("number") == number and not is_draft(pr)
 
 
-def name(event, runs=None, released=None):
+def name(event, runs=None, released=None, artifacts=None):
     """The tag a pull_request event's run builds (pr-<number>-<8 hex>), or None: a draft builds nothing, and an edit (of the
     title or the description: Forgejo's payload does not say which) builds only a head that has no build yet, so taking WIP:
     off builds it once and editing the description afterwards builds nothing. runs, released: the head's runs and whether its
-    release is out (the tests pass theirs; else asked of the server)"""
+    release is out, artifacts(run id) (the tests pass theirs; else asked of the server)"""
     pr = event.get("pull_request") or {}
     if is_draft(pr) or event.get("action") not in ("opened", "synchronize", "reopened", "edited"):
         return None
@@ -117,25 +122,34 @@ def name(event, runs=None, released=None):
         return None
     this = int(os.environ.get("GITHUB_RUN_ID") or 0)
     runs = runs_of(pr["head"]["sha"]) if runs is None else runs
-    return None if any(r["id"] != this and r.get("status") in BUILDING and built_run(r, pr["number"]) for r in runs) else tag
+    for r in runs:
+        if r["id"] == this or not built_run(r, pr["number"]):
+            continue
+        if r.get("status") in BUILDING or (r.get("status") == "success" and has_builders(r["id"], artifacts)):
+            return None
+    return tag
 
 
-def open_pulls():
-    out, page = [], 1
-    while True:
-        got = api("/repos/%s/pulls?state=open&limit=50&page=%d" % (repo(), page)) or []
-        out += got
-        if len(got) < 50:
+def open_pulls(pages=1000):
+    """Every open pull request, page by page until an empty one (the server may cap a page below the limit asked: a short page
+    is not the last, and prune takes a pull request missing here for closed)"""
+    out, seen = [], set()
+    for page in range(1, pages + 1):
+        new = [p for p in api("/repos/%s/pulls?state=open&limit=50&page=%d" % (repo(), page)) or [] if p["number"] not in seen]
+        if not new:
             return out
-        page += 1
+        seen.update(p["number"] for p in new)
+        out += new
+    fail("more than %d pages of open pull requests" % pages)
 
 
 def pending(pulls=None, releases=None, runs=None, artifacts=None):
-    """The builds to publish, [(number, tag, run id)]: each open pull request that is not a draft, whose head has no release
-    yet and a successful pr-build.yml run that built it, with both builders' artifacts there (not expired). The arguments are
+    """The builds to publish, [(number, tag, run id)]: each open pull request that is not a draft, whose head has no published
+    release yet (a draft a failed run left is published again: release.publish reuses it) and a successful pr-build.yml run
+    that built it, with both builders' artifacts there (not expired). The arguments are
     the server's answers (the tests pass theirs): pulls, releases (tags), runs(head), artifacts(run id)"""
     pulls = open_pulls() if pulls is None else pulls
-    tags = {r["tag_name"] for r in (release.releases(repo()) if releases is None else releases)}
+    tags = {r["tag_name"] for r in (release.releases(repo()) if releases is None else releases) if not r.get("draft")}
     runs = runs or runs_of
     artifacts = artifacts or run_artifacts
     out = []
@@ -148,8 +162,7 @@ def pending(pulls=None, releases=None, runs=None, artifacts=None):
             continue
         done = [r for r in runs(head) if r.get("status") == "success" and r.get("commit_sha") == head and built_run(r, pr["number"])]
         for run in done:
-            have = {a["name"] for a in artifacts(run["id"]) if not a.get("expired")}
-            if set(ARTIFACTS) <= have:
+            if has_builders(run["id"], artifacts):
                 out.append((pr["number"], tag, run["id"]))
                 break
     return out
@@ -157,27 +170,6 @@ def pending(pulls=None, releases=None, runs=None, artifacts=None):
 
 def run_artifacts(run_id):
     return (api("/repos/%s/actions/runs/%d/artifacts" % (repo(), run_id)) or {}).get("artifacts") or []
-
-
-def download(url, to):
-    """A large file (an artifact's zip) into to, with the job's token for the forge only (release.py's opener drops it on
-    the redirect to the file store)"""
-    headers = {"User-Agent": "longshot-pr-builds"}
-    if os.environ.get("RELEASE_TOKEN"):
-        headers["Authorization"] = "token " + os.environ["RELEASE_TOKEN"]
-    try:
-        with release._OPENER.open(urllib.request.Request(url, headers=headers), timeout=600) as r, open(to, "wb") as f:
-            size = 0
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_FILE:
-                    fail("%s: larger than %d bytes" % (url, MAX_FILE))
-                f.write(chunk)
-    except (urllib.error.URLError, OSError) as e:
-        fail("%s: %s" % (url, e))
 
 
 def take(zip_path, want, folder):
@@ -201,7 +193,7 @@ def take(zip_path, want, folder):
 
 def fetch(number, tag, run_id, folder):
     """A pending build's files into folder: both builders from its run's artifacts, and tools.lock from its head (what its
-    Windows builder installs, and the launcher on Linux); the paths"""
+    Windows builder installs, and the launcher on Linux); the pull request and the paths"""
     pr = api("/repos/%s/pulls/%d" % (repo(), number))
     head = pr["head"]["sha"]
     if tag_of(number, head) != tag:
@@ -212,13 +204,14 @@ def fetch(number, tag, run_id, folder):
         if artifact not in found:
             fail("run %d has no %s" % (run_id, artifact))
         zip_path = os.path.join(folder, artifact + ".zip")
-        download("%s/api/v1/repos/%s/actions/artifacts/%d/zip" % (release.SERVER, repo(), found[artifact]["id"]), zip_path)
+        release.download("%s/api/v1/repos/%s/actions/artifacts/%d/zip" % (release.SERVER, repo(), found[artifact]["id"]), MAX_FILE,
+                         to=zip_path)
         files.append(take(zip_path, file.format(tag=tag), folder))
         os.remove(zip_path)
     lock = os.path.join(folder, "tools.lock")
-    download("%s/api/v1/repos/%s/raw/tools.lock?ref=%s" % (release.SERVER, repo(), head), lock)
+    release.download("%s/api/v1/repos/%s/raw/tools.lock?ref=%s" % (release.SERVER, repo(), head), to=lock)
     files.append(lock)
-    return head, files
+    return pr, files
 
 
 def pull_request_keys(root=ROOT):
@@ -254,10 +247,18 @@ def verify(sums_path, folder, keys=None):
             fail("%s is not the file SHA256SUMS names" % name)
 
 
+def plain(text):
+    """text as a Markdown code span, shown as written: a pull request's title is its author's, and no link (a bare address is
+    one too), image or emphasis of theirs goes on a release page of Longshot's"""
+    text = " ".join(text.split())
+    fence = "`" * (max((len(r) for r in re.findall(r"`+", text)), default=0) + 1)
+    return "%s %s %s" % (fence, text, fence)
+
+
 def notes(number, head, pr):
-    title = desc.strip_wip(pr.get("title") or "")
+    title = plain(desc.strip_wip(pr.get("title") or ""))
     return "\n".join([
-        "A build of [pull request #%d](%s/%s/pulls/%d), **%s**, at %s, for testers: the Longshot Launcher installs it from "
+        "A build of [pull request #%d](%s/%s/pulls/%d), %s, at %s, for testers: the Longshot Launcher installs it from "
         "*Build another version > A pull request*. Nobody has reviewed this code yet." % (number, release.SERVER, repo(), number, title, head),
         "", "It is on no channel, and nothing updates to it: it stays until it is deleted. A newer push of the pull request is "
         "built as a release of its own; this one is deleted with the pull request's older builds, or when it is merged or closed.", ""])
@@ -275,7 +276,8 @@ def publish(key, work, dry_run=False):
             continue
         folder = tempfile.mkdtemp(prefix=tag + "-", dir=work)
         try:
-            head, files = fetch(number, tag, run_id, folder)
+            pr, files = fetch(number, tag, run_id, folder)
+            head = pr["head"]["sha"]
             sums_path = os.path.join(folder, "SHA256SUMS")
             sums(files, sums_path)
             with open(sums_path + ".sig", "w", encoding="ascii") as f:
@@ -283,12 +285,14 @@ def publish(key, work, dry_run=False):
             verify(sums_path, folder)
             notes_path = os.path.join(folder, "notes.md")
             with open(notes_path, "w", encoding="utf-8") as f:
-                f.write(notes(number, head, api("/repos/%s/pulls/%d" % (repo(), number))))
+                f.write(notes(number, head, pr))
             release.publish(tag, head, notes_path, files + [sums_path, sums_path + ".sig"], "longshot")
             done.append(tag)
-        except SystemExit as e:
+        except (SystemExit, Exception) as e:   # (a bad zip, a timeout, a field missing: this build fails, the others go on)
             print("::error::%s: %s" % (tag, e))
             failed.append(tag)
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
     if failed:
         fail("not published: " + ", ".join(failed))
     return done
@@ -316,10 +320,12 @@ def to_prune(releases, pulls, keep=2, now=None):
 
 
 def _when(stamp):
+    """A time of Forgejo's API (2026-11-13T10:00:00-05:00, or Z): with its offset, which is the server's; one without is UTC"""
     try:
-        return calendar.timegm(time.strptime((stamp or "")[:19], "%Y-%m-%dT%H:%M:%S"))
+        t = datetime.datetime.fromisoformat((stamp or "").replace("Z", "+00:00"))
     except ValueError:
         return 0
+    return (t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)).timestamp()
 
 
 def prune(keep, dry_run=False):

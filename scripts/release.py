@@ -532,9 +532,10 @@ def prune(keep, product):
         print("pruned %s" % r["tag_name"])
 
 
-def download(url, limit=1 << 20):
+def download(url, limit=1 << 20, to=None):
     """A release file's bytes (SHA256SUMS, its signature: small), from the address without Cloudflare when FORGEJO_UPLOAD_API
-    names one (the same server: only the scheme and host change), else from url"""
+    names one (the same server: only the scheme and host change), else from url. With to, the file is written there as it
+    comes (a large one: a workflow artifact's zip) and nothing is returned"""
     up = os.environ.get("FORGEJO_UPLOAD_API")
     if up:
         u, base = urllib.parse.urlsplit(url), urllib.parse.urlsplit(up)
@@ -542,12 +543,20 @@ def download(url, limit=1 << 20):
     headers = {"User-Agent": "longshot-release"}
     if os.environ.get("RELEASE_TOKEN"):
         headers["Authorization"] = "token " + os.environ["RELEASE_TOKEN"]
+    data, size = None, 0
     try:
-        with _OPENER.open(urllib.request.Request(url, headers=headers), timeout=120) as r:
-            data = r.read(limit + 1)
+        with _OPENER.open(urllib.request.Request(url, headers=headers), timeout=120 if to is None else 600) as r:
+            if to is None:
+                data = r.read(limit + 1)
+                size = len(data)
+            else:
+                with open(to, "wb") as f:
+                    while size <= limit and (chunk := r.read(1 << 20)):
+                        size += len(chunk)
+                        f.write(chunk)
     except (urllib.error.URLError, OSError) as e:
         fail("%s: %s" % (url, e))
-    if len(data) > limit:
+    if size > limit:
         fail("%s: larger than %d bytes" % (url, limit))
     return data
 

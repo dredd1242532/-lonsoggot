@@ -19,7 +19,7 @@ GitHub, and nothing is compatible with Hookshot's 2.x updates (NotRexed/Hookshot
 | **tools.lock** | The builders' build tools, Windows' and Linux's, are not in Longshot's releases: `tools.lock` names each one (URLs, SHA-256, size) |
 | **Tags, not release PRs** | A maintainer releases by pushing a tag. CI checks the number against the commits, builds, signs and publishes. Notes by git-cliff |
 | **Updates** | The launcher installs and updates the builder of each build, and updates itself, from these releases. The builders and the game look for no update themselves |
-| **Pull request builds** | A pull request that may be tested is built as a pre-release `pr-<number>-<commit>` on no channel, signed with a second key, the **pull request key**. The launcher installs one when a player picks it to help test, never as an update ([below](#pull-request-builds)) |
+| **Pull request builds** | A pull request that is not a draft is built as a pre-release `pr-<number>-<commit>` on no channel, signed with a second key, the **pull request key**. The launcher installs one when a player picks it to help test, never as an update ([below](#pull-request-builds)) |
 
 ## What a release is
 
@@ -300,7 +300,8 @@ title. The launcher installs that pull request's builder and builds the game wit
 
 **What CI makes** (`.forgejo/workflows/pr-build.yml`, `pr-publish.yml`, `scripts/pr_builds.py`). Each pull request that is
 **not a draft** (no `WIP:` or `[WIP]` title) builds its head in its own run, `pr-build.yml`: the Linux AppImage and the
-Windows builder named `pr-<number>-<first 8 hex of its head>` (`pr-222-1a2b3c4d`), as that run's artifacts. A new push builds
+Windows builder named `pr-<number>-<first 8 hex of its head>` (`pr-222-1a2b3c4d`), as that run's artifacts, with the caches a
+pull request's build takes (a release's builds none). A new push builds
 again and cancels the build before it; taking `WIP:` off builds once; editing the description builds nothing. That run is the
 pull request's, a fork's: a read-only token and no secret, so nothing in it is signed or published.
 
@@ -309,8 +310,9 @@ that is not a draft and whose head has a run that passed with both builders, it 
 and `tools.lock` from the head, writes `SHA256SUMS`, signs it with the **pull request key** (organization secret
 `PR_SIGNING_KEY`; never the release key), checks it with the keys of `scripts/release_keys.json`'s `pull_request_keys`, and
 publishes a Forgejo **pre-release** with that tag, on no channel. It then deletes the builds of pull requests closed, merged
-or back to draft, each one's past its newest 2, and drafts a failed run left. Without the secret it publishes nothing and
-says so.
+or back to draft, each one's past its newest 2, and drafts a failed run left (the next run publishes such a draft again; one
+still there after 6 hours is deleted). A build that fails leaves the others to go on. Without the secret it publishes nothing
+and says so.
 
 A fork's run that Forgejo holds for a maintainer's approval builds nothing until it is approved. Anything a pull request's
 code makes is that code's: the key says *CI built this pull request at this commit*, not that anyone reviewed it, which the

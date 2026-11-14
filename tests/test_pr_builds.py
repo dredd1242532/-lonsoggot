@@ -64,13 +64,20 @@ class NameTests(unittest.TestCase):
         self.assertEqual(pr_builds.name(event("edited"), runs=[], released=False), "pr-222-1a2b3c4d")
         # (the description edited afterwards: its build passed, runs, or is published)
         for status in ("success", "running", "waiting", "blocked"):
-            self.assertIsNone(pr_builds.name(event("edited"), runs=[run(5, status=status)], released=False), status)
+            self.assertIsNone(pr_builds.name(event("edited"), runs=[run(5, status=status)], released=False,
+                                             artifacts=lambda rid: BOTH), status)
         self.assertIsNone(pr_builds.name(event("edited"), runs=[], released=True))
         # (a build that failed or was cancelled is built again on an edit; another pull request's run of the same commit is
         # not this one's)
         self.assertEqual(pr_builds.name(event("edited"), runs=[run(5, status="failure"), run(6, status="cancelled")], released=False),
                          "pr-222-1a2b3c4d")
         self.assertEqual(pr_builds.name(event("edited"), runs=[run(5, number=223)], released=False), "pr-222-1a2b3c4d")
+
+    def test_an_edit_that_built_nothing_is_no_build(self):
+        # (push run 5 builds; an edit's run 6 sees it and builds nothing, and passes; 5 fails: the next edit builds the head)
+        runs = [run(5, status="failure"), run(6)]
+        builders = {5: [], 6: BOTH[2:]}
+        self.assertEqual(pr_builds.name(event("edited"), runs=runs, released=False, artifacts=builders.get), "pr-222-1a2b3c4d")
 
     def test_an_edit_does_not_count_its_own_run(self):
         os.environ["GITHUB_RUN_ID"] = "7"
@@ -90,7 +97,8 @@ class NameTests(unittest.TestCase):
 class PendingTests(unittest.TestCase):
     def pending(self, pulls, releases=(), runs=None, artifacts=None):
         runs = runs or {HEAD: [run(10)], OTHER: [run(11, number=223, head=OTHER)]}
-        return pr_builds.pending(pulls=pulls, releases=[{"tag_name": t} for t in releases],
+        releases = [r if isinstance(r, dict) else {"tag_name": r} for r in releases]
+        return pr_builds.pending(pulls=pulls, releases=releases,
                                  runs=lambda h: runs.get(h, []), artifacts=artifacts or (lambda rid: BOTH))
 
     def test_a_built_head_is_published(self):
@@ -99,6 +107,11 @@ class PendingTests(unittest.TestCase):
     def test_not_a_draft_nor_one_published(self):
         self.assertEqual(self.pending([pull(title="WIP: fix"), pull(223, OTHER, draft=True)]), [])
         self.assertEqual(self.pending([pull()], releases=["pr-222-1a2b3c4d"]), [])
+
+    def test_a_failed_runs_draft_is_published_again(self):
+        # (release.publish reuses the draft: waiting for the prune would leave the head without a build for hours)
+        self.assertEqual(self.pending([pull()], releases=[{"tag_name": "pr-222-1a2b3c4d", "draft": True}]),
+                         [(222, "pr-222-1a2b3c4d", 10)])
 
     def test_only_a_run_that_passed_and_built_both(self):
         def only(*runs):
@@ -116,6 +129,55 @@ class PendingTests(unittest.TestCase):
 
     def test_a_head_that_is_not_a_commit(self):
         self.assertEqual(self.pending([pull(head="1a2b3c4d")]), [])
+
+
+class OpenPullsTests(unittest.TestCase):
+    def test_every_page_even_short_ones(self):
+        # (a server whose pages hold 30 at most: a short page is not the last, or prune deletes the builds of open ones)
+        everyone = [pull(n) for n in range(1, 71)]
+        asked = []
+
+        def api(path, missing_ok=False):
+            page = int(re.search(r"page=(\d+)", path).group(1))
+            asked.append(page)
+            return everyone[(page - 1) * 30:page * 30]
+        real = pr_builds.api
+        pr_builds.api = api
+        try:
+            self.assertEqual([p["number"] for p in pr_builds.open_pulls()], list(range(1, 71)))
+        finally:
+            pr_builds.api = real
+        self.assertEqual(asked, [1, 2, 3, 4])
+
+
+class PublishTests(unittest.TestCase):
+    def test_one_build_failing_lets_the_others_go_on(self):
+        # (a bad zip, a timeout, a field missing: that build fails, the next is published, and no folder is left)
+        tried = []
+
+        def fetch(number, tag, run_id, folder):
+            tried.append(tag)
+            Path(folder, "big.AppImage").write_bytes(b"x")
+            if number == 222:
+                raise zipfile.BadZipFile("truncated")
+            raise SystemExit("pr_builds.py: run %d has no Longshot-linux-x86_64" % run_id)
+        saved = pr_builds.pending, pr_builds.fetch
+        pr_builds.pending = lambda: [(222, "pr-222-1a2b3c4d", 10), (223, "pr-223-9f3e21ab", 11)]
+        pr_builds.fetch = fetch
+        try:
+            with tempfile.TemporaryDirectory() as work:
+                with self.assertRaises(SystemExit) as e:
+                    pr_builds.publish("key.pem", work)
+                self.assertEqual(os.listdir(work), [])
+        finally:
+            pr_builds.pending, pr_builds.fetch = saved
+        self.assertEqual(tried, ["pr-222-1a2b3c4d", "pr-223-9f3e21ab"])
+        self.assertIn("pr-222-1a2b3c4d, pr-223-9f3e21ab", str(e.exception))
+
+    def test_the_title_is_text_on_the_release_page(self):
+        text = pr_builds.notes(222, HEAD, {"title": "fix: [Download the official build](https://evil.example/x) ``a``"})
+        self.assertIn("``` fix: [Download the official build](https://evil.example/x) ``a`` ```", text)
+        self.assertEqual(pr_builds.plain("WIP:  two\nlines"), "` WIP: two lines `")
 
 
 class PruneTests(unittest.TestCase):
@@ -141,6 +203,13 @@ class PruneTests(unittest.TestCase):
         new = self.rel("pr-222-eeeeeeee", draft=True, published=None,
                        created=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.NOW - 60)))
         self.assertEqual(self.gone([old, new], [pull(222)]), ["pr-222-dddddddd"])
+
+    def test_a_drafts_age_with_the_servers_offset(self):
+        # (Forgejo's times carry its own offset: a draft made a minute ago on a server at UTC-08:00 is not 8 hours old)
+        made = time.strftime("%Y-%m-%dT%H:%M:%S-08:00", time.gmtime(self.NOW - 60 - 8 * 3600))
+        new = self.rel("pr-222-eeeeeeee", draft=True, published=None, created=made)
+        self.assertEqual(self.gone([new], [pull(222)]), [])
+        self.assertAlmostEqual(pr_builds._when(made), self.NOW - 60)
 
     def test_never_anything_else(self):
         rels = [self.rel(t) for t in ("v3.0.0", "v3.1.0-rc.1", "nightly-12-bbbbbbbb", "pr-1a2b3c4d", "pr-222-1A2B3C4D", "tools")]
@@ -228,6 +297,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("RELEASE_SIGNING_KEY", wf)
         self.assertIn("scripts/pr_builds.py publish", wf)
         self.assertIn("scripts/pr_builds.py prune", wf)
+
+    def test_a_pull_requests_build_is_no_release_build(self):
+        # (build-linux.yml and build-windows.yml name the files by the tag; only a channel's version builds without the caches
+        # other runs write, and writes the release-only download cache)
+        for wf in ("build-linux.yml", "build-windows.yml"):
+            text = (WORKFLOWS / wf).read_text(encoding="utf-8")
+            self.assertIn("RELEASE_BUILD: ${{ inputs.tag != '' && !startsWith(inputs.tag, 'pr-') && '1' || '' }}", text, wf)
+            self.assertNotRegex(text, r"if: .*env\.RELEASE_TAG", wf)
 
     def test_the_artifacts_are_the_builders(self):
         # (pr_builds.ARTIFACTS names what build-linux.yml and build-windows.yml upload)
