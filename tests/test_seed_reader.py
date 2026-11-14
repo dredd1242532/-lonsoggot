@@ -45,6 +45,7 @@ def main():
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "hos_fopen_read.h"
 #define _fseeki64 fseeko
 #define _ftelli64 ftello
 namespace Shader { struct ProgramHeader { uint8_t b[0x50]; }; }
@@ -130,7 +131,7 @@ int main(int argc, char** argv) {
         tmp = Path(tmp)
         (tmp / "t.cpp").write_text(cpp, encoding="utf-8")
         exe = tmp / "t.exe"
-        base = [cxx, "-std=c++20", "-O1", "-g", str(tmp / "t.cpp"), "-o", str(exe)]
+        base = [cxx, "-std=c++20", "-O1", "-g", "-I", str(ROOT / "host"), str(tmp / "t.cpp"), "-o", str(exe)]
         sanitized = subprocess.run(base[:2] + ["-fsanitize=address,undefined", "-fno-sanitize-recover=all"] + base[2:],
                                    capture_output=True, text=True)
         if sanitized.returncode:   # (no sanitizer runtime with this compiler: the checks alone)

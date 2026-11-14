@@ -17,9 +17,13 @@ Checked here, without a game:
   writes and empties a regular file for "w"/"wb", appends for "a"/"ab", and updates an existing one for "r+b" (the
   program cache, cut back to its last whole record);
 - hos_freopen_write puts a stream on a file the same way (the log);
+- hos_fopen_read_nofollow, which the bug report reads the logs it copies with (the player sends them), refuses a link at
+  the name, a FIFO and a folder, and reads a regular file;
 - its Windows branch (with a stand-in windows.h): the name is opened as itself, and a name surrogate (symbolic link,
-  junction, WSL's and the container links) is refused before anything opens it for writing; OneDrive's files and plain
-  ones are written, opened again as themselves, and not when what is at the name changed between the two opens.
+  junction, WSL's and the container links) is refused before anything opens it to write or read. A plain file is
+  opened for writing once more as itself, and refused if a link or folder is there by then; no file index is compared
+  for it (some file systems make them up for each open). OneDrive's files are opened again without the flag and kept
+  only when the file index matches (a 0 index is refused). The bug report's read follows the same rule.
 - with LONGSHOT_MINGW=<llvm-mingw>, the header builds against Windows' own headers, as C and as C++.
 
 python -I -B tests/test_game_writes_no_links.py [--cc gcc]
@@ -38,9 +42,13 @@ RUN_ALL_SKIP = {"windows": "the links checked are Linux's (an archive's links ar
 
 # (the small text files the game reads at the start, each through hos_fopen_read: file -> how many. vk_draw.cpp: with
 # Longshot's own markers and lists; its pipeline caches are read by PipelineCacheFile::read, a regular file only too)
-BINARY_READS = {"gpu/vk/vk_draw.cpp": 27, "host/prompts.c": 2, "gpu/vk/vk_main.cpp": 1, "gpu/vk/vk_game_font.h": 1,
-                "host/hos_main.c": 1, "gpu/vk/vk_progcache.cpp": 2, "gpu/vk/load_default.h": 1,
-                "gpu/vk/pcache_stamp.h": 1}   # (the caches, lists and markers; the prompt files)
+BINARY_READS = {"gpu/vk/vk_draw.cpp": 28, "host/prompts.c": 5, "gpu/vk/vk_main.cpp": 1, "gpu/vk/vk_game_font.h": 1,
+                "host/hos_main.c": 2, "gpu/vk/vk_progcache.cpp": 2, "gpu/vk/load_default.h": 1,
+                "gpu/vk/pcache_stamp.h": 1, "gpu/vk/module_ids.h": 1, "gpu/vk/vk_shader.cpp": 1}
+# (the caches, lists and markers, RX_VK_DRAW_STATS' trigger file; the prompt files and the game's prompt files read back;
+# the game's image, the shaders seed and the module identifiers)
+# (the reads whose bytes leave the PC, through hos_fopen_read_nofollow: the bug report's copies of the two logs)
+NOFOLLOW_READS = {"gpu/vk/vk_bug_report.cpp": 1}
 READS = {"host/hos_main.c": 2, "host/nn_applet.c": 2, "host/nn_hid.c": 2, "host/discord_rpc.c": 1, "host/prompts.c": 2,
          "host/nn_audio.c": 1, "gpu/vk/vk_menu.cpp": 2, "gpu/vk/vk_draw.cpp": 2, "gpu/vk/vk_main.cpp": 2,
          "gpu/vk/vk_menu_i18n.cpp": 2}
@@ -278,6 +286,15 @@ def check_sources():
         got = (ROOT / rel).read_text(encoding="utf-8", errors="replace").count("hos_fopen_read_binary(")
         if got != want_n:
             bad.append("%s: %d reads through hos_fopen_read_binary, %d expected" % (rel, got, want_n))
+    for rel, want_n in NOFOLLOW_READS.items():
+        got = (ROOT / rel).read_text(encoding="utf-8", errors="replace").count("hos_fopen_read_nofollow(")
+        if got != want_n:
+            bad.append("%s: %d reads through hos_fopen_read_nofollow, %d expected" % (rel, got, want_n))
+    report = strip((ROOT / "gpu/vk/vk_bug_report.cpp").read_text(encoding="utf-8"))
+    copy_log = report[report.index("LogFacts copy_log("):]
+    copy_log = copy_log[:copy_log.index("\n}\n")]
+    if "hos_fopen_read_nofollow(from.c_str())" not in copy_log or re.search(r"\bfopen\(", copy_log):
+        bad.append("vk_bug_report.cpp: copy_log reads the logs (sent with the report) other than through hos_fopen_read_nofollow")
     if bad:
         sys.exit("\n".join(bad))
     print("PASS: in %d sources under host/ and gpu/vk/, every write goes through hos_fopen_write, makes its file new, or "
@@ -351,6 +368,14 @@ int main(int argc, char **argv) {
     CHECK(f && fgets(got, sizeof got, f) && !strcmp(got, "the player's file") && fclose(f) == 0);
     CHECK(hos_fopen_read(fifo) == NULL && hos_fopen_read(dir) == NULL && hos_fopen_read_binary(fifo) == NULL);
     puts("PASS: hos_fopen_read reads regular files and refuses FIFOs and folders without waiting");
+    /* (hos_fopen_read_nofollow, the bug report's copies of the logs: a regular file only, and never through a link at its
+       name, to a file or dangling) */
+    f = hos_fopen_read_nofollow(plain);
+    CHECK(f && fgets(got, sizeof got, f) && !strcmp(got, "ne") && fclose(f) == 0);
+    CHECK(hos_fopen_read_nofollow(link) == NULL && hos_fopen_read_nofollow(dangling) == NULL);
+    CHECK(hos_fopen_read_nofollow(fifo) == NULL && hos_fopen_read_nofollow(dir) == NULL);
+    CHECK(hos_fopen_read_nofollow(missing) == NULL && access(missing, F_OK) != 0);
+    puts("PASS: hos_fopen_read_nofollow reads regular files, not through a link, and refuses FIFOs and folders without waiting");
     return 0;
 }
 '''
@@ -389,9 +414,10 @@ typedef void *LPSECURITY_ATTRIBUTES;
 typedef enum { FileAttributeTagInfo = 9 } FILE_INFO_BY_HANDLE_CLASS;
 typedef struct { DWORD FileAttributes, ReparseTag; } FILE_ATTRIBUTE_TAG_INFO;
 typedef struct { DWORD dwFileAttributes, dwVolumeSerialNumber, nFileIndexHigh, nFileIndexLow; } BY_HANDLE_FILE_INFORMATION;
-struct fake_name { int there; DWORD attributes, tag, id, id_again; };
+struct fake_name { int there; DWORD attributes, tag, id, attributes_again, tag_again, id_again; };
 extern struct fake_name fake;
-extern int fake_write_opens, fake_reparse_write_opens, fake_creates, fake_emptied, fake_closes, fake_osf_flags, fake_utf8;
+extern int fake_write_opens, fake_reparse_write_opens, fake_data_opens, fake_creates, fake_emptied, fake_closes, fake_osf_flags,
+    fake_utf8;
 extern DWORD fake_error, fake_access;
 extern const char *fake_file;
 #define LOOK ((HANDLE)(intptr_t)1)
@@ -404,24 +430,27 @@ static int MultiByteToWideChar(UINT cp, DWORD flags, const char *s, int n, wchar
     if (w) for (int i = 0; i < len && i < cap; i++) w[i] = (wchar_t)s[i];
     return len;
 }
+/* (LOOK: an open for attributes only, what was at the name first; FILE_H: an open to read or write, what is there then) */
 static HANDLE CreateFileW(const wchar_t *w, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD how, DWORD flags, HANDLE t) {
     (void)w, (void)share, (void)sa, (void)t;
-    if (access & GENERIC_WRITE) fake_write_opens++, fake_access = access;
+    const int data = (access & (GENERIC_READ | GENERIC_WRITE)) != 0;
+    if (data) fake_data_opens++, fake_access = access;
+    if (access & GENERIC_WRITE) fake_write_opens++;
     if ((access & GENERIC_WRITE) && (flags & FILE_FLAG_OPEN_REPARSE_POINT)) fake_reparse_write_opens++;
     if (how == CREATE_NEW) {
         if (fake.there) { fake_error = ERROR_FILE_EXISTS; return INVALID_HANDLE_VALUE; }
-        fake.there = 1, fake.attributes = 0x20, fake.tag = 0, fake_creates++;
+        fake.there = 1, fake.attributes = fake.attributes_again = 0x20, fake.tag = fake.tag_again = 0, fake_creates++;
         return FILE_H;
     }
     if (!fake.there) { fake_error = ERROR_FILE_NOT_FOUND; return INVALID_HANDLE_VALUE; }
-    return (flags & FILE_FLAG_OPEN_REPARSE_POINT) ? LOOK : FILE_H;
+    return data ? FILE_H : LOOK;
 }
 static DWORD GetFileType(HANDLE h) { (void)h; return FILE_TYPE_DISK; }
 static BOOL GetFileInformationByHandleEx(HANDLE h, FILE_INFO_BY_HANDLE_CLASS c, void *out, DWORD n) {
-    (void)h, (void)n;
+    (void)n;
     if (c != FileAttributeTagInfo) return 0;
     FILE_ATTRIBUTE_TAG_INFO *i = (FILE_ATTRIBUTE_TAG_INFO *)out;
-    i->FileAttributes = fake.attributes, i->ReparseTag = fake.tag;
+    i->FileAttributes = h == LOOK ? fake.attributes : fake.attributes_again, i->ReparseTag = h == LOOK ? fake.tag : fake.tag_again;
     return 1;
 }
 static BOOL GetFileInformationByHandle(HANDLE h, BY_HANDLE_FILE_INFORMATION *i) {
@@ -436,6 +465,7 @@ IO_H = r'''#pragma once
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#define _O_RDONLY 0x0000
 #define _O_APPEND 0x0008
 #define _O_TEXT 0x4000
 static int _open_osfhandle(intptr_t h, int flags) {
@@ -452,45 +482,70 @@ WINDOWS_FIXTURE = r'''#include <stdio.h>
 #include <io.h>
 #include "hos_fopen_write.h"
 struct fake_name fake;
-int fake_write_opens, fake_reparse_write_opens, fake_creates, fake_emptied, fake_closes, fake_osf_flags, fake_utf8;
+int fake_write_opens, fake_reparse_write_opens, fake_data_opens, fake_creates, fake_emptied, fake_closes, fake_osf_flags, fake_utf8;
 DWORD fake_error, fake_access;
 const char *fake_file;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); return 1; } } while (0)
-static int writes(int there, DWORD attributes, DWORD tag, DWORD id_again, const char *mode) {
-    fake.there = there, fake.attributes = attributes, fake.tag = tag, fake.id = 5, fake.id_again = id_again;
-    fake_write_opens = fake_reparse_write_opens = fake_creates = fake_emptied = fake_closes = fake_osf_flags = 0;
-    fake_error = 0, fake_access = 0;
-    FILE *f = hos_fopen_write("longshot_options.ini", mode);
+/* (what is at the name when it is looked at, and when it is opened to write or read; mode "R": hos_fopen_read_nofollow) */
+static int opens(int there, DWORD attributes, DWORD tag, DWORD id, DWORD attributes_again, DWORD tag_again, DWORD id_again,
+                 const char *mode) {
+    fake.there = there, fake.attributes = attributes, fake.tag = tag, fake.id = id;
+    fake.attributes_again = attributes_again, fake.tag_again = tag_again, fake.id_again = id_again;
+    fake_write_opens = fake_reparse_write_opens = fake_data_opens = fake_creates = fake_emptied = fake_closes = 0;
+    fake_osf_flags = -1, fake_error = 0, fake_access = 0;
+    FILE *f = !strcmp(mode, "R") ? hos_fopen_read_nofollow("longshot_log.txt") : hos_fopen_write("longshot_options.ini", mode);
     if (f) fclose(f);
     return f != NULL;
+}
+static int writes(int there, DWORD attributes, DWORD tag, DWORD id_again, const char *mode) {
+    return opens(there, attributes, tag, 5, attributes, tag, id_again, mode);
 }
 int main(int argc, char **argv) {
     (void)argc;
     fake_file = argv[1];
     /* (nothing at the name: made new, and only new) */
     CHECK(writes(0, 0, 0, 5, "w") && fake_creates == 1 && fake_utf8);
-    /* (a plain file: opened again as itself, emptied for "w", appended to for "a", written where it stands for "r+b") */
+    /* (a plain file: opened for writing once, as itself; emptied for "w", appended to for "a", written where it stands for
+       "r+b") */
     CHECK(writes(1, 0x20, 0, 5, "w") && fake_creates == 0 && fake_emptied == 1 && fake_osf_flags == _O_TEXT);
+    CHECK(fake_write_opens == 1 && fake_reparse_write_opens == 1);
     CHECK(writes(1, 0x20, 0, 5, "ab") && fake_emptied == 0 && fake_osf_flags == _O_APPEND);
     CHECK(writes(1, 0x20, 0, 5, "r+b") && fake_emptied == 0 && fake_osf_flags == 0 && (fake_access & GENERIC_READ));
     CHECK(!writes(0, 0, 0, 5, "r+b") && fake_creates == 0 && fake_write_opens == 0);
-    CHECK(fake_reparse_write_opens == 0);
-    /* (OneDrive's files, reparse points that are not name surrogates, are written, opened as themselves) */
-    CHECK(writes(1, 0x420, 0x9000001AUL, 5, "w") && fake_reparse_write_opens == 0);   /* (IO_REPARSE_TAG_CLOUD_6) */
+    /* (a file system that makes up the file index for each open (redirectors, FUSE, shared folders): plain files still
+       written, as no index is compared for them) */
+    CHECK(writes(1, 0x20, 0, 6, "w") && fake_emptied == 1);
+    CHECK(opens(1, 0x20, 0, 0, 0x20, 0, 0, "w") && fake_emptied == 1);
+    /* (OneDrive's files, reparse points that are not name surrogates, are written, opened again without the flag) */
+    CHECK(writes(1, 0x420, 0x9000001AUL, 5, "w") && fake_write_opens == 1 && fake_reparse_write_opens == 0);   /* (CLOUD_6) */
     CHECK(writes(1, 0x420, 0x9000701AUL, 5, "w"));                                       /* (a cloud tag's other flavour) */
-    /* (name surrogates are refused before anything opens the name for writing: symbolic link, junction, WSL's link,
+    /* (name surrogates are refused before anything opens the name to write or read: symbolic link, junction, WSL's link,
        WCI_LINK_1, GLOBAL_REPARSE) */
     const DWORD links[] = {0xA000000CUL, 0xA0000003UL, 0xA000001DUL, 0xA0000027UL, 0xA0000019UL};
     for (int i = 0; i < 5; i++) {
-        CHECK(!writes(1, 0x420, links[i], 5, "w") && fake_write_opens == 0 && fake_emptied == 0);
-        CHECK(!writes(1, 0x420, links[i], 5, "ab") && fake_write_opens == 0);
+        CHECK(!writes(1, 0x420, links[i], 5, "w") && fake_data_opens == 0 && fake_emptied == 0);
+        CHECK(!writes(1, 0x420, links[i], 5, "ab") && fake_data_opens == 0);
+        CHECK(!writes(1, 0x420, links[i], 5, "R") && fake_data_opens == 0);
     }
-    /* (something else put at the name between the look and the open: refused, closed, not emptied) */
-    CHECK(!writes(1, 0x20, 0, 6, "w") && fake_emptied == 0 && fake_closes == 2);
+    /* (something else put at the name between the look and the open: refused, closed, not emptied. A plain file that is a
+       link by the time it is opened (the open, as itself, sees it); a OneDrive file that is another file by then (its
+       index); a OneDrive file whose index is 0, which proves nothing, is not opened at all) */
+    CHECK(!opens(1, 0x20, 0, 5, 0x420, 0xA000000CUL, 5, "w") && fake_emptied == 0 && fake_closes == 2);
+    CHECK(!opens(1, 0x20, 0, 5, 0x10, 0, 5, "w") && fake_emptied == 0 && fake_closes == 2);
+    CHECK(!writes(1, 0x420, 0x9000001AUL, 6, "w") && fake_emptied == 0 && fake_closes == 2);
+    CHECK(!opens(1, 0x420, 0x9000001AUL, 0, 0x420, 0x9000001AUL, 0, "w") && fake_write_opens == 0);
     /* (a folder; a mode that does not write) */
     CHECK(!writes(1, 0x10, 0, 5, "w") && fake_write_opens == 0);
     CHECK(!writes(1, 0x20, 0, 5, "r") && fake_write_opens == 0);
-    puts("PASS: on Windows, hos_fopen_write refuses name surrogates and a name swapped under it, writes OneDrive's and plain files");
+    /* (hos_fopen_read_nofollow, the bug report's logs: a plain file and OneDrive's are read, opened for reading only; nothing
+       is made where nothing is; a link put at the name in between is refused) */
+    CHECK(writes(1, 0x20, 0, 5, "R") && fake_write_opens == 0 && fake_access == (GENERIC_READ | FILE_READ_ATTRIBUTES));
+    CHECK(fake_osf_flags == _O_RDONLY);
+    CHECK(writes(1, 0x420, 0x9000001AUL, 5, "R") && fake_write_opens == 0);
+    CHECK(!writes(0, 0, 0, 5, "R") && fake_creates == 0 && fake_data_opens == 0);
+    CHECK(!opens(1, 0x20, 0, 5, 0x420, 0xA0000003UL, 5, "R") && fake_closes == 2);
+    puts("PASS: on Windows, hos_fopen_write and hos_fopen_read_nofollow refuse name surrogates and a name swapped under them, "
+         "write and read OneDrive's and plain files, and need no stable file index for plain ones");
     return 0;
 }
 '''

@@ -5890,7 +5890,7 @@ void stats_tick() {
         if (now < next_check.load(std::memory_order_relaxed)) return;
         next_check.store(now + 500, std::memory_order_relaxed);
         const std::string trigger = std::string(dir) + "/draw_stats.now";   // ('/': both systems take it; '\\' made a file beside the folder on Linux)
-        FILE* f = fopen(trigger.c_str(), "rb");
+        FILE* f = hos_fopen_read_binary(trigger.c_str());   // (a bare name from longshot_env.txt lands in the game folder: no FIFO waited on)
         if (!f) return;
         fclose(f);
         std::remove(trigger.c_str());

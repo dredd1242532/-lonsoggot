@@ -260,7 +260,10 @@ The build reads your game and never changes it.
   leaves the file as it is and says so once in the log. Longshot Builder stops when a name it writes in the game folder
   is a link, the folders `bin`, `romfs`, `prompts`, `ngx`, `ffx`, `.game` and `.longshot_exefs` included. To keep the
   game, or its `romfs`, on another drive (an SD card), move the whole game folder there and build into it, or link the
-  game folder itself; a link to the `user` folder (the saves) is fine.
+  game folder itself; a link to the `user` folder (the saves) is fine. The Insert menu's bug report copies
+  `longshot_log.txt` and `longshot_log.1.txt` only when they are plain files, not links. Only the file's own name is
+  checked: a link at a folder on the way to it (the game folder, `user`, `bug-reports`, `prompts`) is followed, so a
+  linked game or `user` folder and OneDrive keep working, and a hard link is taken as the file it is.
 - **Uninstall:** uninstall the launcher (Windows: *Apps & features*), then delete its folder, the game folder and the
   shortcuts.
 

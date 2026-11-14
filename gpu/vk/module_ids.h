@@ -30,7 +30,7 @@ public:
         path_ = path, stamp_ = stamp;
         std::memcpy(uuid_, uuid, 16);
         ids_.clear(), pending_.clear(), fresh_ = true;
-        FILE* f = fopen(path.c_str(), "rb");
+        FILE* f = hos_fopen_read_binary(path.c_str());   // (a regular file: not a FIFO the start would wait on)
         if (!f) return;
         uint8_t head[kHead];
         if (fread(head, 1, kHead, f) == kHead && !std::memcmp(head, kMagic, 8) && !std::memcmp(head + 8, &stamp, 8) &&

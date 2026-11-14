@@ -180,10 +180,13 @@ void take_facts(const std::string& line, LogFacts& f) {
         f.trouble = trimmed(line).substr(0, 300);
 }
 /// Copies a log, its paths redacted, as much of it as there was when the copy began (the game goes on writing this run's).
-/// Read by length, not as C strings: a log a power cut or a kill ended can hold NUL bytes, and they are copied as they are
+/// Read by length, not as C strings: a log a power cut or a kill ended can hold NUL bytes, and they are copied as they are.
+/// (longshot) Read as hos_fopen_write writes, as the copy leaves the PC with the report: not through a link at the log's
+/// name, which a game folder from elsewhere can hold and which would put another file in the report, and a regular file
+/// only, so a FIFO there does not hold the menu up
 LogFacts copy_log(const std::string& from, const std::string& to, const Inputs& in) {
     LogFacts f;
-    FILE* src = fopen(from.c_str(), "rb");
+    FILE* src = hos_fopen_read_nofollow(from.c_str());
     if (!src) return f;
     exists(from, &f.written);
     f.size = file_size(src);

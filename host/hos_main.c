@@ -1913,7 +1913,7 @@ static int game_main(int argc, char **argv) {
     }
     size_t n = (size_t)got;
 #else
-    FILE *f = fopen(image, "rb");
+    FILE *f = hos_fopen_read_binary(image);   /* (a regular file: not a FIFO the start would wait on) */
     if (!f) {
         fprintf(stderr, "cannot open %s\n", image);
         return 1;

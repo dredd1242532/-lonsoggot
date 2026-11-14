@@ -49,6 +49,7 @@ HARNESS = r'''
 typedef long LONG;
 static LONG InterlockedIncrement(volatile LONG *p) { return ++*p; }
 static void hos_log(const char *fmt, ...) { (void)fmt; }
+#define hos_fopen_read_binary(path) fopen((path), "rb")   /* (host/hos_fopen_read.h's regular-file-only read, for a plain file) */
 enum { WINDOW = 1 << 20 };
 static uint8_t window[WINDOW];   /* (guest addresses: offsets into it, from 0x1000) */
 static void *hos_guest_range(uint64_t a, uint64_t n) {

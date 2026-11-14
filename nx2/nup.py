@@ -396,9 +396,16 @@ def long_path(p):
     return "\\\\?\\" + p
 
 
-# (Windows) the reparse points that are links: a symbolic link, a junction (mount point), WSL's link. OneDrive marks its files
-# and folders with reparse points of its own, which are not
-LINK_TAGS = (0xA000000C, 0xA0000003, 0xA000001D)
+# (Windows) a reparse point that is a link: its tag is a name surrogate, the bit IsReparseTagNameSurrogate reads and the game
+# itself refuses (host/hos_fopen_write.h): a symbolic link, a junction (mount point), WSL's link, the container links
+# (WCI_LINK, GLOBAL_REPARSE) and any later one. OneDrive marks its files and folders with reparse points of its own, which
+# are not. nx2/make_game.py tests the same bit
+NAME_SURROGATE = 0x20000000
+
+
+def link_tag(tag):
+    """Whether a reparse point's tag is a link's (a name surrogate)"""
+    return bool(tag & NAME_SURROGATE)
 
 
 def package_parts(rel):
@@ -411,10 +418,10 @@ def package_parts(rel):
 
 
 def is_link(info, links_only=False):
-    """A link or reparse point. links_only: only reparse points that are links (LINK_TAGS) count"""
+    """A link or reparse point. links_only: only reparse points that are links (link_tag: name surrogates) count"""
     reparse = getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
     if reparse and links_only:
-        reparse = getattr(info, "st_reparse_tag", 0) in LINK_TAGS
+        reparse = link_tag(getattr(info, "st_reparse_tag", 0))
     return stat.S_ISLNK(info.st_mode) or bool(reparse)
 
 

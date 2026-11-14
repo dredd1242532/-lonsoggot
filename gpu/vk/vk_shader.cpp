@@ -51,6 +51,7 @@
 #include "shader_recompiler/runtime_info.h"
 
 #include "vk_paths.h"
+#include "../../host/hos_fopen_read.h"   // (longshot_shaders.bin, a regular file only)
 #include "vk_internal.h"
 #include "vk_jobs.h"
 #include "vk_draw.h"
@@ -2109,7 +2110,7 @@ void seed_stage_failed(const Code& c, uint64_t program) {
 std::string seed_path() { return beside_exe("longshot_shaders.bin"); }
 
 size_t seed_open() {
-    if (FILE* f = fopen(seed_path().c_str(), "rb")) {
+    if (FILE* f = hos_fopen_read_binary(seed_path().c_str())) {   // (a regular file: not a FIFO the start would wait on)
         _fseeki64(f, 0, SEEK_END);
         seed.blob.resize((size_t)_ftelli64(f));
         _fseeki64(f, 0, SEEK_SET);

@@ -5,10 +5,17 @@
    emptied and rewrote the file it named, anywhere the player can write.
    Linux: O_NOFOLLOW, and only a regular file (not a FIFO or a device). Windows: the name is opened as itself
    (FILE_FLAG_OPEN_REPARSE_POINT) and refused when it is a name surrogate (a symbolic link, a junction, WSL's and the
-   container links), then opened for writing and kept only when that is the same file, so nothing can be swapped in
-   between; OneDrive's own reparse points are not surrogates and are written.
+   container links). A file with no reparse point (the usual case) is then opened for writing as itself in one step, and
+   refused if what that handle finds is a reparse point after all. One with a reparse point that is not a link (OneDrive's
+   files, deduplicated or compressed ones) is opened again without the flag, so OneDrive fills it first, and kept only
+   when it is the same file (volume and file index).
    mode: "w", "wb", "a", "ab", "r+" or "r+b" ("r+": an existing file only, as fopen). Used by the host (C) and the renderer
-   (C++). tests/test_game_writes_no_links.py fails on a write in host/ or gpu/vk/ that does not come through here. */
+   (C++). tests/test_game_writes_no_links.py fails on a write in host/ or gpu/vk/ that does not come through here.
+   hos_fopen_read_nofollow reads by the same rule: the bug report's copies of the logs, which the player sends.
+   Not covered, on purpose: a link at a folder on the way to the file (the game folder, user/, bug-reports, prompts) is
+   followed, as a linked game or user folder and OneDrive need; only the file's own name is checked. A hard link is not
+   told apart from the file itself (an archive can only hard-link within itself, and refusing them would refuse
+   deduplicated or hard-link-copied folders). */
 #pragma once
 #include <stdio.h>
 #include <string.h>
@@ -44,9 +51,21 @@ static inline wchar_t *hos_fopen_wide(const char *path) {
     if (w && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, w, n) != n) free(w), w = NULL;
     return w;
 }
-/* (the handle to write w through, or INVALID_HANDLE_VALUE; *refused: the name is a link or not a plain file) */
+/* (what is at a handle: -1 not a plain file (a folder, a device, a name surrogate, or not known), 0 a file with no reparse
+   point, 1 a file with a reparse point that is not a link (OneDrive's, deduplicated, compressed)) */
+static inline int hos_fopen_kind(HANDLE h) {
+    FILE_ATTRIBUTE_TAG_INFO tag;
+    if (GetFileType(h) != FILE_TYPE_DISK || !GetFileInformationByHandleEx(h, FileAttributeTagInfo, &tag, sizeof tag) ||
+        (tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+        return -1;
+    if (!(tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+    return IsReparseTagNameSurrogate(tag.ReparseTag) ? -1 : 1;
+}
+/* (the handle to write or read w through, for access, or INVALID_HANDLE_VALUE; existing: only a file that is there, else
+   one is made new where nothing is; *refused: the name is a link or not a plain file) */
 static inline HANDLE hos_fopen_write_handle(const wchar_t *w, DWORD access, int existing, int *refused) {
     const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;   /* (as fopen's) */
+    *refused = 0;
     const HANDLE look = CreateFileW(w, FILE_READ_ATTRIBUTES, share | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
                                     FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (look == INVALID_HANDLE_VALUE) {
@@ -54,22 +73,34 @@ static inline HANDLE hos_fopen_write_handle(const wchar_t *w, DWORD access, int 
         /* (nothing at the name: made new, which fails if something, a link too, was put there since) */
         return CreateFileW(w, access, share, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
     }
-    FILE_ATTRIBUTE_TAG_INFO tag;
+    const int kind = hos_fopen_kind(look);
     BY_HANDLE_FILE_INFORMATION was, is;
-    const int plain = GetFileType(look) == FILE_TYPE_DISK &&
-                      GetFileInformationByHandleEx(look, FileAttributeTagInfo, &tag, sizeof tag) &&
-                      !(tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                      !((tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && IsReparseTagNameSurrogate(tag.ReparseTag)) &&
-                      GetFileInformationByHandle(look, &was);
-    /* (opened again without FILE_FLAG_OPEN_REPARSE_POINT, so that OneDrive fills a file kept only online before it is
-       written, and kept only if it is the file looked at) */
-    HANDLE h = plain ? CreateFileW(w, access, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL) : INVALID_HANDLE_VALUE;
-    const int opened = h != INVALID_HANDLE_VALUE;
-    const int same = opened && GetFileInformationByHandle(h, &is) && is.dwVolumeSerialNumber == was.dwVolumeSerialNumber &&
-                     is.nFileIndexHigh == was.nFileIndexHigh && is.nFileIndexLow == was.nFileIndexLow;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    int same = 0, refuse = kind < 0;
+    if (kind == 0) {
+        /* (no reparse point: opened as itself once more, now for access. The flag changes nothing for such a file, and
+           whatever was put at the name since is opened as itself too, not followed, and refused below. No file IDs are
+           compared, so a file system that makes them up for each open (some network redirectors, FUSE mounts, a virtual
+           machine's shared folders) still saves) */
+        h = CreateFileW(w, access | FILE_READ_ATTRIBUTES, share, NULL, OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+        same = h != INVALID_HANDLE_VALUE && hos_fopen_kind(h) == 0;
+    } else if (kind == 1) {
+        /* (a reparse point that is not a link: opened again without the flag, so that OneDrive fills a file kept only
+           online and the others are read and written as their data, and kept only if it is the file looked at. A file
+           index of 0 proves nothing: refused) */
+        if (GetFileInformationByHandle(look, &was) && (was.nFileIndexHigh | was.nFileIndexLow)) {
+            h = CreateFileW(w, access | FILE_READ_ATTRIBUTES, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            same = h != INVALID_HANDLE_VALUE && GetFileInformationByHandle(h, &is) &&
+                   is.dwVolumeSerialNumber == was.dwVolumeSerialNumber && is.nFileIndexHigh == was.nFileIndexHigh &&
+                   is.nFileIndexLow == was.nFileIndexLow;
+        } else {
+            refuse = 1;
+        }
+    }
     CloseHandle(look);
-    if (opened && !same) CloseHandle(h), h = INVALID_HANDLE_VALUE;
-    *refused = !plain || (opened && !same);
+    if (h != INVALID_HANDLE_VALUE && !same) CloseHandle(h), h = INVALID_HANDLE_VALUE, refuse = 1;
+    *refused = refuse;
     return h;
 }
 #endif
@@ -134,5 +165,52 @@ static inline int hos_freopen_write(const char *path, const char *mode, FILE *st
     const int ok = dup2(fileno(f), fileno(stream)) >= 0;
     fclose(f);
     return ok;
+#endif
+}
+/* (a refused read, said once per file that includes this, as a refused write is) */
+static inline void hos_fopen_read_refused(const char *path) {
+    static int said;
+    if (!said++) fprintf(stderr, "files: %s is a link or not a plain file: the game does not read it\n", path);
+}
+/* fopen(path, "rb") for a file whose bytes leave the PC (the bug report's copies of longshot_log.txt and longshot_log.1.txt,
+   which the player is asked to send): by the write's rule, not through a link at its name and only a regular file, so a
+   link there cannot put another file's bytes in the report, and a FIFO is not waited on. Linux: O_NOFOLLOW and
+   O_NONBLOCK, then fstat. Windows: hos_fopen_write_handle, for reading an existing file */
+static inline FILE *hos_fopen_read_nofollow(const char *path) {
+#ifdef _WIN32
+    wchar_t *w = hos_fopen_wide(path);
+    if (!w) return NULL;
+    int refused = 0;
+    HANDLE h = hos_fopen_write_handle(w, GENERIC_READ, 1, &refused);
+    free(w);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (refused) hos_fopen_read_refused(path);
+        return NULL;
+    }
+    const int fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
+    if (fd < 0) {
+        CloseHandle(h);
+        return NULL;
+    }
+    FILE *f = _fdopen(fd, "rb");
+    if (!f) _close(fd);
+    return f;
+#else
+    const int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) {
+        if (errno == ELOOP) hos_fopen_read_refused(path);
+        return NULL;
+    }
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        hos_fopen_read_refused(path);
+        close(fd);
+        return NULL;
+    }
+    const int flags = fcntl(fd, F_GETFL);
+    if (flags != -1) fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+    FILE *f = fdopen(fd, "rb");
+    if (!f) close(fd);
+    return f;
 #endif
 }

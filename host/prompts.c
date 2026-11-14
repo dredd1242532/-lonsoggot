@@ -610,7 +610,7 @@ static void keep_ranges(Live *l, const Run *runs, size_t nruns) {
    written; how many were outside l's range, or (guarded) over bytes the game changed: not written. Guarded, every run is
    looked at before any is written (a later one over an earlier finds the file's bytes), and only those written are kept */
 static size_t put_runs(Live *l, const Run *runs, size_t nruns, size_t *written, size_t *put_back) {
-    FILE *f = fopen(l->path, "rb");
+    FILE *f = hos_fopen_read_binary(l->path);
     uint8_t *chunk = (uint8_t *)malloc(131072);
     uint8_t *ok = (uint8_t *)calloc(nruns ? nruns : 1, 1);
     size_t outside = 0;
@@ -704,7 +704,7 @@ static void part_served(int p, int face, const int *bind) {   /* (its file writt
 
 /* (build_textures) the file's texture data, with bytes to know its pool by, and the ranges of the start's runs */
 static void live_textures_start(const char *bntx, const Run *runs, size_t nruns) {
-    FILE *f = fopen(bntx, "rb");
+    FILE *f = hos_fopen_read_binary(bntx);
     uint8_t h[0x38], blk[16];
     if (!f) return;
     int ok = fread(h, 1, sizeof h, f) == sizeof h && !memcmp(h, "BNTX", 4);
@@ -1239,7 +1239,7 @@ static int build_layouts(char *out, size_t cap) {
     snprintf(out, cap, "%sprompts/Common.blarc.zs", dir);
     snprintf(path, sizeof path, "%sprompts/Common.blarc", dir);
     snprintf(keypath, sizeof keypath, "%sprompts/Common.blarc.key", dir);
-    FILE *f = fopen(path, "rb");
+    FILE *f = hos_fopen_read_binary(path);
     long n = 0;
     const int headed = f && fread(lay_head, 1, sizeof lay_head, f) == sizeof lay_head && !in_runs(0, sizeof lay_head, o.runs, o.n) &&
                        !fseek(f, 0, SEEK_END) && (n = ftell(f)) > 0;

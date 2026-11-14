@@ -133,7 +133,7 @@ def refuse_written_links(out, launcher_dir="bin"):
             tag = getattr(os.lstat(at), "st_reparse_tag", 0)
         except OSError:
             tag = 0
-        if not (os.path.islink(at) or (hasattr(os.path, "isjunction") and os.path.isjunction(at)) or tag in LINK_TAGS):
+        if not (os.path.islink(at) or (hasattr(os.path, "isjunction") and os.path.isjunction(at)) or link_tag(tag)):
             continue
         if folder == out and name in FOLDERS_WRITTEN:
             fail("%s is a link, which Longshot Builder never makes there: it writes into the %s folder, and would write wherever "
@@ -1550,9 +1550,16 @@ def copy_writable(src, dst):
     shutil.copyfile(src, dst)
 
 
-# (Windows) the reparse points that are links: a symbolic link, a junction (mount point), WSL's link. OneDrive marks its files
-# with others, and those are files
-LINK_TAGS = (0xA000000C, 0xA0000003, 0xA000001D)
+# (Windows) a reparse point that is a link: its tag is a name surrogate, the bit IsReparseTagNameSurrogate reads and the game
+# itself refuses (host/hos_fopen_write.h): a symbolic link, a junction (mount point), WSL's link, the container links
+# (WCI_LINK, GLOBAL_REPARSE) and any later one. OneDrive marks its files with others, and those are files. nx2/nup.py's
+# link_tag is the same
+NAME_SURROGATE = 0x20000000
+
+
+def link_tag(tag):
+    """Whether a reparse point's tag is a link's (a name surrogate)"""
+    return bool(tag & NAME_SURROGATE)
 
 
 def first_link(folder, any_reparse=True):
@@ -1563,7 +1570,7 @@ def first_link(folder, any_reparse=True):
             path = os.path.join(d, name)
             attrs = os.lstat(path)
             reparse = getattr(attrs, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-            if stat.S_ISLNK(attrs.st_mode) or (reparse and (any_reparse or getattr(attrs, "st_reparse_tag", 0) in LINK_TAGS)):
+            if stat.S_ISLNK(attrs.st_mode) or (reparse and (any_reparse or link_tag(getattr(attrs, "st_reparse_tag", 0)))):
                 return path
     return None
 

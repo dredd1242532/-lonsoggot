@@ -136,7 +136,7 @@ class GameFolderLinks(unittest.TestCase):
             make_game.refuse_folder_links(str(folder))
             with self.assertRaises(SystemExit):   # (a dump folder: any reparse point, as before)
                 make_game.refuse_dump_links(str(folder))
-        for tag in (0xA000000C, 0xA0000003):   # (a symbolic link, a junction)
+        for tag in (0xA000000C, 0xA0000003, 0xA0000027, 0xA0000019):   # (a symbolic link, a junction, WCI_LINK_1, GLOBAL_REPARSE)
             with mock.patch.object(make_game.os, "lstat", tagged(tag)), quiet, self.assertRaises(SystemExit):
                 make_game.refuse_folder_links(str(folder))
 
@@ -155,7 +155,7 @@ class GameFolderLinks(unittest.TestCase):
                                            st_nlink=1)
                 return real(path, *a, **k)
             return lstat
-        for tag, fast in ((0x9000001A, True), (0xA000000C, False)):   # (OneDrive's; a symbolic link's)
+        for tag, fast in ((0x9000001A, True), (0xA000000C, False), (0xA0000027, False)):   # (OneDrive's; a link's; WCI_LINK_1's)
             with self.subTest(tag=hex(tag)):
                 (self.out / ".longshot_romfs_checked").unlink(missing_ok=True)
                 self.heads("Model/a_Alb.bntx.zs")
@@ -166,6 +166,17 @@ class GameFolderLinks(unittest.TestCase):
                     self.stand_in()
                 self.assertEqual(len(calls), 1)
                 self.assertEqual(calls[0] is not None, fast, "the known list was %s" % ("dropped" if fast else "taken"))
+
+    def test_the_builder_and_the_game_take_one_rule_for_links(self):
+        """(Windows: a reparse point is a link when its tag is a name surrogate, in the Builder, nup.py and the game alike)"""
+        import nup
+        for tag in (0xA000000C, 0xA0000003, 0xA000001D, 0xA0000027, 0xA0000019, 0x9000001A, 0x9000701A, 0x80000017, 0):
+            with self.subTest(tag=hex(tag)):
+                self.assertEqual(make_game.link_tag(tag), bool(tag & 0x20000000))
+                self.assertEqual(nup.link_tag(tag), make_game.link_tag(tag))
+        header = (ROOT / "host" / "hos_fopen_write.h").read_text(encoding="utf-8")
+        self.assertIn("IsReparseTagNameSurrogate(tag.ReparseTag)", header)
+        self.assertIn("(((tag) & 0x20000000UL) != 0)", header)
 
     def test_links_at_the_names_the_builder_writes_stop_it(self):
         game = self.root / "built"
