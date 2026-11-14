@@ -361,13 +361,15 @@ static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) 
 #ifdef _WIN32
     if (!r && GetLastError() == ERROR_TIMEOUT) real_timeouts++;   // (a timeout, not an early return: WaitOnAddress may return early)
 #endif
+    // (the counters first, the return's time after them: a return the producer still counts as a blocked wait is then judged on
+    // a time after the publish, never left unjudged)
+    in_real_wait--;
+    real_wait_returns++;
     const uint64_t ret = rec::now_ns();
     if (const uint64_t pub = judge_after_ns; pub && ret >= pub) {   // (the first return after the publish time, judged once)
         int none = 0;
         verdict.compare_exchange_strong(none, call < pub && ret - call >= 15000000 ? 1 : 2);
     }
-    in_real_wait--;
-    real_wait_returns++;
     return r;
 }
 static std::atomic<bool> real_wake_works{true};
