@@ -435,13 +435,14 @@ int main(int argc, char** argv) {
             no_timeout = true;
             real_wake(&rec::g_rec.W);   // (back round into a wait entered with no timeout)
             bool woken = false;
+            int published = 0;   // (packets published so far: an attempt that returned early publishes none)
             for (int attempt = 0; attempt < 5 && !woken; attempt++) {
                 if (!wait_until([] { return in_real_wait == 1 && entered_without_timeout; })) fail("the recorder never waited on W");
                 const int r0 = real_wait_returns;
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 if (real_wait_returns != r0 || in_real_wait != 1) continue;   // (it returned early: again)
                 const uint64_t pub = rec::now_ns();
-                if (!publish_runs(attempt + 1)) fail("a publish did not wake the recorder waiting on W (3 s)");
+                if (!publish_runs(++published)) fail("a publish did not wake the recorder waiting on W (3 s)");
                 // (the wait that returned began before the publish and blocked for 15 ms or more: no compare at its start, so the
                 // wake ended it. Otherwise inconclusive: again)
                 woken = last_call_ns < pub && last_return_ns >= pub && last_return_ns - last_call_ns >= 15000000;

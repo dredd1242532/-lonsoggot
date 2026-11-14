@@ -269,6 +269,16 @@ HOOKS_BROKEN = (
 )
 
 
+def caught(exe, case, env):
+    """whether a broken build fails `case`. A real_ case runs the operating system's wait, which may return early (WaitOnAddress
+    allows it) or start late under load, and so can now and then let a broken adapter through; a real break fails nearly every
+    run. So a real_ case counts as caught when any of up to three runs fails: a fluke cannot make the suite intermittent"""
+    for _ in range(3 if case.startswith("real_") else 1):
+        if check(exe, ((case, env, None),)):
+            return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cxx", default=os.environ.get("CXX", "clang++"))
@@ -292,7 +302,7 @@ def main():
             if recorder.count(old) != 1:
                 raise SystemExit("broken %r: the anchor %r must appear once in vk_recorder.h" % (what, old))
             exe = build(cxx, args.headers, out, recorder.replace(old, new), "broken%d" % i)
-            if not check(exe, ((case, env, None),)):
+            if not caught(exe, case, env):
                 raise SystemExit("FAIL: vk_recorder.h with %s passed %s" % (what, case))
             print("PASS broken: %s fails %s" % (what, case))
         if os.name == "nt":   # (vk_replay.cpp's adapter broken: the real_ cases, which run without the timeout, must catch it)
@@ -301,7 +311,7 @@ def main():
                 if hooks.count(old) != 1:
                     raise SystemExit("broken adapter %r: the anchor %r must appear once in rec_wait_hooks" % (what, old))
                 exe = build(cxx, args.headers, out, recorder, "hooks%d" % i, hooks.replace(old, new))
-                if not check(exe, ((case, {IDLE: "wait"}, None),)):
+                if not caught(exe, case, {IDLE: "wait"}):
                     raise SystemExit("FAIL: the adapter with %s passed %s" % (what, case))
                 print("PASS broken adapter: %s fails %s" % (what, case))
     print("recorder own/idle: all passed")
