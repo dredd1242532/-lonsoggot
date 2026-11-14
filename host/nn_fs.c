@@ -87,6 +87,7 @@ const char *hos_romfs_dir, *hos_user_dir;
 #define R_PATH_EXISTS 0x402             /* fs::ResultPathAlreadyExists */
 #define R_NOT_MOUNTED 0xCA02            /* fs::ResultInvalidMountName-ish: no such mount */
 #define R_TARGET_NOT_FOUND 0x7D402      /* fs::ResultTargetNotFound (save data) */
+/* (0xCA01: the out-of-memory code hos_mem.c and hos_svc.c return; by Horizon's numbering it is svc::ResultInvalidSize) */
 #define R_OUT_OF_MEMORY 0xCA01          /* svc::ResultOutOfMemory: the guest buffer could not be committed (Windows) */
 
 #define FS_PATH_MAX 0x302                /* (nn::fs paths: 0x300 bytes and the NUL; DirectoryEntry's name is 0x301) */

@@ -88,11 +88,16 @@ static LONG CALLBACK commit_on_touch(EXCEPTION_POINTERS *info) {
     if (guest < 0x100000) return EXCEPTION_CONTINUE_SEARCH;   /* (a null pointer: the game's own fault) */
     MEMORY_BASIC_INFORMATION mbi;
     if (!VirtualQuery(p, &mbi, sizeof mbi)) return EXCEPTION_CONTINUE_SEARCH;
+#ifdef _WIN32
     /* (another thread committed this 64 KB between the fault and the look: the access is tried again. The heap is committed on
        touch now (hos_mem.c), and two threads touching one new chunk at once crashed the second in the boot's module loads.
-       Not an execute fault (8, DEP): a jump into guest memory would fault again at once, forever; it goes on to the crash report) */
+       Not an execute fault (8, DEP): a jump into guest memory would fault again at once, forever; it goes on to the crash report.
+       Windows only: Linux commits nothing lazily, its VirtualQuery stand-in calls every guest page committed and read-write, and
+       its signal handler never sets 8, so there every SIGSEGV and SIGBUS in the window would be tried again forever, at 100% CPU,
+       rather than reach report_crash) */
     if (mbi.State == MEM_COMMIT && mbi.Protect == PAGE_READWRITE && rec->ExceptionInformation[0] != 8)
         return EXCEPTION_CONTINUE_EXECUTION;
+#endif
     if (mbi.State != MEM_RESERVE) return EXCEPTION_CONTINUE_SEARCH;
     static volatile LONG touched;
     if (InterlockedIncrement(&touched) <= 16)
