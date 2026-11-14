@@ -929,9 +929,11 @@ static void events_tick(CoopSess *s, uint64_t now) {
 // player's own line lists another session than its own: someone took its place at the relay (a CONNECT with its
 // token, seen on the way), and the session joins again to take it back (roster_rejoin).
 static int apply_roster(CoopSess *s, const CoopRoster *r) {
-    int taken = 0;
+    int taken = 0, changed = s->roster.n != r->n;
     for (int i = 0; i < r->n; i++) {
         const CoopMemberInfo *m = &r->m[i], *old = member_of(s, m->id);
+        if (!old || old->session != m->session || old->flags != m->flags ||
+            strcmp(old->name, m->name) || s->roster.m[i].id != m->id) changed = 1;
         if (m->id == s->self) {   // the relay's maker mark is not taken for this session's own creation (on_joined)
             taken = m->session != s->session;
             continue;
@@ -958,8 +960,9 @@ static int apply_roster(CoopSess *s, const CoopRoster *r) {
         s->heard_at[id] = 0;
         coop_unlock(&s->lock);
     }
-    s->roster = *r;
-    s->dirty = 1;
+    // A repeated heartbeat is not a new view: publishing it would expose a new version before the
+    // consent hook has consumed it, briefly revoking an otherwise unchanged native context.
+    if (changed) s->roster = *r, s->dirty = 1;
     return taken;
 }
 

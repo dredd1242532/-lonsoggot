@@ -41,6 +41,10 @@ where each network's joins went.
   same game, with its rejoin token, joins again as the same member).
 - The roster (who is in the room, each one's session, which one made it) goes out at a change, again 0.25 s and 0.75 s
   later, and every 5 s: a datagram is lost now and then, and roster updates are not acknowledged.
+  A repeated unchanged roster refreshes the receive sequence/time without publishing a new view. Otherwise
+  a game-thread context read between publication and the consent callback could briefly revoke body permission
+  and delete/recreate a friend who never left. Member IDs, sessions, flags, names, count and order still publish
+  real changes immediately; the stale-view consent fence is unchanged.
 - Limits: a source address answers a cookie challenge before the relay sends it anything larger than it sent; each
   member is limited to 480 forwarded copies and 256 KiB per second, a datagram forwarded to seven counted seven times
   in both budgets (bursts 960 copies and 512 KiB). `--member-copies` and `--member-bytes` change the rates; each burst
@@ -241,6 +245,11 @@ when the relay drops it 15 s later. Two games on one PC: start a relay
 (`python -I scripts/coop_relay.py --host 127.0.0.1 --port 0 --log-joins`), then each game with `HOS_COOP=1
 HOS_COOP_SERVER=127.0.0.1:<port>`, the first with `HOS_COOP_AUTO=create HOS_COOP_ROOM=<secret>`, the second with
 `HOS_COOP_AUTO=join` and the same secret, each with its own `--user` folder.
+
+`tests/test_coop_roster_presence.py` deterministically refreshes the real native presentation context between
+session view publication and its consumer callback. Unchanged roster heartbeats preserve presence, view and
+body-ticket generations on normal and temporary saves; real roster changes still revoke before the consumer
+acknowledges them. The fixture also covers receive freshness, struct padding and a separately pending publication.
 
 The game and relay reserve their requested UDP addresses on Windows with `SO_EXCLUSIVEADDRUSE` before binding.
 Without it, Windows permits another program of the same user to bind a specific IPv4 address beside a wildcard
