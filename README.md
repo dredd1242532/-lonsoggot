@@ -218,6 +218,7 @@ Before updating, copy your saves somewhere safe: the `user` folder in the game f
 | Your saves | The game in `bin` and its files |
 | `longshot_options.ini`: the menu's choices and your controls | `image.bin` and the shader list |
 | `longshot_env.txt` | `language.txt`, written again with the game's language |
+| | `texts`: the texts reworded for a PC, made again |
 | `mods` | |
 
 Without the launcher: from a clone, `git pull`, then `python -I nx2/make_game.py --update <game folder>`; a builder
@@ -802,6 +803,11 @@ layout emulators use: `mods/<name>/romfs/...` holds files that replace or add to
 `mods/contents/<title id>/<name>/romfs` work too. A folder whose name starts with `-` or `_` is off. When two mods
 have the same file, the one whose whole path relative to `mods` sorts last (ignoring case) wins. Use `01-...`, `02-...`
 at the same level to set the order. Stop the game before changing mods, then restart.
+
+One of the game's texts names the console: the hint for playing the ocarina by microphone says to use its built-in one.
+The build rewords it for a PC ("your microphone") in your own text files, in each of the game's languages, into the game
+folder's `texts` folder, and the game reads those instead. A mod's own text file wins, and `HOS_TEXTS=0` in
+`longshot_env.txt` shows the game's own.
 
 Only RomFS mods are loaded. `exefs` patches (`.pchtxt`, `.ips`) are left out: Longshot compiles the game's code ahead
 of time, so patching its instructions would need a rebuild. The log (`longshot_log.txt`) names each mod and the files

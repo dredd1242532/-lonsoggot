@@ -2532,6 +2532,11 @@ def main(a=None):
         print("the shader list was not made: the game will compile its shaders as it plays", flush=True)
     else:
         note_shader_list(work, romfs, os.path.join(out, "longshot_shaders.bin"))
+    # (longshot) the text that names the console, reworded for a PC in every language (host/texts.c serves them; a mod's own wins)
+    texts = os.path.join(out, "texts")
+    if run(PY + [os.path.join(HERE, "text_assets.py"), "--romfs", romfs, "--out", texts], check=False, output=sys.stderr):
+        print("the texts were not reworded for a PC: the game shows its own", flush=True)
+        shutil.rmtree(texts, ignore_errors=True)
     # (longshot) the button prompts of other controllers (host/prompts.c): the game's icon font redrawn per controller, with fontTools.
     # Without it the game shows its own icons
     prompts = os.path.join(out, "prompts")
