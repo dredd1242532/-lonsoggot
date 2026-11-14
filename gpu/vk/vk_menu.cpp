@@ -888,6 +888,9 @@ void sync_preset_budgets(int p) {
 void env_release(const int* value);   // (below: a row the environment held, set by the menu from now on)
 // (longshot) the Quality preset "Auto (this PC)", kAutoPreset: the profile menu_auto_for_gpu chose for this PC (auto_settings.h)
 ::auto_settings::Choice auto_choice;   // (tier 0: no profile yet, before the card is known)
+/// (longshot) Frame generation's default is this PC's where Auto's choice sets it: the Steam Deck profile's 2x (auto_settings.h
+/// Choice::framegen; -1 elsewhere, where the row keeps its built-in default). The Bug report asks (report_default_depends_on_pc)
+bool framegen_by_pc() { return auto_choice.framegen >= 0; }
 uint64_t auto_for = 0;               // (the fingerprint of the hardware the options' Auto settings were chosen for: auto_for=)
 uint64_t auto_fp = 0;                // (this PC's, menu_auto_for_gpu)
 uint64_t auto_tuned = 0;             // (the fingerprint the measured tuning in play finished for: auto_tuned=)
@@ -2969,10 +2972,12 @@ void draw_debug_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, 
 // change the live options the renderer reads. Keep their current values, but do
 // not call them changes or invent a default. GPU 0 and microphone 1 stay stable;
 // report_default has the Aspect ratio's, the Game language's and Frame generation by's.
+// Frame generation's is this PC's where the Steam Deck profile chooses it (framegen_by_pc).
 bool report_default_depends_on_pc(const Row& r) {
     if (r.value == &opts.sharpness || r.value == &opts.pace || r.value == &opts.realtime ||
         r.value == &opts.handheld || r.value == &opts.vram_budget)
         return opts.preset != 0 || auto_for != 0;
+    if (r.value == &opts.framegen) return framegen_by_pc();
     return r.value == &opts.output_res || r.value == &opts.resolution || r.value == &opts.dlss ||
            r.value == &opts.preset || r.value == &opts.upscale ||
            (r.value == &opts.dlss_model && dlss_preset_env());
