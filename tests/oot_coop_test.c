@@ -14,6 +14,7 @@
 #include "coop.h"
 #include "coop_state.h"
 #include "coop_gameplay.h"
+#include "coop_players.h"
 #include "oot_coop_kit.h"
 #include "coop_chat.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* (env_on, env_value_off: the switches' rule, as host/oot_coop.c has it) */
@@ -817,6 +818,20 @@ int main(int argc, char **argv) {
 #undef FRESH
 #undef TICK
     }
+
+#ifdef COOP_PLAYERS_GRACE_MS
+    /* Manager disappearance is semantic loss, even if a clock stall was retaining bodies. */
+    {
+        const uint64_t holder = ld(GAMEDATA_SLOT, 8);
+        G.state = ST_ON, G.on = G.bound = G.playing = 1;
+        G.presence_play = COOP_PRESENCE_HELD;
+        st(GAMEDATA_SLOT, 0, 8);
+        hos_oot_coop_present(&c);
+        CHECK(!G.playing && !G.bound && G.presence_play == COOP_PRESENCE_CLOSED);
+        CHECK(!hooks.tick_loaded && !hooks.tick_open);
+        st(GAMEDATA_SLOT, holder, 8);
+    }
+#endif
 
     check_consent_publication();
     check_accept_log(COOP_ROOM_COOP);

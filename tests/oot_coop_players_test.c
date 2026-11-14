@@ -28,6 +28,14 @@ static int unsetenv(const char *name) { return _putenv_s(name, ""); }
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/compat/longshot_env.h"   /* the runtime's shared environment parser */
 
+/* Only for compiling this current fixture against the pre-grace production headers. */
+#ifndef COOP_PLAYERS_GRACE_MS
+#define COOP_PLAYERS_GRACE_MS 10000
+#define COOP_PLAYERS_FRESH_MS COOP_PLAYERS_SILENT_MS
+enum { COOP_PRESENCE_CLOSED, COOP_PRESENCE_ACTIVE, COOP_PRESENCE_HELD, COOP_PRESENCE_EXPIRED };
+enum { COOP_PLAYER_HELD = COOP_PLAYER_OTHER_MAP + 1, COOP_PLAYER_TIMED_OUT };
+#endif
+
 static int failures;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL:%d %s\n", __LINE__, #x); failures++; } } while (0)
 
@@ -122,9 +130,11 @@ static void messages(void) {
     CHECK(coop_players_show(&s, 2, both, "Forest", now + 1000, &at) == COOP_PLAYER_OTHER_MAP && !strcmp(at.area, "Field"));
     CHECK(coop_players_show(&s, 2, both, "Field", now + 1000, &at) == COOP_PLAYER_SHOWN && (at.flags & COOP_POS_ADULT) && at.pos[0] == 1);
 
-    /* its age: hidden once nothing was heard for COOP_PLAYERS_SILENT_MS, not a millisecond before */
-    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_SILENT_MS - 1, &at) == COOP_PLAYER_SHOWN);
-    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_SILENT_MS, &at) == COOP_PLAYER_NOT_HEARD);
+    /* Fresh poses become retain-only, then retire exactly at the shared grace boundary. */
+    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_FRESH_MS - 1, &at) == COOP_PLAYER_SHOWN);
+    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_FRESH_MS, &at) == COOP_PLAYER_HELD);
+    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_GRACE_MS - 1, &at) == COOP_PLAYER_HELD);
+    CHECK(coop_players_show(&s, 2, both, "Field", now + 800 + COOP_PLAYERS_GRACE_MS, &at) == COOP_PLAYER_TIMED_OUT);
 
     /* between two places: shown where it was COOP_PLAYERS_BEHIND_MS ago, the short way round for the facing */
     now += 10000;
@@ -378,8 +388,14 @@ int hos_coop_players_assets(void) { return assets_ready; }
 
 /* progress sync's two answers */
 static int playing;
+static int *native_playing, *native_presence_play;
+static uint64_t owner_save = 1, owner_area = 1;
+static uint32_t owner_offer = 1, owner_rules = 1;
 static uint32_t accepted;
-static int hos_oot_coop_playing(void) { return playing; }
+static int hos_oot_coop_playing(void) { return native_playing ? *native_playing : playing; }
+static int hos_oot_coop_presence_play(void) {
+    return native_presence_play ? *native_presence_play : playing ? COOP_PRESENCE_ACTIVE : COOP_PRESENCE_CLOSED;
+}
 static uint32_t hos_oot_coop_shown(void) { return accepted; }
 
 /* the session */
@@ -411,7 +427,7 @@ static void owner_context(void) {
     CoopGameplayContext c = {0};
     c.version = COOP_GAMEPLAY_VERSION, c.size = sizeof c;
     c.capabilities = presence ? COOP_GAMEPLAY_PRESENTATION : 0;
-    c.offer = 1, c.rules_epoch = 1, c.room_session = 11, c.save_generation = 1, c.area_generation = 1;
+    c.offer = owner_offer, c.rules_epoch = owner_rules, c.room_session = 11, c.save_generation = owner_save, c.area_generation = owner_area;
     for (int i = 0; i < view.n; i++)
         if (accepted & (1u << view.member[i].id)) c.accepted_session[view.member[i].id] = view.member[i].session;
     coop_gameplay_publish(&gameplay, &c);
@@ -645,6 +661,8 @@ static void frame(uint64_t ms) {
 static void fresh(void) {
     memset(&P, 0, sizeof P), P.lock = 7;   /* (7: the store's lock, for store_busy) */
     memset(&gameplay, 0, sizeof gameplay), presence = 1;
+    native_playing = native_presence_play = NULL;
+    owner_save = owner_area = 1, owner_offer = owner_rules = 1;
     allocations = refuse_alloc = 0;
     memset(calls, 0, sizeof calls);
     log_clear();
@@ -822,15 +840,15 @@ static void game_side(const char *steps_path) {
     CHECK(calls[FN_MTX] == 3);
     store_busy = 0;
 
-    /* an event plays (a conversation, a cutscene): nothing is sent, made, moved or removed */
+    /* An event holds poses, but a real received map change still retires the owned remote actor immediately. */
     st(events + 104, 0x1234, 8);
     const int sends_before = sends;
     they_are_at("Field", 0, 0, 0, 0, COOP_POS_IN_WORLD);
     frame(300), frame(300);
-    CHECK(calls[FN_MTX] == 3 && !calls[FN_DELETE] && sends == sends_before);
+    CHECK(calls[FN_MTX] == 3 && calls[FN_DELETE] == 1 && P.puppet[2].state == PP_NONE && sends == sends_before);
     st(events + 104, 0, 8);
 
-    /* the member is in another map now: its actor is deleted, and the log says where it went */
+    /* The member's other-map body remains retired, with the explaining log preserved. */
     frame(16);
     CHECK(calls[FN_DELETE] == 1 && deleted_actor == last_actor && P.puppet[2].state == PP_NONE && P.deleted == 1);
     CHECK(logged("member 2 is hidden (in another map)") && logged("member 2 is in Field at 0.00 0.00 0.00, child Link (another map than this game's: not shown)"));
@@ -865,14 +883,14 @@ static void game_side(const char *steps_path) {
     CHECK(total_calls() == before && sends == sent_before);
     playing = 1;
 
-    /* silence: hidden after 3 s */
+    /* Silence: existing body held through the grace, then removed. */
     they_are_at("Forest", 1, 1, 1, 0, COOP_POS_IN_WORLD);
     frame(16);
     CHECK(calls[FN_CREATE] == 3);
     game_makes();
     frame(16);
     CHECK(P.puppet[2].state == PP_SHOWN && P.made == 3);
-    frame(COOP_PLAYERS_SILENT_MS - 100);
+    frame(COOP_PLAYERS_GRACE_MS - 100);
     CHECK(P.puppet[2].state == PP_SHOWN && calls[FN_DELETE] == 2);
     log_clear();
     frame(200);
@@ -961,17 +979,15 @@ static void game_side(const char *steps_path) {
     hos_oot_coop_players_tick(1, 1);
     CHECK(sends == 1);
     st(events + 104, 0x1234, 8);
-    frame(IDLE_MS - 100), hos_oot_coop_players_tick(1, 1);
+    frame(3000), hos_oot_coop_players_tick(1, 1);
     CHECK(sends == 1);
-    frame(100), hos_oot_coop_players_tick(1, 1);
-    CHECK(sends == 2 && coop_pos_parse(sent, sent_n, &mine) && mine.flags == COOP_POS_LOADED && !strcmp(mine.area, "Forest") && !mine.pos[0]);
-    frame(1000), hos_oot_coop_players_tick(1, 1);
-    CHECK(sends == 2);
-    frame(COOP_PLAYERS_SLOW_MS - 1000), hos_oot_coop_players_tick(1, 1);
-    CHECK(sends == 3);
+    frame(6000), hos_oot_coop_players_tick(1, 1);
+    CHECK(sends == 1);
+    frame(2000), hos_oot_coop_players_tick(1, 1);
+    CHECK(sends == 1);   /* missing pose is silence, never an invented map exit */
     st(events + 104, 0, 8);
     frame(COOP_PLAYERS_SEND_MS);
-    CHECK(sends == 4 && coop_pos_parse(sent, sent_n, &mine) && mine.flags == (COOP_POS_IN_WORLD | COOP_POS_LOADED));
+    CHECK(sends == 2 && coop_pos_parse(sent, sent_n, &mine) && mine.flags == (COOP_POS_IN_WORLD | COOP_POS_LOADED));
     accepted = 1u << 2;
     their_pseq = 0;
     they_are_at("Forest", 10, 5, 21, 0, COOP_POS_IN_WORLD | COOP_POS_LOADED | COOP_POS_SLOW);
@@ -1125,7 +1141,7 @@ static void game_side(const char *steps_path) {
     frame(1000), frame(100);                   /* past 5 s: another map */
     CHECK(P.puppet[8].state == PP_NONE && calls[FN_DELETE] == 1 && logged("member 8 is in Elsewhere"));
     frame(1000), frame(100);                   /* past 6 s: gone: silent */
-    frame(COOP_PLAYERS_SILENT_MS);
+    frame(COOP_PLAYERS_FRESH_MS);
     CHECK(logged("made 1, deleted 1"));
     frame(3000), frame(100);                   /* past 12 s: a place in the map's own coordinates, wherever Link stood at the start */
     CHECK(calls[FN_CREATE] == 2 && made_place[0] == 30 && made_place[1] == 6 && made_place[2] == 40);
@@ -1362,7 +1378,7 @@ static void hud_privacy(void) {
     they_are_at("Elsewhere", 1, 2, 3, 0, COOP_POS_IN_WORLD);
     CHECK(!hos_coop_overlay_snapshot(&overlay, 2));
     they_are_at("Forest", 1, 2, 3, 0, COOP_POS_IN_WORLD);
-    now_ms += COOP_PLAYERS_SILENT_MS;
+    now_ms += COOP_PLAYERS_FRESH_MS;
     CHECK(!hos_coop_overlay_snapshot(&overlay, 2));
 
     const uint64_t gd = ld(ld(GAMEDATA_HOLDER, 8), 8), cn = gd + 0xc8;

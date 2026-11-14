@@ -13,6 +13,7 @@ static uint64_t clock_ms = 1000;
 #include "coop.c"
 #include "coop_state.h"
 #include "coop_gameplay.h"
+#include "coop_players.h"
 #include "oot_coop_kit.h"
 
 static int selected;

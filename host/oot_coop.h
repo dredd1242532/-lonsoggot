@@ -9,6 +9,7 @@
 #include "coop_state.h"
 #include "coop_proto.h"   /* (COOP_POS_TEXT, the POS flags: hos_oot_coop_players_last) */
 #include "coop_gameplay.h"
+#include "coop_players.h"
 #include "oot_coop_kit.h"
 
 /* nvnQueuePresentTexture's end (host/nvn_native.c), between frames on the presenting game thread with its core held.
@@ -33,6 +34,8 @@ int hos_oot_coop_contributors(CoopContributor *out, int max);
    change, as the present last saw it); the members the player accepted, bit <member id> set (identified, not removed,
    their key accepted), as the co-op thread last saw them. */
 int hos_oot_coop_playing(void);
+/* Body-only liveness grace; never authorizes progress, travel or a new body while HELD. */
+int hos_oot_coop_presence_play(void);
 uint32_t hos_oot_coop_shown(void);
 int hos_oot_coop_presence(void);   /* accepted signed COOP_PRESENCE_* mask; 0 when context is closed */
 /* Live presentation consent and its signed rules/member mask. No durable or download permission. Every adapter
@@ -55,10 +58,10 @@ void hos_oot_coop_kit_update(Ctx *c);
    before an authorized body effect. _update: each update of Link (host/hos_main.c
    hos_oot_lift_player), on the guest thread that runs it; until co-op is on and a save is played it reads two values
    and returns. _tick: each present of hos_oot_coop_present on the presenting thread, with whether a save was loaded
-   since the title screen and whether the game is being played (gate): outside play, and in play while an event holds
-   Link, it says the map and state to the room (the title screen: no map; a load or map change: the last map), every
-   2 s and at once at a change; never waiting. _last: for the Co-op tab, any thread: 1 when member id was heard in its
-   current session, with its last area (a map's name, "" on the title screen), its flags (COOP_POS_ADULT, _IN_WORLD,
+   since the title screen and whether the game is being played (gate). Real title/load/map changes publish a
+   not-in-world status; a missing pose or stopped clock sends nothing, so peers expire the last pose after the shared
+   body grace. The low-rate status is every 2 s and at a change; never waiting. _last: for the Co-op tab, any thread:
+   1 when member id was heard in its current session, with its last area (a map's name, "" on the title screen), its flags (COOP_POS_ADULT, _IN_WORLD,
    _LOADED, _SLOW: coop_proto.h) and the age of that message in ms; 0 when nothing was heard from it, it is no member
    of the room, or the layer is not running (another build of the game). area, flags and age_ms may be NULL. */
 void hos_oot_coop_players_start(void);

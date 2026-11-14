@@ -1090,6 +1090,28 @@ changes and revocation invalidate old work, even if the same terms are later acc
 this adapter's existing actors; another actor occupying a reused address is never deleted or moved. Registration
 refuses a second body writer. Request storage is allocated only at the first authorized body effect.
 
+**Stalls retain existing bodies for up to ten seconds**, using the single `COOP_PLAYERS_GRACE_MS` deadline.
+An old peer pose becomes retain-only after three seconds: it cannot create a new body, move the retained body
+or extrapolate motion. The native play clock still closes progress/travel after 2.5 seconds without a tick,
+but body presentation alone retains its existing authorized actors until the ten-second deadline. A missing
+own-pose update stops POS updates instead of falsely announcing a map exit; peers apply the same last-pose
+deadline. The player sees the same body at its last known place, not a predicted position or a new stand-in.
+
+Real load/transition/title/save changes, a missing player, Leave, changed member/session, signed rules,
+presence permission or consent still retire the body at the next game update that can execute. Copy and Return
+still revoke the prior save's permissions. Retain-only updates recheck the current owner ticket; the grace is
+not permission to show anything new and cannot carry revoked consent through a stall.
+
+After a liveness timeout removes a live body, a fresh permitted pose/play state can request it again immediately;
+construction itself remains asynchronous. The two-second backoff remains for refused/failed/cancelled creation,
+unexpected actor loss and real context/permission removals. A native play-counter jump greater than five is still
+treated as a possible save load: a stall alone is not enough evidence to waive that safety check.
+
+`tests/test_coop_presence_grace.py` exercises the actual native clock gate, pose policy, body adapter and owner
+on synthetic game memory, including three/nine/eleven-second gaps, immediate semantic revocation during grace,
+no new body from held data, zero-delay timeout recovery and preserved creation-failure backoff. These are
+game-free checks; a real freeze/slow-window observation remains separate evidence.
+
 The native adapter is build-guarded and range-checks guest pointers. Missing animation/equipment components,
 excessive slot counts, malformed strings, non-finite poses and stale actor or equipment-holder generations are refused
 or left untouched. Loading, title screens and events do not create or move a body. This is not full skeletal-pose

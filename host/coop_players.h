@@ -6,27 +6,31 @@
 // (coop_pos_parse: its version, printable names, finite numbers), with a place within COOP_PLAYERS_FAR metres of the
 // origin, and above the last one taken from that member in that session (coop_pos_fresh). A member is shown only
 // while the player accepted it (the mask the caller passes: progress sync's accepted and identified members), it was
-// heard within COOP_PLAYERS_SILENT_MS, its game sends at the full rate (COOP_POS_SLOW clear), its Link stands in a map,
-// and that map is this game's. Not thread safe: the caller holds its lock.
+// heard within COOP_PLAYERS_FRESH_MS, its game sends at the full rate (COOP_POS_SLOW clear), its Link stands in a map,
+// and that map is this game's. Older poses may retain an existing body, not create or move one. The caller holds its lock.
 //
 // Only a signed accepted presentation context sends POS. The session expands the send into accepted-session
 // unicasts and cancels queued poses when consent changes. With local body display off, permitted map/health state
 // uses COOP_PLAYERS_SLOW_MS; the independent arrows permission may still send precise positions at the full rate.
-// Outside play IN_WORLD is clear. The list treats missing or stale values as unknown, never as zero.
+// Real scene loss clears IN_WORLD; unavailable poses send nothing. The list treats stale values as unknown, never zero.
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
 #include "coop_proto.h"
 
 #define COOP_PLAYERS_HIST 8          // positions kept per member
-#define COOP_PLAYERS_SILENT_MS 3000  // a member not heard for this long is hidden
+#define COOP_PLAYERS_FRESH_MS 3000   // older poses retain an existing body only
+#define COOP_PLAYERS_GRACE_MS 10000 // total liveness gap permitted for an already-authorized body
 #define COOP_PLAYERS_BEHIND_MS 100   // a member is shown where it was this long ago, between two positions received
 #define COOP_PLAYERS_SEND_MS 66      // at most one position sent in this time (15 a second)
 // The low rate: below COOP_POS_QUIET_MS (3 s), so a receiver keeps its counter between two of them and a recorded one is
-// not taken again (coop_pos_fresh), and below COOP_PLAYERS_SILENT_MS, so a member at the low rate never reads as gone;
+// not taken again (coop_pos_fresh), and below COOP_PLAYERS_FRESH_MS, so a member at the low rate never reads as stale;
 // one message in 2 s is a thirtieth of the full rate's
 #define COOP_PLAYERS_SLOW_MS 2000
 #define COOP_PLAYERS_FAR 100000.0f   // metres from the origin: no map of the game is this large
+
+// Native presentation state is separate from the stricter progress/travel play gate.
+enum { COOP_PRESENCE_CLOSED, COOP_PRESENCE_ACTIVE, COOP_PRESENCE_HELD, COOP_PRESENCE_EXPIRED };
 
 typedef struct {
     CoopPos pose[COOP_PLAYERS_HIST];        // the newest at head
@@ -65,15 +69,16 @@ enum {
     COOP_PLAYER_SHOWN = 0,
     COOP_PLAYER_ABSENT,        // not a member of the room (or this player itself)
     COOP_PLAYER_NOT_ACCEPTED,  // not among the members this player accepted
-    COOP_PLAYER_NOT_HEARD,     // no position within COOP_PLAYERS_SILENT_MS
+    COOP_PLAYER_NOT_HEARD,     // no pose for this member/session
     COOP_PLAYER_SLOW,          // its game shows nobody and sends only at the low rate (COOP_POS_SLOW)
     COOP_PLAYER_NOT_IN_MAP,    // its Link stands in no map (COOP_POS_IN_WORLD not set)
     COOP_PLAYER_OTHER_MAP,     // its Link is in another map than map
+    COOP_PLAYER_HELD,          // stale pose within the grace: retain, never create or move
+    COOP_PLAYER_TIMED_OUT,     // grace exhausted; a fresh pose may request a body immediately
 };
-// Whether member id is shown in the map this game is in, and where: COOP_PLAYER_SHOWN and its position of
-// COOP_PLAYERS_BEHIND_MS ago in out (between the two positions received around then; the newest one when that is
-// older), or the reason it is not (out: the newest position for COOP_PLAYER_SLOW). accepted: bit id set for a member
-// the player accepted. out may be NULL.
+// Whether member id is shown in the map this game is in: SHOWN has an interpolated pose, HELD retains only an
+// existing body, otherwise the reason for retirement. Identity, explicit state and map changes have no grace.
+// accepted: bit id set for a member the player accepted. out may be NULL.
 int coop_players_show(const CoopPlayers *p, int id, uint32_t accepted, const char *map, uint64_t now_ms, CoopPos *out);
 const char *coop_players_why(int reason);
 // For the Co-op tab: 1 when a position was taken from member id in its current session (since it joined or this game

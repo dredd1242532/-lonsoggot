@@ -63,6 +63,7 @@ PIECES = [
     "static int presentation_locked(", "static int kit_consent_locked(", "static void gameplay_revoke_locked(", "static void publish_members(", "static void publish_none(", "static void sync_on(", "static void on_view(",
     "static int accept_always(", "static int offer_of(", "static int key_accepted(", "static uint32_t shown_of(",
     "static void publish(", "static void offer_update(",
+    "int hos_oot_coop_presence_play(",
     "static void unbind(", "static void say_counts(", "static void bind_tables(", "static int player_in_world(",
     "static volatile int title_starts;", "void hos_oot_coop_rom_open(", "static int gate(",
     "static void gameplay_context_locked(", "static int start(", "static void copy_present(", "void hos_oot_coop_present(",
@@ -139,7 +140,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="longshot-oot-coop-") as temp:
         temp = Path(temp)
         pieces = temp / "oot_coop_pieces.c"
-        pieces.write_text("\n".join(piece(coop, m) for m in PIECES) + "\n", encoding="utf-8")
+        pieces.write_text("\n".join(piece(coop, m) for m in PIECES
+                                   if m != "int hos_oot_coop_presence_play(" or m in coop) + "\n", encoding="utf-8")
         exe = temp / "oot_coop_test.exe"
         base = [a.cc, "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-I" + str(host),
                 '-DOOT_COOP_PIECES="%s"' % pieces.as_posix(), str(ROOT / "tests" / "oot_coop_test.c"), str(host / "coop_state.c"),

@@ -94,7 +94,7 @@ enum {
     APPLY_PER_FRAME = 16,
     INT_MAX_ITEM = 999,     /* the highest item count or counter the room may set: the game's counters show three digits */
     KEY_MAX = 15,           /* the most small keys of one dungeon the room may set (the most any dungeon has is 9) */
-    CLOCK_MS = 2500,        /* the game clock advanced this recently: the game is being played */
+    CLOCK_MS = 2500,        /* progress/travel still require a recent native clock tick; body grace is separate */
     CHECK_FLAGS = 24,       /* Bool flags read both ways (the table, the game's getter) before a save is shared */
 };
 
@@ -198,6 +198,7 @@ static struct {
     int looked;             /* the gate has looked at the game once since sync was switched on */
     int titles;             /* title_starts when last seen */
     int player;             /* the Player actor stands in the world (player_in_world) */
+    int scene;              /* valid native scene, independent of clock liveness */
     uint32_t clock;
     uint64_t clock_at, clock_entry, loading_entry, transition_entry[4];
     uint32_t frames;        /* frames played since the save was bound */
@@ -221,6 +222,7 @@ static struct {
     int open;               /* the current offer is accepted and the copy exists: the game thread applies (atomic) */
     int copy_busy_said;
     int playing;            /* co-op is on and the game is being played (gate): what Link's update reads (atomic) */
+    int presence_play;      /* COOP_PRESENCE_* native body lifetime state (atomic) */
     uint32_t pub_shown;     /* bit id: a member of the accepted offer whose key the player accepted (atomic) */
     int presence;           /* accepted signed presentation mask, atomic; absence is off */
 
@@ -862,6 +864,7 @@ static void on_view(const CoopView *v, void *user) {
         __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
         view_changed(v);
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&G.presence_play, COOP_PRESENCE_CLOSED, __ATOMIC_RELEASE);
         __atomic_store_n(&G.on, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&G.state, G.probe ? ST_ON : ST_OFF, __ATOMIC_RELEASE);
         return;
@@ -929,6 +932,7 @@ static void publish(const CoopOffer *o, int has, uint64_t now) {
 
 uint32_t hos_oot_coop_shown(void) { return __atomic_load_n(&G.pub_shown, __ATOMIC_ACQUIRE); }
 int hos_oot_coop_playing(void) { return __atomic_load_n(&G.playing, __ATOMIC_ACQUIRE); }
+int hos_oot_coop_presence_play(void) { return __atomic_load_n(&G.presence_play, __ATOMIC_ACQUIRE); }
 int hos_oot_coop_presence(void) { return __atomic_load_n(&G.presence, __ATOMIC_ACQUIRE); }
 
 int hos_oot_coop_presentation(CoopRules *rules, uint32_t *members) {
@@ -1423,7 +1427,13 @@ static int gate(Ctx *c, uint64_t mgr) {
         G.clock_entry = entry_of(c, mgr, C_UINT, INT_SIZE, F_PLAY_CLOCK);
         G.loading_entry = entry_of(c, mgr, C_BOOL, BOOL_SIZE, F_LOADING);
         for (int i = 0; i < 4; i++) G.transition_entry[i] = entry_of(c, mgr, C_BOOL, BOOL_SIZE, transition_flags[i]);
-        if (!G.clock_entry) return 0;
+        if (!G.clock_entry) {
+            if (G.scene) G.area_generation++;
+            G.scene = G.gate = 0;
+            __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
+            __atomic_store_n(&G.presence_play, COOP_PRESENCE_CLOSED, __ATOMIC_RELEASE);
+            return 0;
+        }
     }
     const uint64_t now = coop_now_ms();
     const int titles = __atomic_load_n(&title_starts, __ATOMIC_RELAXED);
@@ -1459,12 +1469,18 @@ static int gate(Ctx *c, uint64_t mgr) {
     const int player = player_in_world(c);
     if (player != G.player && (TRACE_ON || G.probe)) hos_log("coop: sync: Link %s the world", player ? "stands in" : "is not in");
     G.player = player;
-    const int open = G.loaded && player && !loading && !moving && G.clock_at && now - G.clock_at < CLOCK_MS;
+    const int scene = G.loaded && player && !loading && !moving && G.clock_at;
+    const uint64_t age = G.clock_at ? now - G.clock_at : 0;
+    const int open = scene && age < CLOCK_MS;
+    const int body = !scene ? COOP_PRESENCE_CLOSED : open ? COOP_PRESENCE_ACTIVE :
+                     age < COOP_PLAYERS_GRACE_MS ? COOP_PRESENCE_HELD : COOP_PRESENCE_EXPIRED;
     if (open != G.gate && (TRACE_ON || G.probe))
         hos_log("coop: sync: game %s (play clock %u, loading %d, scene change %#x)", open ? "running" : "paused", clock, loading, moving);
-    if (open != G.gate) G.area_generation++;
-    G.gate = open;
-    __atomic_store_n(&G.playing, open && __atomic_load_n(&G.on, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
+    if (scene != G.scene) G.area_generation++;   /* clock stalls are not scene changes or new body grants */
+    G.scene = scene, G.gate = open;
+    const int on = __atomic_load_n(&G.on, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&G.playing, open && on, __ATOMIC_RELEASE);
+    __atomic_store_n(&G.presence_play, on ? body : COOP_PRESENCE_CLOSED, __ATOMIC_RELEASE);
     return open;
 }
 
@@ -1783,7 +1799,14 @@ static int start(void) {
    the progress scanner, reports a local value, applies a value, requests a backup or runs the flag test aid. */
 static void copy_present(Ctx *c) {
     const uint64_t holder = recomp_load64(c, GAMEDATA_SLOT), mgr = rd_ok(holder, 8) ? recomp_load64(c, holder) : 0;
-    int open = rd_ok(mgr, MGR_SIZE) && gate(c, mgr);
+    const int valid = rd_ok(mgr, MGR_SIZE);
+    int open = valid && gate(c, mgr);
+    if (!valid) {
+        G.scene = 0;
+        __atomic_store_n(&G.presence_play, COOP_PRESENCE_CLOSED, __ATOMIC_RELEASE);
+    }
+    const int body = hos_oot_coop_presence_play();
+    if (!open) __atomic_store_n(&hos_oot_coop_kit_active, 0, __ATOMIC_RELEASE);
     if (TryAcquireSRWLockExclusive(&G.lock)) {
         if (G.eng && open && (mgr != G.mgr || !G.nflags)) {
             if (build_table(c, mgr)) {
@@ -1793,7 +1816,7 @@ static void copy_present(Ctx *c) {
             } else open = 0;
         }
         if (open) gameplay_context_locked();
-        else {
+        else if (body != COOP_PRESENCE_HELD && body != COOP_PRESENCE_EXPIRED) {
             coop_gameplay_publish(&G.gameplay, NULL);
             __atomic_store_n(&G.presence, 0, __ATOMIC_RELEASE);
         }
@@ -1832,6 +1855,8 @@ void hos_oot_coop_present(Ctx *c) {
         unbind("the game's flags are gone");
         hos_oot_hits_frame(NULL, 0);
         __atomic_store_n(&G.playing, 0, __ATOMIC_RELEASE);
+        G.scene = 0;
+        __atomic_store_n(&G.presence_play, COOP_PRESENCE_CLOSED, __ATOMIC_RELEASE);
         if (on) hos_coop_chat_scene(0);
         hos_oot_coop_players_tick(0, 0);   /* (no save: the title screen as far as the room is told) */
         return;

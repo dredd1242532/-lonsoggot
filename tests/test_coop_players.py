@@ -3,7 +3,7 @@
 Part 1, host/coop_players.c compiled as it is: a position message (POS) is taken only from a member the room's roster
 lists (not this player's own id), when it parses (version, printable names, finite numbers), names a place a map can
 have and is newer than the last one taken from that member in that session; a member is shown only while the player
-accepted it, it was heard within 3 s, its Link stands in a map and that map is this game's; between two positions the
+accepted it, it was recently heard or an existing body is still within its ten-second grace, its Link stands in a map and that map is this game's; between two positions the
 place shown lies between them, never between a place and a message without one; a member that left, or another
 session under its id, starts from nothing; this game's own position goes out at most 15 times a second and only with
 others in the room. The low rate: a game that shows nobody (COOP_POS_SLOW), or whose Link stands in no map, sends one
@@ -14,12 +14,12 @@ Part 2, host/oot_coop_players.c from its first constant to its end, on a fake gu
 oot_coop_players_test.c): switched off, it registers all the same, says this game's map and that a save is played
 (no place) every 2 s and at once at a map change, keeps a member's message for the tab's reader and makes nothing;
 until co-op is on and a save is played Link's update reads nothing; the present's tick says the title screen (no map)
-and a load (the last map) at once, and an event that holds Link for 2.5 s; off with one line on another
-build of the game or without one of the game's routines; the game's create request called with the manager, the name,
+and a real load (the last map) at once. Missing own poses send nothing: the peer's shared last-pose grace expires them.
+The adapter is off on another build or without a game routine; tests cover the create request's manager and name,
 the placement and the stack words; the actor taken once made, placed every frame, deleted when the member changes map,
-falls silent or leaves, and when this game stops being played; nothing sent, made, moved or deleted while the game is
-not played or an event plays; a request never made cancelled; an actor the game removed itself not deleted again; the
-counts of what was made and deleted; the guest's registers as they were after every call; and the test's made-up
+falls silent past the grace or leaves, and when this game stops being played for a real reason; held updates
+never create or move bodies, but still retire revoked ones. A request never made is cancelled; an actor the game
+removed itself is not deleted again; counts, preserved guest registers after every call, and the test's made-up
 member fed from a file.
 
 The production body adapter and codec are executed below, not judged by source-text assertions. Hook placement

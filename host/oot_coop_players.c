@@ -5,18 +5,18 @@
    A game that shows others sends its map, position, facing and permitted sword/shield state about 15 times a second,
    and shows each permitted member in the same map as an age-specific actor at that place: made by the game's routine for
    making an actor by its file name, moved every frame, and removed when the member leaves the map or the room, is not
-   heard for 3 s, or is not a member the player accepted (coop_players.h has the rules; this file is the game's side).
+   heard for the shared ten-second body grace, or is not a member the player accepted (coop_players.h has the rules).
    A permitted game that shows nobody (the local display switch off) sends no place: only its map and play state
    (COOP_POS_SLOW), every 2 s and at once at a change; the title screen (no save: no map) and a load or map change
-   (the last map) go out the same way from the present (hos_oot_coop_players_tick), as does an event that holds Link
-   for 2.5 s. Nothing is made in the game then: what arrives is kept for the reader.
+   (the last map) go out the same way from the present (hos_oot_coop_players_tick). A missing pose sends nothing:
+   peers hold the existing body until their last-pose grace expires, without mistaking a stall for a map exit.
 
    Where it runs. Everything that calls the game runs in Link's own update (host/hos_main.c hos_oot_lift_player, the
    hook nx2/oot_patches.py patch_movement puts into f_82c415e0), on the guest thread that updates him, as the game's
-   own actors ask for actors from their updates. Nothing is made, moved or removed unless progress sync's test says the
-   game is being played (hos_oot_coop_playing: a save loaded, Link in a map, no load, no scene change) and no event is
-   playing (a cutscene, a conversation, a map change's event: EventMgr +104). When the game stops being played (a map
-   change begins, a save loads) every actor made here is removed at that update, before the map goes.
+   own actors ask for actors from their updates. Active play may create and move authorized bodies; liveness
+   grace only retains actors that already exist. Real scene or consent loss still retires this adapter's actors.
+   Held updates never create or move one, and the native progress/travel gate remains strict. All native calls
+   still run on Link's update worker.
 
    The game's routines (their addresses are this build's):
    - The create request f_80392a70(manager [0x84eb1888], x1 the address of the actor file name's pointer, x2 a
@@ -130,8 +130,7 @@ enum {
     SCRATCH_MTX = 0x00, SCRATCH_PLAY = 0x40, SCRATCH_NODE = 0x80, SCRATCH_SIZE = 0xc0,
     NAME_MAX_LEN = 63,
     ASK_MS = 20000,         /* a request not made after this long is cancelled */
-    AGAIN_MS = 2000,        /* after a removal or a failure, the next request for that member waits this long */
-    IDLE_MS = 2500,         /* in play, Link's place not read for this long (an event holds him): the present says he is in no map */
+    AGAIN_MS = 2000,        /* failed/cancelled creation, unexpected actor loss and semantic removals keep this backoff */
     TEST_MEMBER = COOP_MAX_MEMBERS,
     TEST_STEPS = 64,
     RING = 128,
@@ -575,41 +574,44 @@ static void say_counts(const char *when) {
 }
 
 /* Removes what was made or asked for member id: nothing of it is left in the game. */
-static void puppet_remove(Ctx *c, int id, const char *why, uint64_t now) {
+static void puppet_remove(Ctx *c, int id, const char *why, uint64_t now, uint64_t retry_ms) {
     Puppet *p = &P.puppet[id];
     if (p->state == PP_NONE) return;
     if (p->state == PP_ASKED) {
         request_cancel(c, p), P.failed++;
+        retry_ms = AGAIN_MS;
     } else if (actor_alive(c, p)) {
         const Call k = {.x = {p->actor, 0}};
         game_call(c, ACTOR_DELETE_FN, &k, NULL);
         P.deleted++;
     } else {
         P.taken_away++;   /* the game removed it (its map went) */
+        retry_ms = AGAIN_MS;
     }
     hos_log("coop: puppet: member %d is hidden (%s)", id, why);
-    p->state = PP_NONE, p->actor = 0, p->again_ms = now + AGAIN_MS;
+    p->state = PP_NONE, p->actor = 0, p->again_ms = now + retry_ms;
 }
 
-static void remove_all(Ctx *c, const char *why, uint64_t now) {
+static void remove_all(Ctx *c, const char *why, uint64_t now, uint64_t retry_ms) {
     int any = 0;
-    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) any |= P.puppet[id].state != PP_NONE, puppet_remove(c, id, why, now);
+    for (int id = 1; id <= COOP_MAX_MEMBERS; id++) any |= P.puppet[id].state != PP_NONE, puppet_remove(c, id, why, now, retry_ms);
     if (any) say_counts(why);
 }
 
 /* Member id this frame: reason (coop_players_show) and, when it is heard, its place. */
 static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t now) {
     Puppet *p = &P.puppet[id];
-    const int heard = reason == COOP_PLAYER_SHOWN || reason == COOP_PLAYER_OTHER_MAP;
+    const int heard = reason == COOP_PLAYER_SHOWN || reason == COOP_PLAYER_HELD || reason == COOP_PLAYER_OTHER_MAP;
     if (!heard) p->map[0] = 0;
     else if (strcmp(p->map, at->area)) {   /* the first sight, and each change of map */
         text_copy(p->map, sizeof p->map, at->area);
         hos_log("coop: puppet: member %d is in %s at %.2f %.2f %.2f, %s Link%s", id, at->area, at->pos[0], at->pos[1], at->pos[2],
-                at->flags & COOP_POS_ADULT ? "adult" : "child", reason == COOP_PLAYER_SHOWN ? "" : " (another map than this game's: not shown)");
+                at->flags & COOP_POS_ADULT ? "adult" : "child", reason != COOP_PLAYER_OTHER_MAP ? "" : " (another map than this game's: not shown)");
     }
     const char *name = P.actor_name[(at->flags & COOP_POS_ADULT) != 0];
-    if (p->state != PP_NONE && (reason != COOP_PLAYER_SHOWN || strcmp(p->name, name)))
-        puppet_remove(c, id, reason != COOP_PLAYER_SHOWN ? coop_players_why(reason) : "another actor is shown for it", now);
+    if (p->state != PP_NONE && ((reason != COOP_PLAYER_SHOWN && reason != COOP_PLAYER_HELD) || strcmp(p->name, name)))
+        puppet_remove(c, id, reason != COOP_PLAYER_SHOWN && reason != COOP_PLAYER_HELD ? coop_players_why(reason) : "another actor is shown for it",
+                      now, reason == COOP_PLAYER_TIMED_OUT ? 0 : AGAIN_MS);
     if (reason != COOP_PLAYER_SHOWN) return;
     if (p->state == PP_NONE) {
         if (now < p->again_ms) return;
@@ -651,13 +653,17 @@ static void puppet_step(Ctx *c, int id, int reason, const CoopPos *at, uint64_t 
                 was[2], anim_slots(c, anim_control(c, p->actor)));
     }
 }
-typedef struct { int member; uint64_t now; const CoopPos *pose; } BodyWrite;
+typedef struct { int member; uint64_t now; const CoopPos *pose; int hold; } BodyWrite;
 
 static int body_write(void *game, const void *payload) {
     const BodyWrite *body = payload;
     if (!(hos_oot_coop_presence() & COOP_PRESENCE_CHILD_BODY)) return 0;
     if (P.storage_failed) return 0;
     if (!P.show || body->member < 1 || body->member > COOP_MAX_MEMBERS || !body->pose || !age_permitted(body->pose->flags)) return 0;
+    if (body->hold) {
+        puppet_step(game, body->member, COOP_PLAYER_HELD, body->pose, body->now);
+        return 1;   /* ticket checked by the owner; no allocation, creation or pose update */
+    }
     if (!P.blocks) {
         P.blocks = hos_sys_alloc((uint64_t)B_SIZE * (COOP_MAX_MEMBERS + 1) + SCRATCH_SIZE, 16);
         if (!P.blocks) {
@@ -851,60 +857,67 @@ static void place_hidden(CoopPos *me) {
     } else me->flags &= (uint8_t)~COOP_POS_SLOW;
 }
 
+static int sample_pose(Ctx *c, uint64_t actor, uint64_t now, CoopPos *me) {
+    if (event_playing(c) || !rd_ok(actor, A_SIZE)) return 0;
+    *me = (CoopPos){.flags = COOP_POS_IN_WORLD | COOP_POS_LOADED | (P.show ? 0 : COOP_POS_SLOW)};
+    float rot[9];
+    char file[NAME_MAX_LEN + 1];
+    floats_at(actor + A_POS, me->pos, 3), floats_at(actor + A_ROT, rot, 9);
+    me->yaw = atan2f(rot[2], rot[8]);
+    if (!isfinite(me->pos[0]) || !isfinite(me->pos[1]) || !isfinite(me->pos[2]) || !isfinite(me->yaw)) return 0;
+    text_at(recomp_load64(c, actor + A_FILE), file, sizeof file);
+    if (!strcmp(file, "Player_Adult")) me->flags |= COOP_POS_ADULT;
+    else if (strcmp(file, "Player_Child")) return 0;
+    if (!map_now(c, me->area, sizeof me->area)[0]) return 0;
+    if (strcmp(me->area, P.own_map)) {
+        text_copy(P.own_map, sizeof P.own_map, me->area);
+        if (P.trace) hos_log("coop: players: this game's Link (%s) is in %s at %.2f %.2f %.2f", file, me->area, me->pos[0], me->pos[1], me->pos[2]);
+    }
+    const int disclose = age_permitted(me->flags);
+    if (P.show && disclose && P.anim) anim_read(c, actor, me);
+    if (P.show && disclose && P.gear && (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT)) equipment_read(c, actor, me);
+    health_read(c, me);
+    if (P.test) test_feed(me, now);
+    place_hidden(me);
+    return 1;
+}
+
 static void update(Ctx *c, uint64_t actor) {
     const uint64_t now = coop_now_ms();
-    if (!hos_oot_coop_playing() || !hos_oot_coop_presence()) {   /* context revoked: retire only this adapter's own actors */
-        if (P.was_playing) remove_all(c, "this game stopped being played: a map change or a load", now);
+    const int play = hos_oot_coop_presence_play(), permitted = hos_oot_coop_presence();
+    if (play == COOP_PRESENCE_CLOSED || !permitted || play == COOP_PRESENCE_EXPIRED) {
+        const int timeout = permitted && play == COOP_PRESENCE_EXPIRED;
+        if (P.was_playing) remove_all(c, timeout ? "this game's body liveness grace expired" :
+                                     "this game stopped being played: a map change or a load", now, timeout ? 0 : AGAIN_MS);
         __atomic_store_n(&P.was_playing, 0, __ATOMIC_RELAXED);
         return;
     }
     __atomic_store_n(&P.was_playing, 1, __ATOMIC_RELAXED);
-    if (event_playing(c) || !rd_ok(actor, A_SIZE)) return;
-
-    CoopPos me = {.flags = COOP_POS_IN_WORLD | COOP_POS_LOADED | (P.show ? 0 : COOP_POS_SLOW)};
-    float rot[9];
-    char file[NAME_MAX_LEN + 1];
-    floats_at(actor + A_POS, me.pos, 3), floats_at(actor + A_ROT, rot, 9);
-    me.yaw = atan2f(rot[2], rot[8]);
-    if (!isfinite(me.pos[0]) || !isfinite(me.pos[1]) || !isfinite(me.pos[2]) || !isfinite(me.yaw)) return;
-    text_at(recomp_load64(c, actor + A_FILE), file, sizeof file);
-    if (!strcmp(file, "Player_Adult")) me.flags |= COOP_POS_ADULT;
-    else if (strcmp(file, "Player_Child")) return;   /* an unknown age is not silently a child */
-    if (!map_now(c, me.area, sizeof me.area)[0]) return;
-    if (strcmp(me.area, P.own_map)) {
-        text_copy(P.own_map, sizeof P.own_map, me.area);
-        if (P.trace) hos_log("coop: players: this game's Link (%s) is in %s at %.2f %.2f %.2f", file, me.area, me.pos[0], me.pos[1], me.pos[2]);
-    }
-    const int disclose = age_permitted(me.flags);
-    if (P.show && disclose && P.anim) anim_read(c, actor, &me);
-    if (P.show && disclose && P.gear && (hos_oot_coop_presence() & COOP_PRESENCE_EQUIPMENT)) equipment_read(c, actor, &me);
-    health_read(c, &me);
-    if (P.test) test_feed(&me, now);
-    place_hidden(&me);
-
+    CoopPos me;
+    const int sampled = play == COOP_PRESENCE_ACTIVE && sample_pose(c, actor, now, &me);
     uint8_t buf[COOP_MAX_MESSAGE];
     int reason[COOP_MAX_MEMBERS + 1], in_room;
-    static CoopPos at[COOP_MAX_MEMBERS + 1];   /* (Link's update holds game_lock) */
+    static CoopPos at[COOP_MAX_MEMBERS + 1];   /* Link's update holds game_lock */
     CoopGameplayTicket tickets[COOP_MAX_MEMBERS + 1];
     const uint32_t accepted = P.show ? hos_oot_coop_shown() | P.forced : 0;
-    if (!TryAcquireSRWLockExclusive(&P.lock)) return;   /* the co-op thread is taking a position: the next frame */
-    P.last_me = me, P.me_ms = now;
-    const size_t n = disclose ? coop_players_send(&P.store, buf, sizeof buf, &me, now) : 0;
-    for (int id = 1; P.show && id <= COOP_MAX_MEMBERS; id++) reason[id] = coop_players_show(&P.store, id, accepted, me.area, now, &at[id]);
+    if (!TryAcquireSRWLockExclusive(&P.lock)) return;
+    if (sampled) P.last_me = me, P.me_ms = now;
+    const size_t n = sampled && age_permitted(me.flags) ? coop_players_send(&P.store, buf, sizeof buf, &me, now) : 0;
+    for (int id = 1; P.show && id <= COOP_MAX_MEMBERS; id++)
+        reason[id] = coop_players_show(&P.store, id, accepted, P.last_me.area, now, &at[id]);
     in_room = P.store.others > 0;
     memcpy(tickets, P.ticket, sizeof tickets);
     ReleaseSRWLockExclusive(&P.lock);
-    if (n) coop_send(COOP_K_POS, buf, n);   /* place_hidden applies each independent disclosure bit */
-    if (!P.show) return;   /* (nobody is shown: nothing is made in the game) */
-
+    if (n) coop_send(COOP_K_POS, buf, n);
+    if (!P.show) return;
     int shown = 0;
     for (int id = 1; id <= COOP_MAX_MEMBERS; id++) {
-        const BodyWrite body = {id, now, &at[id]};
-        if (reason[id] != COOP_PLAYER_SHOWN) {
-            puppet_step(c, id, reason[id], &at[id], now);   /* retirement only; cannot create or move */
+        const BodyWrite body = {id, now, &at[id], !sampled || reason[id] == COOP_PLAYER_HELD};
+        if (reason[id] != COOP_PLAYER_SHOWN && reason[id] != COOP_PLAYER_HELD) {
+            puppet_step(c, id, reason[id], &at[id], now);   /* retirement only; never a new grant */
         } else {
             const int result = hos_oot_coop_gameplay_dispatch(&tickets[id], &body, sizeof body, c);
-            if (!result) puppet_remove(c, id, "presentation permission or pose expired", now);
+            if (!result) puppet_remove(c, id, "presentation permission or pose expired", now, AGAIN_MS);
         }
         shown += P.puppet[id].state != PP_NONE;
     }
@@ -915,7 +928,8 @@ static void update(Ctx *c, uint64_t actor) {
 void hos_oot_coop_players_update(Ctx *c, uint64_t actor) {
     if (!__atomic_load_n(&P.on, __ATOMIC_ACQUIRE)) return;
     /* co-op off, the title screen, a load: nothing to send from here and nothing made to remove */
-    if ((!hos_oot_coop_playing() || !hos_oot_coop_presence()) && !__atomic_load_n(&P.was_playing, __ATOMIC_RELAXED)) return;
+    if ((hos_oot_coop_presence_play() == COOP_PRESENCE_CLOSED || !hos_oot_coop_presence()) &&
+        !__atomic_load_n(&P.was_playing, __ATOMIC_RELAXED)) return;
     if (!TryAcquireSRWLockExclusive(&P.game_lock)) return;
     update(c, actor);
     ReleaseSRWLockExclusive(&P.game_lock);
@@ -927,8 +941,8 @@ void hos_oot_coop_players_tick(int loaded, int open) {
     uint8_t buf[COOP_MAX_MESSAGE];
     size_t n = 0;
     if (!TryAcquireSRWLockExclusive(&P.lock)) return;   /* (the next present) */
-    /* in play Link's update sends; here only when it has not read Link's place for IDLE_MS (an event holds him) */
-    if (P.store.others && (!open || now - P.me_ms >= IDLE_MS)) {
+    /* Missing updates are silence, not evidence of a map exit. Only a real native-context closure sends this status. */
+    if (P.store.others && !open && hos_oot_coop_presence_play() == COOP_PRESENCE_CLOSED) {
         CoopPos me = {.flags = P.show ? 0 : COOP_POS_SLOW};   /* no place: Link stands in no map now */
         if (loaded) {   /* a save is played: the last map; else the title screen, no map */
             me.flags |= COOP_POS_LOADED | (P.last_me.flags & COOP_POS_ADULT);
@@ -986,7 +1000,7 @@ int hos_coop_overlay_snapshot(MkwVkCoopOverlay *out, int labels) {
         if (id < 1 || id > COOP_MAX_MEMBERS || !(members & (1u << id))) continue;
         CoopPos pose;
         uint64_t age = 0;
-        if (!hos_oot_coop_players_snapshot(id, &pose, &age) || age >= COOP_PLAYERS_SILENT_MS ||
+        if (!hos_oot_coop_players_snapshot(id, &pose, &age) || age >= COOP_PLAYERS_FRESH_MS ||
             now < P.me_ms || now - P.me_ms >= 500 || !(pose.flags & COOP_POS_IN_WORLD) ||
             (pose.flags & COOP_POS_SLOW) || !pose.area[0] || strcmp(pose.area, P.last_me.area)) continue;
         const int name = names && age_permitted(pose.flags) && P.puppet[id].state == PP_SHOWN;

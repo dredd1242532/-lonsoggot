@@ -105,11 +105,15 @@ int coop_players_show(const CoopPlayers *p, int id, uint32_t accepted, const cha
     if (!member_ok(id) || id == p->self || !p->listed[id]) return COOP_PLAYER_ABSENT;
     if (!(accepted >> id & 1)) return COOP_PLAYER_NOT_ACCEPTED;
     const CoopPlayerTrack *r = &p->r[id];
-    if (!r->n || now_ms - r->recv_ms[r->head] >= COOP_PLAYERS_SILENT_MS) return COOP_PLAYER_NOT_HEARD;
-    if (r->pose[r->head].flags & COOP_POS_SLOW) {   // its places are seconds apart and not meant to be shown
-        if (out) *out = r->pose[r->head];
-        return COOP_PLAYER_SLOW;
-    }
+    if (!r->n) return COOP_PLAYER_NOT_HEARD;
+    const CoopPos *latest = &r->pose[r->head];
+    if (out) *out = *latest;
+    if (latest->flags & COOP_POS_SLOW) return COOP_PLAYER_SLOW;
+    if (!(latest->flags & COOP_POS_IN_WORLD) || !latest->area[0]) return COOP_PLAYER_NOT_IN_MAP;
+    if (!map || strcmp(latest->area, map)) return COOP_PLAYER_OTHER_MAP;
+    const uint64_t age = now_ms - r->recv_ms[r->head];
+    if (age >= COOP_PLAYERS_GRACE_MS) return COOP_PLAYER_TIMED_OUT;
+    if (age >= COOP_PLAYERS_FRESH_MS) return COOP_PLAYER_HELD;
     CoopPos at;
     place_at(r, (uint32_t)now_ms, &at);
     if (out) *out = at;
@@ -125,6 +129,8 @@ const char *coop_players_why(int reason) {
     case COOP_PLAYER_NOT_ACCEPTED: return "not accepted or not identified";
     case COOP_PLAYER_SLOW: return "its game shows nobody";
     case COOP_PLAYER_NOT_HEARD: return "not heard";
+    case COOP_PLAYER_TIMED_OUT: return "not heard";
+    case COOP_PLAYER_HELD: return "waiting for a fresh pose";
     case COOP_PLAYER_NOT_IN_MAP: return "in no map";
     case COOP_PLAYER_OTHER_MAP: return "in another map";
     }
