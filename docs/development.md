@@ -617,6 +617,8 @@ Insert always releases the latch.
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
 | `compile_shaders` | No menu row: the Builder's, `make_game.py --compile-shaders`'s and the launcher's Compile shaders, read by a preparation (`vk_draw.cpp` `compile_all`). 0 Most (the default), 1 All (the predicted pipelines too). A file with only this line still makes the game's first start a first start |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y` | percent |
+| `haptic` | 0 Auto, 1 Standard rumble, 2 DualSense haptics, 3 Off: the Controls page's Haptic feedback row (`host/haptic.c`). Off stops the fine haptics only; `rumble_strength` 0 stops every back end |
+| `haptic_strength` | 0 Game's own (default), else 25 to 200 percent of what the game asks for, applied to the fine haptics alone and after the DSP (`host/haptic.c`) |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |
 | `field_of_view` | 50 to 150 percent of the current vertical gameplay FOV; 100 is the original. Applies immediately, before projection and culling. The resulting vertical angle stays within 5 to 140 degrees |
 | `robust_buffers` | 0 Auto (on), 1 Off, 2 On |

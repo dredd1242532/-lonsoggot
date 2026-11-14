@@ -199,6 +199,7 @@ static struct { int steps = 0; bool went_down = false; } auto_tuning;   // (and 
 static std::string mic_key(const char* name) { return name; }
 static void mic_tell_host() {}
 static int rumble_step(int v) { return v; }
+static int haptic_step(int v) { return v; }   // (the Haptic strength row's steps, which menu_init snaps)
 struct Row { int tab; const char* name; int* value; int lo, hi; };
 // INI_KEY
 // BIND_NAMES

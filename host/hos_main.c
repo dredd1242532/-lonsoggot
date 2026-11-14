@@ -2023,6 +2023,9 @@ static int game_main(int argc, char **argv) {
         call_guest(c, hos_module_init[i], sp, what);
     }
     call_guest(c, hos_entry_nnMain, sp, "nnMain");
+    /* (longshot) the game is over: the haptics stop and let go of the DualSense (host/haptic.c) */
+    void hos_sdl_haptic_shutdown(void);
+    hos_sdl_haptic_shutdown();
     hos_log("nnMain returned");
     return 0;
 }

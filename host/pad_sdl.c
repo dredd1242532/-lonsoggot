@@ -21,6 +21,7 @@
 #include <windows.h>
 #include "hos_sdl.h"
 #include "hd_rumble.h"
+#include "haptic.h"
 #include "hos_motion.h"
 #include "steam_pads.h"
 #include "../gpu/vk/vk_api.h"   /* (HOS_PAD_*) */
@@ -334,6 +335,7 @@ static void pads_poll(void) {
             for (int i = 0; i < MAX_PADS; i++)
                 if (pads[i].gc && !hos_sdl_pad_connected(pads[i].gc)) {
                     hos_log("hid: controller \"%s\" disconnected (SDL)", hos_sdl_pad_name(pads[i].gc));
+                    hos_haptic_pad_removed(pads[i].gc);   /* (longshot) the haptics let go of it first */
                     hos_sdl_pad_close(pads[i].gc);
                     pads[i].gc = NULL;
                     pads[i].rumble_lo = pads[i].rumble_hi = 0;
@@ -358,6 +360,10 @@ static void pads_poll(void) {
                 pads[slot].rumble_lo = pads[slot].rumble_hi = 0;
                 pads[slot].rumble_ns = 0;
                 hd_open(slot, gc);
+                /* (longshot) the haptics hear about the pad: a DualSense on a cable is driven through its own audio
+                   endpoint, every other pad keeps the rumble above (host/haptic.c) */
+                hos_haptic_pad_added(gc, hos_sdl_pad_vendor(gc), hos_sdl_pad_name(gc), hos_sdl_pad_wireless(gc),
+                                     pads[slot].hd_kind != HD_RUMBLE_NONE);
                 pads[slot].motion = hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_GYRO) && hos_sdl_pad_has_sensor(gc, HOS_SDL_SENSOR_ACCEL);
                 pads[slot].motion_on = 0;
                 pads[slot].motion_retry_ns = 0;
@@ -377,6 +383,21 @@ static void pads_poll(void) {
         int count = 0;
         int rx_option(int id, int otherwise);
         const int strength = rx_option(9, 100);   /* (the menu's Rumble strength: the motors' and HD rumble's) */
+        /* (longshot) the same two settings, and the same strength, for the DualSense's haptics: the one strength, and
+           Off stops every backend (host/haptic.c) */
+        void hos_haptic_strength(int percent);
+        void hos_haptic_mode(int mode);
+        void hos_haptic_extra(int percent);
+        int hos_haptic_status(void);
+        void rx_option_set(int id, int value);
+        hos_haptic_strength(strength);
+        hos_haptic_extra(rx_option(HOS_OPT_HAPTIC_STRENGTH, 0));
+        hos_haptic_mode(rx_option(HOS_OPT_HAPTIC_MODE, HOS_HAPTIC_AUTO));
+        if (rx_option(HOS_OPT_HAPTIC_TEST, 0)) {
+            int hos_haptic_test(void);
+            hos_haptic_test();
+        }
+        rx_option_set(HOS_OPT_HAPTIC_STATUS, hos_haptic_status());   /* (the menu's status row reads it back) */
         uint16_t motors[2];
         rumble_strength((uint16_t)rumble_low, (uint16_t)rumble_high, strength, motors);
         const uint16_t lo = motors[0], hi = motors[1];
@@ -469,6 +490,8 @@ static void pads_poll(void) {
                 if (sig != pads[i].input_sig) pads[i].input_sig = sig, pads[i].used_ns = now;
             }
             if (hd_poll(i, side, now)) continue;
+            /* (longshot) a pad the haptics drive is sent no SDL rumble at the same time (host/haptic.c) */
+            if (hos_haptic_owns(gc)) continue;
             if (rumble_due(lo, hi, pads[i].rumble_lo, pads[i].rumble_hi, now, pads[i].rumble_ns)) {
                 hos_sdl_pad_rumble(gc, lo, hi, lo || hi ? 1000 : 0);
                 pads[i].rumble_lo = lo;
@@ -577,3 +600,7 @@ void hos_sdl_rumble_hd(int side, const float value[4]) {
     memcpy(hd_values[side & 1], value, sizeof hd_values[0]);
     ReleaseSRWLockExclusive(&hd_lock);
 }
+
+/* (longshot) the game is over: the haptics stop and let go of the DualSense (host/haptic.c), which hos_main.c calls
+   once nnMain has returned. */
+void hos_sdl_haptic_shutdown(void) { hos_haptic_shutdown(); }

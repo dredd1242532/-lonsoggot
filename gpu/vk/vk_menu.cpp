@@ -816,6 +816,53 @@ const char* hn_mic(int v, int variant) {
     return missing ? "Not plugged in: Default stands in until it is back." : "This microphone, by its name. A change applies at once.";
 }
 const char* tx_rumble(int v) { return v ? tx_percent(v) : "Off"; }
+// (longshot) Haptic feedback and its rows (host/haptic.c): the mode, the strength of the fine haptics alone, and the
+// status the host writes back each poll. Auto is the default: a DualSense on a cable gets its own fine haptics, a Switch
+// Pro Controller keeps its HD Rumble, every other pad its motors, and a DualSense on Bluetooth the standard rumble.
+std::atomic<int> haptic_status_cache{7};   // (HOS_HAPTIC_NO_PAD until the host reports; the status row's value)
+const char* tx_haptic(int v) {
+    static const char* t[] = {"Auto", "Standard rumble", "DualSense haptics", "Off"};
+    return (unsigned)v < 4 ? t[v] : t[0];
+}
+const char* tx_haptic_strength(int v) { return v ? tx_percent(v) : "Game's own"; }
+const char* tx_haptic_status(int v) {
+    (void)v;
+    static const char* t[] = {"DualSense haptics (USB)", "DualSense Bluetooth (standard rumble)", "Switch Pro HD rumble",
+                              "Standard rumble", "Off", "Waiting for the DualSense audio endpoint",
+                              "Haptic backend unavailable", "No controller"};
+    const int s = haptic_status_cache.load(std::memory_order_relaxed);
+    return (unsigned)s < 8 ? t[s] : t[7];
+}
+const char* hn_haptic(int v, int variant) {
+    if (variant == 1) return nullptr;
+    if (v == 0)
+        return "Auto: the fine haptics for a DualSense on a cable, its motors on Bluetooth, a Switch Pro Controller its own "
+               "HD rumble, everything else the standard rumble.";
+    if (v == 2)
+        return "DualSense haptics: a DualSense without the audio endpoint (Bluetooth, none found) falls back to the standard "
+               "rumble, and the status row says so.";
+    return nullptr;
+}
+const char* hn_haptic_status(int v, int variant) {
+    (void)v;
+    if (variant == 1) return nullptr;
+    const int s = haptic_status_cache.load(std::memory_order_relaxed);
+    if (s == 5)
+        return "Looking for the DualSense's audio endpoint: the four-channel playback device a cable gives. Plug the "
+               "controller in with a USB cable; the standard rumble plays meanwhile.";
+    if (s == 6)
+        return "renhdrum.dll is not beside the game, or is not the right version: the standard rumble only.";
+    if (s == 4) return "Haptic feedback is Off. The Rumble strength's Off stops the motors as well.";
+    return "What drives the controller now, and why not the fine haptics (a missing renhdrum.dll, a DualSense on "
+           "Bluetooth, Haptic feedback Off).";
+}
+const char* hn_haptic_test(int v, int variant) {
+    (void)v;
+    if (variant == 1) return nullptr;
+    const int s = haptic_status_cache.load(std::memory_order_relaxed);
+    if (s == 4 || s == 6 || s == 7) return "Nothing to test right now: turn Haptic feedback on, or plug a controller in.";
+    return "Press Confirm: a short, gentle buzz, half a second, then it stops on its own.";
+}
 // (longshot) Menu size: how large the overlays are drawn (vk_ui.h unit), Medium unless the player chooses Small or Large. It
 // was Auto by default, Large in fullscreen at 1080 lines and up while a controller opened the menu: the menu changed size with
 // the input that opened it, and the version in its banner no longer fitted. An options file's menu_size=0 (that Auto): Medium
@@ -1323,6 +1370,23 @@ Row rows[] = {
      "The game's own dead zone still follows.", nullptr, false, true},
     {TAB_CONTROLS, "Rumble strength", &opts.rumble, 0, 150, 25, tx_rumble,
      "How strongly the controller rumbles, in percent of the game's rumble. Off turns it off.", nullptr, false, true},
+    // (longshot) the haptics: the one strength above still applies on top, and its Off stops every backend here
+    {TAB_CONTROLS, "Haptic feedback", &opts.haptic, 0, 3, 1, tx_haptic,
+     "Fine vibration for a DualSense on a cable: the game's high and low tones as they are. Auto picks the best a "
+     "controller can do (a Switch Pro Controller keeps its own HD rumble), Standard rumble plays every pad's motors, Off "
+     "stops the fine haptics only. The Rumble strength's Off still stops all of it.",
+     hn_haptic, false, true},
+    {TAB_CONTROLS, "Haptic strength", &opts.haptic_strength, 0, 200, 25, tx_haptic_strength,
+     "How strong the fine haptics alone are, in percent of what the game asks for. Game's own leaves them exactly as the "
+     "game sends them; the Rumble strength still applies on top, and its Off still stops everything.",
+     nullptr, false, true},
+    {TAB_CONTROLS, "Haptic status", &opts.haptic_status, 0, 0, 1, tx_haptic_status,
+     "What drives the controller now, and why not the fine haptics (a missing renhdrum.dll, a DualSense on Bluetooth, "
+     "Haptic feedback Off).",
+     hn_haptic_status, false, true},
+    {TAB_CONTROLS, "Test haptics", nullptr, 0, 0, 0, nullptr,
+     "A short, gentle buzz to check the controller really vibrates, whether it is the fine haptics, and how strong.",
+     hn_haptic_test},
     {TAB_MOTION, "Motion controls", &opts.gyro, 0, 1, 1, tx_gyro,
      "Aims and looks with the controller's gyroscope where the game uses motion, as on the Switch. Works with Switch Pro "
      "controllers and pads in Switch mode, DualSense and DualShock 4. Shown beside it: whether the connected pad has one.", hn_gyro,
@@ -1438,6 +1502,7 @@ std::atomic<int> protect_hearts{-1};
 std::atomic<int> player_flight{-1};
 std::atomic<int> free_camera{0};
 std::atomic<int> cheat_action{0};
+std::atomic<int> menu_haptic_test{0};   // (longshot) 1 when the Test haptics row was pressed; the host takes it back to 0
 std::atomic<int> link_age{-1};
 // (Movement speed: the choice, an index of link_speeds; the game side reads it in percent, HOS_OPT_CHEAT_SPEED)
 constexpr int link_speeds[] = {100, 125, 150, 200, 300};
@@ -1728,9 +1793,11 @@ int drag_row = -1;
 bool mouse_read = false;   // (the menu has read the mouse since it opened)
 bool is_slider(const Row& r) { return r.value == &opts.sharpness || r.value == &opts.mouse_sens || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (a scale: the arrows and a click stop at its ends; Rumble strength would go from Off to its strongest)
-bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
+bool stops_at_ends(const Row& r) { return r.value == &opts.ultrawide || r.value == &opts.mouse_sens || r.value == &opts.rumble || r.value == &opts.haptic_strength || r.value == &opts.gyro_sens_x || r.value == &opts.gyro_sens_y || r.value == &opts.volume || r.value == &opts.camera_speed || r.value == &opts.fov; }
 /// (the ini's Rumble strength on the menu's steps: 0 to 150, the nearest 25)
 int rumble_step(int v) { return (std::min(std::max(v, 0), 150) + 12) / 25 * 25; }
+// (longshot) the ini's Haptic strength on the menu's steps: 0 stays Game's own, else 25 to 200, the nearest 25
+int haptic_step(int v) { return v > 0 ? (std::min(v, 200) + 12) / 25 * 25 : 0; }
 // (longshot) A run's environment over a saved row (RX_VK_PACE=1, HOS_OUTPUT_RES=...): for that run only. save() writes the
 // player's own value while the row still holds the environment's; once the player changes the row, theirs is kept. (These
 // were copied into the row and the next save wrote them into longshot_options.ini, so a test run's switch stayed for good)
@@ -1789,6 +1856,9 @@ const char* ini_key(const Row& r) {
     if (r.value == &opts.dlss) return "dlss";   // (as opts.dlss and RX_VK_DLSS)
     if (r.value == &opts.handheld) return "handheld_profile";   // (the Profile row; host/nn_applet.c reads it at the start)
     if (r.value == &opts.ultrawide) return "ultrawide";   // (the Aspect ratio row; host/hos_main.c reads it at the start)
+    // (longshot) the haptics (host/haptic.c): the mode and the fine haptics' own strength
+    if (r.value == &opts.haptic) return "haptic";
+    if (r.value == &opts.haptic_strength) return "haptic_strength";
     static char k[32];
     size_t n = 0;
     for (const char* p = r.name; *p && n + 1 < sizeof k; p++) k[n++] = *p == ' ' ? '_' : (char)tolower(*p);
@@ -1923,6 +1993,7 @@ void save() {
                 const int v = saved_value(r.value);
                 fprintf(f, "%s=%d\n", ini_key(r), env_holds(&opts.output_res) && v == aspect_started ? ultrawide_read : aspect_follows_host(v) ? 1 : 0);
             } else if (r.value && r.value != &opts.game_lang) {   // (game_lang: language.txt's)
+                if (r.value == &opts.haptic_status) continue;   // (longshot: the host's report, never saved)
                 fprintf(f, "%s=%d\n", ini_key(r), saved_value(r.value));
             }
         }
@@ -1988,6 +2059,8 @@ void share_finish() {
     menu_refresh = true;
 }
 bool is_share_row(const Row& r) { return !r.value && r.tab == TAB_DEBUG && !strcmp(r.name, "Save my pipeline list"); }
+/// (longshot) the Test haptics row: an action, not a page (host/haptic.c takes the ask back to 0)
+bool is_haptic_test_row(const Row& r) { return !r.value && r.tab == TAB_CONTROLS && !strcmp(r.name, "Test haptics"); }
 std::string game_folder() {
     char exe[MAX_PATH];
     const DWORD n = game_module_path(exe, MAX_PATH);
@@ -3057,6 +3130,34 @@ const char* bug_report_hint() {
     return text.c_str();
 }
 
+/// (longshot) Test haptics: whether there is anything to buzz right now (the status the host wrote back, HOS_HAPTIC_*)
+bool haptic_test_ready() {
+    const int s = haptic_status_cache.load(std::memory_order_relaxed);
+    return s != 4 && s != 6 && s != 7;   // (not Off, not without a backend, not without a controller)
+}
+std::atomic<int> haptic_testing{0};   // (1 while the buzz plays: the cell says so, then clears itself)
+int64_t haptic_buzz_at = 0;   // (when the last buzz was asked for, prof_now)
+/// The Test haptics row's cell: what Confirm does, or that the buzz is playing
+const char* haptic_test_cell() {
+    static std::string said;
+    if (haptic_testing.load(std::memory_order_relaxed)) said = "Buzzing...";
+    else said = haptic_test_ready() ? "Test" : "Not now";
+    return said.c_str();
+}
+/// Under its help: why there is nothing to test, when there isn't
+const char* haptic_test_hint() {
+    const int s = haptic_status_cache.load(std::memory_order_relaxed);
+    if (s == 7) return "No controller to test. Plug one in.";
+    if (s == 4) return "Haptic feedback is Off: nothing to test.";
+    if (s == 6) return "renhdrum.dll is missing or not the right version: the standard rumble only, nothing to test.";
+    return nullptr;
+}
+/// (the buzz is half a second: the cell stops saying so a little after the host has stopped it)
+void haptic_test_tick() {
+    if (!haptic_testing.load(std::memory_order_relaxed)) return;
+    if (prof_now() - haptic_buzz_at > 2000000000LL) haptic_testing.store(0, std::memory_order_relaxed);
+}
+
 const char* const tab_titles[TAB_COUNT] = {"Graphics", "Audio", "Gameplay", "Controls", "Debug"};
 inline const char* tab_title(int t) { return t >= 0 && t < TAB_COUNT ? tab_titles[t] : "Settings"; }
 inline bool cheat_is_toggle(int c) { return c == 0 || c == 1 || c == 7; }
@@ -3077,6 +3178,7 @@ void row_value_cell(ui::Ctx& c, const Row& r, ImVec2 va, ImVec2 vb, bool selecte
         if (pending == &r) choice_cell(c, va, vb, "Press again to confirm", selected, false, false);
         else if (is_share_row(r)) choice_cell(c, va, vb, share_value.empty() ? "Save" : share_value, selected, false, false);   // (an action, not a page)
         else if (&r == &rows[kBugReportRow]) choice_cell(c, va, vb, bug_report_cell(), selected, false, false);   // (how the last report went)
+        else if (is_haptic_test_row(r)) choice_cell(c, va, vb, haptic_test_cell(), selected, false, false);   // (longshot: an action)
         else {
             choice_cell(c, va, vb, "", selected, false, false);
             ui::triangle(c, ImVec2(vb.x - 15 * s, mid), 10 * s, 1, selected ? ui::kGoldInk : ui::kInk);
@@ -3150,6 +3252,12 @@ void draw_options(ui::Ctx& c) {
     const char* hint = selr.value && selr.hint ? selr.hint(*selr.value, -1) : nullptr;
     if (is_share_row(selr) && !share_said.empty()) hint = share_said.c_str();   // (what the last save did)
     if (&selr == &rows[kBugReportRow]) hint = bug_report_hint();   // (the Bug report: where it was saved, or why not)
+    // (longshot) Test haptics: why there is nothing to test, when there isn't
+    static std::string haptic_test_said;
+    if (is_haptic_test_row(selr)) {
+        if (selr.hint) hint = selr.hint(0, -1);
+        if (const char* extra = haptic_test_hint()) haptic_test_said = extra, hint = haptic_test_said.c_str();
+    }
     const std::string pending_line = (cur_tab == TAB_GRAPHICS || cur_tab == TAB_DEBUG) && restart_pending() ? restart_line(c, 16 * s, hx1 - hx0 - 66 * s) : "";
     static float help_tall = 0, help_tall_w = 0;
     static std::string help_said;   // (Save my pipeline list's line as measured: measured again when it changes)
@@ -3168,7 +3276,7 @@ void draw_options(ui::Ctx& c) {
         if (const char* says = cheat_confirm(selr.cheat)) prompt_list[prompts_n++] = {ui::kConfirm, says};
         prompt_list[prompts_n++] = {ui::kCompact, "Compact", compact_key_name};
     } else {
-        prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : "Open"};
+        prompt_list[prompts_n++] = {ui::kConfirm, confirms ? (pending == &selr ? "Confirm" : selr.name) : &selr == &rows[kBugReportRow] || is_share_row(selr) ? "Save" : is_haptic_test_row(selr) ? "Test" : "Open"};
     }
     if (cur_tab == TAB_MOTION) prompt_list[prompts_n++] = {ui::kBack, "Back"};   // (Esc: to Controls)
     else {
@@ -3280,7 +3388,7 @@ void draw_tune_bar(ui::Ctx& c) {
     if (r.cheat >= 0 && cheat_confirm(r.cheat)) {
         tune_prompts[1] = {ui::kConfirm, cheat_confirm(r.cheat)};
     } else if (!r.value && r.cheat < 0) {
-        tune_prompts[1] = {ui::kConfirm, confirms ? (pending == &r ? "Confirm" : r.name) : &r == &rows[kBugReportRow] || is_share_row(r) ? "Save" : "Open"};
+        tune_prompts[1] = {ui::kConfirm, confirms ? (pending == &r ? "Confirm" : r.name) : &r == &rows[kBugReportRow] || is_share_row(r) ? "Save" : is_haptic_test_row(r) ? "Test" : "Open"};
     }
     const float pw = ui::prompts(c, ImVec2(0, 0), tune_prompts, 4, false);
     const float px0 = bx0 + (bw - pw) * 0.5f;
@@ -4136,6 +4244,7 @@ void menu_init() {
     if (FILE* f = fopen(ini_path().c_str(), "r")) {
         char line[80];
         bool has_resolution = false;
+        bool has_haptic = false;   // (longshot: an options file from before the haptics has no haptic= line)
         bool v2 = false;
         int version = 0;
         int old_dynres = -1;   // (the row before Resolution: 0, the full scale, is its 100%; 1 is Auto)
@@ -4159,6 +4268,7 @@ void menu_init() {
                         opts.hold_toggle = atoi(eq + 1) == 1 ? opts.hold_toggle | bit : opts.hold_toggle & ~bit;
                     }
             has_resolution |= !strcmp(line, "resolution");
+            has_haptic |= !strcmp(line, "haptic");   // (longshot)
             has_output |= !strcmp(line, "output_res");
             v2 |= !strcmp(line, "options_version");
             if (!strcmp(line, "options_version")) version = atoi(eq + 1);
@@ -4188,6 +4298,10 @@ void menu_init() {
         if (!has_resolution && old_dynres >= 0) opts.resolution = old_dynres ? 0 : 1;
         if (menu_auto) opts.menu_size = 2;
         opts.rumble = rumble_step(opts.rumble);   // (a hand-edited 60: 50, on the arrows' steps)
+        // (longshot) the haptics' two steps: 0 to 3, and the fine haptics' own strength 0 (Game's own) or 25 to 200
+        opts.haptic = std::min(std::max(opts.haptic, 0), 3);
+        opts.haptic_strength = haptic_step(opts.haptic_strength);
+        if (!has_haptic) opts.haptic = 0;   // (an options file from before: Auto, the default)
         // (Game speed is Real time by default now: Per frame played at half speed at 30 fps, the "slow motion" players
         // reported. An options file from before kept the old default whether chosen or not: Real time for it too)
         if (!v2) opts.realtime = 1;
@@ -4332,6 +4446,9 @@ int menu_free_camera() { return cheats_on() ? free_camera.load(std::memory_order
 int menu_link_speed() { return cheats_on() ? link_speeds[std::clamp(link_speed.load(std::memory_order_relaxed), 0, kLinkSpeeds - 1)] : 100; }
 int menu_damage_taken() { return cheats_on() ? opts.damage_taken : 1; }   // (Normal while the tools are off; the choice is kept)
 int menu_take_cheat_action() { return cheat_action.exchange(0, std::memory_order_relaxed); }
+// (longshot) the haptics' two asks: the status the host wrote back (menu_option_set) and the Test row's press
+int menu_haptic_status_option() { return haptic_status_cache.load(std::memory_order_relaxed); }
+int menu_haptic_test_take() { return menu_haptic_test.exchange(0, std::memory_order_relaxed); }
 
 void menu_note_present_sizes(uint32_t picture_w, uint32_t picture_h, uint32_t window_w, uint32_t window_h) {
     const auto c = [](uint32_t v) { return (uint64_t)std::min(v, 0xffffu); };
@@ -4447,6 +4564,10 @@ void menu_option_set(int id, int value) {
             int expected = value ? 0 : 1;
             player_flight.compare_exchange_strong(expected, value != 0, std::memory_order_relaxed);
         }
+        return;
+    }
+    if (id == HOS_OPT_HAPTIC_STATUS) {   // (longshot: the host's report of what drives the controller, host/haptic.c)
+        haptic_status_cache.store(value, std::memory_order_relaxed);
         return;
     }
     if (id != 7) return;
@@ -4774,6 +4895,7 @@ void outputs_follow_screen() {
 void menu_tick() {
     std::lock_guard lk(menu_mu);   // (the control bridge's settings: menu_setting_set)
     share_finish();   // (Save my pipeline list's worker, done)
+    haptic_test_tick();   // (longshot: the Test haptics cell stops saying Buzzing... by itself)
     fullscreen_tick();
     game_lang_tick();
     outputs_follow_screen();
@@ -5200,6 +5322,10 @@ void menu_tick() {
         else if (press[7] && is_motion_row(r)) cur_tab = TAB_MOTION, tab_selected[TAB_MOTION] = 0, press[7] = false, changed = true;
         else if (press[7] && is_share_row(r)) share_pipeline_list(), press[7] = false, changed = true;
         else if (press[7] && &r == &rows[kBugReportRow]) bug_report_save(), press[7] = false, changed = true;
+        else if (press[7] && is_haptic_test_row(r)) {   // (longshot: Test haptics, before the page branch below)
+            if (haptic_test_ready()) menu_haptic_test.store(1, std::memory_order_relaxed), haptic_testing.store(1, std::memory_order_relaxed), haptic_buzz_at = prof_now();
+            press[7] = false, changed = true;
+        }
         else if (press[7] && !r.value && can_bind()) page = 1, csel = 0, ccol = menu_hit::kCtlPrimary, changed = true;
         if ((press[3] || press[4] || press[7]) && r.value) {   // (Enter, or A, as Right)
             if (press[7]) press[4] = true;

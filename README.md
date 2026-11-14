@@ -472,6 +472,10 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Camera speed | 50% to 400%, in steps of 25 | 100% |
 | | Stick dead zone | Default (24%), 5%, 10%, 15%, 20%, 30% | Default (24%) |
 | | Rumble strength | Off, 25% to 150%, in steps of 25 | 100% |
+| | Haptic feedback | Auto, Standard rumble, DualSense haptics, Off | Auto |
+| | Haptic strength | Game's own, 25% to 200%, in steps of 25 | Game's own |
+| | Haptic status | DualSense haptics (USB), DualSense Bluetooth (standard rumble), Switch Pro HD rumble, Standard rumble, Off, Waiting for the DualSense audio endpoint, Haptic backend unavailable, No controller | No controller |
+| | Test haptics | Test, Not now (an action: confirm does it) | Not now |
 | | Layout preset | Nintendo (Def), Xbox / PC, Swap Face; Custom once you bind a button yourself (on the Controls page) | Nintendo (Def) |
 | | Button prompts | Auto, Switch, Xbox, PlayStation 4, PlayStation 5, Steam Deck, Keyboard (on the Controls page; changes at once where the game allows it, else after a restart) | Auto |
 | | Motion | Opens the Motion page: Motion controls (Off, On; On), Motion sensitivity X (10% to 600%) and Y (10% to 300%, in steps of 10; 100%), Invert motion X and Y (Off, On; Off), Motion deadzone (Low, Standard, High; Standard) | |
@@ -681,6 +685,17 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   a lower value for a precise stick or a higher one for a stick that drifts. The game also applies its own dead zone.
 - **Rumble strength** scales the controller's rumble: 100% is the game's own, Off turns it off. The game's HD rumble
   goes to a controller's heavy and light motors by its frequency.
+- **Haptic feedback** (Controls tab) picks what drives the controller. Auto, the default, gives a DualSense on a USB
+  cable its own fine haptics, keeps a Switch Pro Controller's HD rumble, and plays every other pad's motors. Standard
+  rumble sends every pad the motor rumble. DualSense haptics asks for the fine haptics and falls back, saying so on the
+  Haptic status row, when the pad is not a DualSense on a cable. Off stops the fine haptics only: the Rumble strength's
+  Off is the one that stops everything.
+- **Haptic strength** scales the fine haptics alone: Game's own leaves them exactly as the game sends them, and 25% to
+  200% multiplies them. The Rumble strength still applies on top.
+- **Haptic status** is read-only: what drives the controller now and, in its help line, why it is not the fine haptics
+  (a missing `renhdrum.dll`, a DualSense on Bluetooth, Haptic feedback Off).
+- **Test haptics** buzzes the controller for half a second and stops on its own, so you can tell whether the fine
+  haptics are really playing and how strong they are.
 - **Motion controls** (Controls tab, Motion page): the controller's gyroscope aims where the game uses motion, as on the Switch. It works with
   Switch Pro controllers and pads in Switch mode, DualSense and DualShock 4 (through SDL). Its row
   says whether the connected pad has a gyroscope; Off leaves the game seeing a pad lying still. **Motion sensitivity X/Y**
@@ -719,6 +734,15 @@ it. Without them the kernel's hid-nintendo driver runs the controller, and it ge
 anything SDL reports as a Switch Pro Controller or Joy-Con, and that includes third-party controllers in Switch mode
 (8BitDo, GameSir and others; SDL gives them Nintendo's ids). Some of them may turn it into weak rumble or none: set
 `HOS_HD_RUMBLE=0` to give them the plain motor rumble.
+
+**DualSense haptics:** a DualSense on a USB cable is also a four-channel 48 kHz sound card, and its third and fourth
+channels drive the voice coils. With `renhdrum.dll` beside the game, Longshot sends the game's own HD rumble values to
+them as they are (both bands, both sides, no flattening to two motors), so the pad plays the game's fine vibration
+instead of a rough imitation of it. The menu's Haptic feedback row picks it, Auto does on a cable, and Haptic strength
+scales it; the Rumble strength still applies. A DualSense on Bluetooth has no such endpoint: it keeps the standard
+rumble, and the Haptic status row says so. Without `renhdrum.dll`, or with no endpoint found, nothing breaks: the pad
+gets the standard rumble. `renhdrum.dll` is RenHDrum's (MIT OR Apache-2.0, `third_party/renhdrum/NOTICE`); the build
+copies it beside the game when it is in `third_party/renhdrum/`, and the game runs without it.
 
 To change which gamepad button or key presses a Switch button, or which keys move and turn the camera, open the
 Controls tab's Controls page. Choose a row and a column (Gamepad or Keyboard), press <kbd>Enter</kbd> (or the bottom

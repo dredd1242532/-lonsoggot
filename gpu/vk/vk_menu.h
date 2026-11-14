@@ -68,6 +68,9 @@ struct Options {
     int invert_cam_x = 0; // right-stick camera horizontal inversion: 0 normal, 1 inverted
     int invert_cam_y = 0; // right-stick camera vertical inversion: 0 normal, 1 inverted
     int rumble = 100;     // the controllers' rumble in percent of the game's: 0 Off, 25 to 150 (host/pad_sdl.c)
+    int haptic = 0;       // (longshot) Haptic feedback: 0 Auto, 1 Standard rumble, 2 DualSense haptics, 3 Off (host/haptic.c)
+    int haptic_strength = 0;   // (longshot) the fine haptics' own strength in percent: 0 the game's own, else a percent of it
+    int haptic_status = 0;   // (longshot) what drives the controller now, written by the host each poll; never saved
     int stick_dead_zone = 0;  // circular stick cutoff: 0 XInput's 7849 (~24%), 1..5 5% to 30% (host/nn_hid.c)
     int hold_toggle = 0;  // enabled Switch buttons (1 << HOS_SW_*); persisted as toggle_<button>, not one mask entry
     int pad_layout = 0;   // 0 Nintendo (default), 1 Xbox / PC, 2 Swap Face Buttons, 3 Custom
@@ -135,6 +138,8 @@ int menu_free_camera();
 int menu_link_speed();   // (Movement speed in percent, 100 while the tools are off)
 int menu_damage_taken();   // (Damage taken, HOS_OPT_DAMAGE_TAKEN: 1, Normal, while the tools are off)
 int menu_take_cheat_action();
+int menu_haptic_status_option();   // (longshot) the haptics' status as the host last reported it (HOS_OPT_HAPTIC_STATUS)
+int menu_haptic_test_take();   // (longshot) 1 once, if the Test haptics row was pressed (HOS_OPT_HAPTIC_TEST)
 void menu_note_frame(bool game_frame, int shown = 1);   // (the frame rates the FPS counter shows)
 /// The game's picture's size (the Output resolution, its crop) and the window's, at each present: the Window scaling filter
 /// row says when it is not needed

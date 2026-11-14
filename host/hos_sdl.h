@@ -53,6 +53,15 @@ int hos_sdl_poll_event(HosSdlEvent *e);
 int hos_sdl_audio_open(int freq, int channels, int s16, void (*pull)(void *user, uint8_t *out, int len), void *user);
 int hos_sdl_audio_channels(void);   /* the default output's channels (6 for 5.1); 2 when SDL cannot say */
 
+/* ---- (longshot) a pad's own audio endpoint: the DualSense's voice coils (host/haptic.c) ----
+   SDL3 only: SDL2 (the Linux AppImage) has no way to open a stream on a device of our choice or to ask whether it is
+   still there, so it reports no endpoints and every pad keeps the standard rumble. */
+int hos_sdl_audio_endpoints(uint32_t *ids, char (*names)[128], int *channels, int max);   /* the playback devices now */
+void *hos_sdl_audio_endpoint_open(uint32_t device, int freq, int channels, void (*pull)(void *user, float *out, int frames),
+                                  void *user);   /* an interleaved float stream on that device; NULL on failure */
+int hos_sdl_audio_endpoint_alive(void *stream);   /* 1 while the device is still there and playing */
+void hos_sdl_audio_endpoint_close(void *stream);   /* waits for the callback: call it with no lock held */
+
 /* ---- (longshot) microphones: SDL3's recording devices or SDL2's capture devices, for the game's input streams
    (host/nn_audio_in.c). The device's sound comes out converted to the format asked for (SDL resamples and mixes the
    channels down) ---- */
@@ -93,3 +102,4 @@ int hos_sdl_pad_sensor(void *pad, int type, float *data, int n);   /* 1 when rea
 int hos_sdl_knows_steam_pads(void);
 uint16_t hos_sdl_pad_vendor(void *pad);
 uint64_t hos_sdl_pad_steam_handle(void *pad);
+int hos_sdl_pad_wireless(void *pad);   /* (longshot) a pad's transport: 1 wireless, 0 wired, -1 when SDL cannot say */

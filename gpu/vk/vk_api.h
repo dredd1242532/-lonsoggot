@@ -60,6 +60,20 @@ enum { HOS_OPT_HOLD_TOGGLE = 54 };
 enum { HOS_OPT_AUDIO_OUTPUT = 57 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
+/* (longshot) Haptic feedback: 0 Auto, 1 Standard rumble, 2 DualSense haptics, 3 Off (host/haptic.c). Auto drives a
+   DualSense on a cable through its own audio endpoint with the game's own high and low bands, keeps a Switch Pro
+   Controller's HD Rumble, and plays every other pad's motors; a DualSense on Bluetooth has no such endpoint and falls
+   back to the standard rumble. The menu's Rumble strength is the one strength, and its Off stops every backend here. */
+enum { HOS_OPT_HAPTIC_MODE = 58 };
+/* (longshot) Haptic status: what drives the controller now, and why not the fine haptics; the host writes it back each
+   poll and the status row reads it (host/haptic.c's HOS_HAPTIC_*). */
+enum { HOS_OPT_HAPTIC_STATUS = 59 };
+/* (longshot) Haptic strength: the fine haptics' own strength, in percent of what the game asks for; 0 (Game's own)
+   leaves them exactly as the game sends them. The Rumble strength still applies on top (host/haptic.c). */
+enum { HOS_OPT_HAPTIC_STRENGTH = 61 };
+/* (longshot) Test haptics: 1 asks for a short, gentle buzz on whichever backend drives the controller now; the host
+   takes it back to 0 and stops on its own (host/haptic.c). */
+enum { HOS_OPT_HAPTIC_TEST = 62 };
 
 /* (longshot) the controls' names (host/nn_hid.c, host/pad_sdl.c, the pad_ and key_ lines of longshot_options.ini):
    the Switch's buttons in nn::hid's bit order, and a gamepad's inputs by position (the bottom face button first:
