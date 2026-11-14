@@ -111,6 +111,10 @@ Time, not for finishing a temple. It could be its own achievement if wanted.
   counts for nothing; eight at once (stones and medallions) showed as one "8 achievements unlocked" pop-up. The probe's
   counts confirm the sword, shield, stone and medallion names. **Not yet confirmed: the songs** (the Debug tools'
   inventory editor could not hand them out, so their names are unproven until one is learned in play) and the bag tiers.
+  The second part, the same day: the Achievements page lists all 29 with their icons (9 unlocked, 20 locked), and moves
+  and scrolls as the Teleport page does; using a debug tool logs `achievements: paused: a debug tool was used in this run`
+  and the page shows the paused notice. A first build that made each icon its own texture left every overlay blank (the
+  backend's texture pool ran out): the icons are one atlas since.
 
 ## The launcher (a later, separate pull request)
 
