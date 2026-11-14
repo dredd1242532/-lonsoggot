@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Render real Launcher views in memory using synthetic state; no desktop or game needed."""
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -10,6 +11,25 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+BUILD_CONFIG = ('Directory.Build.props', 'Directory.Build.targets', 'Directory.Packages.props', 'NuGet.Config')
+
+
+def capture_inputs(tracked):
+    missing = set(BUILD_CONFIG) - set(tracked)
+    if missing:
+        raise ValueError('Launcher capture requires tracked build configuration: ' + ', '.join(sorted(missing)))
+    return sorted(f for f in tracked if f.startswith(('App/', 'Core/')) or f in BUILD_CONFIG)
+
+
+@contextmanager
+def example_state(path):
+    # A stable, neutral path is visible in the real views. Never reuse or remove
+    # an existing directory: another capture or a user's data may own it.
+    path.mkdir()
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 def run(args, **kwargs):
@@ -24,7 +44,10 @@ def main():
     a = p.parse_args()
     source, output = a.source.resolve(), a.output.resolve()
     tracked = run(['git', '-C', str(source), 'ls-files'], capture_output=True).stdout.splitlines()
-    inputs = sorted(f for f in tracked if f.startswith(('App/', 'Core/')) or f in ('Directory.Build.props', 'Directory.Packages.props'))
+    try:
+        inputs = capture_inputs(tracked)
+    except ValueError as exc:
+        p.error(str(exc))
     if run(['git', '-C', str(source), 'diff', '--name-only', 'HEAD', '--', *inputs], capture_output=True).stdout:
         p.error('Launcher capture inputs must match the named clean source revision')
     hashes = {f: hashlib.sha256((source / f).read_bytes()).hexdigest() for f in inputs}
@@ -65,11 +88,15 @@ def main():
         env = dict(os.environ, DOTNET_CLI_HOME=str(stage / 'dotnet-home'), DOTNET_CLI_TELEMETRY_OPTOUT='1',
                    DOTNET_GENERATE_ASPNET_CERTIFICATE='false',
                    NUGET_PACKAGES='/tmp/longshot-guide-nuget')
-        run([a.dotnet, 'restore', str(stage / 'App/LongshotLauncher.csproj'), '--locked-mode'], env=env)
-        run([a.dotnet, 'restore', str(fixture / 'Capture.csproj'), '--locked-mode'], env=env)
+        # Preserve both the Launcher's AvaloniaStats opt-out target and its feed
+        # policy. Explicit config excludes ambient machine/user NuGet sources.
+        restore_options = ['--locked-mode', '--configfile', str(stage / 'NuGet.Config')]
+        run([a.dotnet, 'restore', str(stage / 'App/LongshotLauncher.csproj'), *restore_options], env=env)
+        run([a.dotnet, 'restore', str(fixture / 'Capture.csproj'), *restore_options], env=env)
         shutil.copyfile(fixture / 'packages.lock.json', output / 'launcher-packages.lock.json')
         run([a.dotnet, 'build', str(fixture / 'Capture.csproj'), '--no-restore', '-c', 'Release', '-p:LongshotTag=v1.0.0-rc.3'], env=env)
-        run([a.dotnet, str(fixture / 'bin/Release/net10.0/Capture.dll'), str(stage / 'example-state'), str(output)], env=env)
+        with example_state(Path(tempfile.gettempdir()) / 'longshot-guide-example') as state:
+            run([a.dotnet, str(fixture / 'bin/Release/net10.0/Capture.dll'), str(state), str(output)], env=env)
     metadata = {'source_revision': revision, 'source_files': hashes,
                 'fixture_files': {f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in
                                   ('scripts/screenshots/LauncherCapture.cs', 'scripts/screenshots/capture_launcher.py')},

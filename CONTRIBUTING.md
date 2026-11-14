@@ -274,6 +274,11 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 
 ## Commits and pull requests
 
+Changes to recorded menu, Launcher, font or shared renderer inputs also trigger the
+[user-guide screenshot source review](docs/images/guide/README.md#developer-maintenance-plan).
+Run the check and review the affected image and written steps before updating its fingerprints;
+even an implementation-only header change needs a recorded decision to retain or recapture it.
+
 Every pull request uses the [pull request template](.forgejo/pull_request_template.md): its sections are the
 description, its checklist stays whole, and `forge.py pr ready` checks it before review.
 

@@ -24,3 +24,5 @@ jobs:
         run: python3 -I -B scripts/check_guide_screenshots.py --review-sources
       - name: Checker regression tests
         run: python3 -I -B tests/test_guide_screenshots.py
+      - name: Capture isolation and build-policy regression tests
+        run: python3 -I -B tests/test_launcher_capture.py

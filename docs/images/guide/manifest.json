@@ -243,7 +243,7 @@
       },
       "reviewed_source": {
         "repository": "https://git.magicbean.dev/MagicBeanDev/Longshot",
-        "revision": "6d8a424e7082109232affc16ceac287c199e211c",
+        "revision": "54ccc587802904d90a4284f2d3be50b3291c97dd",
         "files": {
           "gpu/render/nvn_api.h": "f40e44b4b63aa20892399547167d367a652c1ed0793ca4a0f9299a8988289b82",
           "gpu/render/rx_nvn.h": "1e0ddee230142034e7859d859a12e9201b92b280d66cb992f5f2883cbdc96b4d",
@@ -252,16 +252,16 @@
           "gpu/vk/display_modes.h": "beea7b04494ed72b564eb462be979029c4aa81cc661154ec88c28b7050149c3f",
           "gpu/vk/fps_stats.h": "e7bf939440e8ded4d0459953b794f4c71b8e9042990909111a7c5116e2c73986",
           "gpu/vk/fsr3_math.h": "6ab06be58fa0706a9c1fbdbf5fd693d3c510b8076f92f7df3403c879ff07392e",
-          "gpu/vk/menu_i18n.h": "d01aec7fd160867f426635b4db19f53d62c4fb0732e17856aa1844ba3787bc0e",
+          "gpu/vk/menu_i18n.h": "23ea05469a28df8dba4b1a715a472e4bd93f030961e3b5356ec991c04a026fc4",
           "gpu/vk/menu_restart.h": "89dc8e1be7471344dd5aef1ebcde3378dec986b648c69dc86b9da4a72f23e55c",
           "gpu/vk/oot_cheat_items.h": "8500b50a9a779967d889741fe80e24dae1031ba7127aaed449207f9b8d43648c",
           "gpu/vk/pipeline_share.h": "e0e0cf353516ff20a8ca8546b92e7311afa3b798b6d9524248a4f3c249374e41",
-          "gpu/vk/upscaler_rows.h": "bef4bb6f0bab03390e5199cce6e74f7ed8d8ecc10bc61b81aa16b0424cd76fa8",
+          "gpu/vk/upscaler_rows.h": "c4f3a8c7f80e03ede367aad2c71fc74bec0e4337d98d7a440d3ce314de34a1a8",
           "gpu/vk/vk_antilag.h": "e43538dde4493328eef266c1580a983e2187645c613d00a108fa92ed1376b5be",
-          "gpu/vk/vk_api.h": "31f15c41253e9547150fdcd5898d2ef596a9189bf5557da3d23e898c67343bd6",
-          "gpu/vk/vk_bug_report.h": "aac1b02326adbeb7cef90060abd9708122f1bfad46066d09b4aa74534c77e1d7",
+          "gpu/vk/vk_api.h": "5bde30bba91678559f1a140b4b5ae36c41369550e064c42698ce52c1433fc8c2",
+          "gpu/vk/vk_bug_report.h": "56538f29bf9e26f6e5bf7b84bdab4c2e967e8f895d7843b3f7cab6eccde21536",
           "gpu/vk/vk_dlss.h": "c0cfc35832f194fffe4e07215a92a713ecffcd535945fc5b7ae78d127ddab9c9",
-          "gpu/vk/vk_draw.h": "d96de4433b29c688f12aacdb8a01957e459dec36869f2efd9cff203daaf27be1",
+          "gpu/vk/vk_draw.h": "b2afb8e06d3cd33cea0615e224089cc1396571c258b6b0cee0178ba440356637",
           "gpu/vk/vk_fps.h": "e35f47eb65ed97493ddb2c01296d49592f83509f4699e7ae4a32da3272a271eb",
           "gpu/vk/vk_framegen.h": "c9003658fa21747a951c70de54bf97341150d2eae4ab669fff429c3b5c1b4a51",
           "gpu/vk/vk_fsr3.h": "30ecb6e6b31b1fb3ae73b797ac3d4b7d3ab0a3684318255ac970d58f09013032",
@@ -270,9 +270,9 @@
           "gpu/vk/vk_imgui.h": "30375ca257a12b18e83d091e5ef53a5f5b25be7a1b8156e06508eebd467cb205",
           "gpu/vk/vk_internal.h": "f8d6f9ac6fc01d172c30e885ffe34794b7a46239ac83f5f90365bec644281a4d",
           "gpu/vk/vk_loader.h": "39ab0d15d59867f2234f797e795f7268d0f21460e0bc58ea753ee8ca2970170d",
-          "gpu/vk/vk_menu.cpp": "f986a3d43a2fa4ab62f5dcac7af2c9b0fa50b61beb28734cff1074717a9651f2",
-          "gpu/vk/vk_menu.h": "203b3994394aa033b9ca8ab433e54d5acb227b3d713fe8e1aca64fa7ad45118c",
-          "gpu/vk/vk_menu_hit.h": "d552ec79715fb1f97babfe9a0eec06a9892d017e0008dcb605f80a7da95ebb41",
+          "gpu/vk/vk_menu.cpp": "7bd799efe59e512ec7cbb4f9af8a841e32b0b95080f0b15be5c413a3d6be6952",
+          "gpu/vk/vk_menu.h": "157bb8c7c3d757a53397c4b0a5abafc3857a6cd19161d576252c331226b5a3a5",
+          "gpu/vk/vk_menu_hit.h": "bec415bc52f29b1429cfb6164ff02af6122e6f43861642b79ded7b2cb8b713f9",
           "gpu/vk/vk_menu_i18n.cpp": "40568e770876197cfcea870a382c49bcded29d31319b90a3e4ee5b847501fc36",
           "gpu/vk/vk_menu_i18n.h": "4123574ca3bb9dd6afe35967f25095e3737c1e143b67e5ed63e5fde3c3179caa",
           "gpu/vk/vk_menu_keys.h": "18df78f9e8742e43c0f79936c41c1b02bae554e1302e62752cab5cb42915474b",
@@ -280,14 +280,14 @@
           "gpu/vk/vk_progress.h": "7a827a85310a23f95e2cff9c60c9fbabf1403af846c0d8d4c6fc51e05d6c254c",
           "gpu/vk/vk_recorder.h": "92f0dba931e080f17ae336acaf6c8f1a4b218b9f3a995e5cd86a2d713c3ae3dc",
           "gpu/vk/vk_reflex.h": "a617d12dc9bd0600afd7e3d941b4eb1996472393cf0ab31fbdde9768af2710ed",
-          "gpu/vk/vk_state.h": "3fc11f3a522adcd3bb7bd5f2704fe5dcc6d1f6176c0677ea014b137bd9a4ed39",
-          "gpu/vk/vk_temporal.h": "7204c523f6620afeab75d9012f245fd65a4dd64a095182b11cd8fd710925e40b",
+          "gpu/vk/vk_state.h": "667332378ab8c3a7690d50f75d8be890485f8dec6b48bc8bae86be3e8b189d78",
+          "gpu/vk/vk_temporal.h": "61ed2a8b381ee7609c5b438bae1ebc93f2766f78e9838b9f3375954e6bbc632d",
           "gpu/vk/vk_texture.h": "79ed7f6d5e17ca5d8bbf8a7048dd4eb7cb1010ea9bafda8ff4421f6a6f48f00f",
           "gpu/vk/vk_ui.h": "cc04607100c4ccbd4244038991fa132984045d0b963436bda607cabb411ad6ed",
           "gpu/vk/vk_vendor.h": "98966ceff35cf617482ff1ed67cd71eb9c71248ee572a7ad5c9dc34da75c5069",
           "gpu/vk/vk_work.h": "63d40bc5a35300f7910cb5cf93d878cbe783cde15b14599e9671265283f3ab00",
           "host/hos_wide_size.h": "2e0124ed89c4a2e19b8cd782433358774b9830aee4ea5d1d04ba743136910bd6",
-          "host/posix/windows.h": "06db941335f3d425f79648548dfd927e7c0fc85f9c1e2413a04528ba88b7939f",
+          "host/posix/windows.h": "808431459300d4e30047bdf6318ec694902ebbf43107065169a22ad3b0a7fcbd",
           "third_party/fonts/libertinus/LibertinusSans-Bold.ttf": "9ebce4e4463c806336ee7ab353c06fe40a6ee8691b5187f32118458726e3ed82",
           "third_party/fonts/libertinus/LibertinusSans-Regular.ttf": "a488d956f64d88b14df8a01708c5b480815107695e711d45e13561038004f0af",
           "third_party/fonts/libertinus/LibertinusSerif-Semibold.ttf": "a51b4c1c5664750f4e5a758b33735863c33b6db577fa68cc236b05002f11f077",
@@ -326,12 +326,12 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Bundled Libertinus Sans Regular/Bold and Serif Semibold; third_party/fonts/libertinus/OFL.txt.",
-        "notes": "UI-only fixture, not a runtime screenshot or recommended configuration. No comparison with a live game/Vulkan presentation has been performed. Reviewed against current source: render-scale preservation changes do not affect the pictured Game\u2019s own/Auto state; remaining changes are renderer declarations unused by the fixture. A current-source recapture differs only in the top-left version label (pixel comparison); original rc.3 capture provenance is retained."
+        "notes": "UI-only fixture, not a runtime screenshot or recommended configuration. No live game/Vulkan equivalence check. Rebuilt and visually compared after rebasing onto main 351affd: all pixels outside x71\u2013249, y25\u201339 are identical to the rc.3 Graphics capture; only the top-left version label differs. The compiler dependency set is unchanged. Reviewed changes cover Audio Mono, Controls hold-to-toggle, Debug damage, bug-report defaults, HDR FSR 4 eligibility and renderer/platform declarations; none changes this visible Graphics orientation state (Game\u2019s own/Auto, no GPU SDK capabilities). Original rc.3 capture and provenance retained."
       }
     },
     {
       "file": "launcher-manage-saves.png",
-      "sha256": "0703799e094d62d86a1af764559685b098b882a5cbf18f44d623d1d6c3a2eb81",
+      "sha256": "785babfa42450dc31347f41d6ced6fcdb44cf47a09e986289bf3b84ad4750c15",
       "width": 960,
       "height": 600,
       "captured_at": "2026-11-13",
@@ -429,7 +429,9 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "reviewed_source": {
@@ -524,19 +526,21 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "fixture_files": {
-        "scripts/screenshots/LauncherCapture.cs": "6e314fdfca3335125e1b07f982ca005181feaa7697353731c94d79e10a084fc3",
-        "scripts/screenshots/capture_launcher.py": "04f3020a2e00d6ea6fc0cd194b0e5e8c11b2815866310c6995ea4e39b3681e13",
+        "scripts/screenshots/LauncherCapture.cs": "2927d2b095ffb4403f3bdd6d29b247204cafce4b72af4ab532f3406112393d2c",
+        "scripts/screenshots/capture_launcher.py": "c5a10b767f7fee991b30513c9443e819fc71a7e23dc2d581423db4793fbc2384",
         "scripts/screenshots/launcher-packages.lock.json": "85bb691510593062b00f9a839375c55b89ffbd4f248daee18195a139e7e299de"
       },
       "capture": {
         "platform": "Linux x86_64, in-memory Avalonia Headless with Skia",
         "display": "960x600, scale 1, reduced motion",
         "theme": "Launcher default dark with bundled Inter fonts",
-        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only.",
+        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only. Neutral fixed temporary root: /tmp/longshot-guide-example.",
         "method": "Avalonia.Headless 12.1.6 with Skia; actual rc.3 views/view models",
         "source_adapter": "Only in temporary build: suppress FilesStepViewModel StartSearch(); replace host requirements probe with maintained Evaluate() on explicit illustrative 16 GB RAM, 12 threads, AVX2, 100 GB free, Vulkan 1.3/8 GB VRAM/mesh inputs. UI labels and layout unchanged.",
         "sdk": "10.0.301"
@@ -547,7 +551,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter; App/Assets/Fonts/Inter-LICENSE.txt.",
-        "notes": "Actual maintained views and view models, rendered from source with synthetic data, not an official binary desktop capture. No UI label replacement or compositing. Temporary paths and slot identifiers are synthetic. Game-file discovery is disabled; hardware/tool readiness is illustrative. Import confirmation invokes the real dry-run preview only. The fixture asserts that files and directories are unchanged after confirmation. Independent source/image review found no blocking privacy or placement issue. Browser-rendered guide review remains pending."
+        "notes": "Recaptured using the real rc.3 views with neutral fixed synthetic paths, no UI text substitution. Staged clean tracked Directory.Build.targets preserves the AvaloniaStats opt-out; both locked restores explicitly use staged NuGet.Config. Synthetic text-only slots and non-executable build marker; confirmation invokes the real dry-run preview only. File and directory fingerprints remain unchanged. No actual save transfer, game or desktop automation. Rendered website browser review remains pending."
       }
     },
     {
@@ -650,7 +654,9 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "reviewed_source": {
@@ -745,19 +751,21 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "fixture_files": {
-        "scripts/screenshots/LauncherCapture.cs": "6e314fdfca3335125e1b07f982ca005181feaa7697353731c94d79e10a084fc3",
-        "scripts/screenshots/capture_launcher.py": "04f3020a2e00d6ea6fc0cd194b0e5e8c11b2815866310c6995ea4e39b3681e13",
+        "scripts/screenshots/LauncherCapture.cs": "2927d2b095ffb4403f3bdd6d29b247204cafce4b72af4ab532f3406112393d2c",
+        "scripts/screenshots/capture_launcher.py": "c5a10b767f7fee991b30513c9443e819fc71a7e23dc2d581423db4793fbc2384",
         "scripts/screenshots/launcher-packages.lock.json": "85bb691510593062b00f9a839375c55b89ffbd4f248daee18195a139e7e299de"
       },
       "capture": {
         "platform": "Linux x86_64, in-memory Avalonia Headless with Skia",
         "display": "960x600, scale 1, reduced motion",
         "theme": "Launcher default dark with bundled Inter fonts",
-        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only.",
+        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only. Neutral fixed temporary root: /tmp/longshot-guide-example.",
         "method": "Avalonia.Headless 12.1.6 with Skia; actual rc.3 views/view models",
         "source_adapter": "Only in temporary build: suppress FilesStepViewModel StartSearch(); replace host requirements probe with maintained Evaluate() on explicit illustrative 16 GB RAM, 12 threads, AVX2, 100 GB free, Vulkan 1.3/8 GB VRAM/mesh inputs. UI labels and layout unchanged.",
         "sdk": "10.0.301"
@@ -768,12 +776,12 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter; App/Assets/Fonts/Inter-LICENSE.txt.",
-        "notes": "Actual maintained views and view models, rendered from source with synthetic data, not an official binary desktop capture. No UI label replacement or compositing. Temporary paths and slot identifiers are synthetic. Game-file discovery is disabled; hardware/tool readiness is illustrative. Import confirmation invokes the real dry-run preview only. The fixture asserts that files and directories are unchanged after confirmation. Independent source/image review found no blocking privacy or placement issue. Browser-rendered guide review remains pending."
+        "notes": "Recaptured using the real rc.3 views with neutral fixed synthetic paths, no UI text substitution. Staged clean tracked Directory.Build.targets preserves the AvaloniaStats opt-out; both locked restores explicitly use staged NuGet.Config. Synthetic text-only slots and non-executable build marker; confirmation invokes the real dry-run preview only. File and directory fingerprints remain unchanged. No actual save transfer, game or desktop automation. Rendered website browser review remains pending."
       }
     },
     {
       "file": "launcher-import-confirm.png",
-      "sha256": "1addfe69fbcf7ecae91e3732295f374ccc2eddff42abbebe76a6512dc5d257a8",
+      "sha256": "48d1b69fbee7e2dd6086b812371788c8389daaee77fc6baac4c0e3cfa889515e",
       "width": 960,
       "height": 600,
       "captured_at": "2026-11-13",
@@ -871,7 +879,9 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "reviewed_source": {
@@ -966,19 +976,21 @@
           "Core/Versions.cs": "6ac6e6ef6ef98764a2831451f9ac86c11ba74acb6c9461a7b59f78f07a113e62",
           "Core/packages.lock.json": "03eeadc5ef377c17f787ab65f41fb4c8a9c936bb7f7f4171111fdeec8a81cb46",
           "Directory.Build.props": "1943f49503897477f60313b31f866fd1b330ea763915c03c47394f671d6fade5",
-          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38"
+          "Directory.Build.targets": "b9e86d6ea1c7aad64263e7bd2f7f106dad4e0bfa00e4a2e4e555a08ae636b88c",
+          "Directory.Packages.props": "eaa484cfc5394fdea721ae07bfbdbdcc4f3930891f71670fa114b653b0ae8e38",
+          "NuGet.Config": "6789bc3936c421bfe4ae6a703c1d9870892505bc64eb22252dcb6bf9f8f1b626"
         }
       },
       "fixture_files": {
-        "scripts/screenshots/LauncherCapture.cs": "6e314fdfca3335125e1b07f982ca005181feaa7697353731c94d79e10a084fc3",
-        "scripts/screenshots/capture_launcher.py": "04f3020a2e00d6ea6fc0cd194b0e5e8c11b2815866310c6995ea4e39b3681e13",
+        "scripts/screenshots/LauncherCapture.cs": "2927d2b095ffb4403f3bdd6d29b247204cafce4b72af4ab532f3406112393d2c",
+        "scripts/screenshots/capture_launcher.py": "c5a10b767f7fee991b30513c9443e819fc71a7e23dc2d581423db4793fbc2384",
         "scripts/screenshots/launcher-packages.lock.json": "85bb691510593062b00f9a839375c55b89ffbd4f248daee18195a139e7e299de"
       },
       "capture": {
         "platform": "Linux x86_64, in-memory Avalonia Headless with Skia",
         "display": "960x600, scale 1, reduced motion",
         "theme": "Launcher default dark with bundled Inter fonts",
-        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only.",
+        "state": "Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only. Neutral fixed temporary root: /tmp/longshot-guide-example.",
         "method": "Avalonia.Headless 12.1.6 with Skia; actual rc.3 views/view models",
         "source_adapter": "Only in temporary build: suppress FilesStepViewModel StartSearch(); replace host requirements probe with maintained Evaluate() on explicit illustrative 16 GB RAM, 12 threads, AVX2, 100 GB free, Vulkan 1.3/8 GB VRAM/mesh inputs. UI labels and layout unchanged.",
         "sdk": "10.0.301"
@@ -989,7 +1001,7 @@
         "contains_save_data": false,
         "contains_private_paths": false,
         "font_source": "Launcher bundled Inter; App/Assets/Fonts/Inter-LICENSE.txt.",
-        "notes": "Actual maintained views and view models, rendered from source with synthetic data, not an official binary desktop capture. No UI label replacement or compositing. Temporary paths and slot identifiers are synthetic. Game-file discovery is disabled; hardware/tool readiness is illustrative. Import confirmation invokes the real dry-run preview only. The fixture asserts that files and directories are unchanged after confirmation. Independent source/image review found no blocking privacy or placement issue. Browser-rendered guide review remains pending."
+        "notes": "Recaptured using the real rc.3 views with neutral fixed synthetic paths, no UI text substitution. Staged clean tracked Directory.Build.targets preserves the AvaloniaStats opt-out; both locked restores explicitly use staged NuGet.Config. Synthetic text-only slots and non-executable build marker; confirmation invokes the real dry-run preview only. File and directory fingerprints remain unchanged. No actual save transfer, game or desktop automation. Rendered website browser review remains pending."
       }
     }
   ]

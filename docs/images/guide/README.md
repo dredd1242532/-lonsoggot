@@ -157,6 +157,15 @@ Use `--dotnet /path/to/dotnet` when needed. The first run restores packages from
 cache under `/tmp/longshot-guide-nuget`. Both the Launcher and fixture package locks are enforced. No game, save,
 window server or installed Launcher is required. The temporary application build is deleted after capture.
 
+The staged source includes and fingerprints `Directory.Build.targets`, preserving the Launcher's empty
+`AvaloniaStats` target that disables Avalonia build statistics. This is separate from the .NET CLI telemetry
+opt-out. Both restores explicitly use the staged `NuGet.Config`, preserving the nuget.org-only feed policy
+instead of inheriting machine/user feeds. Missing tracked build configuration stops the helper.
+
+Synthetic state uses the fixed `longshot-guide-example` directory under the system temporary directory so the
+real UI shows neutral paths. The helper exclusively creates it, refuses an existing directory, and removes only
+the directory it created when capture ends. It never repaints or substitutes displayed paths in an image.
+
 The helper builds a temporary copy of clean tracked Launcher sources. Two explicit adapters in that copy prevent
 private game-file discovery and replace the host hardware probe with illustrative inputs to the real requirements
 evaluator (16 GB RAM, 12 CPU threads, AVX2, 100 GB free, Vulkan 1.3, 8 GB VRAM and mesh shaders). They do not change

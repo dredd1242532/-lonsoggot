@@ -34,7 +34,7 @@ Linux builds share saves; Windows builds have separate saves in this launcher re
 
 1. Start Longshot once and save, so its save folder exists, then quit it.
 2. On the **Saves** page, choose **From an emulator…**. The launcher lists the emulators whose saves it found on this
-   PC (Lichii, Eden, Eglantine, Orchid, PokeDinner, Fritzi and NX2navi), with their slots and save times.
+   PC (Lichii, Eden, Eglantine, Orchid, PokeDinner, Frizti and NX2navi), with their slots and save times.
 3. Pick the emulator and, if asked, the profile you play on. If it isn't listed (a portable install, a copy on another
    drive), select **Another folder…**. Press **Continue**, then pick the save folder, or a folder that holds one.
 

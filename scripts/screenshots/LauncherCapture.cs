@@ -15,8 +15,8 @@ static class LauncherCapture
     {
         if (args.Length != 2) throw new ArgumentException("Expected an empty state directory and output directory.");
         string state = Path.GetFullPath(args[0]), output = Path.GetFullPath(args[1]);
-        if (Directory.Exists(state)) throw new InvalidOperationException("State directory must not already exist.");
-        Directory.CreateDirectory(state);
+        if (!Directory.Exists(state) || Directory.EnumerateFileSystemEntries(state).Any())
+            throw new InvalidOperationException("State directory must be the empty directory reserved by the capture helper.");
         Directory.CreateDirectory(output);
         Environment.SetEnvironmentVariable("LONGSHOT_LAUNCHER_OFFLINE", "1");
         Environment.SetEnvironmentVariable("LONGSHOT_LAUNCHER_REDUCED_MOTION", "1");
