@@ -280,6 +280,68 @@ fixture prints its tiny child's actual dump size, not a game-size estimate.
 [Microsoft recommends a separate process, or a dedicated thread](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/nf-minidumpapiset-minidumpwritedump);
 even the dedicated worker can fail or stall after heap/loader corruption.
 
+### The window after a crash
+
+Right after the game crashes, at start or in play, a window says so: **Longshot closed unexpectedly** (or **Longshot
+couldn't start**), when (during the start, while it prepared the shaders, while playing; nothing when the run's log
+isn't found), what went wrong where that is known, and **Report**, **Open the log folder**, **Close** (`host/hos_crash_dialog.c`; what decides is
+`host/hos_crash_dialog.h`).
+
+It is shown by a helper the game starts early in `game_main`, once the crash record and its run id are set up and before
+the guest, the renderer, the sound and the input: the same executable, `longshot --crash-watch <pid> <run id> <game
+folder> <log>`. `main()` hands that command line to `hos_crash_helper_main` first thing, so the helper starts nothing of
+the game; it loads SDL3 or SDL2 for its message box (Windows' `MessageBoxW` without one) and nothing else. On Windows it
+is started with `CREATE_NO_WINDOW`, no inherited handles and out of the launcher's job where the job allows it; on Linux
+its input and output are `/dev/null` (never the game's log or a launcher's pipe) and it closes any other file it
+inherited. It waits for the game's process to end
+(Windows: the process handle, with its exit code; Linux: a pidfd, else its parent changing), turns a marker left behind
+into an unclean-end record as a start would, then decides:
+
+| How the run ended | The window |
+|---|---|
+| a crash record of the run (`bug-reports/pending/crash-*.txt`), a quit before it included | yes |
+| the log says the start could not go on, before a save was loaded: the game's files (`cannot open`, `usage:`, `lift and image do not match`), Vulkan (`did not load ... nothing is drawn`, `vkCreateInstance failed`, `no Vulkan 1.3 GPU`, ...), the window, `cannot reserve the guest window` | yes, **Longshot couldn't start**, a quit included (a black window closed) |
+| the marker left with no crash record (killed, out of memory, a handler that could not run) | yes, unless the player had asked to quit, or Windows' exit code is 0 |
+| a quit, then the process ended while it closes (a second close of a window that stopped answering) | no: `rx_close_asked` notes the quit first in the marker, and the unclean record says `quit_asked: yes` (the same rule as the renderer's crash markers, [PR 498](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/498)) |
+| a clean end: a quit, a return, the menu's restart (Windows: a new process with its own helper; Linux: the same process, whose new run's marker ends the old helper) | no |
+| Windows is signing out or shutting down | no (a window would hold it up); a crash record of the run is shown at the next start |
+
+The cause is the first that holds: the game's files, Vulkan, the window (before play), memory (`cannot reserve`,
+Windows out of memory, `0xC0000017`, or an unclean end after the start's low-memory warning), the graphics driver
+(`device lost`, a Vulkan fatal, a crash in the driver's own module), ended from outside; else "an unexpected error".
+
+**Report** builds a plain-text report: what happened, the version and its channel, the GPU and driver (from the log's
+`vk:` lines), CPU, RAM and system, what the game was built for, the log's first DLSS and FSR 4 lines,
+`longshot_options.ini`'s settings and the switches set (a value only when it is a number, a size or on/off, never for a
+name with TOKEN, KEY, ROOM, SECRET, PASS, SERVER or USER; not the controls' bindings), the crash and unclean records of
+the last day, the run's crash record, and the last 200 lines of the run's log with the home folder and the user's name
+taken out as the Insert menu's Bug report does. Never saves, game files, the executable or caches, memory dumps, keys,
+the options file itself or the home folder's path. It is put on the clipboard (Windows' own; on Linux through `wl-copy` on
+Wayland, else `xclip` or `xsel`, which keep it after the helper ends, and SDL's X11 clipboard only as a last resort, given
+while the next box is open: Wayland takes a selection only from a focused window, which the helper no longer has), written to `bug-reports/pending/report-<UTC>.txt` (the newest ten kept), and the game-problem issue form
+opens in the browser with the version, GPU, system and a title filled in. The box that follows says whether the report is
+on the clipboard, never that it is when nothing took it, and names the saved file, which **Open the report** opens to copy it
+from. Nothing is sent by the game: the player pastes the report.
+
+Under gamescope (the Steam Deck's Game Mode: `GAMESCOPE_WAYLAND_DISPLAY` set, or `XDG_CURRENT_DESKTOP=gamescope`) there
+is no helper and no box of an earlier crash at the start, until someone has tested that gamescope shows a child process's
+box: one nobody sees would keep the helper, and so the game in Steam's eyes, running. The records are still written.
+
+A start that finds a crash record of the last day that no helper showed (the helper could not run, or was ended with the
+game) shows it once, before it goes on (`--crash-show`); `bug-reports/shown.txt` lists the records shown. The first
+start with this window lists what was pending already. Unclean ends are shown only by the helper, never at a start: a
+launcher or a logout that stopped the game is no crash.
+
+| Switch | What it does |
+|---|---|
+| `HOS_CRASH_WATCH=0` | No helper and no window after a crash, for development runs; on by default. None either for `--prepare-shaders`, `HOS_HEADLESS`, a profile-guided training run (`HOS_PGO`) or under gamescope |
+| `HOS_CRASH_TEST=start` or `=<seconds>` | A developer's test: the game crashes on purpose (a write to address 16) just after its crash handlers are set up, before the renderer, or that many seconds after the start, on a thread of its own. Off unless set; taken from the environment only, never from `longshot_env.txt` |
+
+To test it: start the game with `HOS_CRASH_TEST=start` (the window says *during the start*), with `HOS_CRASH_TEST=60`
+and a save loaded within the minute (*while you were playing*), end it from Task Manager or with `kill -9` (*ended
+without a crash report*), and quit normally and with the Insert menu's Restart now (no window). `tests/test_crash_dialog.py`
+checks the decisions game-free, and on Linux runs the real helper against real processes with the window stood in for.
+
 ### Input for scripted runs
 
 | Switch | What it does |

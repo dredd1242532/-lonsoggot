@@ -327,7 +327,9 @@ line with the video memory in use against what the driver allows, and DLSS's det
 | **Other** | |
 | The game is in the wrong language | Change the code in `language.txt` in the game folder. The file lists them all, and an update keeps the one you set. |
 
-Still stuck? [Report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with the version, where you were in
+After a crash, at the start or in play, a window says what happened; its **Report** button copies a report (no saves or
+game files, your home folder and user name taken out) and opens the issue form, for you to paste it into. Still stuck?
+[Report it](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new) with the version, where you were in
 the game, your graphics card, `longshot_log.txt` and a screenshot or video, and never game files. **Gameplay → Bug
 report** in the [in-game menu](#in-game-menu) gathers all of it in one press.
 

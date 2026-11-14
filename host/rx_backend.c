@@ -397,6 +397,10 @@ int rx_prepare_shaders(void) {
 /* (longshot) the window is being closed: a back end still preparing its shaders stops and keeps what it made first (a few
    seconds at most). One without the export (an older one) has nothing to keep */
 void rx_close_asked(void) {
+    /* (first, before anything that takes time: the player asked to quit, so however the process ends from here (a second
+       close of a window that stopped answering) the crash window says nothing; a crash still counts: host/hos_crash_dialog.h) */
+    void hos_crash_quit_asked(void);
+    hos_crash_quit_asked();
     if (!vk_module) return;
     void (*close_asked)(void) = (void (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_close_asked");
     if (close_asked) close_asked();

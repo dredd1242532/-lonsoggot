@@ -2095,6 +2095,13 @@ def warn_slow_disk(*folders):
 
 
 
+def stale_copies(found, parents, visible):
+    """The copies end_stale_games ends: those with no visible window, but not the crash window's helper of a game still open
+    (host/hos_crash_dialog.c: longshot --crash-watch, a windowless child of the game it waits on). Ending it would lose that
+    run's watcher, and the game's own window stops the update anyway; a helper showing its window is visible, so left alone"""
+    return [pid for pid in found if pid not in visible and parents.get(pid) not in visible]
+
+
 def end_stale_games(folders):
     """(Windows) The running processes whose exe is in one of folders (the game being updated): those with no visible window, a
     copy left behind (a shader preparation that hung, a game whose window closed but whose process did not end), are ended and
@@ -2120,7 +2127,7 @@ def end_stale_games(folders):
     snap = k32.CreateToolhelp32Snapshot(0x2, 0)
     if not snap or snap == wintypes.HANDLE(-1).value:
         return []
-    found = []
+    found, parents = [], {}
     try:
         e = Entry()
         e.dwSize = ctypes.sizeof(Entry)
@@ -2134,6 +2141,7 @@ def end_stale_games(folders):
                         path = os.path.normcase(buf.value)
                         if any(path.startswith(r) for r in roots) and os.path.dirname(path) + os.sep in roots:
                             found.append(e.th32ProcessID)
+                            parents[e.th32ProcessID] = e.th32ParentProcessID
                     k32.CloseHandle(h)
             ok = k32.Process32NextW(snap, ctypes.byref(e))
     finally:
@@ -2151,9 +2159,7 @@ def end_stale_games(folders):
                 visible.add(pid.value)
         return True
     u32.EnumWindows(proc(each), 0)
-    for pid in found:
-        if pid in visible:
-            continue
+    for pid in stale_copies(found, parents, visible):
         h = k32.OpenProcess(0x0001 | 0x00100000, False, pid)   # (PROCESS_TERMINATE | SYNCHRONIZE)
         if h:
             print("A copy of Longshot left running without a window (process %d) was ended so the update can replace it" % pid,
