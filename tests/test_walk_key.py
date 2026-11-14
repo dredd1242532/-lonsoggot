@@ -56,6 +56,7 @@ PRELUDE = r"""
 #include <string.h>
 #include <stdint.h>
 #include "vk_api.h"
+#include "../../host/hold_toggle.h"
 _Static_assert(HOS_OPT_WALK_MODE == 49, "Walk mode option ID");
 _Static_assert(HOS_OPT_WALK_SPEED == 50, "Walk speed option ID");
 typedef long LONG;

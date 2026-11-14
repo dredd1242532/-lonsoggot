@@ -602,7 +602,7 @@ number is not the obvious one:
 
 `toggle_<button>=0|1` is the Controls page's Toggle column: 0 Off (default), 1 press once to hold and again to release.
 It applies after remapping to either pad binding, keys and mouse buttons. Only Switch buttons accept it, excluding
-Plus and Minus; directions and ocarina notes do not. Other values mean Off. Saving keeps the flags, not live latches.
+Plus and Minus; directions, Walk and ocarina notes do not. Other values mean Off. Saving keeps the flags, not live latches.
 Opening Insert, Plus/Minus, focus loss, rebinding and Reset to defaults clear latches. Background pad presses can
 latch again when Controller in background permits them. Linux's other game dialogs are not guaranteed resets;
 Insert always releases the latch.
@@ -636,6 +636,10 @@ These named keys, including `walk_mode` and `walk_speed`, are independent of the
 `gpu/vk/vk_api.h`; renumbering an option does not require changing a player's saved options file.
 Walk mode and Walk speed use IDs 49 and 50 respectively; 52 is Skip opening's. The input regression check compiles the real header
 with the host's reads and checks the renderer's answers and menu rows against those names.
+Hold-to-toggle uses ID 54 and latches the final Switch-button word. Walk reads its raw bound key earlier and scales
+only the movement-key stick, so it never receives a latched Switch button as another toggle input. `toggle_walk` is
+not accepted; choose `walk_mode` instead. Walk's Toggle selection survives Insert, focus loss and Switch-button latch
+resets; a key held across Insert/focus return must be released before it can switch walking again.
 
 `HOS_CONTROL=<socket path>` turns on the control bridge: a local socket a tool or coding agent drives the running game
 through (inputs timed in frames, screenshots, waits, the Insert menu's settings, quit), with `scripts/longshot_ctl.py`

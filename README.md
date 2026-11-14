@@ -702,6 +702,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   way, and he walks; with Walk mode on Toggle, one press walks and the next runs again. 15% is his slowest walk, 45% to
   50% his fastest; from 55% up he jogs, then runs. Controllers, the mouse and the camera keys are not changed. Caps Lock
   still switches capitals on and off in other programs at each press: bind another key if that bothers you.
+  Walk mode is separate from the Controls page's Toggle column, which holds Switch buttons such as ZL, not Walk.
+  They can be used together without toggling twice. In Toggle mode, walking stays selected across Insert and focus
+  changes, but a Walk key held when play resumes must be released before a fresh press changes that selection.
 
 ### Controls
 
@@ -736,7 +739,7 @@ puts them all back. A gamepad button taken from another Switch button swaps with
 
 **Toggle:** on the Controls page, set a Switch button's Toggle column to On to hold it with one press and release it
 with the next. Both gamepad inputs, bound keys and mouse buttons share the latch. Every Toggle starts Off.
-Plus, Minus, stick directions and ocarina note rows have no Toggle. Opening Insert, pressing Plus or Minus,
+Plus, Minus, stick directions, Walk and ocarina note rows have no Toggle. Opening Insert, pressing Plus or Minus,
 losing focus, rebinding or Reset to defaults releases latched buttons. With Controller in background On, a new
 press can latch again behind another window. On Linux, other game dialogs do not necessarily clear the latch;
 press Insert to release it. There is no separate on-screen latch indicator.
@@ -764,7 +767,7 @@ buttons), and count while the mouse is captured. The buttons are `a` `b` `x` `y`
 `move_down` `move_left` `move_right` `cam_up` `cam_down` `cam_left` `cam_right` `walk`, and the ocarina's five notes,
 which also take a `pad_` line: `note_l` `note_r` `note_a` `note_y` `note_x`. A button the file leaves out keeps
 its default. `toggle_<button>=0|1` sets that button's Toggle (0 Off, the default; 1 On). It accepts the Switch
-buttons above except `plus` and `minus`; stick directions and note rows do not accept it. Other values mean Off.
+buttons above except `plus` and `minus`; stick directions, Walk and note rows do not accept it. Other values mean Off.
 The file saves enabled flags, not held state; a restart starts with no button latched.
 
 </details>

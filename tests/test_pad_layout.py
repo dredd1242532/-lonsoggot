@@ -45,6 +45,7 @@ HID = r"""
 #include <string.h>
 #include <stdint.h>
 #include "vk_api.h"
+#include "../../host/hold_toggle.h"
 typedef long LONG;
 typedef unsigned long DWORD;
 typedef int SRWLOCK;
