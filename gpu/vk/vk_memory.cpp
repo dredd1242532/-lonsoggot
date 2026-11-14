@@ -2063,6 +2063,15 @@ bool shadow_follows_sync_on() {
     static const bool on = [] { const char* e = getenv("RX_VK_SHADOW_FOLLOWS_SYNC"); return !e || !env_value_off(e); }();
     return on;
 }
+// (longshot) Always-on counts for the late pages' summary line, one for each way a late page's words or a CPU read of them go
+// (plain counters, pools_mu held; read and reset with the 600-recording line): reads on the CPU by branch, pages fixed by kind,
+// pages a mirror sync copied into a shadow, made known by it, and of those the ones the replay or the collection wrote again
+// since (shadow_forgotten_last, set by the write-back's forget: pages the capture did not take)
+struct LateStats {
+    int64_t rd_fixed = 0, rd_earlier_rec = 0, rd_not_recorded = 0, rd_this_part = 0, fix_diff_pages = 0, fix_whole_pages = 0,
+            sync_pages = 0, sync_known = 0, sync_known_again = 0;
+} st_lfx;
+std::vector<uint32_t> shadow_forgotten_last;   // (sorted)
 struct ShadowSynced { uint64_t lo, page; VkBuffer shadow; };
 std::vector<ShadowSynced> shadow_synced;   // (synced since the last write-back's forget, into that shadow; pools_mu)
 void shadow_sync_copy(VkCommandBuffer up, VkBuffer src, Pool& p, const std::vector<VkBufferCopy>& rs) {
@@ -2074,14 +2083,19 @@ void shadow_sync_copy(VkCommandBuffer up, VkBuffer src, Pool& p, const std::vect
     vkCmdCopyBuffer(up, src, p.shadow, (uint32_t)rs.size(), rs.data());
     for (const VkBufferCopy& r : rs)
         for (uint64_t pg = r.dstOffset >> kPageShift; r.size && pg <= (r.dstOffset + r.size - 1) >> kPageShift; pg++)
-            shadow_synced.push_back({p.lo, pg, p.shadow});
+            shadow_synced.push_back({p.lo, pg, p.shadow}), st_lfx.sync_pages++;
 }
 void shadow_synced_known() {   // (after the write-back's forget: the pages synced since, known as the sync left them)
     for (const ShadowSynced& s : shadow_synced) {   // (a shadow made since has not had the copy: shadow_synced_freed)
         const auto it = imported.find(s.lo);
         if (it == imported.end() || !it->second.shadow || it->second.shadow != s.shadow) continue;
         std::vector<uint64_t>& known = it->second.shadow_known;
-        if ((s.page >> 6) < known.size()) known[s.page >> 6] |= 1ull << (s.page & 63);
+        if ((s.page >> 6) < known.size()) {
+            known[s.page >> 6] |= 1ull << (s.page & 63);
+            st_lfx.sync_known++;
+            if (std::binary_search(shadow_forgotten_last.begin(), shadow_forgotten_last.end(), (uint32_t)((s.lo >> kPageShift) + s.page)))
+                st_lfx.sync_known_again++;
+        }
     }
     shadow_synced.clear();
 }
@@ -2352,7 +2366,10 @@ bool late_fix_build(Capture& c) {
             if (copied[i]) guarded_copy((uint8_t*)c.map + (uint64_t)i * 4096, base + ((uint64_t)c.pages[i] << kPageShift), 4096);
         flush_mapped(c.alloc, c.nbytes);
     }
-    for (auto& [pg, lp] : pages) late_pages[pg] = lp, late_built.push_back(pg);
+    for (auto& [pg, lp] : pages) {
+        late_pages[pg] = lp, late_built.push_back(pg);
+        (lp.stamp_key != UINT64_MAX ? st_lfx.fix_diff_pages : st_lfx.fix_whole_pages)++;
+    }
     st_lf_fixed++, st_lf_pages += (int64_t)pages.size(), st_lf_fixes += (int64_t)(late_fixes.size() - late_built_mark);
     return true;
 }
@@ -2397,7 +2414,8 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
     LatePage& lp = it->second;
     static uint64_t part_wait_failed = 0;   // (a part waited for past the guard is not waited for again)
     bool fixed = lp.fix_value && lp.fix_value <= mem_completed;   // (the buffer is as the fix left it)
-    if (!fixed && lp.fix_value && lp.fix_value < mem_rec_value) vk_timeline_wait(lp.fix_value), fixed = true;
+    if (fixed) st_lfx.rd_fixed++;
+    if (!fixed && lp.fix_value && lp.fix_value < mem_rec_value) vk_timeline_wait(lp.fix_value), fixed = true, st_lfx.rd_earlier_rec++;
     if (!fixed && lp.fix_value && lp.fix_part && lp.fix_part != mem_rec_part.load()) {   // (an earlier part of this recording)
         const int waited = lp.fix_part == part_wait_failed ? 0 : vk_part_wait(lp.fix_part, kPartWaitGuard);
         if (waited > 0) fixed = true, st_lf_part_waits++;
@@ -2414,8 +2432,10 @@ void late_fix_cpu_read(uint32_t page, VkBuffer buffer, uint8_t* slot) {
         invalidate_mapped(lp.alloc, lp.nbytes);
     } else {
         if (!lp.fix_value) {
+            st_lfx.rd_not_recorded++;
             for (size_t k = lp.first; k < lp.first + lp.n && k < late_fixes.size(); k++) late_fixes[k].count = 0;
         } else if (lp.fix_map) {
+            if (lp.fix_part == mem_rec_part.load()) st_lfx.rd_this_part++;
             for (size_t k = 0; k < lp.n; k++) lp.fix_map[k].count = 0;
             flush_mapped(lp.fix_alloc, lp.fix_end);
         }
@@ -2525,13 +2545,19 @@ void late_fix_emit() {
              "a capture), waited as before: %lld no pool, %lld no stamps or shadow yet, %lld stamps too new, %lld "
              "whole copies, %lld in place or unknown, %lld a page's earlier fix not recorded yet, %lld other; %lld read on the CPU first, %lld with no table, %lld pages whose shadow changed "
              "first; stamps %zu blocks (%llu KB); of the reads on the CPU, %lld waited for an earlier part's fix, %lld copied the page "
-             "again instead (that part not waited for)",
+             "again instead (that part not waited for); the paths: reads on the CPU with the fix done %lld, of an earlier recording %lld, "
+             "not recorded yet %lld, of this part %lld; pages fixed from stamps %lld, from snapshots %lld; the shadows: %lld pages "
+             "synced from captures, %lld made known by it, %lld of those also written by the replay or the collection since",
              (long long)st_lf_takes, (long long)st_lf_fixed, st_lf_fixed ? (double)st_lf_pages / st_lf_fixed : 0.0,
              st_lf_fixed ? (double)st_lf_fixes / st_lf_fixed : 0.0, (long long)st_lf_fell[1],
              (long long)st_lf_fell[3], (long long)st_lf_fell[4], (long long)st_lf_fell[5], (long long)st_lf_fell[6],
              (long long)st_lf_fell[2], (long long)st_lf_fell[0], (long long)st_lf_cpu_reads, (long long)st_lf_no_table, (long long)st_lf_moved, stamp_blocks.size(),
-             (unsigned long long)(stamp_bytes >> 10), (long long)st_lf_part_waits, (long long)st_lf_part_fell);
+             (unsigned long long)(stamp_bytes >> 10), (long long)st_lf_part_waits, (long long)st_lf_part_fell,
+             (long long)st_lfx.rd_fixed, (long long)st_lfx.rd_earlier_rec, (long long)st_lfx.rd_not_recorded, (long long)st_lfx.rd_this_part,
+             (long long)st_lfx.fix_diff_pages, (long long)st_lfx.fix_whole_pages, (long long)st_lfx.sync_pages, (long long)st_lfx.sync_known,
+             (long long)st_lfx.sync_known_again);
         st_lf_takes = st_lf_fixed = st_lf_pages = st_lf_fixes = st_lf_cpu_reads = st_lf_no_table = st_lf_moved = st_lf_part_waits = st_lf_part_fell = 0;
+        st_lfx = LateStats{};
         for (int64_t& f : st_lf_fell) f = 0;
     }
 }
@@ -5243,6 +5269,7 @@ void shadows_forget_written() {
     if (all)   // (written for a long while with no write-back to read the list: nothing of guest memory is known)
         for (auto& [lo, pool] : imported)
             if (pool.shadow) std::fill(pool.shadow_known.begin(), pool.shadow_known.end(), 0ull);
+    shadow_forgotten_last.clear();
     if (!shadow_bytes) return;
     // (in this order, each page counted under the first that reports it: the collection's and the replay's counts are what the
     // captures alone would have left known)
@@ -5269,6 +5296,12 @@ void shadows_forget_written() {
             bits &= ~(1ull << (i & 63));
         }
     }
+    // (the pages the capture did not take that were written since: the replay's own writes and the collection's, for the late
+    // pages' summary line: a page synced from a capture and also in these has newer words in guest memory than the shadow)
+    shadow_forgotten_last.clear();
+    shadow_forgotten_last.insert(shadow_forgotten_last.end(), collected.begin(), collected.end());
+    shadow_forgotten_last.insert(shadow_forgotten_last.end(), replay.begin(), replay.end());
+    std::sort(shadow_forgotten_last.begin(), shadow_forgotten_last.end());
 }
 // (the pass's pipeline: 24 bytes of push constants and no descriptors, its buffers by address; made once)
 struct WbdPipe {

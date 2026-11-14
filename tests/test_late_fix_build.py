@@ -193,7 +193,7 @@ void reset() {
     guest_data.clear(), timeline_waits.clear(), while_waiting = nullptr, flushes = invalidates = 0, completed_now = 0, mem_rec_part = 0;
     part_waits.clear(), while_part_waiting = nullptr, part_wait_result = 1, st_lf_part_waits = st_lf_part_fell = 0;
     for (int64_t& f : st_lf_fell) f = 0;
-    st_lf_cpu_reads = 0;
+    st_lf_cpu_reads = 0, st_lfx = LateStats{}, shadow_forgotten_last.clear(), shadow_synced.clear();
     mem_rec_value = mem_completed = 0;
 }
 Capture cap(std::vector<uint32_t> pages, uint64_t late_done = 0) {   // (every page copied and late)
@@ -297,6 +297,7 @@ int main() {
         CHECK(f.dst == cap_addr && f.src == ((uint64_t)kShadowA << 32) + 3 * 4096 && f.stamps == b.address + 3 * 4096);
         CHECK(f.count == 1024 && f.after == 9);
         CHECK(late_pages.count((uint32_t)pg) && late_pages[(uint32_t)pg].fix_value == 0 && late_built.size() == 1);
+        CHECK(st_lfx.fix_diff_pages == 1 && st_lfx.fix_whole_pages == 0);
         CHECK(late_pages[(uint32_t)pg].stamp_buf == b.buf && late_pages[(uint32_t)pg].shadow == kShadowA);
         late_fixes.clear(), late_pages.clear();
         CHECK(build(c, 10) && late_fixes.empty() && late_pages.empty());   // (done by D: the copy again is all it needs)
@@ -472,6 +473,7 @@ int main() {
         CHECK(slot[kX] == kA && slot[kY] == kCpu);          // (the capture as the GPU read it: not copied again, the CPU reads it)
         CHECK(part_waits.size() == 1 && part_waits[0] == 1 && copied_pages.empty() && timeline_waits.empty());
         CHECK(invalidates == 1 && late_pages.empty() && st_lf_cpu_reads == 1);
+        CHECK(st_lf_part_waits == 1 && st_lfx.rd_fixed == 0 && st_lfx.rd_this_part == 0);
         gpu_fix(table.data(), table.size());                // (a fix run again changes nothing)
         CHECK(slot[kX] == kA && slot[kY] == kCpu);
     }
@@ -486,6 +488,7 @@ int main() {
         const uint32_t* slot = (const uint32_t*)cap_mem;
         CHECK(part_waits.empty() && timeline_waits.size() == 1 && timeline_waits[0] == 1000 && st_lf_cpu_reads == 1);
         CHECK(slot[kX] == kB && slot[kY] == kCpu && table[0].count == 0 && late_pages.empty());
+        CHECK(st_lfx.rd_this_part == 1 && st_lfx.rd_fixed == 0 && st_lfx.rd_not_recorded == 0);
         gpu_fix(table.data(), table.size());
         CHECK(slot[kX] == kB && slot[kY] == kCpu);
     }
@@ -501,6 +504,7 @@ int main() {
         const uint32_t* slot = (const uint32_t*)cap_mem;
         CHECK(timeline_waits.empty() && part_waits.empty() && copied_pages.empty() && invalidates == 1 && late_pages.empty());
         CHECK(slot[kX] == kA && slot[kY] == kCpu);          // (the capture as the GPU read it)
+        CHECK(st_lfx.rd_fixed == 1 && st_lfx.rd_earlier_rec == 0);
     }
     // (n) a fix recorded by an earlier recording, not done yet: the CPU waits for that recording, then reads the fixed capture
     {
@@ -513,6 +517,7 @@ int main() {
         const uint32_t* slot = (const uint32_t*)cap_mem;
         CHECK(timeline_waits.size() == 1 && timeline_waits[0] == 15 && part_waits.empty() && copied_pages.empty() && invalidates == 1);
         CHECK(slot[kX] == kA && slot[kY] == kCpu);
+        CHECK(st_lfx.rd_earlier_rec == 1 && st_lfx.rd_fixed == 0 && st_lfx.rd_this_part == 0 && st_lfx.rd_not_recorded == 0);
     }
     // (k) the read of (j) when that part cannot be waited for (vk_part_wait -1: no timeline of its own, RX_VK_PER_QUEUE_FENCES=0): its
     // fix is dropped before the page is copied again, as for a part not submitted yet; counted as copied again, and asked again
@@ -551,6 +556,22 @@ int main() {
         CHECK(slot[kX] == kB && slot[kY] == kCpu);
         late_fix_cpu_read((uint32_t)pg + 1, kCapBuf, cap_mem + 4096);
         CHECK(part_waits.size() == 1 && timeline_waits.size() == 2 && st_lf_cpu_reads == 2 && late_pages.empty() && st_lf_part_fell == 2);
+    }
+    // (p) the shadow's counts (the summary line's): a mirror sync's copy into a shadow counts its pages, the forget's pages the
+    // capture did not take (the replay's and the collection's writes) are told apart from the ones it did, and the pages made
+    // known by the sync that those lists also hold are counted again: the page of main's forget-then-known order
+    {
+        reset();
+        const uint64_t other = pg + 1;                      // (a second page of the pool: synced, not written since)
+        std::vector<VkBufferCopy> rs{{0, pg * 4096 - kLo, 4096}, {4096, other * 4096 - kLo, 4096}};
+        shadow_sync_copy(1, kCapBuf, imported[kLo], rs);
+        CHECK(st_lfx.sync_pages == 2 && shadow_synced.size() == 2 && cmd_copies.size() == 2);
+        shadow_forgotten_last = {(uint32_t)pg};             // (the replay wrote the first page after its capture)
+        shadow_synced_known();
+        const std::vector<uint64_t>& known = imported[kLo].shadow_known;
+        const uint64_t i = pg - (kLo >> kPageShift), j = other - (kLo >> kPageShift);
+        CHECK((known[i >> 6] >> (i & 63) & 1) && (known[j >> 6] >> (j & 63) & 1));   // (both known: the sync left them so)
+        CHECK(st_lfx.sync_known == 2 && st_lfx.sync_known_again == 1 && shadow_synced.empty());
     }
     std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots, their ranges and slots, and a CPU read of a fixed late page");
 }
