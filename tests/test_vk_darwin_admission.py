@@ -172,6 +172,8 @@ static void* dlopen(const char* path, int) { loaded.emplace_back(path); return n
 static void* GetProcAddress(void*, const char*) { return nullptr; }
 static void* LoadLibraryExA(const char* path, void*, unsigned flags) { loaded.emplace_back(path); loader_flags = flags; return nullptr; }
 static unsigned last_error;
+static char load_error[512];   // main's LoadLibraryA keeps dlerror()'s text here (hos_load_error)
+static const char* dlerror() { return "fixture: no library"; }
 static int cached_extensions(uint32_t* n, const char* const** names) { *n = sdl_count; *names = sdl_names; return 1; }
 static struct { int (*vulkan_extensions)(uint32_t*, const char* const**); } host_data{cached_extensions}, *host = &host_data;
 static struct { VkInstance instance{}; bool swapchain_colorspace{}; } dev;
@@ -198,7 +200,7 @@ static VkResult vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const cha
 }
 static void vkGetPhysicalDeviceFeatures2(VkPhysicalDevice, VkPhysicalDeviceFeatures2*) {}
 static void vkGetPhysicalDeviceProperties2(VkPhysicalDevice, VkPhysicalDeviceProperties2*) {}
-static bool native_fadd_wanted(const char*, VkDriverId driver) { return driver == VK_DRIVER_ID_NVIDIA_PROPRIETARY; }
+static bool native_fadd_wanted(const char*, VkDriverId driver, uint32_t, uint32_t) { return driver == VK_DRIVER_ID_NVIDIA_PROPRIETARY; }
 static void dlss_device_extensions(std::vector<const char*>&, const std::vector<VkExtensionProperties>&) {}
 static void dlss_fg_device_extensions(std::vector<const char*>&, const std::vector<VkExtensionProperties>&) {}
 static bool fsr4_wants_descriptor_buffer() { return false; }
