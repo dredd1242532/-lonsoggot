@@ -312,7 +312,9 @@ and `tools.lock` from the head, writes `SHA256SUMS`, signs it with the **pull re
 publishes a Forgejo **pre-release** with that tag, on no channel. It then deletes the builds of pull requests closed, merged
 or back to draft, each one's past its newest 2, and drafts a failed run left (the next run publishes such a draft again; one
 still there after 6 hours is deleted). A build that fails leaves the others to go on. Without the secret it publishes nothing
-and says so.
+and says so. Key or not, it last counts who has looked at each pull request that is not a draft: the people other than its
+author who commented on it or reviewed it, bots left out, in the release `pull-requests` (a pre-release on no channel, never
+a version), whose one file `pull-requests.json` each run replaces.
 
 A fork's run that Forgejo holds for a maintainer's approval builds nothing until it is approved. Anything a pull request's
 code makes is that code's: the key says *CI built this pull request at this commit*, not that anyone reviewed it, which the
@@ -325,8 +327,11 @@ launcher says before installing one.
   requests but installs none, and says so. `LONGSHOT_LAUNCHER_PR_TRUST=<public key .pem>` trusts one more, for a test key.
 - The open pull requests from `GET /api/v1/repos/MagicBeanDev/Longshot/pulls?state=open` (public, no sign-in), matched on the
   player's PC: a number (`332`, `#332`), or words of the title or the author, as typed or as letters in order within one
-  word (`rendr targts`). A draft is never listed (CI builds none). *Testing wanted* (on by default) keeps those with the
-  label; off, every other one shows. Each shows its build: **ready** (a build of its head), **built from an earlier push**,
+  word (`rendr targts`). A draft is never listed (CI builds none), nor one labelled for the other system only
+  (`platform/windows` on Linux; `platform/linux` or `platform/steam-deck` on Windows); a search that finds only those says so.
+  *Testing wanted* (on by default) keeps those with the label; off, every other one shows. They come in the order that gets
+  eyes on what waits: those the fewest people other than their author have looked at first (`pull-requests.json`), then the
+  oldest; without that file, the oldest first. Each shows its build: **ready** (a build of its head), **built from an earlier push**,
   or none (not installable, with the reason). *Read* opens it on git.magicbean.dev.
 - A pull request's build is a version of its own (`Versions.PullRequest`, "pr"), on no channel: no channel's version is
   offered to it, and it is offered to none. Its only update is a newer build of the same pull request (a new push), which the

@@ -181,6 +181,24 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(pr_builds.plain("WIP:  two\nlines"), "` WIP: two lines `")
 
 
+class CountsTests(unittest.TestCase):
+    def test_who_has_looked(self):
+        # (the author, a bot and a deleted account are no one; a login in another case is the same person; a review counts)
+        pr = {"number": 222, "title": "fix(vk): HUD", "user": {"login": "dukenheimer"}}
+        comments = [{"user": {"login": "DukeNheimer"}}, {"user": {"login": "crash-bot"}}, {"user": {"login": "renovate[bot]"}},
+                    {"user": {"login": "ghost"}}, {"user": {"login": "Amateurwizrd"}}, {"user": {"login": "amateurwizrd"}}, {"user": None}]
+        reviews = [{"user": {"login": "mooki"}}, {"user": {"login": "dukenheimer"}}]
+        self.assertEqual(pr_builds.commenters(pr, comments, reviews), {"amateurwizrd", "mooki"})
+
+    def test_each_pull_request_out_of_draft(self):
+        pulls = [pull(222), pull(223, OTHER, title="WIP: later"), pull(224, OTHER, draft=True), pull(16, OTHER)]
+        for p in pulls:
+            p["user"] = {"login": "author"}
+        looked = {222: [{"user": {"login": "a"}}, {"user": {"login": "b"}}], 16: []}
+        got = pr_builds.counts(pulls, comments=lambda n: looked.get(n, []), reviews=lambda n: [], now=1_800_000_000)
+        self.assertEqual(got, {"generated": "2027-01-15T08:00:00Z", "pulls": {"222": {"commenters": 2}, "16": {"commenters": 0}}})
+
+
 class PruneTests(unittest.TestCase):
     NOW = 1_800_000_000
 
@@ -211,6 +229,9 @@ class PruneTests(unittest.TestCase):
         new = self.rel("pr-222-eeeeeeee", draft=True, published=None, created=made)
         self.assertEqual(self.gone([new], [pull(222)]), [])
         self.assertAlmostEqual(pr_builds._when(made), self.NOW - 60)
+
+    def test_never_the_counts(self):
+        self.assertEqual(self.gone([self.rel(pr_builds.COUNTS_TAG)], []), [])
 
     def test_never_anything_else(self):
         rels = [self.rel(t) for t in ("v3.0.0", "v3.1.0-rc.1", "nightly-12-bbbbbbbb", "pr-1a2b3c4d", "pr-222-1A2B3C4D", "tools")]
@@ -298,6 +319,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("RELEASE_SIGNING_KEY", wf)
         self.assertIn("scripts/pr_builds.py publish", wf)
         self.assertIn("scripts/pr_builds.py prune", wf)
+        self.assertIn("scripts/pr_builds.py counts", wf)
 
     def test_a_pull_requests_build_is_no_release_build(self):
         # (build-linux.yml and build-windows.yml name the files by the tag; only a channel's version builds without the caches

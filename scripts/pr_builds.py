@@ -12,6 +12,12 @@ testers (Build another version > A pull request), never on a channel.
     python -I scripts/pr_builds.py prune [--keep 2] [--dry-run]  the builds of pull requests closed, merged or back to draft,
                                                                  and each one's past its newest keep
     python -I scripts/pr_builds.py verify <SHA256SUMS> --files <dir>    checked with the pull request keys
+    python -I scripts/pr_builds.py counts [--dry-run]            who has looked at each pull request that is not a draft: the
+                                                                 launcher's picker shows the ones fewest people looked at first
+
+The counts are the release "pull-requests" (a pre-release on no channel, never a version: its one file, pull-requests.json,
+is replaced each run): {"generated": <UTC time>, "pulls": {"<number>": {"commenters": <n>}}}, n the people other than its
+author who commented on it or reviewed it, bots left out. Nothing is signed: it only orders the list.
 
 The pull request keys are scripts/release_keys.json's "pull_request_keys" (the launcher's ReleaseKeys.PullRequestBuiltIn):
 never the release key, which signs the channels' versions alone. RELEASE_TOKEN: the job's token (forgejo.token);
@@ -57,6 +63,9 @@ ACTIONS = ("opened", "synchronize", "synchronized", "reopened", "edited")
 # artifacts: an edit's run that built nothing passes too)
 BUILDING = ("running", "waiting", "blocked")
 MAX_FILE = 4 << 30
+COUNTS_TAG, COUNTS_FILE = "pull-requests", "pull-requests.json"
+# (an account that is a bot: crash-bot, renovate[bot]; its comments are no one looking)
+BOT = re.compile(r"(?i)(?:-bot|\[bot\])$")
 DRAFT_AGE = 6 * 3600   # (a pull request build's draft older than this was left by a failed run)
 
 
@@ -300,6 +309,68 @@ def publish(key, work, dry_run=False):
     return done
 
 
+def paged(path, pages=100):
+    """Every item of a list the API pages (limit=50), page by page until an empty one"""
+    out = []
+    for page in range(1, pages + 1):
+        got = api("%s%slimit=50&page=%d" % (path, "&" if "?" in path else "?", page)) or []
+        if not got:
+            return out
+        out += got
+    fail("%s: more than %d pages" % (path, pages))
+
+
+def commenters(pr, comments, reviews):
+    """The people who looked at pr: those other than its author who commented on it or reviewed it, by login (any case);
+    bots and Forgejo's ghost (a deleted account) left out"""
+    author = ((pr.get("user") or {}).get("login") or "").lower()
+    who = set()
+    for item in list(comments) + list(reviews):
+        login = ((item.get("user") or {}).get("login") or "").lower()
+        if login and login not in (author, "ghost") and not BOT.search(login):
+            who.add(login)
+    return who
+
+
+def counts(pulls=None, comments=None, reviews=None, now=None):
+    """The counts file's data for each open pull request that is not a draft. The arguments are the server's answers (the
+    tests pass theirs): pulls, comments(number), reviews(number)"""
+    pulls = open_pulls() if pulls is None else pulls
+    comments = comments or (lambda n: api("/repos/%s/issues/%d/comments" % (repo(), n)) or [])
+    reviews = reviews or (lambda n: paged("/repos/%s/pulls/%d/reviews" % (repo(), n)))
+    now = time.time() if now is None else now
+    out = {}
+    for pr in pulls:
+        if is_draft(pr):
+            continue
+        out[str(pr["number"])] = {"commenters": len(commenters(pr, comments(pr["number"]), reviews(pr["number"])))}
+    return {"generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)), "pulls": out}
+
+
+def publish_counts(data, dry_run=False):
+    """The counts file in the release "pull-requests" (made the first time, on main), replacing the one before"""
+    text = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    print("%d pull requests counted" % len(data["pulls"]))
+    if dry_run:
+        print(text.decode())
+        return
+    r = repo()
+    rel = api("/repos/%s/releases/tags/%s" % (r, COUNTS_TAG), missing_ok=True)
+    if rel is None:
+        rel = release.api("POST", "/repos/%s/releases" % r, {
+            "tag_name": COUNTS_TAG, "target_commitish": "main", "name": "Pull requests: who has looked", "draft": False,
+            "prerelease": True, "body": "Not a version: how many people have looked at each open pull request, which the Longshot "
+            "Launcher's pull request picker reads to show first the ones fewest looked at (docs/releases.md, Pull request builds). "
+            "scripts/pr_builds.py counts replaces its file every 15 minutes."})
+    for asset in rel.get("assets") or []:
+        if asset["name"] == COUNTS_FILE:
+            release.api("DELETE", "/repos/%s/releases/%d/assets/%d" % (r, rel["id"], asset["id"]))
+    form, ctype = release.multipart(COUNTS_FILE, text)
+    release.api("POST", "/repos/%s/releases/%d/assets?name=%s" % (r, rel["id"], COUNTS_FILE), data=form, content_type=ctype,
+                upload=True)
+    print("published %s/%s/releases/download/%s/%s" % (release.SERVER, r, COUNTS_TAG, COUNTS_FILE))
+
+
 def to_prune(releases, pulls, keep=2, now=None):
     """The pull requests' builds to delete: those of a pull request that is not open or is a draft again, each one's
     published builds past its newest keep, and drafts a failed run left (older than DRAFT_AGE). Never anything else"""
@@ -352,6 +423,8 @@ def main(argv=None):
     s = sub.add_parser("prune")
     s.add_argument("--keep", type=int, default=2)
     s.add_argument("--dry-run", action="store_true")
+    s = sub.add_parser("counts")
+    s.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("verify")
     s.add_argument("sums")
     s.add_argument("--files", required=True)
@@ -369,6 +442,8 @@ def main(argv=None):
         if a.keep < 1:
             fail("--keep is at least 1")
         prune(a.keep, a.dry_run)
+    elif a.cmd == "counts":
+        publish_counts(counts(), a.dry_run)
     elif a.cmd == "verify":
         verify(a.sums, a.files)
     return 0

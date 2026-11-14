@@ -2,7 +2,9 @@
 # scripts/pr_builds.py finds each open pull request that is not a draft whose head pr-build.yml built (a run that passed, with
 # both builders' artifacts), takes the two builders from that run and tools.lock from the head, signs SHA256SUMS with the pull
 # request key, and publishes a pre-release pr-<number>-<first 8 hex of the head> on no channel. It then deletes the builds of
-# pull requests closed, merged or back to draft, and each one's past its newest 2.
+# pull requests closed, merged or back to draft, and each one's past its newest 2. Last, it counts who has looked at each
+# pull request that is not a draft (the release "pull-requests": the launcher's picker shows first the ones fewest looked at),
+# with or without the key.
 #
 # No pull request's code runs here: this job checks out main, and only reads the builders a pull request's own run made. The
 # job's token (forgejo.token, a scheduled run's: write access to this repository) makes and deletes the releases.
@@ -51,3 +53,6 @@ jobs:
       - name: Prune
         if: ${{ !cancelled() }}
         run: python3 -I scripts/pr_builds.py prune --keep 2
+      - name: Who has looked (the launcher's order)
+        if: ${{ !cancelled() }}
+        run: python3 -I scripts/pr_builds.py counts
