@@ -579,24 +579,8 @@ def check_cache_paths(out, paths):
                  "Choose a different output folder." % path)
 
 
-def check_cpu(fsr=False):
-    """(linux) The AppImage's Vulkan back end (LONGSHOT_VK_PREBUILT) is built for x86-64-v3 elsewhere
-    (scripts/linux/appimage.sh), while the game follows this PC (nx2/host_cpu.py): on a CPU without AVX2 it would stop at
-    its start. Said now, before the game is read, not 40 minutes in (issue 363). fsr: this build has AMD FSR 4, which compiles its
-    own back end (nx2/build.py prebuilt_renderer), for this PC"""
-    if not os.environ.get("LONGSHOT_VK_PREBUILT") or os.environ.get("RX_MARCH") or fsr:
-        return
-    sys.path.insert(0, HERE)
-    from host_cpu import host_march
-    m = host_march()
-    if m != "x86-64-v3":
-        fail("Your processor has no AVX2 (it runs %s), and the AppImage's renderer needs it. Build Longshot from source "
-             "instead (see the readme): a source build follows your processor." % m)
-
-
 def check(a, work):
     check_windows_sdk(work)   # (first: said in plain words when the game is chosen, not after it has been read)
-    check_cpu()
     if a.nup:
         probe = os.path.join(work, "probe")
         shutil.rmtree(probe, ignore_errors=True)
@@ -719,25 +703,18 @@ def check_linux_prerequisites(work=None):
                 if pin and importlib.util.find_spec(pin[1]) is None:
                     missing.append("Python module %s (not on %s's isolated import path; install requirements.txt "
                                    "with that Python)" % (pin[1], sys.executable))
-    prebuilt = build.prebuilt_renderer()
-    if prebuilt:
-        if not os.path.isfile(prebuilt):
-            missing.append("Vulkan renderer %s (LONGSHOT_VK_PREBUILT)" % prebuilt)
-    else:
-        for (name, package, probe, env), found in zip(build.VK_HEADERS, build.vulkan_headers(work)):
-            if not found:
-                missing.append("%s header %s (CPM package %s: RX_CPM, clone/cpm, work/eg/.cache/cpm, then sibling "
-                               "mkw-recomp/Eglantine caches; then %s, package root or include/; then /usr/local, /usr)"
-                               % (name, probe, package, env))
-        if build.FSR and not os.path.isfile(os.path.join(build.FSR_HEADERS, "api", "include", "ffx_api.h")):
-            missing.append("AMD's FSR API headers in %s (AMD FSR 4: third_party/fidelityfx; or build without --fsr)"
-                           % os.path.normpath(build.FSR_HEADERS))
+    # (the Vulkan back end is compiled by every build, the AppImage's too: its headers, and clang++ for it and a64emit)
+    for (name, package, probe, env), found in zip(build.VK_HEADERS, build.vulkan_headers(work)):
+        if not found:
+            missing.append("%s header %s (CPM package %s: RX_CPM, clone/cpm, work/eg/.cache/cpm, then sibling "
+                           "mkw-recomp/Eglantine caches; then %s, package root or include/; then /usr/local, /usr)"
+                           % (name, probe, package, env))
+    if build.FSR and not os.path.isfile(os.path.join(build.FSR_HEADERS, "api", "include", "ffx_api.h")):
+        missing.append("AMD's FSR API headers in %s (AMD FSR 4: third_party/fidelityfx; or build without --fsr)"
+                       % os.path.normpath(build.FSR_HEADERS))
     build.ffmpeg_linux(missing)
     cc = build.toolchain.find("clang")
-    # A source checkout also builds a64emit with clang++, even with a prebuilt renderer.
-    tools = [("clang", cc)]
-    if source_build or not prebuilt:
-        tools.append(("clang++", build.toolchain.find("clang++")))
+    tools = [("clang", cc), ("clang++", build.toolchain.find("clang++"))]
     for name, path in tools:
         if not os.path.isfile(path):
             missing.append("%s compiler %s (EMSDK/upstream/bin, else ~/emsdk/upstream/bin, then PATH; "
@@ -1917,7 +1894,7 @@ def ngx_script():
     """scripts/ngx_sdk.py: NVIDIA's DLSS SDK, its file table and where each file goes"""
     import importlib.util
     path = os.path.join(ROOT, "scripts", "ngx_sdk.py")
-    if not os.path.isfile(path):   # (the AppImage carries no scripts/: its Vulkan back end comes built, without DLSS)
+    if not os.path.isfile(path):   # (a builder without scripts/ngx_sdk.py: an older AppImage carried none)
         fail("NVIDIA DLSS (LONGSHOT_NGX_SDK) needs %s, which this builder does not carry: its renderer is built without DLSS. "
              "Unset LONGSHOT_NGX_SDK, or build Longshot from source for DLSS." % path)
     spec = importlib.util.spec_from_file_location("ngx_sdk", path)
@@ -2208,17 +2185,15 @@ def main(a=None):
     a.language = build_language(a, out)   # (now: the folder's own language.txt is still the one the player left)
     warn_slow_disk(out, work)   # (a warning, not a stop: a hard drive still builds, only much slower)
     check_writable(out)
-    # (AMD FSR 4: the build's switch for nx2/build.py, set or cleared here, before the checks: on Linux it compiles its own
-    # Vulkan back end, as with DLSS, so the AppImage's prebuilt one is neither checked nor used. One set in the shell is not
-    # taken for this build's: --fsr, or the folder's mark, decides)
+    # (AMD FSR 4: the build's switch for nx2/build.py, set or cleared here, before the checks: the Vulkan back end is compiled
+    # with it, and its headers are checked. One set in the shell is not taken for this build's: --fsr, or the folder's mark, decides)
     fsr = fsr_wanted(a, out)
     if fsr:
         os.environ["LONGSHOT_FSR"] = "1"
     else:
         os.environ.pop("LONGSHOT_FSR", None)
-    check_cpu(fsr)   # (no game read yet: the AppImage on a CPU without AVX2 stops here)
     if getattr(a, "fetch_ngx_sdk", False):
-        fetch_ngx_sdk(a)   # (the SDK selects a source renderer instead of LONGSHOT_VK_PREBUILT)
+        fetch_ngx_sdk(a)   # (the Vulkan back end is compiled with NVIDIA DLSS)
     check_windows_sdk(work)
     stop_stray_compilers(work, a.default_work)
     drop_stale_objects(work)
@@ -2230,9 +2205,6 @@ def main(a=None):
             print("--fetch-fsr-runtime: AMD publishes this runtime for Windows only; on Linux see the readme "
                   "(amd_fidelityfx_upscaler_vk.so)", flush=True)
         open(os.path.join(out, FSR_MARK), "w").close()
-        if os.environ.get("LONGSHOT_VK_PREBUILT"):   # (the AppImage's back end, built without FSR 4: nx2/build.py prebuilt_renderer)
-            print("--fsr: the Vulkan back end is compiled here with AMD FSR 4, not the prebuilt one (LONGSHOT_VK_PREBUILT)",
-                  flush=True)
     else:
         if os.path.isfile(os.path.join(out, FSR_MARK)):
             os.remove(os.path.join(out, FSR_MARK))

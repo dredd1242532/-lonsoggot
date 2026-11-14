@@ -8,8 +8,9 @@ one's shape and how often its branches ran: no game code or data.
 
 The Vulkan back end's play profile (nx2/build.py `RX_VK_PGO`; docs/development.md, "The renderer's play profile"),
 compressed with xz. `nx2/make_game.py` unpacks it into the work folder and builds the renderer with it, unless the
-checkout's `work/longshot_vk.profdata` or `RX_VK_PGO` says otherwise; `scripts/linux/appimage.sh` builds the
-AppImage's renderer with it. A compiler that can't read it builds the renderer without it.
+checkout's `work/longshot_vk.profdata` or `RX_VK_PGO` says otherwise; the Linux AppImage carries it for the player's
+build, which compiles the renderer (the AppImage has no built one). A compiler that can't read it builds the renderer
+without it.
 
 One profile for every build for now. It ages rather than breaks: a function changed since the recording is compiled as
 if there were no profile, the rest keep theirs. Record it again before a release, and when the renderer has changed much.

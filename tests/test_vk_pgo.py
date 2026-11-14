@@ -108,13 +108,16 @@ def check_writer():
 
 def check_release():
     appimage = (ROOT / "scripts" / "linux" / "appimage.sh").read_text(encoding="utf-8")
-    build = next(line for line in appimage.splitlines() if "RX_VK_ONLY=1" in line and "nx2/build.py" in line)
-    check("the AppImage's renderer is built with the checkout's profile, else the committed one, never the shell's RX_VK_PGO",
-          "RX_VK_PGO=$VK_PGO " in build and "\nVK_PGO=\n" in appimage and
-          "if [ -f work/longshot_vk.profdata ]; then VK_PGO=$ROOT/work/longshot_vk.profdata" in appimage and
-          'xz -dc assets/profiles/longshot_vk.profdata.xz > "$VKW/longshot_vk.shipped.profdata"' in appimage)
-    check("the AppImage carries assets/ (the committed profile, for a player's own renderer with DLSS or FSR 4)",
+    check("the AppImage builds no renderer of its own (every player's build compiles it, with the profile)",
+          "RX_VK_ONLY" not in appimage and "RX_VK_PGO" not in appimage)
+    check("the AppImage carries assets/ (the committed profile, for every player's own renderer)",
           "cp -a nx2 host scripts LICENSE README.md assets tools.lock" in appimage)
+    flow = (ROOT / ".forgejo" / "workflows" / "build-linux.yml").read_text(encoding="utf-8")
+    step = flow[flow.index("- name: longshot_vk.so (build check)"):flow.index("- name: longshot_vk.so with AMD FSR 4")]
+    check("CI's renderer build check takes the profile as a player's build does: the checkout's, else the committed one",
+          'RX_VK_PGO="$VK_PGO" ' in step and "\n          VK_PGO=\n" in step and
+          'if [ -f work/longshot_vk.profdata ]; then VK_PGO="$PWD/work/longshot_vk.profdata"' in step and
+          'xz -dc assets/profiles/longshot_vk.profdata.xz > "$VKW/longshot_vk.shipped.profdata"' in step)
     check("and a developer's own profile when the checkout has one",
           "for f in hot_funcs.txt hot_order.txt longshot_pieces.prof longshot_vk.profdata; do" in appimage)
     docs = (ROOT / "docs" / "development.md").read_text(encoding="utf-8")

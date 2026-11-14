@@ -28,8 +28,8 @@ On Linux, `make_game.py` checks the mandatory Python modules, compilers/linker, 
 development libraries before reading or translating the dump, and lists every missing prerequisite in one error.
 It uses the compile's lookup order: CPM caches first, then `LONGSHOT_*_HEADERS`, then `/usr/local` and `/usr`;
 FFmpeg comes from `LONGSHOT_FFMPEG` when it holds `lib/libavcodec.a`, otherwise from `pkg-config`. The C probe
-uses the selected compiler, lld and `LONGSHOT_SYSROOT` if set. A prebuilt renderer does not need renderer headers
-unless an NGX SDK selects a source renderer instead; source builds still need clang++ for the native translator.
+uses the selected compiler, lld and `LONGSHOT_SYSROOT` if set. Every build compiles the Vulkan back end, the AppImage's
+too, so the renderer headers and clang++ (for it and the native translator) are always needed.
 The AppImage uses tools.lock's Linux tools (builder/linux/linux_tools.py sets `EMSDK`, `LONGSHOT_SYSROOT`,
 `LONGSHOT_FFMPEG`, `LONGSHOT_SDL2` and `RX_CPM` to them),
 and `RX_TARGET=windows` keeps the Windows toolchain checks rather than requiring Linux development libraries.
@@ -450,7 +450,6 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `LONGSHOT_SPLIT_GIANTS=<KB>` | Compiles each lifted function of 256 KB of C or more as pieces of about `<KB>` (8 is the measured best) cut at its labels, with a dispatch loop under its own name (`nx2/split_giants.py`). Measured on a Ryzen 5 5600, 16 GB: the 15 giant-function chunks compile 2.6x faster one at a time (their largest compile's peak memory 2,263 -> 586 MB; a single 2-6 MB function's peak falls to about a fifth), and a whole first build's compile (`--jobs 4`) takes ~21% less time, with ~6% less summed compiler memory. The lifted files are not changed (`build.py` compiles a copy). On by default at 8; `0` turns it off |
 | `RX_MARCH=<level>` | The CPU level to build for. Default: `native` (this PC's own CPU) on a CPU with `x86-64-v3`'s features, else `x86-64-v2`, else `x86-64`; `x86-64-v3` if clang can't say what `native` is here. With `native` the CPU clang finds goes into the object keys (`-DLONGSHOT_NATIVE_CPU=`, in the build log), so another CPU compiles again ([issue 182](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/182)). `RX_MARCH=x86-64-v3` builds as before. `native` also tunes for this CPU (the Steam Deck's Zen 2 too), so there is no tuning switch |
 | `RX_VK_ONLY=1` | Only the Vulkan back end, with no lift |
-| `LONGSHOT_VK_PREBUILT=<longshot_vk.so>` | (Linux) The Vulkan back end as built already, the AppImage's; set aside by a build with DLSS (`LONGSHOT_NGX_SDK`) or AMD FSR 4 (`LONGSHOT_FSR=1`, `make_game.py --fsr`), which compiles its own |
 | `OOT_WORK`, `OOT_DUMP`, `OOT_EXEFS`, `OOT_ROMFS` | The work folder and the dump's folders, over `work/dump.txt` |
 
 The Longshot Launcher's build settings set two of these for its build. **Build workers**: Automatic keeps
@@ -559,9 +558,9 @@ Runs from both can be merged into one file: a function is matched by its name an
 matches nothing is left out. For the same reason a profile ages rather than breaks: a function whose branches changed
 since the recording, or a new one, is compiled as if there were no profile (clang's warning for it is among those
 the build silences), the rest keep theirs. The committed profile is one for every build for now, recorded on Linux:
-a Windows build matches the renderer's own functions and leaves the C++ library's out. On Linux the AppImage's back
-end comes built (`LONGSHOT_VK_PREBUILT`), with the profile `scripts/linux/appimage.sh` finds as `make_game.py` does; a
-player's build there compiles the back end, with the AppImage's copy of the profile, with DLSS or FSR 4.
+a Windows build matches the renderer's own functions and leaves the C++ library's out. On Linux the AppImage carries no
+built back end (since 2026-11-14): every player's build compiles it, with or without DLSS or FSR 4, with the AppImage's copy
+of the profile (`assets/profiles/`) and for the player's own CPU. The AppImage workflow compiles it once as a build check.
 
 The file holds the names of the back end's functions (Longshot's own source), a hash of each one's shape and how often
 each branch ran: nothing of the game's code or data. It says which code paths the recorded places exercised, no more.
