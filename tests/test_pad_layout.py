@@ -45,6 +45,7 @@ HID = r"""
 #include <string.h>
 #include <stdint.h>
 #include "vk_api.h"
+#include "../../host/hold_toggle.h"   /* (the table's HoldToggle since #137: as tests/test_bound_keys.py) */
 typedef long LONG;
 typedef unsigned long DWORD;
 typedef int SRWLOCK;
