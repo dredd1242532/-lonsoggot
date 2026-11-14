@@ -606,6 +606,26 @@ int main() {
         CHECK(is_known(b) && is_known(d));                  // (synced from the capture, not written since: as the sync left them)
         CHECK(!is_known(a) && !is_known(c));                // (written since: guest memory has newer words, refilled at the write-back)
     }
+    // (r) the same after a forget whose lists overflowed (shadow_written_all: shadow_written_to dropped the lists): every pool's
+    // pages are unknown after it and the page list is empty, so the sync's "known" must not set any page it copied
+    {
+        reset();
+        Pool& pool = imported[kLo];
+        std::vector<VkBufferCopy> rs{{0, pg * 4096 - kLo, 4096}};
+        shadow_sync_copy(1, kCapBuf, pool, rs);
+        shadow_written_all = true;                          // (the overflow: the detailed lists are empty)
+        shadows_forget_written();
+        const uint64_t i = pg - (kLo >> kPageShift);
+        CHECK(!(pool.shadow_known[i >> 6] >> (i & 63) & 1));
+        shadow_synced_known();
+        CHECK(!(pool.shadow_known[i >> 6] >> (i & 63) & 1));   // (left unknown: read from guest memory at the next write-back)
+        CHECK(st_lfx.sync_left_unknown == 1 && st_lfx.sync_known == 0);
+        shadow_written_all = false;
+        shadows_forget_written();                           // (the next forget, lists whole again: synced pages known as before)
+        shadow_sync_copy(1, kCapBuf, pool, rs);
+        shadow_synced_known();
+        CHECK(pool.shadow_known[i >> 6] >> (i & 63) & 1);
+    }
     std::puts("PASS: late_fix_build's fixes and waits, its stamp blocks, snapshots, their ranges and slots, and a CPU read of a fixed late page");
 }
 '''
