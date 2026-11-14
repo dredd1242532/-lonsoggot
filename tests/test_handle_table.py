@@ -71,6 +71,14 @@ def check_sources(root):
     assert 'inst == g_index_operand' in node and 'Op::Index' in node, 'the index is not built as HandleOp::Index'
     assert 'CompositeExtractU32x4' in node, 'a word of a 128-bit load is not a handle'
 
+    # An XMAD pair reads the index in two 16-bit halves. Whichever half's multiply the search meets first, it must
+    # give the index both halves are read from, or the handle program can't be built and the shader falls back.
+    halves = function(passes, 'IR::Value IndexThroughHalf(')
+    assert 'offset.U32() == 0 || offset.U32() == 16' in halves and 'count.U32() == 16' in halves, \
+        'an XMAD pair\'s high half is not unwrapped to its index'
+    find = function(passes, 'bool FindHandleTableIndex(')
+    assert find.count('IndexThroughHalf(') == 2, 'the multiply and the shift do not both unwrap a half'
+
     count = function(passes, 'u32 DynamicSampledTextureArrayCount(')
     assert 'handle_program' in count, \
         "a table's samples are counted once each: the water's 69 cut its array to 14 elements"

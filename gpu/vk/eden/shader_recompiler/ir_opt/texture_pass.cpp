@@ -955,15 +955,18 @@ IR::Value SkipIdentity(IR::Value v) {
     return v;
 }
 
-// The value a 16-bit half extract reads (BitFieldUExtract x, 0, 16: the low half of an XMAD pair's index), else itself
-IR::Value IndexThroughLowHalf(IR::Value v) {
+// The value a 16-bit half extract reads, else itself. An XMAD pair multiplies an index in two halves,
+// (BitFieldUExtract x, 0, 16) * k + ((BitFieldUExtract x, 16, 16) * k << 16): either multiply the search meets first
+// gives x, the index both halves are read from, which the handle program then builds as HandleOp::Index in both.
+IR::Value IndexThroughHalf(IR::Value v) {
     v = SkipIdentity(v);
     if (v.IsImmediate()) return v;
     const IR::Inst* const i{v.InstRecursive()};
     if (i->GetOpcode() == IR::Opcode::BitFieldUExtract) {
         const IR::Value offset{SkipIdentity(i->Arg(1))};
         const IR::Value count{SkipIdentity(i->Arg(2))};
-        if (offset.IsImmediate() && count.IsImmediate() && offset.U32() == 0 && count.U32() == 16) {
+        if (offset.IsImmediate() && count.IsImmediate() && (offset.U32() == 0 || offset.U32() == 16) &&
+            count.U32() == 16) {
             return SkipIdentity(i->Arg(0));
         }
     }
@@ -1008,7 +1011,7 @@ bool FindHandleTableIndex(const IR::Value& handle, IR::Value& index) {
         case IR::Opcode::IMul32:
             for (size_t a = 0; a < 2; ++a) {
                 const IR::Value k{SkipIdentity(i->Arg(a))};
-                const IR::Value x{IndexThroughLowHalf(i->Arg(1 - a))};
+                const IR::Value x{IndexThroughHalf(i->Arg(1 - a))};
                 if (k.IsImmediate() && k.U32() >= 4 && k.U32() <= 4096 && !x.IsImmediate()) {
                     index = x;
                     return true;
@@ -1017,7 +1020,7 @@ bool FindHandleTableIndex(const IR::Value& handle, IR::Value& index) {
             break;
         case IR::Opcode::ShiftLeftLogical32: {
             const IR::Value k{SkipIdentity(i->Arg(1))};
-            const IR::Value x{SkipIdentity(i->Arg(0))};
+            const IR::Value x{IndexThroughHalf(i->Arg(0))};
             if (k.IsImmediate() && k.U32() >= 2 && k.U32() <= 12 && !x.IsImmediate()) {
                 index = x;
                 return true;
