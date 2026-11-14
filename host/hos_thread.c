@@ -43,6 +43,7 @@ struct HosThread {
     int vc_held, vc_last, vc_queued, vc_escaped;
     volatile int vc_kick;
     int vc_first;   /* (HOS_VCORE_FIRST: named there, ahead of every guest priority for a virtual core) */
+    int vc_turned;  /* (a first thread that gave its core up by turn: by guest priority until it takes one; vc_lock) */
     int64_t vc_since;
     CONDITION_VARIABLE vc_cv;
     /* (longshot) fibers: the context running now (NULL: ctx, the thread's own), the thread's host fiber once it
@@ -655,22 +656,30 @@ int64_t hos_spin_ns(void) {
     return hos_thread_serial(hos_self()) ? b >> 32 : b & 0xFFFFFFFF;
 }
 
-/* HOS_VCORE_FIRST=<name part>,... (experiment, off by default): the threads whose name holds one of the parts get a
-   virtual core before any other, as if their priority were above every guest priority (-1; Horizon's are 0-63): a
-   waiter asks a holder for its core at once, and no waiter takes theirs. The guest's own priority (GetThreadPriority)
-   and the host thread's priority stay as they are. OoT's Presentation Thread (the renderer's replay runs on it with no core
-   held) wakes when the main thread hands it the frame, and needs a core for the guest code before its submit just as
-   the six BaseProcExecutors, woken by the same hand-off, take all six: it waited ~1.2 ms for one twice in every slow
-   frame pair at Lon Lon Ranch, on the frame's critical path (HOS_CHAIN). */
+/* HOS_VCORE_FIRST=<name part>,... (experiment, off by default): the threads whose name holds one of the parts (a
+   case-sensitive substring; spaces around a part are skipped) get a virtual core before any other, as if their priority
+   were above every guest priority (their guest priority - 64; Horizon's are 0-63, so first threads keep their guest
+   order among themselves): a waiter asks a worse holder for its core at once, and a waiter that isn't a first thread
+   never asks a first thread for its core at once, even one better by guest priority (it waits for the time slice). A
+   first thread's turns still go by guest priority (vc_turn): it gives its core to a waiter as good by guest priority at
+   a yield and, after the time slice, when that waiter asks; until it takes a core again it then ranks by its guest
+   priority (vc_turned), so the waiter keeps the core for a time slice instead of being asked for it back at once. The
+   guest's own priority (GetThreadPriority) and the host thread's priority stay as they are. OoT's Presentation Thread
+   (the renderer's replay runs on it with no core held) wakes when the main thread hands it the frame, and needs a core
+   for the guest code before its submit just as the six BaseProcExecutors, woken by the same hand-off, take all six: at
+   Lon Lon Ranch it waited 1.01 ms a frame for one on the frame's critical path (HOS_CHAIN, Hookshot). */
 static int vc_first_named(const char *name) {   /* (at each naming, a few a run: the variable read each time) */
     const char *parts = getenv("HOS_VCORE_FIRST");
     for (const char *p = parts ? parts : ""; *p;) {
         const char *end = strchr(p, ',');
-        const size_t n = end ? (size_t)(end - p) : strlen(p);
+        const char *stop = end ? end : p + strlen(p), *a = p, *b = stop;
+        while (a < b && (*a == ' ' || *a == '\t')) a++;
+        while (b > a && (b[-1] == ' ' || b[-1] == '\t')) b--;
+        const size_t n = (size_t)(b - a);
         char part[64];
-        snprintf(part, sizeof part, "%.*s", (int)(n < sizeof part ? n : sizeof part - 1), p);
+        snprintf(part, sizeof part, "%.*s", (int)(n < sizeof part ? n : sizeof part - 1), a);
         if (part[0] && strstr(name, part)) return 1;
-        p += n + (end ? 1 : 0);
+        p = end ? end + 1 : stop;
     }
     return 0;
 }
@@ -1662,11 +1671,15 @@ static unsigned vc_allowed(HosThread *t) {
     if (!m) m = 1u << hos_thread_core(t);
     return m;
 }
-/* the priority the virtual cores go by */
-static int vc_prio(const HosThread *t) { return __atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) ? -1 : t->priority; }
+/* the priority the virtual cores go by: a first thread's (HOS_VCORE_FIRST) is above every guest priority, in guest
+   order among first threads, except after it gave its core up by turn, until it takes one again (vc_turned); holding
+   vc_lock */
+static int vc_prio(const HosThread *t) {
+    return __atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) && !t->vc_turned ? t->priority - 64 : t->priority;
+}
 /* w may take t's core in a turn (a yield of t's, or after the time slice): as good in that order, or, t being a first
-   thread, as good by guest priority: a first thread comes first, but its yields and slices stay as they were (a first
-   thread waiting by yielding for a job thread pinned to its own core kept that core until the 2 s escape) */
+   thread, as good by guest priority: a first thread comes first, but its yields and slices go by guest priority (a
+   first thread waiting by yielding for a job thread pinned to its own core kept that core until the 2 s escape) */
 static int vc_turn(const HosThread *w, const HosThread *t) {
     return vc_prio(w) <= vc_prio(t) || (__atomic_load_n(&t->vc_first, __ATOMIC_RELAXED) && w->priority <= t->priority);
 }
@@ -1689,6 +1702,7 @@ static void vc_take(HosThread *t, int c) {
     t->vc_held = c + 1;
     t->vc_last = c + 1;
     t->vc_kick = 0;
+    t->vc_turned = 0;   /* (a first thread that gave its core up by turn comes first again) */
 }
 static void vc_dequeue(HosThread *t) {
     for (int i = 0; i < vc_nq; i++)
@@ -1810,16 +1824,23 @@ static void vc_release(HosThread *t) {
     vc_grant(c);
     ReleaseSRWLockExclusive(&vc_lock);
 }
-/* gives the core to a waiter allowed on it that is better than t (strict) or as good (a yield) */
+/* gives the core to a waiter allowed on it that is better than t (strict) or as good (a yield, or a time slice's ask) */
 static void vc_yield(HosThread *t, int strict) {
     if (!t->vc_held) return;
     AcquireSRWLockExclusive(&vc_lock);
     const int c = t->vc_held - 1;
-    int any = 0;
-    for (int i = 0; i < vc_nq && !any; i++) {
+    const int first = __atomic_load_n(&t->vc_first, __ATOMIC_RELAXED);
+    int any = 0, better = 0;
+    for (int i = 0; i < vc_nq && !better && !(any && !first); i++) {   /* (not first: the first waiter that may take it) */
         HosThread *w = vc_queue[i];
-        any = (vc_allowed(w) >> c & 1) && (strict ? vc_prio(w) < vc_prio(t) : vc_turn(w, t));
+        if (!(vc_allowed(w) >> c & 1)) continue;
+        better = vc_prio(w) < vc_prio(t);
+        any |= strict ? better : vc_turn(w, t);
     }
+    /* a first thread that gives its core up by turn (to a waiter no better by vc_prio) asks for one by guest priority
+       until it takes one: otherwise its vc_acquire would ask the waiter for the core back at once (vc_kick 1), and the
+       waiter would run one checkpoint's work per turn instead of its time slice */
+    if (any && !better && first) t->vc_turned = 1;
     t->vc_kick = 0;
     if (any) vc_st.yields++;
     ReleaseSRWLockExclusive(&vc_lock);
