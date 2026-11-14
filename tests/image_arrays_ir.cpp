@@ -5,6 +5,7 @@
 // A handle read from a constant buffer at a dynamic offset (base + element * 8) is a descriptor array: the texture pass
 // sizes it by the words left after the base (DynamicDescriptorCount) and indexes it with the element. The bases here
 // leave room for 2 or 3 descriptors. The same programs with the handle at a constant offset are single descriptors.
+// Image buffers and storage images are read and written, or added to atomically; texture buffers and textures fetched.
 //
 //     image_arrays_ir <output folder>
 // writes <case>.spv for each case and prints one line a case:
@@ -47,7 +48,7 @@ struct TestEnvironment final : Environment {
     void Dump(u64, u64) override {}
 };
 
-enum class Kind { TextureBuffer, ImageBuffer, Texture, Image };
+enum class Kind { TextureBuffer, ImageBuffer, Texture, Image, ImageBufferAtomic, ImageAtomic };
 
 struct Array {
     Kind kind;
@@ -134,6 +135,18 @@ std::vector<u32> Emit(const Case& c, Info& info_out) {
             ir.ImageWrite(ir.Imm32(0x100), next, AsU32x4(ir, texel), out);
             break;
         }
+        case Kind::ImageBufferAtomic: {
+            info.type.Assign(TextureType::Buffer);
+            const IR::U32 old{ir.ImageAtomicIAdd(handle, lane, ir.Imm32(1), info)};
+            ir.ImageWrite(ir.Imm32(0x100), lane, ir.CompositeConstruct(old, old, old, old), out);
+            break;
+        }
+        case Kind::ImageAtomic: {
+            info.type.Assign(TextureType::Color2D);
+            const IR::U32 old{ir.ImageAtomicIAdd(handle, ir.CompositeConstruct(lane, ir.Imm32(0)), ir.Imm32(1), info)};
+            ir.ImageWrite(ir.Imm32(0x100), lane, ir.CompositeConstruct(old, old, old, old), out);
+            break;
+        }
         }
     }
     ir.Epilogue();
@@ -175,14 +188,18 @@ int main(int argc, char** argv) {
     }
     const std::filesystem::path folder{argv[1]};
     std::filesystem::create_directories(folder);
-    const std::array<std::pair<const char*, std::vector<Array>>, 8> programs{{
+    const std::array<std::pair<const char*, std::vector<Array>>, 12> programs{{
         {"imgbuf-1", {{Kind::ImageBuffer, 1}}},
         {"img-1", {{Kind::Image, 1}}},
         {"texbuf-1", {{Kind::TextureBuffer, 1}}},
+        {"imgbuf-atomic-1", {{Kind::ImageBufferAtomic, 1}}},
+        {"img-atomic-1", {{Kind::ImageAtomic, 1}}},
         {"mixed-1", {{Kind::TextureBuffer, 1}, {Kind::ImageBuffer, 1}, {Kind::Texture, 1}, {Kind::Image, 1}}},
         {"imgbuf-2", {{Kind::ImageBuffer, 2}}},
         {"img-3", {{Kind::Image, 3}}},
         {"texbuf-2", {{Kind::TextureBuffer, 2}}},
+        {"imgbuf-atomic-2", {{Kind::ImageBufferAtomic, 2}}},
+        {"img-atomic-3", {{Kind::ImageAtomic, 3}}},
         {"mixed", {{Kind::TextureBuffer, 2}, {Kind::ImageBuffer, 2}, {Kind::Texture, 2}, {Kind::Image, 3}}},
     }};
     std::vector<Case> cases;

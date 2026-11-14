@@ -4,8 +4,10 @@ A handle the shader reads at a dynamic offset of a constant buffer is a descript
 renderer writes that many descriptors to its binding (vk_draw.cpp). tests/image_arrays_ir.cpp builds such programs and
 the same ones with single descriptors, runs them through the real texture pass and SPIR-V back end, and writes their
 modules. Each must translate, pass spirv-val (Vulkan 1.3) and declare every binding with the count Info gives it: an
-OpTypeArray of that many images for a count above 1, the image itself for 1. Programs whose device indexes the arrays
-nonuniformly must carry NonUniform decorations and that kind's capability.
+OpTypeArray of that many images for a count above 1, the image itself for 1. Image buffers and storage images are read and
+written or added to atomically, texture buffers and textures fetched (plain, and with the fetch bounds of vk_vendor.h).
+Programs whose device indexes the arrays nonuniformly must carry NonUniform decorations (an atomic's texel pointer too)
+and that kind's capability.
 
 python -I -B nx2/test_image_arrays.py --headers <SPIRV-Headers/include> --spirv-val spirv-val [--cxx clang++]
     [--tree <a checkout>] [--base-tree <a checkout>] [--keep <folder>]
@@ -35,13 +37,16 @@ ARRAYS = {
     'imgbuf-2': [('imgbuf', 2)],
     'img-3': [('img', 3)],
     'texbuf-2': [('texbuf', 2)],
+    'imgbuf-atomic-2': [('imgbuf', 2)],
+    'img-atomic-3': [('img', 3)],
     'mixed': [('texbuf', 2), ('imgbuf', 2), ('tex', 2), ('img', 3)],
 }
 # (each kind's capability for nonuniform indexing)
 NONUNIFORM_CAPABILITY = {'texbuf': 5311, 'imgbuf': 5312, 'tex': 5307, 'img': 5309}
 OP_CAPABILITY, OP_TYPE_IMAGE, OP_TYPE_SAMPLED_IMAGE, OP_TYPE_ARRAY = 17, 25, 27, 28
-OP_TYPE_POINTER, OP_CONSTANT, OP_VARIABLE, OP_DECORATE = 32, 43, 59, 71
+OP_TYPE_POINTER, OP_CONSTANT, OP_VARIABLE, OP_IMAGE_TEXEL_POINTER, OP_DECORATE = 32, 43, 59, 60, 71
 DIM_BUFFER, UNIFORM_CONSTANT, DECORATION_BINDING, DECORATION_NON_UNIFORM = 5, 0, 33, 5300
+CASES = 28   # (12 programs, each plain and nonuniform; texbuf-1, texbuf-2, mixed-1 and mixed also with fetch bounds)
 
 
 def build_fixture(cxx, flags, sources, exe):
@@ -84,11 +89,11 @@ def emit(args, tree, folder):
 
 def declared(path):
     """The module's descriptors of images (UniformConstant variables with a binding), in binding order:
-    {kind: [count, ...]}, and whether it has NonUniform decorations and which capabilities"""
+    {kind: [count, ...]}; its ids decorated NonUniform, its capabilities and its atomics' texel pointers"""
     data = path.read_bytes()
     words = struct.unpack('<%dI' % (len(data) // 4), data)
     images, sampled, arrays, constants, pointers, variables, bindings = {}, set(), {}, {}, {}, {}, {}
-    capabilities, non_uniform = set(), False
+    capabilities, non_uniform, texel_pointers = set(), set(), []
     i = 5
     while i < len(words):
         count, op = words[i] >> 16, words[i] & 0xFFFF
@@ -107,10 +112,12 @@ def declared(path):
             pointers[operands[0]] = (operands[1], operands[2])
         elif op == OP_VARIABLE:
             variables[operands[1]] = (operands[0], operands[2])
+        elif op == OP_IMAGE_TEXEL_POINTER:
+            texel_pointers.append(operands[1])
         elif op == OP_DECORATE and operands[1] == DECORATION_BINDING:
             bindings[operands[0]] = operands[2]
         elif op == OP_DECORATE and operands[1] == DECORATION_NON_UNIFORM:
-            non_uniform = True
+            non_uniform.add(operands[0])
         i += count
     found = {kind: [] for kind in KINDS}
     for variable in sorted((v for v in variables if v in bindings), key=bindings.get):
@@ -126,7 +133,7 @@ def declared(path):
             dim, use = images[element]
             kind = ('texbuf' if use == 1 else 'imgbuf') if dim == DIM_BUFFER else 'img'
         found[kind].append(count)
-    return found, non_uniform, capabilities
+    return found, non_uniform, capabilities, texel_pointers
 
 
 def program_of(case):
@@ -151,12 +158,14 @@ def check(args, modules, cases):
         made = [(kind, count) for kind in KINDS for count in info[kind] if count > 1]
         if made != want:
             failures.append('%s: the texture pass made the arrays %s, not %s' % (name, made, want))
-        found, non_uniform, capabilities = declared(module)
+        found, non_uniform, capabilities, texel_pointers = declared(module)
         if found != info:
             failures.append('%s: the module declares %s where Shader::Info has %s' % (name, found, info))
         if name.endswith('-nonuniform') and want:
             if not non_uniform:
                 failures.append('%s: no NonUniform decoration' % name)
+            if not set(texel_pointers) <= non_uniform:
+                failures.append('%s: an atomic\'s texel pointer is not decorated NonUniform' % name)
             for kind in {kind for kind, _ in want} - {k for k, c in NONUNIFORM_CAPABILITY.items() if c in capabilities}:
                 failures.append('%s: no %s nonuniform indexing capability' % (name, kind))
         elif non_uniform:
@@ -180,8 +189,8 @@ def main():
         if args.keep:
             shutil.copytree(modules, args.keep, dirs_exist_ok=True)
         failures = check(args, modules, cases)
-        if len(cases) != 20:
-            failures.append('%d cases, not 20: %s' % (len(cases), sorted(cases)))
+        if len(cases) != CASES:
+            failures.append('%d cases, not %d: %s' % (len(cases), CASES, sorted(cases)))
         singles = sorted(name for name in cases if program_of(name).endswith('-1'))
         if args.base_tree:
             (folder / 'base').mkdir()
