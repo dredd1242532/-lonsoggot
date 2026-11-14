@@ -334,11 +334,16 @@ static bool install_real_hooks() { return false; }
 #endif
 static void (*real_wake)(void*) = nullptr;
 static bool (*real_wait)(volatile void*, void*, size_t, uint32_t) = nullptr;
-static std::atomic<int> in_real_wait{0};   // (the recorder inside the OS wait call now)
+static std::atomic<int> in_real_wait{0}, real_wait_returns{0};   // (the recorder inside the OS wait call now; its returns)
+static std::atomic<bool> no_timeout{false};   // (a case that must be released by the wake or the compare alone)
+static std::atomic<bool> entered_without_timeout{false};   // (the wait in progress was entered with no timeout)
 static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) {
+    const bool inf = no_timeout;
+    entered_without_timeout = inf;
     in_real_wait++;
-    const bool r = real_wait(a, c, n, ms);
+    const bool r = real_wait(a, c, n, inf ? 0xFFFFFFFFu : ms);   // (0xFFFFFFFF: INFINITE)
     in_real_wait--;
+    real_wait_returns++;
     return r;
 }
 static std::atomic<bool> real_wake_works{true};
@@ -408,17 +413,23 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (!rec::g_idle_wait) fail("RX_VK_RECORDER_IDLE=wait expected");
+        rec::g_test_idle_waiting = race_hook;   // (set once, before the recorder starts: it acts only while race_armed)
         warm_up();
-        if (c == "real_parked") {   // (asleep on W through the real wait: a publish wakes it)
-            if (!parked()) fail("the recorder never waited on W");
+        if (c == "real_parked") {   // (asleep on W through the real wait, with no timeout: only the publish's wake lets it go)
+            no_timeout = true;
+            real_wake(&rec::g_rec.W);   // (back round into a wait entered with no timeout)
+            if (!wait_until([] { return in_real_wait == 1 && entered_without_timeout; })) fail("the recorder never waited on W");
             if (!publish_runs(1)) fail("a publish did not wake the recorder waiting on W (3 s)");
-        } else if (c == "real_timeout") {   // (no wake at all: the 2 ms timeout brings the recorder back to the published packet)
+            no_timeout = false;
+        } else if (c == "real_timeout") {   // (no wake and nothing published: only the 2 ms timeout ends each wait)
             real_wake_works = false;
             if (!parked()) fail("the recorder never waited on W");
-            if (!publish_runs(1)) fail("with no wake the timeout did not bring the recorder back (3 s)");
+            const int r0 = real_wait_returns;
+            if (!wait_until([r0] { return real_wait_returns - r0 >= 3; })) fail("with no wake the waits did not time out (3 s)");
+            if (!publish_runs(1)) fail("with no wake the timeout did not bring the recorder back to a publish (3 s)");
             real_wake_works = true;
-        } else if (c == "real_race") {   // (a publish just before the wait, the wake off: the compare returns the wait at once)
-            rec::g_test_idle_waiting = race_hook;
+        } else if (c == "real_race") {   // (a publish just before a wait with no timeout, the wake off: only the compare returns it)
+            no_timeout = true;
             if (!parked()) fail("the recorder never waited on W");
             race_armed = true;
             real_wake(&rec::g_rec.W);   // (let go with nothing new: it idles again, into the armed hook)
@@ -431,9 +442,9 @@ int main(int argc, char** argv) {
             race_step = 2;
             if (!wait_until([] { return g_ran.load() == 1; })) fail("the published packet never ran");
             replay_mu.unlock();
-            // (the 2 ms timeout would bring it back too: the compare returns at once, well within it)
-            if (rec::now_ns() - t0 > 1500000) std::printf("note: %.2f ms to run after a publish just before the wait\n", (rec::now_ns() - t0) / 1e6);
-            rec::g_test_idle_waiting = nullptr;
+            (void)t0;
+            race_armed = false;
+            no_timeout = false;
             real_wake_works = true;
         } else if (c == "real_stop") {   // (stopped while asleep on W)
             if (!parked()) fail("the recorder never waited on W");

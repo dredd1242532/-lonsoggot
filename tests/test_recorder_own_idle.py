@@ -26,7 +26,9 @@ python -I -B tests/test_recorder_own_idle.py --headers <Vulkan-Headers/include> 
      normal return.
 3. The test has teeth: vk_recorder.h with vkEndCommandBuffer among the slot's own calls, the guard removed, the switch ignored,
    OwnSlot ignoring slot_begin(), the wait's compare taken from W instead of the r it last saw, the wake removed, or (Windows) the
-   wait's timeout taken out, must fail it.
+   wait's timeout taken out, must fail it; so must (Windows) vk_replay.cpp's adapter with a wake that does nothing or a wait that
+   compares against W as it is now (the real_parked and real_race waits have no timeout, so only the wake or the compare ends
+   them), and the source check with recording_wait commented out or another slot's descriptor pools.
 """
 import argparse
 import concurrent.futures
@@ -65,10 +67,16 @@ SUBMIT = "void submit_recording(Recording& r, bool signal_value = true, uint64_t
 DRAW_BEGIN = "void draw_begin_recording(int slot, VkCommandBuffer cmd, uint64_t value) {"
 
 
+def code(text):
+    """the text without its // comments: a call commented out is not a call"""
+    return re.sub(r"//[^\n]*", "", text)
+
+
 def source_problems(replay, draw, others):
     """what is wrong with OwnSlot's placement; others: {name: text} of the renderer's other files"""
     p = []
-    begin, submit, draw_begin = body(replay, BEGIN, "vk_replay.cpp"), body(replay, SUBMIT, "vk_replay.cpp"), body(draw, DRAW_BEGIN, "vk_draw.cpp")
+    begin, submit, draw_begin = (code(body(replay, BEGIN, "vk_replay.cpp")), code(body(replay, SUBMIT, "vk_replay.cpp")),
+                                 code(body(draw, DRAW_BEGIN, "vk_draw.cpp")))
     if replay.count("rec::OwnSlot") != 1 or begin.count("rec::OwnSlot") != 1:
         p.append("vk_replay.cpp: rec::OwnSlot must appear once, in begin_recording")
     if draw.count("rec::OwnSlot") != 1 or draw_begin.count("rec::OwnSlot") != 1:
@@ -98,6 +106,9 @@ def source_problems(replay, draw, others):
             p.append("begin_recording: %s within the OwnSlot (only the slot's own resets and begins)" % call)
     if not (0 <= begin.find("recording_wait(r);") < begin.find("rec::slot_begin(")):
         p.append("begin_recording: recording_wait(r) (the slot's GPU work done) must come before rec::slot_begin()")
+    for call in ("rec::slot_begin(rec_end_pos[r.slot]);", "draw_begin_recording(r.slot, r.cmd, value);"):
+        if begin.count(call) != 1:
+            p.append("begin_recording: %s must appear once (the slot's own end position and descriptor pools)" % call)
     if not (0 <= draw_begin.find("RecordingRes& r = res[slot];") < draw_begin.find("rec::OwnSlot")):
         p.append("draw_begin_recording: the OwnSlot's calls must be on res[slot], the slot's own")
     dblock = draw_begin[draw_begin.find("rec::OwnSlot"):]
@@ -128,6 +139,11 @@ def test_sources():
     late = begin.replace("    rec::slot_begin(rec_end_pos[r.slot]);", "", 1).replace("gpu_time_begin(r);", "gpu_time_begin(r);\n    rec::slot_begin(rec_end_pos[r.slot]);", 1)
     if late == begin or not source_problems(replay.replace(begin, late, 1), draw, others):
         raise SystemExit("sources: the control with slot_begin() after the OwnSlot passed")
+    for what, old, new in (("recording_wait commented out", "recording_wait(r);", "// recording_wait(r);"),
+                           ("another slot's descriptor pools", "draw_begin_recording(r.slot, r.cmd, value);",
+                            "draw_begin_recording((r.slot + 1) % kRecordings, r.cmd, value);")):
+        if begin.count(old) != 1 or not source_problems(replay.replace(begin, begin.replace(old, new, 1), 1), draw, others):
+            raise SystemExit("sources: the control with %s passed" % what)
     print("PASS sources: OwnSlot only at the slot's own resets and begins, after slot_begin(); the end position kept after both ends")
 
 
@@ -144,7 +160,7 @@ def wait_hooks():
     return replay[at:end] + "\n"
 
 
-def build(cxx, headers, out, recorder_text, name):
+def build(cxx, headers, out, recorder_text, name, hooks_text=None):
     d = out / name
     d.mkdir()
     (d / "vk_loader.h").write_text(recsync.test_loader(), encoding="utf-8")
@@ -155,7 +171,7 @@ def build(cxx, headers, out, recorder_text, name):
     for h in sorted(set(re.findall(r'#include "([^"/]+)"', work + recorder_text))):
         if h not in ("vk_loader.h", "vk_work.h", "vk_recorder.h") and (VK / h).exists():
             shutil.copyfile(VK / h, d / h)
-    (d / "rec_wait_hooks.inc").write_text(wait_hooks(), encoding="utf-8")
+    (d / "rec_wait_hooks.inc").write_text(hooks_text or wait_hooks(), encoding="utf-8")
     exe = d / "recorder_own_idle_test.exe"
     cmd = [cxx, "-std=c++20", "-include", recsync.ENV_ON_H, "-O2", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function",
            "-Wno-missing-field-initializers", "-DVK_NO_PROTOTYPES", "-D_CRT_SECURE_NO_WARNINGS", "-DRX_REC_TEST_HOOKS",
@@ -244,6 +260,14 @@ BROKEN = (
 )
 
 
+# (vk_replay.cpp's WaitOnAddress adapter broken, and the real_ case that must catch it)
+HOOKS_BROKEN = (
+    ("a wake that does nothing", "[](void* a) { wake(a); }", "[](void*) {}", "real_parked"),
+    ("a wait comparing against W as it is now", "{ return wait(a, c, n, ms) != 0; }",
+     "{ (void)c; uint64_t now = *(volatile uint64_t*)a; return wait(a, &now, n, ms) != 0; }", "real_race"),
+)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cxx", default=os.environ.get("CXX", "clang++"))
@@ -270,6 +294,15 @@ def main():
             if not check(exe, ((case, env, None),)):
                 raise SystemExit("FAIL: vk_recorder.h with %s passed %s" % (what, case))
             print("PASS broken: %s fails %s" % (what, case))
+        if os.name == "nt":   # (vk_replay.cpp's adapter broken: the real_ cases, which run without the timeout, must catch it)
+            hooks = wait_hooks()
+            for i, (what, old, new, case) in enumerate(HOOKS_BROKEN):
+                if hooks.count(old) != 1:
+                    raise SystemExit("broken adapter %r: the anchor %r must appear once in rec_wait_hooks" % (what, old))
+                exe = build(cxx, args.headers, out, recorder, "hooks%d" % i, hooks.replace(old, new))
+                if not check(exe, ((case, {IDLE: "wait"}, None),)):
+                    raise SystemExit("FAIL: the adapter with %s passed %s" % (what, case))
+                print("PASS broken adapter: %s fails %s" % (what, case))
     print("recorder own/idle: all passed")
     return 0
 
