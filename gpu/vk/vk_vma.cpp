@@ -45,7 +45,16 @@ VmaPool image_pool = VK_NULL_HANDLE;
 bool image_pool_tried = false;
 // (RX_VK_IMAGE_BLOCK_MB=<n>, 16 and up: the block's size. VMA keeps one block empty for the next image, 128 MB of VRAM that a 64 MB block
 // would halve, at twice the memory objects: the driver allows ~4096, the imported pools take ~2400)
-const uint64_t kImageBlock = (getenv("RX_VK_IMAGE_BLOCK_MB") ? (uint64_t)std::max(16, atoi(getenv("RX_VK_IMAGE_BLOCK_MB"))) : 128u) << 20;
+static uint64_t block_mb(const char* name, uint64_t otherwise) {
+    const char* e = getenv(name);
+    return e ? (uint64_t)std::max(16, atoi(e)) << 20 : otherwise;
+}
+const uint64_t kImageBlock = block_mb("RX_VK_IMAGE_BLOCK_MB", 128ull << 20);
+// (longshot) the images' pool, once the textures and the render targets have pools of their own, holds DLSS's, the frame
+// interpolation's and the scratch images: 11-17 MB in one 128 MB block in every report of eight 9-minute routes (RTX 5060 Ti
+// 8 GB, 1080p), the rest kept empty by VMA and counted against the textures' budget. 32 MB blocks: 16-20 MB empty. An image
+// larger than a block is allocated outside the pool, as before. RX_VK_IMAGES_BLOCK_MB=<n>, 16 and up (128: as before)
+const uint64_t kImagesBlock = block_mb("RX_VK_IMAGES_BLOCK_MB", 32ull << 20);
 
 // (longshot) and the render targets' images in blocks of their own (texture_get's for a target: OoT's transient ones, made and let go
 // all the time). In the same blocks as the textures that stay, each one gone left a hole beside a texture that kept its block: the
@@ -118,9 +127,12 @@ VmaPool images_pool() {
     if (vmaFindMemoryTypeIndexForImageInfo(vma, &rep, &ai, &type) != VK_SUCCESS) return VK_NULL_HANDLE;
     VmaPoolCreateInfo pi{};
     pi.memoryTypeIndex = type;
-    pi.blockSize = kImageBlock;
-    const size_t n = make_pool(pi, blocks_at_start(!vram_compact::enabled(getenv("RX_VK_COMPACT"))), image_pool);
-    logf("vk: images from a pool of %llu MB blocks (memory type %u), %zu made at the start%s", (unsigned long long)(kImageBlock >> 20), type,
+    // (the textures are here too with compaction off, and the render targets with RX_VK_TARGET_BLOCKS=0: then their size)
+    const bool holds_textures = !vram_compact::enabled(getenv("RX_VK_COMPACT"));
+    const bool holds_targets = getenv("RX_VK_TARGET_BLOCKS") && !atoi(getenv("RX_VK_TARGET_BLOCKS"));
+    pi.blockSize = holds_textures || holds_targets ? kImageBlock : kImagesBlock;
+    const size_t n = make_pool(pi, blocks_at_start(holds_textures), image_pool);
+    logf("vk: images from a pool of %llu MB blocks (memory type %u), %zu made at the start%s", (unsigned long long)(pi.blockSize >> 20), type,
          n, image_pool ? "" : ": not made");
     return image_pool;
 }

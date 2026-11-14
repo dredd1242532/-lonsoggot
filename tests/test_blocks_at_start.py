@@ -46,7 +46,8 @@ def check_source():
           "vram_compact::blocks_at_start(heap, kImageBlock, holds_textures)"])
     # (the images' pool only when the textures are made there, RX_VK_COMPACT=0; else the textures' own)
     need("vk_vma.cpp: images_pool()", block(vma, "VmaPool images_pool() {"),
-         ['make_pool(pi, blocks_at_start(!vram_compact::enabled(getenv("RX_VK_COMPACT"))), image_pool)', "made at the start"])
+         ['const bool holds_textures = !vram_compact::enabled(getenv("RX_VK_COMPACT"));',
+          "make_pool(pi, blocks_at_start(holds_textures), image_pool)", "made at the start"])
     need("vk_vma.cpp: textures_pool()", block(vma, "VmaPool textures_pool() {"),
          ["texture_pool_kept = make_pool(pi, blocks_at_start(true), texture_pool) * kImageBlock;", "made at the start"])
     # (no room for the blocks: the pool empty, as before them)
