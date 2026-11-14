@@ -487,6 +487,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Developer: Save my pipeline list | Saves a zip of the pipelines your play built into Downloads ([below](#send-your-pipeline-list)) | |
 | | Developer: Descriptor reuse | Off, On (changes at once) | On |
 | | Developer: Sampler cache | Off, On (changes at once) | Off |
+| | Developer: Recorder thread | Off, On (after a restart; `RX_VK_RECORDER` set for a run goes over it) | Off |
 | | Developer: Robust buffers | Auto, Off, On (after a restart) | Auto |
 | | Developer: ASTC as RGBA8 | Off, On (after a restart) | Off |
 | | Developer: Intel shader compiles | One at a time, Side by side (after a restart; Intel graphics on Windows only) | One at a time |
@@ -1069,7 +1070,7 @@ To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or a
 in `longshot_options.ini`). It applies only while Debug tools is on: off, Link takes Normal damage, and the saved
 choice returns when the tools do. Heart protection takes priority while enabled. Half scales the full hit before life
 is clamped to zero: with two quarter hearts left, a four-quarter hit still kills. The tab's Developer section, always
-shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows, and on Intel graphics on
+shown, has the Descriptor reuse, Sampler cache, Recorder thread, Robust buffers and ASTC as RGBA8 rows, and on Intel graphics on
 Windows the Intel shader compiles row.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag

@@ -419,6 +419,7 @@ Pipeline-cache file ownership, temporary storage and failure behavior are descri
 | `RX_VK_ASYNC=1` | The replay on a thread of its own instead of the game's submitting thread |
 | `RX_VK_REPLAY_PIN=0` | A/B switch: a thread that replays a submission (the default, `RX_VK_ASYNC` off) stays on its own processors instead of moving to the core kept for the replay (`HOS_RESERVE_CORE`) while it replays, on Windows and Linux. The log says `vk: replays run on logical processors ...` when the move is on |
 | `RX_VK_RECORDER_OWN` (set), `RX_VK_RECORDER_IDLE=wait` | With `RX_VK_RECORDER=thread` (the recorder thread, `gpu/vk/vk_recorder.h`): a recording slot's own command pool and descriptor pool resets at its reuse made without waiting for the recorder; and the recorder's idle a 20 us spin, then a wait on its ring (`WaitOnAddress`, a futex on Linux) instead of the adaptive spin. Both off by default; each named in the recorder's start line |
+| `RX_VK_RECORDER=thread` | The recorder thread (`gpu/vk/vk_recorder.h`): the replay's `vkCmd*` calls packed and run in order by a thread of their own (`sync` and `defer` are its earlier steps, for tests). Refused (off, logged once) with `RX_VK_PARALLEL` 2 or more. Set to any value, it decides alone for the run; unset, the Debug tab's Recorder thread row does (`recorder_thread=1`: thread, and `RX_VK_RECORDER_OWN` on unless it is set). Neither is written into `longshot_options.ini`. The start line says which chose: `vk: RX_VK_RECORDER=thread:` or `vk: the Recorder thread row (...)`; the row's line in the menu says when it is On and the recorder is not running |
 | `RX_VK_DESC_REUSE=0/1/never` | Over the Descriptor reuse row for a run, with its values: 0 its Off (a draw keeps the descriptors of the draw before it while no registration at all was made), 1 its On (through registrations of slots it does not sample, the default); `never`: every draw builds its own |
 | `RX_VK_DESC_COUNTS=0` | A/B switch: a draw's descriptor build (`build_descriptors`, `gpu/vk/vk_draw.cpp`) counts the program's descriptors before every build, as before; by default the three counts are taken once and kept with the program (`Program::desc_counts`), once it is ready. The same writes and reserves either way |
 | `RX_VK_NAN_GUARD=0` | No NaN guard on float colour outputs (on by default on every card: one NaN texel spreads through bloom into glowing blocks) |
@@ -822,7 +823,8 @@ them does not renew a size change's declined restart prompt. Choosing a differen
 
 The other rows are 0 Off and 1 On. Some are read at the start, before the menu exists, by the code that needs them:
 `handheld_profile` and `output_res` (`host/nn_applet.c`), `ultrawide` (`host/hos_main.c`), `robust_buffers`
-(`gpu/vk/vk_main.cpp`), the controls (`host/nn_hid.c`) and `skip_title_screen` (`host/oot_autoload.c`).
+(`gpu/vk/vk_main.cpp`), `recorder_thread` (`gpu/vk/vk_recorder.h`, through `vk_draw.cpp`'s `menu_env_on`, only while
+`RX_VK_RECORDER` is unset), the controls (`host/nn_hid.c`) and `skip_title_screen` (`host/oot_autoload.c`).
 
 These named keys, including `walk_mode` and `walk_speed`, are independent of the internal host/renderer option IDs in
 `gpu/vk/vk_api.h`; renumbering an option does not require changing a player's saved options file.
