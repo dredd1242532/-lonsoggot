@@ -51,6 +51,14 @@ int main() {
     CHECK(kept_only(1152 * MB, 1152 * MB));
     CHECK(!kept_only(1280 * MB, 1152 * MB));    // (a tenth block: a run can give it back)
     CHECK(!kept_only(0, 0) && !kept_only(256 * MB, 0));   // (none made at the start: the rule as before)
+    // the line the driver's count is held under: a dedicated card's driver pages the excess out, an integrated GPU's has nowhere to
+    CHECK(count_line_pct(false) == 97 && count_line_pct(true) == 90);
+    {   // the UHD Graphics at Hyrule Castle: 6717 MB used of 7191 allowed, ten minutes before 7.5 GB and the fault in igvk64.dll
+        const uint64_t allowed = 7191 * MB, used = 6717 * MB;
+        CHECK(used <= allowed / 100 * count_line_pct(false));   // (a dedicated card's line: nothing given up)
+        CHECK(used > allowed / 100 * count_line_pct(true));     // (an integrated GPU's: the textures give up the excess)
+        CHECK((used - allowed / 100 * count_line_pct(true)) / MB == 245);
+    }
     // #2690, an 8 GB card in Castle Town Market: about 7000 MB allowed, 3700 MB of render targets, mirrors and buffers, and
     // 2300 MB of textures wanted. With the nine blocks in a pool no texture is made in, the hold leaves the textures 1098 MB;
     // in the textures' pool, what it leaves without any block made at the start

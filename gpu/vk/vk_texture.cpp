@@ -4393,12 +4393,15 @@ void texture_frame(uint64_t completed) {
     // blocks hold (#2156: an RTX 5050 8 GB at 7602 MB used of 6982 allowed, 1649 MB free in the blocks, paged 4.5 GB and ran at
     // 14-25 fps; v2.0.14, without this wait, squeezed there. Ported from Revens2's a4c7cb3). RX_VK_SQUEEZE_ALWAYS=1: as before
     static const bool squeeze_always = env_on("RX_VK_SQUEEZE_ALWAYS");
+    // (longshot) an integrated GPU's line is lower: vram_compact::count_line_pct
+    static const uint64_t line_pct = vram_compact::count_line_pct(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+    const uint64_t count_line = allowed / 100 * line_pct;
     const bool room_in_blocks = !squeeze_always && used <= allowed && block_free >= allowed / 8;
     // (nor while the textures' pool is down to its blocks made at the start, which VMA keeps: what this evicts would leave the
     // count as it is, the same ratchet, past the allowance too: there no eviction can bring the count down (#2711).
     // RX_VK_SQUEEZE_ALWAYS=1 squeezes there too)
-    if (known && !by_blocks && !(kept_only && !squeeze_always) && used > allowed / 100 * 97 && !room_in_blocks) {
-        const uint64_t over = used - allowed / 100 * 97;
+    if (known && !by_blocks && !(kept_only && !squeeze_always) && used > count_line && !room_in_blocks) {
+        const uint64_t over = used - count_line;
         budget = std::min(budget, total_bytes > over ? total_bytes - over : 0);
         rule_budget = std::min(rule_budget, total_bytes > over ? total_bytes - over : 0);
     }
@@ -4449,7 +4452,7 @@ void texture_frame(uint64_t completed) {
              "MB), %zu textures%s", (unsigned long long)(used >> 20), (unsigned long long)(allowed >> 20),
              (unsigned long long)(block_free >> 20), (unsigned long long)(total_bytes >> 20),
              (unsigned long long)(budget >> 20), textures.size(),
-             known && used > allowed / 100 * 97 && room_in_blocks ? " (at the driver's limit, room in the blocks: not squeezed)" : "");
+             known && used > count_line && room_in_blocks ? " (at the driver's limit, room in the blocks: not squeezed)" : "");
         // (what takes it: decoded ASTC, the GPU's images, the rest; the largest)
         uint64_t astc_b = 0, rt_b = 0, other_b = 0, recent_b = 0, baked_b = 0;
         size_t baked_n = 0;

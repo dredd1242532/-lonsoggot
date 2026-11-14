@@ -51,6 +51,13 @@ inline uint64_t returnable(uint64_t block_bytes, uint64_t free_bytes, uint64_t k
 /// the driver's count: the rule that squeezes by the count alone (97% of the allowance) waits, as it does for room in the blocks
 inline bool kept_only(uint64_t block_bytes, uint64_t kept) { return kept && block_bytes <= kept; }
 
+/// The driver's count, in percent of its allowance, above which the textures give up the excess. 97 on a dedicated card, whose
+/// driver pages what is past the allowance out to system memory. 90 on an integrated GPU: its heap is the PC's RAM, with nowhere
+/// to page to, so past the allowance the driver's own allocations fail. A UHD Graphics (i3-1115G4, 7.0 GB allowed) at 6.7 GB
+/// entered Hyrule Castle, its imports grew by 560 MB, and at 7.5 of 7.0 GB graphics pipelines were not made (-2) and the next
+/// vkCmdDispatchIndirect faulted inside igvk64.dll; 3% of the allowance is 215 MB of room, 10% is 717
+inline uint64_t count_line_pct(bool integrated) { return integrated ? 90 : 97; }
+
 /// The presents between the end of a run and the next look
 inline uint64_t rest(bool is_pressed) { return is_pressed ? 120 : 600; }
 

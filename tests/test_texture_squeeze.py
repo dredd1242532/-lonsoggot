@@ -30,6 +30,10 @@ def main():
     if "!(kept_only && !squeeze_always)" not in squeeze:
         raise SystemExit("the 97% squeeze runs while the textures' pool is down to its blocks made at the start, past the "
                          "allowance too, where no eviction can bring the count down (#2711)")
+    if ("vram_compact::count_line_pct(dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)" not in tex
+            or "used > count_line && !room_in_blocks)" not in squeeze or "const uint64_t over = used - count_line;" not in tex):
+        raise SystemExit("the driver's-limit squeeze holds an integrated GPU at a dedicated card's 97%, where its driver's own "
+                         "allocations fail past the allowance (UHD Graphics at Hyrule Castle: 7.5 of 7.0 GB, a fault in igvk64.dll)")
     if 'env_on("RX_VK_SQUEEZE_ALWAYS")' not in tex:
         raise SystemExit("RX_VK_SQUEEZE_ALWAYS=1 does not bring the old squeeze back")
     if "room in the blocks: not squeezed" not in tex:
