@@ -451,7 +451,7 @@ uint64_t completed_value = 0;
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> gpu_wrote;
 std::mutex gpu_wrote_mu;
 // (measurement: what the gpu-write path copies against what the whole path used to copy: the same events, so one run gives both)
-std::atomic<uint64_t> st_gw_events{0}, st_gw_kb{0}, st_gw_whole_kb{0};
+std::atomic<uint64_t> st_gw_events{0}, st_gw_moved_kb{0}, st_gw_dirty_kb{0}, st_gw_whole_kb{0};
 }  // namespace
 bool gpu_wrote_into(Texture& tex, std::vector<std::pair<uint64_t, uint64_t>>* out = nullptr);
 namespace {
@@ -988,6 +988,59 @@ bool overlaps(const Ranges* dirty, uint64_t a, uint64_t b) {
     return false;
 }
 
+/// The GOB-block row geometry of one level: the rows a written page can force up, how many there are, and what one
+/// row takes of the storage. A row is self-contained, so it is the unit both the marking and the copy work in.
+struct RowGeom {
+    uint32_t rows_per;   // (block rows in one GOB block)
+    uint32_t nrows;      // (of them in this level)
+    uint64_t row_bytes;  // (one row of the storage, GOB padding and all)
+};
+RowGeom row_geom(const LevelGeo& g, int src_bpb) {
+    const uint32_t rows_per = 8u << g.tile_h;
+    return {rows_per, (g.th + rows_per - 1) / rows_per,
+            (((uint64_t)g.tw * src_bpb + 63) / 64) * (512ull << (g.tile_h + g.tile_d))};
+}
+
+/// The block rows of one layer that a set of written ranges forces up: all of them when the ranges cannot narrow the
+/// level (no ranges at all, a linear or 3D level, an ASTC source, a format widened on the way), otherwise the rows of
+/// GOB blocks a written page falls in. Such a row is self-contained in the storage, so these rows are exactly what
+/// the copy takes from guest memory, and that is what *bytes counts: the ranges themselves answer for less than the
+/// copy moves, since a page reaching into a row brings the whole row. Returns (first row, rows) pairs.
+std::vector<std::pair<uint32_t, uint32_t>> dirty_runs(const LevelGeo& g, const RowGeom& rg, uint64_t src_off,
+                                                      uint64_t span, int src_bpb, const Ranges* dirty,
+                                                      bool whole_level, uint64_t* bytes) {
+    std::vector<std::pair<uint32_t, uint32_t>> runs;
+    if (whole_level || !dirty) {
+        runs.push_back({0, rg.nrows});
+    } else {
+        std::vector<uint8_t> mark(rg.nrows, 0);
+        for (const auto& r : *dirty) {
+            const uint64_t lo = std::max(r.first, src_off), hi = std::min(r.second, src_off + span);
+            if (lo >= hi) continue;
+            const uint64_t r0 = (lo - src_off) / rg.row_bytes;
+            const uint64_t r1 = std::min<uint64_t>((hi - 1 - src_off) / rg.row_bytes, rg.nrows - 1);
+            for (uint64_t k = r0; k <= r1; k++) mark[k] = 1;
+        }
+        for (uint32_t k = 0; k < rg.nrows;) {
+            if (!mark[k]) { k++; continue; }
+            uint32_t e = k;
+            while (e < rg.nrows && mark[e]) e++;
+            runs.push_back({k, e - k});
+            k = e;
+        }
+    }
+    if (bytes) {
+        uint64_t taken = 0;
+        for (const auto& [row0, nrow] : runs) {
+            const uint32_t y0 = row0 * rg.rows_per;
+            const uint32_t th = std::min(g.th - y0, nrow * rg.rows_per);
+            taken += (uint64_t)g.tw * th * g.td * (uint64_t)src_bpb;
+        }
+        *bytes = taken;
+    }
+    return runs;
+}
+
 /// The view of one level the ASTC decoder writes: every layer, or one (layer)
 VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
     if (layer == ~0u) return astc_target_view(tex, level);
@@ -1004,7 +1057,7 @@ VkImageView astc_level_view(Texture* tex, uint32_t level, uint32_t layer) {
 /// (longshot) why the last upload_astc_gpu on this thread failed, for the log of a BC3 image left to be tried again
 thread_local const char* astc_fail = nullptr;
 
-bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
+bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty, uint64_t* moved) {
     astc_fail = nullptr;
     if (tex.type != VK_IMAGE_TYPE_2D || tex.samples != VK_SAMPLE_COUNT_1_BIT || !astc_ready()) {
         astc_fail = "not a 2D image the GPU decoder takes";
@@ -1037,6 +1090,7 @@ bool upload_astc_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
     const uint64_t staged = tail * layers.size();
     flush_mapped_range(s.allocation, s.offset, staged);   // (encoded blocks read by the GPU decoder, not necessarily coherent)
     st_bytes += (int64_t)staged;
+    if (moved) *moved += staged;   // (whole layers, chosen by the ranges: what this path really takes)
     VkCommandBuffer cmd = upload_cmd();
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, astc_pipe);
     const uint64_t align = std::max<uint64_t>(dev.props.limits.minStorageBufferOffsetAlignment, 4);
@@ -1181,7 +1235,7 @@ bool unswizzle_ready() {
 }
 
 /// The whole texture (every level and layer dirty overlaps) unswizzled on the GPU; false: not a texture for it
-bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
+bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty, uint64_t* moved) {
     if (tex.type != VK_IMAGE_TYPE_2D || tex.astc || tex.bc || !(tex.usage & VK_IMAGE_USAGE_STORAGE_BIT) ||
         is_bc(tex.format) || is_astc(tex.format) || is_depth_format(tex.format) || nvn_tex_is_linear(&tex.d))
         return false;
@@ -1246,6 +1300,7 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty) {
         checkpoint_mark(cmd, tex.gpu, 'g');
         vkCmdDispatch(cmd, (g.tw + 31) / 32, (g.th + 31) / 32, tex.layers);
         st_bytes += (int64_t)g.swizzled * tex.layers;
+        if (moved) *moved += (uint64_t)g.swizzled * tex.layers;   // (the whole level: the shader stops at no row)
     }
     full_barrier(cmd);
     descriptors_disturbed();
@@ -1441,11 +1496,11 @@ void upload_frame_report() {
     for (UpStat& u : up_frame) u = {};
     up_slowest.clear();
 }
-bool upload_inner(Texture& tex, const Ranges* dirty);
-bool upload(Texture& tex, const Ranges* dirty) {
+bool upload_inner(Texture& tex, const Ranges* dirty, uint64_t* moved);
+bool upload(Texture& tex, const Ranges* dirty, uint64_t* moved = nullptr) {
     const auto t0 = std::chrono::steady_clock::now();
     up_route = UP_CPU;
-    const bool ok = upload_inner(tex, dirty);
+    const bool ok = upload_inner(tex, dirty, moved);
     const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
     frame_upload_ns.fetch_add(ns, std::memory_order_relaxed);
     std::lock_guard lk(up_mu);
@@ -1530,7 +1585,7 @@ bool upload_all_zero(Texture& tex, uint64_t total, const Ranges* dirty, bool wid
              tex.nvn_format, (unsigned long long)(total >> 20), ms);
     return true;
 }
-bool upload_inner(Texture& tex, const Ranges* dirty) {
+bool upload_inner(Texture& tex, const Ranges* dirty, uint64_t* moved) {
     PROF(PROF_UPLOAD);
     if (!tex.gpu || tex.samples != VK_SAMPLE_COUNT_1_BIT) return false;
     const uint64_t total = tex.guest_size;
@@ -1554,11 +1609,11 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
                  (unsigned long long)tex.first_seen);
         }
     }
-    if (tex.astc && (up_route = UP_ASTC, upload_astc_gpu(tex, total, dirty))) return true;
+    if (tex.astc && (up_route = UP_ASTC, upload_astc_gpu(tex, total, dirty, moved))) return true;
     up_route = UP_CPU;
     if (tex.bc) return false;   // (no CPU path into BC3)
     // (the GPU's unswizzle reads guest memory as it is: not where the capture kept the storage as it was at its submit)
-    if (!(tex.gpu < (1ull << 40) && memory_has_shadow(tex.gpu, total)) && upload_unswizzle_gpu(tex, total, dirty))
+    if (!(tex.gpu < (1ull << 40) && memory_has_shadow(tex.gpu, total)) && upload_unswizzle_gpu(tex, total, dirty, moved))
         return up_route = UP_GPU, true;
     const bool linear = nvn_tex_is_linear(&tex.d);
     int widen_from = 0;
@@ -1580,29 +1635,14 @@ bool upload_inner(Texture& tex, const Ranges* dirty) {
             const uint64_t span = linear ? (uint64_t)stride * g.th : std::max<uint64_t>(g.swizzled, 1);
             if (!overlaps(dirty, src_off, src_off + span)) continue;
             // the block rows to upload: all of them, or those a written page falls in (2D block-linear levels)
-            const uint32_t rows_per = 8u << g.tile_h;   // (block rows of a GOB block)
-            const uint32_t nrows = (g.th + rows_per - 1) / rows_per;
-            const uint64_t gobs_x = ((uint64_t)g.tw * src_bpb + 63) / 64;
-            const uint64_t row_bytes = gobs_x * (512ull << (g.tile_h + g.tile_d));
-            std::vector<std::pair<uint32_t, uint32_t>> runs;   // (first row, rows)
-            if (!dirty || linear || tex.astc || widen_from || g.td > 1 || g.tile_d) {
-                runs.push_back({0, nrows});
-            } else {
-                std::vector<uint8_t> mark(nrows, 0);
-                for (const auto& r : *dirty) {
-                    const uint64_t lo = std::max(r.first, src_off), hi = std::min(r.second, src_off + span);
-                    if (lo >= hi) continue;
-                    const uint64_t r0 = (lo - src_off) / row_bytes, r1 = std::min<uint64_t>((hi - 1 - src_off) / row_bytes, nrows - 1);
-                    for (uint64_t k = r0; k <= r1; k++) mark[k] = 1;
-                }
-                for (uint32_t k = 0; k < nrows;) {
-                    if (!mark[k]) { k++; continue; }
-                    uint32_t e = k;
-                    while (e < nrows && mark[e]) e++;
-                    runs.push_back({k, e - k});
-                    k = e;
-                }
-            }
+            const RowGeom rg = row_geom(g, src_bpb);
+            const uint32_t rows_per = rg.rows_per, nrows = rg.nrows;
+            const uint64_t row_bytes = rg.row_bytes;
+            uint64_t taken = 0;
+            const std::vector<std::pair<uint32_t, uint32_t>> runs =   // (first row, rows)
+                dirty_runs(g, rg, src_off, span, src_bpb, dirty,
+                           !dirty || linear || tex.astc || widen_from || g.td > 1 || g.tile_d, &taken);
+            if (moved) *moved += taken;   // (what this layer's copy takes from the storage, rows and all)
             for (const auto& [row0, nrow] : runs) {
                 const uint32_t y0 = row0 * rows_per;                       // (blocks)
                 const uint32_t th = std::min(g.th - y0, nrow * rows_per);   // (blocks)
@@ -2679,7 +2719,8 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
     if (tex->bc && !tex->uploaded && tex->bc_retry_frame > frame_no) return tex;
     const auto up0 = std::chrono::steady_clock::now();
     const bool up_part = partial || sparse_written || gpu_partial;
-    const bool up_ok = upload(*tex, up_part ? &dirty : nullptr);
+    uint64_t gw_moved = 0;   // (what the upload path actually took from the storage, counted where it takes it)
+    const bool up_ok = upload(*tex, up_part ? &dirty : nullptr, &gw_moved);
     {   // (an upload over 15 ms: what it was, 60 of them)
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - up0).count();
         static int slow_logged;
@@ -2696,16 +2737,22 @@ Texture* texture_touch(Texture* tex, bool for_sampling) {
         }
     }
     if (up_ok) {
-        if (gpu_dirty) {   // (the GPU-write path's own tally: the part it took, and the whole it spared)
+        if (gpu_dirty) {   // (the GPU-write path's own tally: what the upload path took, the ranges it was handed,
+                           // and the whole it spared. They differ: a route that works whole levels or whole layers
+                           // moves more than its ranges name, and only the first is a saving.)
             uint64_t part = 0;
             if (gpu_partial) for (const auto& r : dirty) part += r.second - r.first;
             const uint64_t whole = tex->guest_size;
             const uint64_t n = st_gw_events.fetch_add(1, std::memory_order_relaxed) + 1;
-            st_gw_kb.fetch_add((gpu_partial ? part : whole) >> 10, std::memory_order_relaxed);
+            st_gw_moved_kb.fetch_add(gw_moved >> 10, std::memory_order_relaxed);
+            st_gw_dirty_kb.fetch_add((gpu_partial ? part : whole) >> 10, std::memory_order_relaxed);
             st_gw_whole_kb.fetch_add(whole >> 10, std::memory_order_relaxed);
             if (n == 1 || n % 50 == 0)
-                logf("vk: gpu-write uploads: %llu (%llu MB copied, the whole image would have been %llu MB), %s",
-                     (unsigned long long)n, (unsigned long long)(st_gw_kb.load(std::memory_order_relaxed) >> 10),
+                logf("vk: gpu-write uploads: %llu (%llu MB taken by the upload path, %llu MB of written ranges, the "
+                     "whole image would have been %llu MB), %s",
+                     (unsigned long long)n,
+                     (unsigned long long)(st_gw_moved_kb.load(std::memory_order_relaxed) >> 10),
+                     (unsigned long long)(st_gw_dirty_kb.load(std::memory_order_relaxed) >> 10),
                      (unsigned long long)(st_gw_whole_kb.load(std::memory_order_relaxed) >> 10),
                      gpu_partial ? "the part" : "whole");
         }
@@ -3651,13 +3698,22 @@ void texture_gpu_wrote(uint64_t gpu, uint64_t size) {
                  (unsigned long long)frame_no, (unsigned long long)tl_watch_prog);
     }
     std::lock_guard lk(gpu_wrote_mu);
-    auto it = gpu_wrote.find(lo);
-    if (it != gpu_wrote.end() && it->second.first >= hi) {
-        it->second.second = rec_value;
-        return;
+    /* (the recorded ranges are kept disjoint: every stored write the new one overlaps is cut, each part outside the
+       new write keeping the submission that made it. Ranges that nested used to hide the outer one from
+       gpu_wrote_into, whose scan starts at the first range at or before the texture's start: a write that covered the
+       whole storage, recorded before a smaller one inside it, was never reported, and its submission was passed over
+       by the seen mark, so nothing re-uploaded that part later.) */
+    auto e = gpu_wrote.upper_bound(lo);
+    if (e != gpu_wrote.begin()) --e;   // (the only range that can start earlier and still reach into [lo, hi))
+    for (; e != gpu_wrote.end();) {
+        const uint64_t a = e->first, b = e->second.first, v = e->second.second;
+        if (b <= lo) { ++e; continue; }
+        if (a >= hi) break;
+        auto cut = e++;
+        gpu_wrote.erase(cut);
+        if (a < lo) gpu_wrote[a] = {lo, v};   // (before the write)
+        if (b > hi) gpu_wrote[hi] = {b, v};   // (after it)
     }
-    for (auto e = gpu_wrote.lower_bound(lo); e != gpu_wrote.end() && e->first < hi;)   // (ranges it covers)
-        e = e->second.first <= hi ? gpu_wrote.erase(e) : std::next(e);
     gpu_wrote[lo] = {hi, rec_value};
     if (gpu_wrote.size() > 65536) gpu_wrote.erase(gpu_wrote.begin());
 }
@@ -3669,7 +3725,7 @@ bool gpu_wrote_into(Texture& tex, Ranges* out) {
     const uint64_t lo = tex.gpu, hi = tex.gpu + std::max<uint64_t>(tex.guest_size, 1);
     uint64_t newest = 0;
     auto it = gpu_wrote.upper_bound(lo);
-    if (it != gpu_wrote.begin()) --it;
+    if (it != gpu_wrote.begin()) --it;   // (no stored range starts earlier and overlaps a later one, so this is complete)
     for (; it != gpu_wrote.end() && it->first < hi; ++it)
         if (it->second.first > lo && it->second.second <= completed_value && it->second.second > tex.gpu_wrote_seen) {
             newest = std::max(newest, it->second.second);

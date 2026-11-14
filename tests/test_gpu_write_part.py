@@ -13,9 +13,14 @@ source and run against stand-ins for the map, the submissions and a texture:
   - a write of a submission the GPU has not finished is not reported, and is once it has;
   - the same write is not reported to the same texture twice (its seen value moves);
   - a write that does not reach the storage reports nothing and leaves no ranges;
+  - a write recorded before another inside it is still reported in full (recorded ranges never nest, so where the
+    lookup starts is where every write reaching the storage can be found);
+  - two writes, one inside and one ending past the storage, come back as their two parts, each clipped;
   - the caller uploads the part (RX_VK_GPU_WRITE_WHOLE=1 asks for all of it again, as before), takes the CPU's writes
     since into the same part (the whole upload used to cover them, and upload_gen moves past them), and leaves the
-    sparse images to the whole path.
+    sparse images to the whole path;
+  - the upload's own byte count: the CPU path moves whole GOB-block rows, so what it took from guest memory is
+    measured there rather than inferred from the ranges it was handed.
 
 python -I -B tests/test_gpu_write_part.py [--cxx g++]
 """
@@ -53,6 +58,13 @@ using Ranges = std::vector<std::pair<uint64_t, uint64_t>>;
 struct Texture {
     uint64_t gpu = 0, guest_size = 0, gpu_wrote_seen = 0;
     uint32_t id = 0, width = 0, height = 0, nvn_format = 0;
+};
+struct LevelGeo {
+    uint64_t offset;
+    uint32_t w, h, d;
+    uint32_t tw, th, td;
+    unsigned tile_h, tile_d;
+    uint64_t swizzled;
 };
 uint64_t completed_value = 0, rec_value = 0, frame_no = 0, tl_watch_prog = 0;
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> gpu_wrote;
@@ -112,6 +124,41 @@ int main() {
         auto [d, r] = ask(x);
         check(!d && r.empty(), "a write elsewhere reports nothing");
     }
+    {   // (a write around the storage recorded before one inside it: the lookup starts at the inner one's start, so
+     // the outer write is only found if the recorded ranges never nest)
+        Texture y; y.gpu = 0x280000, y.guest_size = 0x200000;
+        rec_value = 11; texture_gpu_wrote(0x100000, 0x400000);   // [0x100000, 0x500000): all of the texture
+        rec_value = 12; texture_gpu_wrote(0x200000, 0x100000);   // [0x200000, 0x300000): inside the first
+        completed_value = 12;
+        auto [d, r] = ask(y);
+        check(d && r.size() == 1 && r[0].first == 0 && r[0].second == 0x200000,
+              "an earlier write that covers the storage is reported in full");
+    }
+    {   // (a write that starts inside the storage and ends past its end, recorded after one that started earlier and
+     // ended inside: both parts, in order, each clipped to the storage)
+        Texture z; z.gpu = 0x7000, z.guest_size = 0x1000;
+        rec_value = 13; texture_gpu_wrote(0x7100, 0x100);        // [0x7100, 0x7200)
+        rec_value = 14; texture_gpu_wrote(0x7C00, 0x800);        // [0x7C00, 0x8400): ends past the storage's 0x8000
+        completed_value = 14;
+        auto [d, r] = ask(z);
+        check(d && r.size() == 2 && r[0].first == 0x100 && r[0].second == 0x200 && r[1].first == 0xC00 && r[1].second == 0x1000,
+              "two writes report both parts, clipped to the storage");
+    }
+    {   // (what the upload path really takes from guest memory: the CPU path works in whole GOB-block rows, so a
+     // 1.75 MB write into a 2560x1440 RGBA8 level costs the 24 rows it lands in, not the bytes its ranges name)
+        const LevelGeo g{0, 2560, 1440, 1, 2560, 1440, 1, 0, 0, 14837760};   // (2560 x 4: 160 GOBs a row, 180 rows)
+        const RowGeom rg = row_geom(g, 4);
+        check(rg.rows_per == 8 && rg.nrows == 180 && rg.row_bytes == 81920, "the GOB rows a 2560x1440 RGBA8 level has");
+        Ranges d{{0x100000, 0x100000 + 0x1C4000}};
+        uint64_t moved = 0;
+        const auto runs = dirty_runs(g, rg, 0, g.swizzled, 4, &d, false, &moved);
+        check(runs.size() == 1 && runs[0].first == 12 && runs[0].second == 24, "the block rows a written range forces up");
+        check(moved == 1966080, "the guest memory those rows take, which is more than the range names");
+        uint64_t all = 0;
+        const auto whole = dirty_runs(g, rg, 0, g.swizzled, 4, nullptr, true, &all);
+        check(whole.size() == 1 && whole[0].first == 0 && whole[0].second == 180 && all == 14745600,
+              "a level the ranges cannot narrow goes up entire");
+    }
     return fails != 0;
 }
 """
@@ -134,13 +181,16 @@ def main():
         ("gpu_wrote_into(*tex, gpu_part ? &dirty : nullptr)", "the GPU-write marking does not report the ranges it found"),
         ("if (gpu_partial) {", "the CPU's writes since a GPU write are not taken into the same part"),
         ("if (texture_dirty(*tex, since, cpu))", "the CPU's writes since a GPU write are not looked for"),
-        ("const bool up_ok = upload(*tex, up_part ? &dirty : nullptr);", "the upload does not take the part"),
+        ("const bool up_ok = upload(*tex, up_part ? &dirty : nullptr, &gw_moved);", "the upload does not take the part"),
+        ("st_gw_moved_kb.fetch_add(gw_moved >> 10", "the gpu-write tally does not count what the upload path took"),
     ]:
         if needle not in tex:
             raise SystemExit("vk_texture.cpp no longer has: " + needle + "\n  (" + why + ")")
 
     cuts = block(tex, "void texture_gpu_wrote(uint64_t gpu, uint64_t size)") + "\n" + \
-        block(tex, "bool gpu_wrote_into(Texture& tex, Ranges* out)")
+        block(tex, "bool gpu_wrote_into(Texture& tex, Ranges* out)") + "\n" + \
+        block(tex, "struct RowGeom {") + ";\n" + block(tex, "RowGeom row_geom(") + "\n" + \
+        block(tex, "std::vector<std::pair<uint32_t, uint32_t>> dirty_runs(")
     src = FIXTURE.replace("__CUTS__", cuts)
 
     with tempfile.TemporaryDirectory(prefix="gpu-write-part-") as tmp:
