@@ -139,7 +139,7 @@ static void *observe_commit(void *p, SIZE_T n, DWORD type, DWORD protect) {
 }
 #define VirtualAlloc observe_commit
 '''
-    guest += take("host/mkw_glue.c", "void hos_commit(") + "#undef VirtualAlloc\n"
+    guest += take("host/mkw_glue.c", "int hos_commit(") + "#undef VirtualAlloc\n"
     guest += "#define GUEST_SPACE HOS_GUEST_SPACE\nstatic int startup_stderr = -1;\nint hos_guest_memfd = -1;\n"
     guest += take("host/hos_main.c", "static int reserve_guest(")
     guest += take("host/hos_main.c", "int hos_posix_guest_discard(")
