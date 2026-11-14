@@ -90,6 +90,8 @@ break.
 
 ## Development setup
 
+After you clone the repository, run **`mise run setup`** once to install the pre-commit and commit-msg hooks.
+
 You need your own supported dump: program `0400486024DEC000`, update v131072, build `e0f3ccfa`. Other versions don't
 work, and the build reads the dump where it lies without changing it. A build needs about 60 GB free. For runtime
 memory, see the README's [requirements](README.md#what-you-need): the game alone can exceed 16 GiB, depending on the
@@ -209,9 +211,10 @@ output. Name part of a path to run only matching checks (`tests/run_all.py ub_`)
 compiler, `spirv-val`, the SPIR-V or Vulkan headers, `zstandard`) is skipped and says so; `--strict` fails it instead.
 Checks that can't run everywhere say so in their own file (`RUN_ALL_SKIP`); `--no-skip` runs them anyway.
 
-Forgejo doesn't run these on pull requests or on `main` for now: CI runs only the light checks (the title, the
-description, workflow lint, the third-party notes), and a maintainer can start the full checks by hand (*Actions* >
-*CI* > *Run workflow*). So run them before you open a pull request and put their results in it.
+CircleCI on Forgejo (see [docs/ci.md](docs/ci.md)) runs path-filtered game-free checks on same-repo pull requests and
+`main`. Run `mise run ci:smoke` and `mise run test` locally before you push, and put results in
+the pull request. Forgejo Actions workflows under `.forgejo/workflows/` remain until cutover; they still match what
+CI reproduces.
 
 ### Checks that need your dump or a run
 
@@ -273,6 +276,8 @@ for scripted input, screenshots, frame dumps and profiles are in the development
 - New code has to be GPL-compatible ([Licensing](#licensing)).
 
 ## Commits and pull requests
+
+Each commit subject is a [Conventional Commit](https://www.conventionalcommits.org/) (same types as [pull request titles](#pull-request-titles)). Keep one concern per commit; squash-merge uses the pull request title on `main`.
 
 Every pull request uses the [pull request template](.forgejo/pull_request_template.md): its sections are the
 description, its checklist stays whole, and `forge.py pr ready` checks it before review.
