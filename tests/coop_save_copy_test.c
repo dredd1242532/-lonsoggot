@@ -206,7 +206,8 @@ int main(int argc, char **argv) {
     assert(coop_profile_active() == !strcmp(argv[2], "copy"));
     char mount[COOP_PROFILE_PATH]; snprintf(mount, sizeof mount, "%s", coop_profile_root());
     setup();
-    /* A maker with a silent/unidentified member cannot grant download consent. */
+    /* A still-pending identity holds back the offer; this is not the later
+       unidentified-member refusal after the identity-wait interval expires. */
     deliver = 0; room_ticks();
     choose(0); CoopOffer before; status(&before);
     assert(!action("identity", 0, before.token, NULL));
@@ -229,6 +230,31 @@ int main(int argc, char **argv) {
         printf("ENGINE domain=%s member=%d identified=2 epoch=%u maker=%u\n",
                coop_profile_active() ? "copy" : "normal", G.view.self, ready.rules.epoch, ready.rules.maker);
         fflush(stdout);
+    }
+    room_ticks(); consent();
+    /* Keep the verified maker/owner and charter, but add a third silent member.
+       A real offer with an unidentified member must refuse, independently of
+       the no-offer wait above. Removing just that guard must be detected. */
+    int ids[] = {1, 2, 3}; uint64_t sessions[] = {101, 202, 303};
+    for (int side = 0; side < 2; side++) {
+        choose(side);
+        G.view.n = 3; G.view.version = ++G.view_seen;
+        G.view.member[2].id = 3; G.view.member[2].session = 303;
+        coop_sync_room(G.eng, "H7K3WMBCDFGH234567", side + 1, ids, sessions, 3, 1, clock_ms);
+    }
+    clock_ms += IDENT_WAIT_MS;
+    room_ticks();
+    for (int side = 0; side < 2; side++) {
+        choose(side); CoopOffer unid; status(&unid);
+        assert(G.pub_has && unid.token && unid.rules.epoch && unid.unidentified == 1);
+        assert(!action("identity", 0, unid.token, NULL));
+        assert(!action("offer", 2 - side, 0, NULL) && !G.downloads && !G.exports);
+        closed();
+    }
+    for (int side = 0; side < 2; side++) {
+        choose(side);
+        G.view.n = 2; G.view.version = ++G.view_seen;
+        coop_sync_room(G.eng, "H7K3WMBCDFGH234567", side + 1, ids, sessions, 2, 1, clock_ms);
     }
     room_ticks(); consent();
     if (coop_profile_active()) {
