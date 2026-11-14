@@ -1016,6 +1016,14 @@ RowGeom row_geom(const LevelGeo& g, int src_bpb) {
             (((uint64_t)g.tw * src_bpb + 63) / 64) * (512ull << (g.tile_h + g.tile_d))};
 }
 
+/// The band of blocks one run of GOB rows covers in a level: the first block row and how many, stopped at the
+/// level's height. The GPU unswizzle dispatches in blocks, so a written range reaches it as exactly these rows -
+/// the same rows the CPU path copies - instead of the whole level.
+std::pair<uint32_t, uint32_t> unswizzle_band(const LevelGeo& g, const RowGeom& rg, uint32_t row0, uint32_t nrow) {
+    const uint32_t first = row0 * rg.rows_per;
+    return {first, std::min(g.th - first, nrow * rg.rows_per)};
+}
+
 /// The block rows of one layer that a set of written ranges forces up: all of them when the ranges cannot narrow the
 /// level (no ranges at all, a linear or 3D level, an ASTC source, a format widened on the way), otherwise the rows of
 /// GOB blocks a written page falls in. Such a row is self-contained in the storage, so these rows are exactly what
@@ -1288,6 +1296,7 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty, uin
             any = overlaps(dirty, g.offset + (uint64_t)layer * tex.L.layer_size,
                            g.offset + (uint64_t)layer * tex.L.layer_size + g.swizzled);
         if (!any) continue;
+        const RowGeom rg = row_geom(g, tex.bpb);
         const uint64_t key = mix(0x5B1Cu, mix(level, (uint64_t)vf));
         const VkImageView view = cached_image_view(&tex, key, [&](VkResult* result) {
             return make_view(&tex, VK_IMAGE_VIEW_TYPE_2D_ARRAY, vf, VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0,
@@ -1311,11 +1320,36 @@ bool upload_unswizzle_gpu(Texture& tex, uint64_t total, const Ranges* dirty, uin
         w[1].dstBinding = 1, w[1].descriptorCount = 1, w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         w[1].pImageInfo = &ii;
         vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, unsw_layout, 0, 2, w);
-        vkCmdPushConstants(cmd, unsw_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
         checkpoint_mark(cmd, tex.gpu, 'g');
-        vkCmdDispatch(cmd, (g.tw + 31) / 32, (g.th + 31) / 32, tex.layers);
-        st_bytes += (int64_t)g.swizzled * tex.layers;
-        if (moved) *moved += (uint64_t)g.swizzled * tex.layers;   // (the whole level: the shader stops at no row)
+        if (!dirty) {   // (all of it: every layer in one dispatch, as before)
+            pc.origin[0] = pc.origin[1] = pc.origin[2] = pc.pad0 = 0;
+            pc.destination[0] = pc.destination[1] = pc.destination[2] = 0;
+            vkCmdPushConstants(cmd, unsw_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+            vkCmdDispatch(cmd, (g.tw + 31) / 32, (g.th + 31) / 32, tex.layers);
+            st_bytes += (int64_t)g.swizzled * tex.layers;
+            if (moved) *moved += (uint64_t)g.swizzled * tex.layers;
+            continue;
+        }
+        // (longshot) a part of the level only: the shader reads at (invocation + origin) and writes at
+        // (invocation + destination), so the written block rows go in as both, one dispatch per layer and run,
+        // and the level's untouched rows are neither read nor written
+        for (uint32_t layer = 0; layer < tex.layers; layer++) {
+            const uint64_t src_off = g.offset + (uint64_t)layer * tex.L.layer_size;
+            if (src_off >= total) continue;
+            uint64_t taken = 0;
+            const auto runs = dirty_runs(g, rg, src_off, g.swizzled, tex.bpb, dirty, false, &taken);
+            if (runs.empty()) continue;
+            st_bytes += (int64_t)taken;
+            if (moved) *moved += taken;
+            for (const auto& [row0, nrow] : runs) {
+                const auto [first, blocks] = unswizzle_band(g, rg, row0, nrow);
+                if (!blocks) continue;
+                pc.origin[0] = 0, pc.origin[1] = first, pc.origin[2] = layer, pc.pad0 = 0;
+                pc.destination[0] = 0, pc.destination[1] = (int32_t)first, pc.destination[2] = (int32_t)layer;
+                vkCmdPushConstants(cmd, unsw_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+                vkCmdDispatch(cmd, (g.tw + 31) / 32, (blocks + 31) / 32, 1);
+            }
+        }
     }
     full_barrier(cmd);
     descriptors_disturbed();

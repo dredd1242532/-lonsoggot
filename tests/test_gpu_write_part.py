@@ -20,6 +20,8 @@ source and run against stand-ins for the map, the submissions and a texture:
     writes since into the same part: run through join_ranges, a CPU range beside the GPU's part is uploaded with it and
     one that touches the part merges into it (the whole upload used to cover them, and upload_gen moves past them);
     sparse images stay with the whole path;
+  - the GPU unswizzle dispatches the same block rows, so a band names the first block of a run and how many,
+    stopping at the level's height;
   - the upload's own byte count: the CPU path moves whole GOB-block rows, so what it took from guest memory is
     measured there rather than inferred from the ranges it was handed.
 
@@ -160,6 +162,17 @@ int main() {
         check(both.size() == 2 && both[1].first == 0x400 && both[1].second == 0x600,
               "ranges that touch the part merge into it, in order");
     }
+    {   // (the GPU unswizzle takes the same block rows: the band a run covers, never past the level)
+        const LevelGeo tall{0, 2560, 1440, 1, 2560, 1440, 1, 0, 0, 14837760};
+        const RowGeom rg = row_geom(tall, 4);
+        auto band = unswizzle_band(tall, rg, 12, 24);
+        check(band.first == 96 && band.second == 192, "a run becomes the block rows it covers");
+        const LevelGeo odd{0, 2560, 1437, 1, 2560, 1437, 1, 0, 0, 14837760};   // (not a whole number of GOB rows)
+        const RowGeom rgodd = row_geom(odd, 4);
+        check(rgodd.nrows == 180, "a short last row still counts as a row");
+        band = unswizzle_band(odd, rgodd, 179, 1);
+        check(band.first == 1432 && band.second == 5, "and the last band stops at the level's height");
+    }
     {   // (what the upload path really takes from guest memory: the CPU path works in whole GOB-block rows, so a
      // 1.75 MB write into a 2560x1440 RGBA8 level costs the 24 rows it lands in, not the bytes its ranges name)
         const LevelGeo g{0, 2560, 1440, 1, 2560, 1440, 1, 0, 0, 14837760};   // (2560 x 4: 160 GOBs a row, 180 rows)
@@ -209,6 +222,7 @@ def main():
         block(tex, "bool gpu_wrote_into(Texture& tex, Ranges* out)") + "\n" + \
         block(tex, "struct RowGeom {") + ";\n" + block(tex, "RowGeom row_geom(") + "\n" + \
         block(tex, "void join_ranges(Ranges& into, const Ranges& more)") + "\n" + \
+        block(tex, "std::pair<uint32_t, uint32_t> unswizzle_band(") + "\n" + \
         block(tex, "std::vector<std::pair<uint32_t, uint32_t>> dirty_runs(")
     src = FIXTURE.replace("__CUTS__", cuts)
 
