@@ -793,6 +793,7 @@ record it again, and make a new tour list. The folder's layout stays the same.
 python -I scripts/pipeline_tour.py tour --game <game folder> --out <tour dir> --name play --publish
 python -I scripts/pipeline_tour.py run --game <game folder copy> --out <dir> --part child-overworld --first "Market" --stops 3 --skip-opening
 python -I scripts/pipeline_tour.py run --game x --out x --dry-run          # the route, without the game
+python -I scripts/pipeline_tour.py compare <new tour dir>/play.bin <old tour dir>/play.bin   # what the new list lost, and gained
 ```
 
 `tour` runs its parts (the opening; the child overworld; the dungeons at both ages; the adult overworld) one after another,
@@ -808,9 +809,14 @@ game also runs in a scope of its own with `MemoryMax` (16 GB).
 Each part starts with no save, in a data folder of its own: the title, New Game and the opening (watched whole by the
 opening part, skipped by the game itself, `HOS_SKIP_OPENING`, in the others), until the bridge's `status` says Link is in a
 map with no event playing and nothing loading; then every item from the Debug tab's inventory but the story's (medallions,
-stones and songs start scenes that wait for the player), and each Teleport destination: the camera all around, at a few
-the sword, the shield and an item from the pause menu's Items page, at Lake Hylia a dive (and, as the adult, the iron boots
-and the Zora tunic on the lake's bottom), and on to the next once no new pipeline came for 2.5 s of game time. A few stops
+stones and songs start scenes that wait for the player), and each Teleport destination: the camera all around, at Lake
+Hylia a dive (and, as the adult, the iron boots and the Zora tunic on the lake's bottom), and on to the next once no new
+pipeline came for 60 frames, a second of game time (`--settle-quiet`; 600 frames at most, `--settle-max`; it was 150, 2.5 s).
+The sword, the shield and an item from the pause menu's Items page are used once an age (the script's `ITEMS_ONCE`: Kokiri
+Forest as the child, Hyrule Field as the adult) and at the stops with passes of their own an item's draws could combine with
+(`ITEMS_PASSES`: Zora's Domain and the Water Temple for water, the Shadow Temple for the Lens of Truth, Death Mountain Crater
+and the Fire Temple for the heat haze), a different pause menu pick at each: a pipeline is a program and its fixed draw state, and a
+scene's light and fog are inputs to the same pipelines, so the sword drawn in one more field is no new pipeline. A few stops
 are left out: one starts a scene the tour cannot finish, others added almost nothing (the script's `LEFT_OUT`). `value <run
 dirs>` measures that: each step's pipelines that neither the players' lists (`contrib/`) nor any other step has, its
 seconds, and the steps under `--floor` (10) cut (`--sub`: a stop's arrival, look around, item use and settling apart).
@@ -826,12 +832,20 @@ the bridge does not do, goes through `HOS_INPUT_LIVE`'s `!cheat` lines (`HOS_OOT
 key (formats and draw state, not sizes or rates): headless, 640x360 with the game's own upscaler at 50%, the cap Uncapped
 (`HOS_FPS_MAX=1000`) with every frame a 60th of a second of game time (`HOS_FPS_STEP=0`, Game speed Per frame), pacing and
 V-Sync off, text at once, no frame generation, sharpening or HDR, in the run's own copy of the options file (restored
-after). `run` is one part (`--part`, `--first <stop>` to start again at a stop, `--stops N`, `--dry-run`); `--env` and
+after). Every wait on the game counts its frames, so a faster game waits less wall time; the inventory's `!cheat` lines alone
+are also 32 ms apart (the game reads the live file every 30 ms), then three frames. `run` is one part (`--part`, `--first <stop>`
+to start again at a stop, `--stops N`, `--dry-run`); `--env` and
 `--ini` change the settings (a list for the mesh fallback: `--env RX_VK_FORCE_MESH_FALLBACK=1`), and `--window WxH` shows
 it. Each run writes `states.bin`, `report.txt` and `report.json` (each step's pipelines, the new ones it added, its frames,
-seconds and the game's memory: a flattening curve says the list is nearly whole), `log.txt`, `steps.txt` (each request, at
+seconds and the game's memory: a flattening curve says the list is nearly whole; and the settle's frames), `log.txt`,
+`steps.txt` (each request, at
 its frame) and a small picture every 600 frames (`shots/`). `tests/test_pipeline_tour.py` checks it without the game,
 against a fake bridge.
+
+A changed route or wait is checked by the lists, not the clock alone: a tour each way on the same PC and game folder, then
+`compare <new tour dir>/<name>.bin <old tour dir>/<name>.bin` (or `tour --compare-to <old list>`, after its merge), which
+prints how many pipelines the old list has that the new lacks (lost; none, for a change that only saves time) and the other
+way round. The wait as it was is `--settle-quiet 150`; `report.txt` says which a run used.
 
 `--vk-profile <dir>` (`run` and `tour`) records [the renderer's play profile](#the-renderers-play-profile) on the same
 route, with a counting renderer (`RX_VK_PGO=gen`): each game's counters, from control of Link to its end, go to

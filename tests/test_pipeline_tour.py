@@ -1,6 +1,7 @@
 """The pipeline tour (scripts/pipeline_tour.py), without the game: the Debug tab's action numbers and the teleport list it reads
-from the source, its route, the presses it sends, the switches and options it runs with, its command line, its counts and merge of
-the pipeline state lists, the memory guard, and the bridge driving: a fake control bridge (a Unix socket served from a thread, as
+from the source, its route (the items once an age and at the passes' stops), the presses it sends, the switches and options it
+runs with, its command line (the settle's frames), its counts, merge and compare of the pipeline state lists, the memory guard,
+and the bridge driving: a fake control bridge (a Unix socket served from a thread, as
 tests/test_longshot_ctl.py's stand-in serves one) that answers the way host/control.c does, refusing, cancelling and timing out
 where the game would, with the real client (scripts/longshot_ctl.py Bridge) in between. And --vk-profile, the renderer's play
 profile on the tour's route: a counting renderer told apart, RX_VK_PGO_FILE's reset after control and dump at each run's end
@@ -218,6 +219,63 @@ def routes(tour, a):
     over = tour.route(a, "gameover")
     if over[-1][0] != "gameover" or a["teleports"][over[-1][1]][0] != tour.GAME_OVER_AT:
         fail("the gameover part does not go to %s" % tour.GAME_OVER_AT)
+    items_where(tour, a)
+
+
+def items_where(tour, a):
+    """The sword, the shield and an item: once an age, at the first stop of its overworld (ITEMS_ONCE), and at the stops with
+    passes of their own (ITEMS_PASSES), each a stop the route visits and with its reason; a different pause menu pick at each,
+    the same whichever game visits it; and play uses them there and nowhere else, settling each stop by the run's frames"""
+    import types
+    names = [n for n, _ in a["teleports"]]
+    plan = tour.plan_stops(a, "all")
+    if set(tour.ITEMS_ONCE) != {"child", "adult"}:
+        fail("the items are not used once for each age: %s" % tour.ITEMS_ONCE)
+    for age, name in tour.ITEMS_ONCE.items():
+        first = tour.plan_stops(a, age + "-overworld")[0]
+        if names[first[1]] != name:
+            fail("the %s's items are not at the first stop of its overworld (%s, not %s)" % (age, name, names[first[1]]))
+    for name, why in tour.ITEMS_PASSES.items():
+        if name not in names or not any(names[i] == name for _, i in plan) or not why.strip():
+            fail("an item stop the route does not visit, or with no reason: %s (%r)" % (name, why))
+    stops = tour.item_stops(a)
+    for age in ("child", "adult"):
+        at = [names[i] for g, i in stops if g == age]
+        want = [names[i] for g, i in plan if g == age and (names[i] == tour.ITEMS_ONCE[age] or names[i] in tour.ITEMS_PASSES)]
+        if at != want or at.count(tour.ITEMS_ONCE[age]) != 1:
+            fail("the %s's item stops: %s, wanted %s" % (age, at, want))
+    if len(stops) > 20 or len({tour.pause_pick(k)[0] for k in range(len(stops))}) != len(stops):
+        fail("the item stops' picks are not all different (%d stops)" % len(stops))
+    if len(stops) >= len(plan) // 3:
+        fail("the items are used at %d of %d stops: not once an age and at the passes' stops" % (len(stops), len(plan)))
+    # (play, without the game: which stops press the items, and the settle's frames as the run's options give them)
+    with tempfile.TemporaryDirectory() as d:
+        g = tour.Game(None, d, os.path.join(d, "none.bin"), dry=True)
+        seen, rows = [], []
+        g.press = lambda script, label=None: seen.append(("press", label))
+        g.settle = lambda quiet, most, step=15: seen.append(("settle", quiet, most))
+        tour.play(g, a, tour.route(a), rows, lambda label: (seen.append(("count", label)), rows.append({"stop": label})),
+                  types.SimpleNamespace(settle_quiet=150, settle_max=600))
+        g.steps.close()
+    pressed, used, picks, settles = [], set(), [], set()
+    for ev in seen:
+        if ev[0] == "press":
+            pressed.append(ev[1])
+            if ev[1].startswith("item "):
+                picks.append(ev[1])
+        elif ev[0] == "settle":
+            settles.add(ev[1:])
+        else:
+            if "sword, shield, item" in pressed:
+                used.add(ev[1])
+            pressed = []
+    want = {"%s (%s)" % (names[i], age) for age, i in stops}
+    if used != want:
+        fail("play uses the items at %s, not %s" % (sorted(used ^ want), sorted(want)))
+    if len(picks) != len(set(picks)) or len(picks) != len(stops):
+        fail("play's item picks: %s" % picks)
+    if settles != {(150, 600)}:
+        fail("play's settle is not the run's --settle-quiet and --settle-max: %s" % settles)
 
 
 def presses(tour):
@@ -275,8 +333,9 @@ def cli(tour, a):
     ran = subprocess.run([sys.executable, "-I", str(TOUR), "run", "--game", "x", "--out", "x", "--dry-run", "--part", "child",
                           "--stops", "3"], capture_output=True, text=True)
     lines = ran.stdout.splitlines()
-    if ran.returncode or lines[0] != "newgame" or not lines[1].startswith("items: ") or len(lines) != 5 or \
-            lines[2] != "visit %s (child): teleport 0" % a["teleports"][0][0]:
+    first = "visit %s (child): teleport 0" % a["teleports"][0][0] + (", sword, shield, item 1" if ("child", 0) in tour.item_stops(a)
+                                                                     else "")
+    if ran.returncode or lines[0] != "newgame" or not lines[1].startswith("items: ") or len(lines) != 5 or lines[2] != first:
         fail("run --dry-run: %s%s" % (ran.stdout, ran.stderr))
     # the switches: fast and headless by default; a window, the Game Over's hearts, the opening, --env over them
     env = tour.run_env(p.parse_args(["run", "--game", "g", "--out", "o"]))
@@ -289,11 +348,35 @@ def cli(tour, a):
     if "HOS_HEADLESS" in env or env.get("HOS_WINDOW_SIZE") != "960x540" or env["HOS_OOT_PROTECT_HEARTS"] != "0" or \
             env["HOS_SKIP_OPENING"] != "1" or "HOS_AUDIO" in env or env.get("RX_VK_FORCE_MESH_FALLBACK") != "1":
         fail("the run's switches: %s" % env)
+    for part in tour.PARTS:   # (the speed settings in every part's game, the opening's too)
+        env = tour.run_env(p.parse_args(["run", "--game", "g", "--out", "o", "--part", part] + (["--skip-opening"] if part != "opening"
+                                                                                             else [])))
+        for k, v in (("HOS_HEADLESS", "1"), ("HOS_OUTPUT_RES", "640x360"), ("HOS_NO_PACING", "1"), ("HOS_FPS_MAX", "1000"),
+                     ("HOS_FPS_STEP", "0")):
+            if env.get(k) != v:
+                fail("the %s part's %s is %s, not %s" % (part, k, env.get(k), v))
+    for k, v in (("output_res", "640x360"), ("frame_pacing", "0"), ("frame_rate_cap", "6"), ("vsync", "0")):
+        if tour.BASE_INI.get(k) != v:
+            fail("the runs' options: %s=%s, not %s" % (k, tour.BASE_INI.get(k), v))
+    # the settle: in frames, shorter than the 150 it was, an option of run and tour that the tour passes to its runs
+    if (r.settle_quiet, r.settle_max) != (tour.SETTLE_QUIET, tour.SETTLE_MAX) or not 30 <= tour.SETTLE_QUIET < 150 or \
+            tour.SETTLE_MAX < 4 * tour.SETTLE_QUIET:
+        fail("the settle's defaults: %d quiet frames, %d at most" % (tour.SETTLE_QUIET, tour.SETTLE_MAX))
+    old = p.parse_args(["run", "--game", "g", "--out", "o", "--settle-quiet", "150", "--settle-max", "600"])
+    if (old.settle_quiet, old.settle_max) != (150, 600):
+        fail("run --settle-quiet 150 --settle-max 600: %s %s" % (old.settle_quiet, old.settle_max))
+    ot = p.parse_args(["tour", "--game", "g", "--out", "o", "--settle-quiet", "150", "--compare-to", "old.bin"])
+    ot.copy, ot.out_dir = "/g-tour", "/o"
+    cmd = tour.run_command(ot, "child", "play-child", None, None, True)
+    if cmd[cmd.index("--settle-quiet") + 1] != "150" or ot.compare_to != "old.bin" or \
+            p.parse_args(["tour", "--game", "g", "--out", "o"]).compare_to is not None:
+        fail("tour --settle-quiet is not passed to its runs, or --compare-to not taken: %s" % cmd)
     # the tour's runs: the opening watched once, by its own part; the next game of a part where the last one ended
     t = p.parse_args(["tour", "--game", "g", "--out", "o", "--cpus", "6-11", "--env", "X=1", "--mem", "soft_mb=5000"])
     t.copy, t.out_dir = "/g-tour", "/o"
     cmd = tour.run_command(t, "dungeons", "play-dungeons-1", "Fire Temple (child)", 3, True)
-    want = ["run", "--game", "/g-tour", "--out", "/o", "--name", "play-dungeons-1", "--part", "dungeons", "--nice", "19", "--env", "X=1",
+    want = ["run", "--game", "/g-tour", "--out", "/o", "--name", "play-dungeons-1", "--part", "dungeons", "--nice", "19",
+            "--settle-quiet", str(tour.SETTLE_QUIET), "--settle-max", str(tour.SETTLE_MAX), "--env", "X=1",
             "--mem", "soft_mb=5000", "--first", "Fire Temple (child)", "--stops", "3", "--skip-opening", "--cpus", "6-11"]
     if cmd[3:] != want:
         fail("the tour's run: %s" % cmd[3:])
@@ -326,6 +409,18 @@ def lists(tour, states, rec):
             fail("merge: %s%s" % (ran.stdout, ran.stderr))
         if states.read(out) != [rec(1, 2, 3), rec(1, 2, 4), rec(5, 0, 3)]:
             fail("merge did not write the three different pipelines in order")
+        # compare: what the old list has that the new lacks (lost), and the other way round
+        diff = tour.list_diff(states, one, two)
+        if (diff["new"], diff["old"], diff["lost"], diff["gained"]) != (2, 2, {rec(5, 0, 3)}, {rec(1, 2, 3)}):
+            fail("list_diff: %s" % diff)
+        if tour.list_diff(states, out, one)["lost"]:
+            fail("list_diff: the merge lost a pipeline of one of its lists")
+        ran = subprocess.run([sys.executable, "-I", str(TOUR), "compare", one, two], capture_output=True, text=True)
+        if ran.returncode or "lost): 1 pipelines" not in ran.stdout or "gained): 1 pipelines" not in ran.stdout:
+            fail("compare: %s%s" % (ran.stdout, ran.stderr))
+        ran = subprocess.run([sys.executable, "-I", str(TOUR), "compare", out, one], capture_output=True, text=True)
+        if ran.returncode or "lost): none" not in ran.stdout:
+            fail("compare against a list it holds whole: %s%s" % (ran.stdout, ran.stderr))
         ini = os.path.join(d, "longshot_options.ini")
         open(ini, "w").write("dlss=1\nhdr=0\n")
         old = tour.set_ini(ini, [("hdr", "1"), ("handheld_profile", "1")])
@@ -338,10 +433,12 @@ def lists(tour, states, rec):
             fail("the report: %s" % report)
         if "renderer profile" in report:
             fail("a report without --vk-profile speaks of the renderer's profile")
-        report = tour.write_report(d, [], {"name": "t", "seconds": 2, "env": {}, "ini": [],
+        report = tour.write_report(d, [], {"name": "t", "seconds": 2, "env": {}, "ini": [], "settle": [60, 600],
                                            "vk_profile": {"file": "/p/t.profraw", "reset": True, "why": None}})
         if "renderer profile: /p/t.profraw" not in report:
             fail("the report does not say where the renderer's counters went: %s" % report)
+        if "settle: on after 60 frames with no new pipeline, 600 at most" not in report:
+            fail("the report does not say the settle's frames: %s" % report)
     # --publish: the tour's source written by nx2/pipeline_states.py tour, its note from what the runs' bridges said
     with tempfile.TemporaryDirectory() as d:
         part = os.path.join(d, "run-child")
@@ -522,10 +619,13 @@ def bridge_driving(tour, a, states, rec):
         if fake.inputs[-1] not in (tour.LOOK, ctl.hos_steps(tour.LOOK)) or fake.frame - before < int((tour.LOOK_SPAN - 0.2) * 60):
             fail("the look around is not one sequence over its span")
         # the items: the Debug tab's actions in the live file, one a line
+        before = fake.frame
         g.cheat(a["item"] + 200)
         g.cheat(a["item"] + 256 + 124)
         if open(live).read() != "!cheat %d\n!cheat %d\n" % (a["item"] + 200, a["item"] + 256 + 124):
             fail("the live file: %r" % open(live).read())
+        if fake.frame - before < 6:   # (three presents after each line: one of a frame that read its input after it was there)
+            fail("the live lines are not three frames apart (%d frames for two)" % (fake.frame - before))
         # an adult-only stop as the child: refused for good, a Failed at once (one try)
         adult_only = next(i for i, (c, _) in enumerate(a["bancs"]) if c is None)
         n = len(fake.requests)
@@ -567,6 +667,10 @@ def bridge_driving(tour, a, states, rec):
         g.settle(150, 600)
         if not 150 <= fake.frame - before <= 200:
             fail("settle took %d frames, wanted about 150" % (fake.frame - before))
+        before = fake.frame
+        g.settle(tour.SETTLE_QUIET, tour.SETTLE_MAX)
+        if not tour.SETTLE_QUIET <= fake.frame - before <= tour.SETTLE_QUIET + 50:
+            fail("the default settle took %d frames, wanted about %d" % (fake.frame - before, tour.SETTLE_QUIET))
         g.steps.close()
         tour.stop_game(None, b)
         b.close()
@@ -656,6 +760,10 @@ def memory_guard(tour, a):
     src = TOUR.read_text(encoding="utf-8")
     if "threading" in src:
         fail("the tour runs games at once (one game can hold 14 GB)")
+    sleeps = re.findall(r"^.*\btime\.sleep\(.*$", src, re.M)
+    if [s.strip() for s in sleeps] != ["time.sleep(self.cheat_gap)", "time.sleep(0.1)   # (no frames to count yet: the bridge is not there)"] \
+            or "self.frames(3)" not in src.split("def cheat(", 1)[1].split("\n    def ", 1)[0]:
+        fail("the tour waits on the game in wall time where it could count frames: %s" % sleeps)
     if "raise MemoryStop(why)" not in src or "wait_memory(mem)" not in src:
         fail("the run does not check memory")
 

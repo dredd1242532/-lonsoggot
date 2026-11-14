@@ -8,12 +8,13 @@ Ported from Hookshot's draft pull request https://github.com/NotRexed/Hookshot/p
 changed to drive the game through the control bridge (host/control.c, docs/control.md) instead of a live input file and the log.
 
     python -I scripts/pipeline_tour.py tour --game <game folder> --out <dir> [--name play] [--parts ...] [--publish] [--env ...] [--ini ...]
-                                            [--vk-profile <dir>]
+                                            [--vk-profile <dir>] [--settle-quiet FRAMES] [--settle-max FRAMES] [--compare-to <list>]
     python -I scripts/pipeline_tour.py run  --game <game folder> --out <dir> [--name play] [--part <part>] [--first <stop>] [--stops N]
                                             [--skip-opening] [--env NAME=VALUE ...] [--ini key=value ...] [--window WxH] [--dry-run]
-                                            [--vk-profile <dir>]
+                                            [--vk-profile <dir>] [--settle-quiet FRAMES] [--settle-max FRAMES]
     python -I scripts/pipeline_tour.py merge-profile <vk-profile dir> [--out <file>] [--publish] [--llvm-profdata <path>]
     python -I scripts/pipeline_tour.py merge --out <file> <list> ...
+    python -I scripts/pipeline_tour.py compare <new list> <old list>
     python -I scripts/pipeline_tour.py report <out>/<name>
     python -I scripts/pipeline_tour.py value <run dir> ... [--sub] [--floor 10]
 
@@ -21,8 +22,10 @@ run: one game. The game folder is used as it is, so give it a copy (cp -a --refl
 pipeline notes), cache/longshot_pipeline_states.bin (and _v1) and longshot_pipeline_states_shipped.bin are moved aside for the run
 (a precompiled pipeline is not noted again, and only what this run meets counts) and put back after it. The run starts with no save
 at all (an empty data folder of its own, <out>/<name>/data): the title, New Game, the opening, then control of Link. Then every item, and each destination: the
-teleport, its loading, the camera all around, at a few the sword, the shield and an item from the pause menu, until no new pipeline
-came for a while.
+teleport, its loading, the camera all around, then on once no new pipeline came for --settle-quiet frames (60: a second of game
+time; --settle-max, 600, at most). The sword, the shield and an item from the pause menu are used once an age (ITEMS_ONCE) and at
+the few stops with passes of their own an item's draws could meet (ITEMS_PASSES: water, the Lens of Truth, heat haze), not at
+every stop: a pipeline is a program and its fixed draw state, and a scene's light and fog are inputs to the same pipelines.
 
 The game is driven through the control bridge (HOS_CONTROL, a socket in the run's folder): presses timed in the game's frames
 (sequence), the debug teleport by destination and the age switch with the game's own answer (refused, cancelled, sent; then the map
@@ -31,15 +34,17 @@ not do, the Debug tab's inventory, goes through the live input file (HOS_INPUT_L
 (HOS_NO_SDL) and nothing reaches the desktop. As fast as the game goes: no window (HOS_HEADLESS), the smallest output (640x360, the
 game's own upscaler at 50%: a pipeline's key has formats and state, not sizes), frame pacing off, no frame generation, the cap
 Uncapped with every frame a 60th of a second of game time (HOS_FPS_MAX=1000, HOS_FPS_STEP=0), text at once, and the opening skipped
-by the game itself (HOS_SKIP_OPENING) in every part but the one that watches it. Each step has a limit: a step that does not happen
-fails the run, it does not wander. --env and --ini run it under other settings (RX_VK_FORCE_MESH_FALLBACK=1, dlss=0, hdr=1,
-HOS_HANDHELD=1); the options file is restored. --window shows it in a window instead.
+by the game itself (HOS_SKIP_OPENING) in every part but the one that watches it. Every wait on the game counts its frames (the
+bridge's wait present), so a faster game waits less; only the inventory's live lines are spaced in wall time as well (the game
+reads that file every 30 ms). Each step has a limit: a step that does not happen fails the run, it does not wander. --env and
+--ini run it under other settings (RX_VK_FORCE_MESH_FALLBACK=1, dlss=0, hdr=1, HOS_HANDHELD=1); the options file is restored.
+--window shows it in a window instead.
 
 tour: the parts one after another, one game at a time, in a reflinked copy of the game folder, in games of --chunk stops (a
 fresh game each), at nice 19 on --cpus, each under the memory guard (MEM: it waits for memory before a game, and ends a game that
 holds too much or leaves the machine too little, the next game going on from there; on Linux the game runs in a systemd scope
-with a MemoryMax); merged; --publish writes the repository's tour list from them (nx2/pipeline_states.py tour, with the GPU,
-build, settings and route the runs logged).
+with a MemoryMax); merged (--compare-to <list>: what the merged list lacks of an older one); --publish writes the repository's
+tour list from them (nx2/pipeline_states.py tour, with the GPU, build, settings and route the runs logged).
 
 --vk-profile <dir> (run and tour): the renderer's play profile recorded on the tour's route (docs/development.md, "The
 renderer's play profile"). The game folder's renderer must be an RX_VK_PGO=gen one (a counting pack: RX_VK_PGO=gen python -I
@@ -50,6 +55,9 @@ renderer that takes neither request fails the run rather than leaving nothing. T
 counting renderer is slower, its pipelines the same). merge-profile then merges <dir>/*.profraw with the toolchain's
 llvm-profdata into work/longshot_vk.profdata (what nx2/make_game.py builds with); --publish also writes
 assets/profiles/longshot_vk.profdata.xz (xz -9e) and the note for assets/profiles/README.md (<dir>/README-note.md).
+
+compare: two lists' pipelines against each other (either may be a tour's merged <out>/<name>.bin, a run's states.bin or a
+tour.bin.xz): how many each has that the other lacks. A faster tour that loses nothing has none in the old list that the new lacks.
 
 value: each step's pipelines over runs that the players' lists (the shipped list's contrib/ sources) and the other steps do not
 have, its seconds, and which steps add too little to keep.
@@ -189,10 +197,30 @@ LAST = {"Haunted Wasteland"}
 # Field +4 pipelines at night, Kakariko +10, for ~10 s each: none by default (add names here for a run that wants them)
 NIGHT_AT = set()
 TIME_ACTION = 100
-# Where Link uses his items and their effects (one picked from the pause menu, a different one each time): a few stops per age,
-# not every one. The rest only look around
-ACT_AT = {"Kokiri Forest", "Hyrule Field", "Lake Hylia", "Death Mountain Crater", "Zora's Domain", "Gerudo Valley",
-          "Inside the Deku Tree", "Fire Temple", "Water Temple", "Shadow Temple"}
+# Where Link uses the sword, the shield and an item picked from the pause menu (a different one at each such stop of the whole
+# route: item_stops). A pipeline is a program and its fixed draw state (formats, blending, depth); a scene's light and fog are
+# inputs to the same programs, so the sword, the shield and an item draw with the same pipelines wherever they are used. Once an
+# age (the child's and the adult's models and items differ), at the first stop of the age's overworld:
+ITEMS_ONCE = {"child": "Kokiri Forest", "adult": "Hyrule Field"}
+# and at the stops with passes of their own, which an item's draws (its effect, a projectile, Link holding it) could combine
+# with into pipelines met nowhere else. The rest only look around
+ITEMS_PASSES = {
+    "Zora's Domain": "water: its surface and what is drawn through it, at both ages (the adult's Lake Hylia dives instead)",
+    "Water Temple": "water around and above Link, at both ages",
+    "Shadow Temple": "the Lens of Truth's pass (the child's visit: the adult's is left out)",
+    "Death Mountain Crater": "heat haze (the adult's visit: the child's is left out)",
+    "Fire Temple": "heat haze, at both ages",
+}
+
+
+def uses_items(age, name):
+    return ITEMS_ONCE.get(age) == name or name in ITEMS_PASSES
+
+
+def item_stops(a):
+    """The stops where Link uses the sword, the shield and an item, in the whole route's order: [(age, index)]. A stop's place
+    here is its pause menu pick (pause_pick), the same whichever game of the tour visits it"""
+    return [(age, i) for age, i in plan_stops(a, "all") if uses_items(age, a["teleports"][i][0])]
 
 
 def items_unlock(a):
@@ -261,6 +289,13 @@ BOOTS_OFF = presses([(0, "PLUS"), (0.8, "ZL"), (1.2, "ZL"), (1.6, "ZL"), (2.0, "
                      (3.8, "A"), (4.3, "B"), (4.8, "B")])   # (from the Zora tunic: left three times is the iron boots again)
 BOOTS_SPAN = 5.3
 
+
+# A stop is left once no new pipeline came for SETTLE_QUIET frames (a frame a 60th of a second of game time, HOS_FPS_STEP=0:
+# the faster the game, the less wall time), SETTLE_MAX frames at most. Before, 150 and 600 (2.5 s and 10 s of game time): the
+# look around and the items come before it, so its quiet frames are what a stop waits for nothing (run --settle-quiet 150 for
+# the old wait)
+SETTLE_QUIET = 60
+SETTLE_MAX = 600
 
 PARTS = ("all", "child", "adult", "opening", "child-overworld", "child-dungeons", "adult-overworld", "adult-dungeons", "dungeons",
          "gameover")
@@ -560,7 +595,7 @@ class Game:
     bridge: an object with request(cmd, timeout=None, **args) -> reply dict (scripts/longshot_ctl.py Bridge, or a test's).
     live: the live input file, for the Debug tab's inventory (the one thing the bridge does not do). list_path: the game's
     pipeline state list. proc: the game's process (None: not ours, as in a test)"""
-    def __init__(self, bridge, run_dir, list_path, live=None, proc=None, mem=None, dry=False, cheat_gap=0.07):
+    def __init__(self, bridge, run_dir, list_path, live=None, proc=None, mem=None, dry=False, cheat_gap=0.032):
         self.b, self.run_dir, self.list_path, self.live, self.proc = bridge, run_dir, list_path, live, proc
         self.mem, self.dry, self.cheat_gap = mem, dry, cheat_gap
         self.peak = 0           # (the most the game held, MB: anonymous + shared memory)
@@ -644,13 +679,18 @@ class Game:
             self.ask("press", buttons=buttons, frames=frames, wait=False)
 
     def cheat(self, action):
-        """A Debug tab action through the live input file: one a live poll (every 30 ms), the game keeping the last one a poll read"""
+        """A Debug tab action through the live input file: one a live poll, the game keeping the last one a poll read. The game
+        reads the file at a frame's input once 30 ms have passed since it last did (host/nn_hid.c live_input): so the next line
+        waits those 30 ms (cheat_gap), then three presents, the first two of which can be of frames that read their input before
+        the line was there (with the render thread, Threaded rendering, the game is a frame ahead of its presents). A frame
+        slowed by a pipeline build is waited for, as a wall-clock pause alone did not"""
         self.note("!cheat %d" % action)
         if self.dry:
             return
         with open(self.live, "a", encoding="utf-8") as f:
             f.write("!cheat %d\n" % action)
         time.sleep(self.cheat_gap)
+        self.frames(3)
 
     def held(self):
         """The game's memory that cannot be dropped, MB (its most so far kept in peak); None where it cannot be read"""
@@ -858,7 +898,7 @@ def start_game(game, run_dir, data, env, prefix=(), timeout=900, ctl=None):
             pass
         if time.monotonic() > end:
             raise Failed("the game's bridge did not answer in %d s" % timeout)
-        time.sleep(0.25)
+        time.sleep(0.1)   # (no frames to count yet: the bridge is not there)
 
 
 def stop_game(proc, bridge=None, grace=15):
@@ -917,6 +957,8 @@ def write_report(run_dir, rows, meta):
     if "vk_profile" in meta:
         vk = meta["vk_profile"] or {}
         out.append("renderer profile: %s" % (vk.get("file") or "none (%s)" % (vk.get("why") or "the game did not start")))
+    if meta.get("settle"):
+        out.append("settle: on after %d frames with no new pipeline, %d at most" % tuple(meta["settle"]))
     out.append("settings: %s" % " ".join("%s=%s" % kv for kv in sorted(meta["env"].items())))
     if meta.get("ini"):
         out.append("options: %s" % " ".join(meta["ini"]))
@@ -955,9 +997,11 @@ def run_env(args):
 
 
 def play(g, a, steps, rows_out, count, args):
-    """The route's steps on game g. count(label) adds a report row"""
-    misses = acts = 0
+    """The route's steps on game g. count(label) adds a report row. args: settle_quiet and settle_max, a stop's settle (frames)"""
+    misses = 0
     dived = False
+    quiet, most = getattr(args, "settle_quiet", SETTLE_QUIET), getattr(args, "settle_max", SETTLE_MAX)
+    picks = item_stops(a)
     for at, step in enumerate(steps):
         g.at = at
         kind = step[0]
@@ -1023,25 +1067,25 @@ def play(g, a, steps, rows_out, count, args):
                     map_change(g, "teleport", lambda st: True, 60 * 60, to=i)
                     g.frames(300)
                     g.press(LOOK, "look")
-                    g.settle(150, 600)
+                    g.settle(quiet, most)
                     count("%s (%s) underwater" % (name, age))
                 except Failed as e:
                     g.note("underwater missed: %s" % e)
                 g.press(BOOTS_OFF, "boots off")
                 continue
-            if name in ACT_AT:
-                pick, _ = pause_pick(acts)
-                acts += 1
-                g.press(pick, "item %d from the pause menu" % acts)
+            if (age, i) in picks:   # (once an age, and where a pass of the stop's own could meet them: ITEMS_ONCE, ITEMS_PASSES)
+                k = picks.index((age, i))
+                pick, _ = pause_pick(k)
+                g.press(pick, "item %d from the pause menu" % (k + 1))
                 g.press(ACT, "sword, shield, item")
                 g.mark("items")
-            g.settle(150, 600)   # (on once no new pipeline came for 2.5 s of game time, 10 s at most)
+            g.settle(quiet, most)   # (on once no new pipeline came for `quiet` frames, `most` at most)
             count("%s (%s)" % (name, age))
             if name in NIGHT_AT and i < dungeons_from(a):
                 g.cheat(TIME_ACTION + 22)
                 g.frames(60)
                 g.press(LOOK, "look at night")
-                g.settle(150, 600)
+                g.settle(quiet, most)
                 count("%s (%s) at night" % (name, age))
                 g.cheat(TIME_ACTION + 12)
                 g.frames(60)
@@ -1162,7 +1206,8 @@ def run(args):
     meta = {"name": args.name, "part": args.part, "seconds": seconds, "frames": frames, "env": env, "ini": args.ini,
             "completed": error is None and not left, "error": error, "fps": frames / seconds if seconds else None,
             "memory_stop": memory_stop, "memory_soft": memory_stop is not None and not hard, "left": left,
-            "peak_mb": (g.peak or None) if g else None, "version": last.get("version"), "renderer": last.get("renderer")}
+            "peak_mb": (g.peak or None) if g else None, "version": last.get("version"), "renderer": last.get("renderer"),
+            "settle": [getattr(args, "settle_quiet", SETTLE_QUIET), getattr(args, "settle_max", SETTLE_MAX)]}
     if vk_out:
         meta["vk_profile"] = profile_meta
         if profile_meta and profile_meta.get("file"):   # (where the counters were recorded, for merge-profile's note)
@@ -1244,7 +1289,8 @@ def part_runs(a, part, size, start, say=print, limit=None):
 def run_command(args, part, name, first, stops, skip_opening):
     """The `run` a tour starts for one game of a part"""
     cmd = [sys.executable, "-I", os.path.abspath(__file__), "run", "--game", args.copy, "--out", args.out_dir, "--name", name,
-           "--part", part, "--nice", str(args.nice)] + sum((["--env", e] for e in args.env), []) + \
+           "--part", part, "--nice", str(args.nice), "--settle-quiet", str(args.settle_quiet), "--settle-max",
+           str(args.settle_max)] + sum((["--env", e] for e in args.env), []) + \
         sum((["--ini", i] for i in args.ini), []) + sum((["--mem", m] for m in args.mem), [])
     if args.no_mem_guard:
         cmd.append("--no-mem-guard")
@@ -1318,6 +1364,8 @@ def tour(args):
     merged = os.path.join(out, "%s.bin" % args.name)
     if have:
         merge(argparse.Namespace(out=merged, lists=have))
+        if getattr(args, "compare_to", None):   # (a faster or changed tour against an older one's list: what it lost)
+            compare(argparse.Namespace(new=merged, old=args.compare_to))
     if args.publish and have and (not rc or args.publish_partial):
         rc = publish(have, [d for _, d, _ in order], parts)
     elif args.publish:
@@ -1373,6 +1421,24 @@ def merge(args):
         seen |= recs
     ran = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "nx2", "pipeline_states.py"), "--out", args.out] + args.lists)
     return ran.returncode
+
+
+def list_diff(tool, new, old):
+    """Two lists' records against each other (version 1 ones as version 2 where the other has those): {new, old: how many each
+    has, lost: those in old not in new, gained: those in new not in old}"""
+    (n, o), _ = tool.as_v2([tool.read(new), tool.read(old)])
+    n, o = set(n), set(o)
+    return {"new": len(n), "old": len(o), "lost": o - n, "gained": n - o}
+
+
+def compare(args):
+    """How many pipelines each of two lists has that the other lacks: a new tour's against an old one's"""
+    tool = state_tool()
+    d = list_diff(tool, args.new, args.old)
+    print("new %s: %d pipelines; old %s: %d pipelines" % (args.new, d["new"], args.old, d["old"]))
+    for what, recs in (("in the old, not in the new (lost)", d["lost"]), ("in the new, not in the old (gained)", d["gained"])):
+        print("%s: %s" % (what, tool.describe(sorted(recs)) if recs else "none"))
+    return 0
 
 
 def raw_problem(path):
@@ -1573,9 +1639,11 @@ def report(args):
 def dry_route(args):
     """--dry-run: the route's steps, without the game"""
     a = actions()
+    picks = item_stops(a)
     for step in route(a, args.part, args.stops, args.first):
         if step[0] == "visit":
-            print("visit %s (%s): teleport %d" % (a["teleports"][step[2]][0], step[1], step[2]))
+            item = ", sword, shield, item %d" % (picks.index(step[1:3]) + 1) if step[1:3] in picks else ""
+            print("visit %s (%s): teleport %d%s" % (a["teleports"][step[2]][0], step[1], step[2], item))
         elif step[0] == "items":
             print("items: %d Debug tab actions" % len(items_unlock(a)))
         else:
@@ -1585,6 +1653,13 @@ def dry_route(args):
 
 def stopped(signum, frame):
     raise KeyboardInterrupt   # (SIGTERM as SIGINT: the run's finally ends the game and puts the game folder's files back)
+
+
+def settle_options(p):
+    p.add_argument("--settle-quiet", type=int, default=SETTLE_QUIET, metavar="FRAMES",
+                   help="a stop is left after this many frames with no new pipeline (default %d; before, 150)" % SETTLE_QUIET)
+    p.add_argument("--settle-max", type=int, default=SETTLE_MAX, metavar="FRAMES",
+                   help="and after this many at most (default %d)" % SETTLE_MAX)
 
 
 def parser():
@@ -1609,6 +1684,7 @@ def parser():
     r.add_argument("--no-mem-guard", action="store_true", help="no memory guard (no waiting, no limits, no scope)")
     r.add_argument("--vk-profile", metavar="DIR", help="an RX_VK_PGO=gen renderer's counters, from control of Link to the "
                    "run's end, to DIR/<name>.profraw (merge-profile merges them)")
+    settle_options(r)
     t = sub.add_parser("tour", help="the parts, one game at a time, merged")
     t.add_argument("--game", required=True)
     t.add_argument("--out", required=True)
@@ -1629,6 +1705,9 @@ def parser():
                    help="write the repository's tour list (assets/pipeline_states/tour.bin.xz and tour.md) from the parts' lists")
     t.add_argument("--vk-profile", metavar="DIR", help="each game's RX_VK_PGO=gen renderer counters to DIR/<game>.profraw "
                    "(run --vk-profile; merge-profile merges them)")
+    settle_options(t)
+    t.add_argument("--compare-to", metavar="LIST", help="after the merge: how many pipelines LIST (an older tour's merged list, "
+                   "or tour.bin.xz) has that this tour's lacks, and the other way round (compare)")
     mp = sub.add_parser("merge-profile", help="the --vk-profile counters merged into the renderer's play profile")
     mp.add_argument("dir", help="the --vk-profile folder (its *.profraw)")
     mp.add_argument("--out", help="the merged profile (default work/longshot_vk.profdata, which nx2/make_game.py builds with)")
@@ -1639,6 +1718,9 @@ def parser():
     m = sub.add_parser("merge", help="lists merged, and what each added")
     m.add_argument("--out", required=True)
     m.add_argument("lists", nargs="+")
+    c = sub.add_parser("compare", help="two lists: how many pipelines each has that the other lacks")
+    c.add_argument("new", help="the new list (a tour's <out>/<name>.bin, a run's states.bin, a .bin.xz)")
+    c.add_argument("old", help="the list it should lose nothing of")
     s = sub.add_parser("report", help="a run's report again")
     s.add_argument("run")
     v = sub.add_parser("value", help="each step's new pipelines and seconds over runs, and the steps worth cutting")
@@ -1656,7 +1738,8 @@ def main(argv=None):
     a = parser().parse_args(argv)
     if a.cmd == "run" and a.dry_run:
         return dry_route(a)
-    return {"run": run, "tour": tour, "merge": merge, "report": report, "value": value, "merge-profile": merge_profile}[a.cmd](a)
+    return {"run": run, "tour": tour, "merge": merge, "compare": compare, "report": report, "value": value,
+            "merge-profile": merge_profile}[a.cmd](a)
 
 
 if __name__ == "__main__":
