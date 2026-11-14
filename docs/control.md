@@ -417,6 +417,14 @@ The client:
   that slot is copied, so Continue loads it. The source is only read. A destination that already holds saves is
   refused. On Windows, use `--profile test` or an explicit `--user DIR`: the game supports `--user` on both platforms.
   With either, the copy goes into `DIR/save/<user id>` instead of the Linux data folder.
+- `launch --repo-save NAME` does the same with a save in the repository
+  ([assets/saves](../assets/saves/README.md)): only `assets/saves/NAME/slot_00/` is copied in, to
+  `<data>/longshot/save/5a3c9e1f0b7d24680000000000000001/slot_00`, so it is the one slot the title's Load screen
+  shows. There is no `account.sav` or `option.sav` to copy: the game makes both when it loads the slot (checked with a
+  real game on 2026-11-14). NAME is looked for in this script's checkout, or `--repo DIR`'s. Only that layout is taken
+  (`README.md` and `slot_00/` with `progress.sav` and `caption.sav`; nothing else, no links), a leftover
+  `assets/saves/_profile/` is refused, and the same destination checks apply. It goes with neither `--save` nor
+  `--slot`. `saves --repo [DIR]` lists the repo saves with their README's first line, without a game.
 
 ## Guest memory
 
@@ -542,7 +550,8 @@ it does not invent an exit code. `show` and `log` work after exit without connec
 `--profile test` sets `HOS_HEADLESS=1`, `HOS_AUDIO=0` and `HOS_ENV_FILE` to the run's owned empty file, and passes
 `--user <run>/user`. These profile choices win over conflicting `--env` entries. The runtime reads that file
 **instead of** the ambient `longshot_env.txt` (`load_longshot_env` in `host/hos_main.c`), not as another layer.
-The profile starts fresh, or `--save FOLDER [--slot NN]` makes a plain-file copy using the existing source checks.
+The profile starts fresh, or `--save FOLDER [--slot NN]` (or `--repo-save NAME`) makes a plain-file copy using the
+existing source checks.
 An ordinary symlinked parent (such as `/home` on Linux) is allowed; source/destination overlap is checked by resolved
 paths. Existing `save/` and user-id entries inside the chosen user root must be real folders, not links.
 It refuses `--data` and `--user`: neither can redirect a test run onto the source save. The same explicit runtime

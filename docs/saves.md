@@ -69,14 +69,14 @@ copying again and [ask on Discord](https://discord.gg/magicbean), without postin
 
 ## For advanced users: the save script
 
-Longshot has the same transfers on the command line: [`scripts/oot_saves.py`](../scripts/oot_saves.py), which needs only
+Longshot has the same transfers on the command line: [`scripts/longshot_saves.py`](../scripts/longshot_saves.py), which needs only
 Python 3. It also exports to Hookshot, handles custom folders, portable installs and several profiles, and previews a
 copy with `--dry-run`:
 
 ```sh
-python -I scripts/oot_saves.py list              # every save it finds, its slots and when each was saved
-python -I scripts/oot_saves.py import lichii     # Lichii -> Longshot
-python -I scripts/oot_saves.py export lichii     # Longshot -> Lichii
+python -I scripts/longshot_saves.py list              # every save it finds, its slots and when each was saved
+python -I scripts/longshot_saves.py import lichii     # Lichii -> Longshot
+python -I scripts/longshot_saves.py export lichii     # Longshot -> Lichii
 ```
 
 [Saves: the files, the script and the emulators](saves-script.md) has every command and option, where each emulator
