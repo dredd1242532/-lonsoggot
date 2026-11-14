@@ -27,6 +27,8 @@ import collections
 import re
 
 HEAD = re.compile(r"^void (f_[0-9a-f]+)\(Ctx \*__restrict A64_NOESC c\) \{$")
+BRACES = re.compile(r"[{}]")
+HEAD_TEXT = re.compile(r"^void (f_[0-9a-f]+)\(Ctx \*__restrict A64_NOESC c\) \{\n", re.M)
 LABEL = re.compile(r"^L_([0-9a-f]+):;")
 GOTO = re.compile(r"\bgoto (L_[0-9a-f]+);")
 TAIL = re.compile(r"\bTAILCALL\((\w+)\);")
@@ -46,6 +48,12 @@ class Refuse(Exception):
 
 def _braces(line, depth):
     """the block depth after a line (comments skipped); literals refuse: braces inside them are not counted"""
+    if "/" not in line and '"' not in line and "'" not in line:   # (no comment, no literal: the braces alone, found in C)
+        for b in BRACES.findall(line):
+            depth += 1 if b == "{" else -1
+            if depth < 0:
+                raise Refuse("unbalanced braces")
+        return depth
     i, n = 0, len(line)
     while i < n:
         ch = line[i]
@@ -219,38 +227,37 @@ def split_text(src, piece_kb=PIECE_KB, min_kb=MIN_KB, only=None, notes=None):
     """A lifted C file with each function of at least min_kb KB of C (or the ones named in `only`) split: (text, stats).
     notes: a list that gets a line per function left whole and why"""
     stats = collections.Counter()
-    if src.find("\nvoid f_") < 0:
-        return src, stats
-    lines = src.split("\n")
-    out, i, n = [], 0, len(lines)
     piece, min_bytes = piece_kb * 1024, min_kb * 1024
-    while i < n:
-        m = HEAD.match(lines[i])
-        if not m:
-            out.append(lines[i])
-            i += 1
+    out, pos = [], 0
+    # (each definition's body runs from its head's line to the first "}" at the start of a line: only the giants are read
+    # line by line; the rest of the file is copied as it is, 40 s -> a few s over a whole lift)
+    for m in HEAD_TEXT.finditer(src):
+        start = m.end()
+        if start < pos:
             continue
-        j = i + 1
-        size = 0
-        while j < n and lines[j] != "}":
-            size += len(lines[j]) + 1
-            j += 1
-        name = m.group(1)
-        done = None
-        if (only is None and size >= min_bytes) or (only is not None and name in only):
-            try:
-                done = split_function(name, lines[i + 1:j], piece, 4 * piece, stats)
-            except Refuse as e:
-                stats["functions_left_whole"] += 1
-                if notes is not None:
-                    notes.append("%s (%d KB) left whole: %s" % (name, size >> 10, e))
-        if done is None:
-            out += lines[i:j + 1]
-        else:
-            out.append(done)
-            stats["bytes_split"] += size
-        i = j + 1
-    return "\n".join(out), stats
+        end = src.find("\n}\n", start - 1)
+        if end < 0:
+            end = len(src) - 2 if src.endswith("\n}") else -1
+        if end < 0:
+            break
+        name, size = m.group(1), end + 1 - start
+        if not ((only is None and size >= min_bytes) or (only is not None and name in only)):
+            continue
+        try:
+            done = split_function(name, src[start:end].split("\n") if end >= start else [], piece, 4 * piece, stats)
+        except Refuse as e:
+            stats["functions_left_whole"] += 1
+            if notes is not None:
+                notes.append("%s (%d KB) left whole: %s" % (name, size >> 10, e))
+            continue
+        out.append(src[pos:m.start()])
+        out.append(done)
+        stats["bytes_split"] += size
+        pos = end + 2
+    if not out:
+        return src, stats
+    out.append(src[pos:])
+    return "".join(out), stats
 
 
 FLAG = "-DLONGSHOT_SPLIT_GIANTS="
