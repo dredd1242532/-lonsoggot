@@ -102,6 +102,18 @@ static void load_longshot_env() {}
 static void hos_game_layout() {}   // (host/game_layout.c: the game folder's cache/ and logs/)
 static void driver_cache_room() {}   // (host/hos_main.c: the drivers' shader caches' size, #2033)
 static void driver_cache_folder() {}   // (host/hos_main.c: the folder __GL_SHADER_DISK_CACHE_PATH names, made)
+#if defined(__APPLE__)
+// Darwin's main keeps its startup command and environment before anything else (host/hos_relaunch.c).
+extern "C" char** environ;
+static int kept_startup, kept_argc;
+static char* const* kept_argv;
+static char* const* kept_envp;
+static int hos_relaunch_keep_startup(int argc, char* const argv[], char* const envp[]) {
+    require(!loads && !threads && !windows && !offscreen, "startup command kept after display or game work began");
+    ++kept_startup, kept_argc = argc, kept_argv = argv, kept_envp = envp;
+    return 0;
+}
+#endif
 
 #include "display_startup_actual.inc"
 
@@ -132,6 +144,10 @@ int main(int argc, char** argv) {
         try { status = app_main(app_argc, app_argv); }
         catch (const ProcessExit& exit) { status = exit.code; }
         require(game_argc == app_argc && game_argv == app_argv, "changed argument handoff");
+#if defined(__APPLE__)
+        require(kept_startup == 1 && kept_argc == app_argc && kept_argv == app_argv && kept_envp == environ,
+                "startup command and environment not kept once, before startup");
+#endif
         if (mode == "load_failure" || mode == "init_failure" || mode == "window_failure") {
             require(status == 1, "unexpected display failure did not exit nonzero");
             require(flushes == 1 && logs.size() == 1, "startup error not logged and flushed once");
