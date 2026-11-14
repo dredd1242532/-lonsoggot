@@ -107,6 +107,10 @@ struct Host { int (*binding)(int, int, int); float (*aspect_ratio)(); } *host = 
 bool can_bind() { return false; }
 // No hardware profile or measured tuning owns the manual round trips.
 uint64_t auto_for = 0, auto_fp = 0, auto_tuned = 0;
+// (the Steam Deck profile's state, which menu_init and apply_auto read and set: off here, as on a PC that is no Deck)
+int steam_deck_saved = -1;
+bool auto_deck_turned = false;
+inline bool env_value_off(const char* v) { return !v || !*v || !std::strcmp(v, "0"); }
 ::auto_settings::Choice auto_choice{};
 ::auto_settings::Tuning auto_tuning{};
 /* SAVE */
