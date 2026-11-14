@@ -22,8 +22,8 @@ int coop_profile_return(void);
    restart. A failed relaunch calls failed() so the pending ticket cannot be used. */
 const char *coop_profile_restart_token(void);
 void coop_profile_restart_failed(void);
-/* Reject links/reparse points in every existing path component. Missing leaves
-   may be created. Private owned directories are not a same-user sandbox. */
+/* Reject parent components and links/reparse points in every existing component.
+   Missing leaves may be created. Private owned directories are not a same-user sandbox. */
 int coop_profile_path_safe(const char *path);
 /* Bounded opaque two-file staging for save transfer. id is local random hex.
    No filenames, archive entries or account/settings files come from the wire. */

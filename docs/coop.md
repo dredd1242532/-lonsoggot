@@ -809,6 +809,13 @@ presentation/progress refusals. A deliberately restored copy-only empty-offer re
 both identities and the signed charter already exist in the engine. The existing save/profile tests retain
 their transport, cancellation, filesystem and mount refusal coverage; these fixtures are not a two-game proof.
 
+The profile boundary normalizes the native mount's separators before Linux filesystem calls,
+including when the selected slot is in a temporary copy. Parent components and links remain
+invalid export paths; normalization never resolves them into another directory.
+`tests/test_coop_export_path.py` compiles both native save-mount entry points and the export barrier,
+then checks the signed manifest against the immutable authored snapshot and exercises refusal paths.
+Normal saves may be exported read-only; this does not permit returning a copy into them.
+
 Only `progress.sav` and `caption.sav` leave the owner's captured checkpoint.
 The owner signature binds both identities and sessions, the room context and
 charter epoch, generation, supported game/version, lengths, per-file and package

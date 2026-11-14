@@ -73,6 +73,15 @@ static void unlink_one(const char *p) { unlink(p); }
 static int path(char out[COOP_PROFILE_PATH], const char *a, const char *b) {
     return snprintf(out, COOP_PROFILE_PATH, "%s/%s", a, b) < COOP_PROFILE_PATH;
 }
+/* nn::fs keeps Win32 separators on both platforms. Normalize external roots at
+   entry, before either validation or I/O; derived profile paths then stay native. */
+static void native_path(char *p) {
+#ifndef _WIN32
+    for (; *p; p++) if (*p == '\\') *p = '/';
+#else
+    (void)p;
+#endif
+}
 static int id_ok(const char *id) {
     if (!id || strlen(id) != 32) return 0;
     for (int i = 0; i < 32; i++) if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) return 0;
@@ -87,17 +96,18 @@ static int random_id(char id[33]) {
 int coop_profile_path_safe(const char *s) {
     char p[COOP_PROFILE_PATH];
     if (!s || snprintf(p, sizeof p, "%s", s) >= (int)sizeof p) return 0;
-#ifndef _WIN32
-    for (char *c = p; *c; c++) if (*c == '\\') *c = '/';
-#endif
+    native_path(p);
+    const char *component = p;
     for (char *c = p; ; c++) {
         if (*c && *c != '/' && *c != '\\') continue;
+        if (c - component == 2 && component[0] == '.' && component[1] == '.') return 0;
         const char saved = *c;
         *c = 0;
         /* Drive and UNC prefixes are checked once a complete component exists. */
         if (c > p && !(c == p + 2 && p[1] == ':') && kind(p) < 0) return 0;
         *c = saved;
         if (!saved) return 1;
+        component = c + 1;
     }
 }
 
@@ -268,8 +278,9 @@ const char *coop_profile_restart_token(void) { return pending[0] ? pending : coo
 
 int coop_profile_init(const char *normal, const char *token) {
     pending[0] = active_id[0] = selected_root[0] = note[0] = 0;
-    if (!normal || snprintf(normal_root, sizeof normal_root, "%s", normal) >= (int)sizeof normal_root ||
-        !path(store, normal_root, "coop-sessions")) return 0;
+    if (!normal || snprintf(normal_root, sizeof normal_root, "%s", normal) >= (int)sizeof normal_root) return 0;
+    native_path(normal_root);
+    if (!path(store, normal_root, "coop-sessions")) return 0;
     if (!token || !*token || !strcmp(token, "normal")) {
         if (kind(store) == 2) snprintf(note, sizeof note, "Normal saves selected. Temporary copies, including interrupted sessions, are kept separately.");
         return 1;
@@ -382,6 +393,7 @@ int coop_profile_export(const char *root, unsigned slot, uint64_t generation, st
     char name[16], base[COOP_PROFILE_PATH];
     snprintf(name, sizeof name, "slot_%02u", slot);
     if (!path(base, root, name)) return 0;
+    native_path(base);
     Inventory *v = calloc(1, sizeof *v);
     if (!v) return 0;
     int ok = inventory(v, base, "", 0) && v->n == 2;
