@@ -1684,12 +1684,16 @@ static void occlusion_switch(void) {
 #define HOS_MEMORY_NEEDED_MB 10240ull
 static int memory_notice_text(unsigned long long ram_mb, unsigned long long swap_mb, char *out, size_t cap) {
 #if defined(__APPLE__)
+    /* (swap_mb UINT64_MAX: memory_notice could not read vm.swapusage. Physical RAM alone decides, and the text then
+       claims no swap figure.) */
     if (ram_mb >= HOS_MEMORY_NEEDED_MB) return 0;
+    char swap_text[64] = "; its allocated swap could not be read";
+    if (swap_mb != UINT64_MAX) snprintf(swap_text, sizeof swap_text, " and currently %.1f GiB of allocated swap", swap_mb / 1024.0);
     snprintf(out, cap,
-             "This Mac has %.1f GiB of RAM and currently %.1f GiB of allocated swap. Longshot recommends 16 GB of RAM or more; "
+             "This Mac has %.1f GiB of RAM%s. Longshot recommends 16 GB of RAM or more; "
              "the game alone can use more than 13 GiB.\n\nmacOS manages swap dynamically; this is not a fixed memory limit. "
              "Heavy swapping can make the game and desktop unresponsive. Close other programs before playing. The game starts anyway.",
-             ram_mb / 1024.0, swap_mb / 1024.0);
+             ram_mb / 1024.0, swap_text);
     return 1;
 #else
 #if defined(__linux__) && !defined(_WIN32)
@@ -1725,6 +1729,7 @@ static void memory_notice(void) {
     if (sysinfo(&si)) return;
     ram = ((unsigned long long)si.totalram * si.mem_unit) >> 20, swap = ((unsigned long long)si.totalswap * si.mem_unit) >> 20;
 #elif defined(__APPLE__)
+    char swap_text[48] = "allocated swap unavailable";   /* (the boot lines' swap figure, or that there is none) */
     uint64_t physical = 0;
     struct xsw_usage usage;
     size_t size = sizeof physical;
@@ -1732,25 +1737,37 @@ static void memory_notice(void) {
         hos_log("boot: cannot query physical RAM on macOS (%s)", strerror(errno));
         return;
     }
+    ram = physical >> 20;
     size = sizeof usage;
     if (sysctlbyname("vm.swapusage", &usage, &size, NULL, 0)) {
-        hos_log("boot: %llu MB of RAM; allocated swap is unavailable (%s)", (unsigned long long)(physical >> 20), strerror(errno));
-        return;
+        /* (the warning depends on physical RAM alone: still decide and show it, without a swap figure) */
+        hos_log("boot: %llu MB of RAM; allocated swap is unavailable (%s)", ram, strerror(errno));
+        swap = UINT64_MAX;
+    } else {
+        swap = usage.xsu_total >> 20;
+        snprintf(swap_text, sizeof swap_text, "%llu MB of swap", swap);
+        hos_log("boot: macOS manages swap dynamically; the swap figure is currently allocated, not a fixed commit limit");
     }
-    ram = physical >> 20;
-    swap = usage.xsu_total >> 20;
-    hos_log("boot: macOS manages swap dynamically; the swap figure is currently allocated, not a fixed commit limit");
 #else
     return;
 #endif
     char text[512];
     if (!memory_notice_text(ram, swap, text, sizeof text)) {
+#if defined(__APPLE__)
+        hos_log("boot: %llu MB of memory, %s", ram, swap_text);
+#else
         hos_log("boot: %llu MB of memory, %llu MB of swap", ram, swap);
+#endif
         return;
     }
 #if (defined(__linux__) || defined(__APPLE__)) && !defined(_WIN32)
+#if defined(__APPLE__)
+    hos_log("boot: LOW MEMORY: %llu MB of memory, %s; below %llu MB of physical RAM: heavy swapping can make "
+            "the game and desktop unresponsive (16 GB RAM or more recommended)", ram, swap_text, HOS_MEMORY_NEEDED_MB);
+#else
     hos_log("boot: LOW MEMORY: %llu MB of memory, %llu MB of swap; below %llu MB of physical RAM: heavy swapping can make "
             "the game and desktop unresponsive (16 GB RAM or more recommended)", ram, swap, HOS_MEMORY_NEEDED_MB);
+#endif
 #else
     hos_log("boot: LOW MEMORY: %llu MB of memory, %llu MB of swap, below the ~%llu MB the game needs", ram, swap, HOS_MEMORY_NEEDED_MB);
 #endif

@@ -8,7 +8,8 @@ headers are included; its memory query and UI remain spies, not Windows runtime.
 On macOS, the real <sys/sysctl.h> struct xsw_usage and an authored sysctlbyname
 report hw.memsize and vm.swapusage in bytes: the same cases under macOS's
 physical-RAM rule, its dynamic-swap wording and boot log, byte-to-MiB truncation,
-and both queries' failure diagnostics. --arch builds and runs one macOS
+a failed RAM query's diagnostic, and a failed swap query that still decides and
+shows the RAM notice without claiming a swap figure. --arch builds and runs one macOS
 architecture (x86_64 under Rosetta).
 
     python -I -B tests/test_low_memory_notice.py [--cc gcc] [--source host/hos_main.c] [--arch arm64|x86_64]
@@ -220,11 +221,41 @@ int main(void) {
     /* (macOS logs why it cannot tell, and still invents no warning) */
     CHECK(strstr(logs, "boot: cannot query physical RAM on macOS (") && strstr(logs, strerror(EPERM)), "failed RAM query: no diagnostic");
     CHECK(!strstr(logs, "LOW MEMORY") && !strstr(logs, "MB of memory") && !boxes, "failed RAM query invents a warning");
-    query_failed = 2; logs[0] = 0; boxes = 0, sdl_loads = 0;
-    headless("0"); memory_notice();
-    CHECK(strstr(logs, "boot: 7639 MB of RAM; allocated swap is unavailable (") && strstr(logs, strerror(ENOMEM)),
-          "failed swap query: no diagnostic with the RAM it read");
-    CHECK(!strstr(logs, "LOW MEMORY") && !boxes && !sdl_loads, "failed swap query: the notice went on without its swap figure");
+    /* (vm.swapusage failing: physical RAM alone still decides and shows the notice; neither the notice nor a boot
+       line claims a swap figure, and the reason is logged) */
+    query_failed = 2;
+    for (size_t i = 0; i < sizeof cases / sizeof *cases; ++i) {
+        if (i && cases[i][0] == cases[i - 1][0]) continue;
+        char text[512] = "", opening[128], reason[256], counts[96];
+        ram_mb = cases[i][0];
+        const int expected = ram_mb < 10240;
+        CHECK(memory_notice_text(ram_mb, UINT64_MAX, text, sizeof text) == expected, "unknown swap changed the RAM decision");
+        if (expected) {
+            snprintf(opening, sizeof opening, "This Mac has %.1f GiB of RAM; its allocated swap could not be read. ", ram_mb / 1024.0);
+            CHECK(!strncmp(text, opening, strlen(opening)), "unknown swap: the notice does not say the swap figure is missing");
+            CHECK(!strstr(text, "GiB of allocated swap"), "unknown swap: the notice claims a swap figure");
+            CHECK(strstr(text, "16 GB") && strstr(text, "13 GiB") && strstr(text, "unresponsive") &&
+                  strstr(text, "The game starts anyway."), "unknown swap: the notice lost its guidance");
+        } else {
+            CHECK(!text[0], "unknown swap: a no-warning case wrote warning text");
+        }
+        snprintf(reason, sizeof reason, "boot: %llu MB of RAM; allocated swap is unavailable (%s)\n", ram_mb, strerror(ENOMEM));
+        snprintf(counts, sizeof counts, "%llu MB of memory, allocated swap unavailable", ram_mb);
+        for (int quiet = 0; quiet < 2; ++quiet) {
+            boxes = 0, sdl_loads = 0; last_log[0] = box_text[0] = logs[0] = 0;
+            headless(quiet ? "1" : "0");
+            memory_notice();
+            CHECK(strstr(logs, reason), "failed swap query: no diagnostic with the RAM it read");
+            CHECK(boxes == (expected && !quiet), "failed swap query: wrong message-box count (physical RAM alone decides)");
+            CHECK(sdl_loads == boxes, "failed swap query: SDL loaded without showing a warning");
+            CHECK((strstr(logs, "LOW MEMORY") != NULL) == expected, "failed swap query: wrong boot log decision");
+            CHECK(strstr(logs, counts), "failed swap query: the boot counts do not say swap is unavailable");
+            CHECK(!strstr(logs, "MB of swap") && !strstr(logs, "macOS manages swap dynamically"),
+                  "failed swap query: a boot line claims a swap figure");
+            if (boxes) CHECK(!strcmp(box_text, text), "failed swap query: message differs from the warning text");
+        }
+        printf("PASS: %llu MiB RAM, swap query failed, warning=%d, visible/headless\n", ram_mb, expected);
+    }
     CHECK(!bad_queries, "production asked sysctl for another name or size, or wrote to it");
 #else
     CHECK(!last_log[0] && !boxes, "failed memory query invents a warning");
