@@ -71,7 +71,7 @@ extern "C" void coop_test_charter_views(MkwVkCoopView* before, MkwVkCoopView* af
 static_assert(HOS_COOP_CMD_RULES_CHANGED == 9 && HOS_COOP_CMD_TEMP_SAVE == 10);
 static_assert(HOS_COOP_CMD_GO_FRIEND == 11 && HOS_COOP_CMD_DUEL_READY == 12 &&
               HOS_COOP_CMD_PRESENCE_ACCEPT == 13 && HOS_COOP_CMD_KIT_ACCEPT == 14);
-static_assert(HOS_OPT_CHAT_FOCUS == 61 && HOS_KEY_CHAT == 29);
+static_assert(HOS_OPT_CHAT_FOCUS == 61 && HOS_KEY_WALK == 29 && HOS_KEY_CHAT == 30);   /* (Walk keeps its place after the note rows; Chat follows it) */
 @@TABS@@
 @@ROW@@
 @@TEXT@@
