@@ -8,7 +8,8 @@ uncounted: a Mac start's "70 failed" named 31 programs. shader_fail_lines, right
 reason's whole count. Checked here, with the catch blocks, seed_stage_failed, the counters and shader_fail_lines cut from the
 source and run against small stand-ins:
 - 69 networks, 40 other failures, 2 mesh failures and 1 stage that does not parse: still 30, 30, 2 and 1 lines naming them,
-  then 4 count lines, 69, 40, 2 and 1, which add up to the 112 counted;
+  then 4 count lines, 69, 40, 2 and 1, which add up to the 112 counted, each saying where its named lines are as a reader at
+  the default level sees them: the networks' "at trace level" (their lines are trace lines, hidden there), the rest "above";
 - 2 answers seed_compute only tries are neither counted nor named; with no failure there is no count line;
 - the counts hold with 8 threads failing at once;
 - prepare_run logs the count lines right after its own, and each st_failed++ goes with exactly one of the four counts.
@@ -146,7 +147,7 @@ int main(int argc, char** argv) {
 """
 
 WANT = [
-    "vk: not translated, a network left out on this card: 69 programs (the first 30 named above)",
+    "vk: not translated, a network left out on this card: 69 programs (the first 30 named at trace level)",
     "vk: not translated: 40 programs (the first 30 named above)",
     "vk: not translated, mesh: 2 programs (named above)",
     "vk: not translated, a seed stage that does not parse: 1 program (named above)",
@@ -232,6 +233,13 @@ def main():
                         fails.append("an answer seed_compute only tries was named")
                     if logs[-4:] != WANT:
                         fails.append("the count lines:\n  got  " + "\n       ".join(logs[-4:]) + "\n  want " + "\n       ".join(WANT))
+                    # (each count line says where its programs are named as they are logged: at trace level for a reason whose
+                    # lines are all trace lines, "above" for one whose lines are at the default level)
+                    named_at = {"network": {line.startswith("[trace] ") for line in named if "network left out" in line},
+                                "others": {line.startswith("[trace] ") for line in named if "network left out" not in line}}
+                    if named_at != {"network": {True}, "others": {False}} or \
+                            not all(("at trace level" in line) == ("network left out" in line) for line in logs[-4:]):
+                        fails.append("a count line says its programs are named where they are not at the default level")
                     total = sum(int(m.group(1)) for m in (re.search(r": (\d+) programs? \(", line) for line in logs[-4:]) if m)
                     if total != 112:
                         fails.append("the count lines add up to %d, not the 112 counted" % total)

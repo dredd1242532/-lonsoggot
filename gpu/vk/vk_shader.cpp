@@ -2543,18 +2543,19 @@ void shader_stats(int64_t* translated, int64_t* failed) {
     *translated = st_translated, *failed = st_failed;
 }
 /// (longshot) After the preparation's "N failed" (vk_draw.cpp prepare_run): how many programs each "not translated" line stands
-/// for, whenever it stood for any. Those lines stop at kFailNamed programs each; these add up to N, so no failure goes uncounted
+/// for, whenever it stood for any. Those lines stop at kFailNamed programs each; these add up to N, so no failure goes uncounted.
+/// where: where those lines are, as a reader at the default level sees it (the networks' are trace lines, hidden there)
 void shader_fail_lines() {
-    const auto line = [](const char* what, int64_t n) {
+    const auto line = [](const char* what, int64_t n, const char* where) {
         if (n > kFailNamed)
-            logf("vk: not translated%s: %lld programs (the first %lld named above)", what, (long long)n, (long long)kFailNamed);
+            logf("vk: not translated%s: %lld programs (the first %lld named %s)", what, (long long)n, (long long)kFailNamed, where);
         else if (n)
-            logf("vk: not translated%s: %lld program%s (named above)", what, (long long)n, n == 1 ? "" : "s");
+            logf("vk: not translated%s: %lld program%s (named %s)", what, (long long)n, n == 1 ? "" : "s", where);
     };
-    line(", a network left out on this card", st_left_out.load());
-    line("", st_not_translated.load());
-    line(", mesh", st_mesh_not_translated.load());
-    line(", a seed stage that does not parse", st_stage_failed.load());
+    line(", a network left out on this card", st_left_out.load(), "at trace level");
+    line("", st_not_translated.load(), "above");
+    line(", mesh", st_mesh_not_translated.load(), "above");
+    line(", a seed stage that does not parse", st_stage_failed.load(), "above");
 }
 double shader_translate_ms() {
     return st_translate_ns.load() / 1e6;
