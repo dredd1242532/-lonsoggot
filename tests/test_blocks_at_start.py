@@ -43,7 +43,8 @@ def check_source():
                          "made in the images' pool, they stay empty while the textures are compacted in a pool of their own)")
     need("vk_vma.cpp: blocks_at_start()", block(vma, "static size_t blocks_at_start(bool holds_textures)"),
          ["if (!holds_textures) return 0;", 'getenv("RX_VK_IMAGE_PREALLOC")',
-          "vram_compact::blocks_at_start(heap, kImageBlock, holds_textures)"])
+          "vram_compact::blocks_at_start(heap, kImageBlock, holds_textures,\n"
+          "                                                 dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)"])
     # (the images' pool only when the textures are made there, RX_VK_COMPACT=0; else the textures' own)
     need("vk_vma.cpp: images_pool()", block(vma, "VmaPool images_pool() {"),
          ['make_pool(pi, blocks_at_start(!vram_compact::enabled(getenv("RX_VK_COMPACT"))), image_pool)', "made at the start"])

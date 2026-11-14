@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
     std::printf("PASS %s\n",argv[11]);
 }
 '''.replace("@HELPERS@", helpers).replace("@POLICY@", policy).replace("@MIP@", mip)
-    # The preset: a number, its budget the same (as a preset sets it); or (preset, budget), Auto (this PC) with its tier's budgets.
+    # The preset: a number, its budget the same (as a preset sets it); or (preset, budget): Auto (this PC) with its tier's budgets,
+    # or Custom with the budgets of the preset it was turned from (kept, as the Debug tab's Set up for a weak laptop leaves them).
     # Literal outcomes: (skip, width, levels) for a 3072-square image and a
     # 1365-square, 90-layer image. No expected result calls the production policy.
     original = (0, 3072, 12, 0, 1365, 11)
@@ -118,6 +119,8 @@ int main(int argc, char** argv) {
         ("zero-budget", 1, 0, 1, {}, original, 0),
         ("failed-budget-query", 1, 3674, 0, {}, original, 0),
         ("custom-preset", 0, 3674, 1, {}, original, 0),
+        ("custom-with-minimums-budgets", (0, 1), 3674, 1, {}, minimum, 0),
+        ("custom-with-lows-budgets", (0, 2), 3674, 1, {}, original, 0),
         ("auto-at-minimum-tier", (6, 1), 3674, 1, {}, minimum, 0),
         ("auto-at-minimum-tier-large-budget", (6, 1), 7500, 1, {}, original, 0),
         ("auto-at-balanced-tier", (6, 3), 3674, 1, {}, original, 0),
@@ -142,6 +145,8 @@ int main(int argc, char** argv) {
         ("integrated-16gb-auto-at-minimum-tier", (6, 1), 7402, 1, {}, minimum, 0, 1, 16122),
         ("integrated-8gb-large-budget", 1, 4900, 1, {}, minimum, 0, 1, 7900),
         ("integrated-16gb-low-preset", 2, 7402, 1, {}, original, 0, 1, 16122),
+        ("integrated-16gb-weak-laptop-button", (0, 1), 7402, 1, {}, minimum, 0, 1, 16122),
+        ("integrated-16gb-custom-no-budget", (0, 0), 7402, 1, {}, original, 0, 1, 16122),
         ("integrated-16gb-disabled", 1, 7402, 1, {"RX_VK_LOW_VRAM_MIPS": "0"}, original, 0, 1, 16122),
         ("integrated-32gb-large-budget", 1, 15000, 1, {}, original, 0, 1, 32500),
         ("integrated-unknown-ram", 1, 7402, 1, {}, original, 0, 1, 0),

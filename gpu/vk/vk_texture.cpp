@@ -1956,8 +1956,9 @@ bool low_vram_texture_mips() {
     // Windows paged the game out (3-6 fps). With 16 GB of RAM or less it counts as small whatever the driver allows
     static const bool shared = dev.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU && system_ram_bytes() &&
                                system_ram_bytes() <= (16ull << 30);
-    // (Minimum, or Auto (this PC) at Minimum's tier: its budgets, opts.budget 1)
-    return !disabled && (small || shared) && (opts.preset == 1 || (opts.preset == kAutoPreset && opts.budget == 1));
+    // (Minimum's budgets, opts.budget 1: Minimum, Auto (this PC) at Minimum's tier, or Custom after either, which keeps them: the
+    // Debug tab's Set up for a weak laptop leaves the preset on Custom)
+    return !disabled && (small || shared) && (opts.preset == 1 || opts.budget == 1);
 }
 
 Texture* create(const Key& key, const nvn_tex* t, VkFormat vf, bool astc, int bw, int bh, int bpb, bool as_target) {
