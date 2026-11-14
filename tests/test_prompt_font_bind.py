@@ -27,8 +27,11 @@ import prompt_assets  # noqa: E402
 import prompt_faces  # noqa: E402
 import prompt_keys  # noqa: E402
 
-# (the Switch buttons bound in the test: A to the bottom face button, B to the right shoulder; the rest unbound)
-BIND = {0: 0, 1: 10, 3: 17}   # (Y on a paddle, HOS_PAD_RPADDLE1: no artwork, so its default's icon)
+# (the Switch buttons' pad inputs in the test, Input 1 and Input 2 (-1 clear): A on the bottom face button, B on the right
+# shoulder, Y on a paddle (HOS_PAD_RPADDLE1: no artwork, so its default's icon), the left stick's click on Input 2 only (Input 1
+# cleared) and the right stick's on both (Input 1's icon); the rest unbound)
+SLOTS = {0: (0, -1), 1: (10, -1), 3: (17, -1), 4: (-1, 9), 5: (2, 3)}
+BIND = {b: s[0] if s[0] >= 0 else s[1] for b, s in SLOTS.items()}   # (the input a prompt shows: Input 1's, else Input 2's)
 ART = lambda b: b in BIND and BIND[b] < len(prompt_assets.PADS)   # (a binding the prompt font has an icon for)
 # (and their keys: A on E, B on the mouse's left button in the second slot (the first clear), X on a key the font has no icon for;
 # the rest none)
@@ -126,7 +129,7 @@ def main():
         *("        if (button == %d) return slot ? %d : %d;" % (b, k[1], k[0]) for b, k in KEYS.items()),
         "        return 0;",
         "    }",
-        *("    if (button == %d) return %d;" % kv for kv in BIND.items()),
+        *("    if (button == %d) return slot ? %d : %d;" % (b, s[1], s[0]) for b, s in SLOTS.items()),
         "    return -1;",
         "}",
         re.search(r"static const uint16_t switch_code\[HOS_SW_N\] = \{[^}]*\};", src).group(0),
@@ -134,6 +137,7 @@ def main():
         re.search(r"static const uint16_t static_code\[3\] = \{[^}]*\};", src).group(0),
         re.search(r"static const uint16_t stick_code\[15\] = \{[^}]*\};", src).group(0),
         block(src, "static int first_key("),
+        block(src, "static int first_pad("),
         re.search(r"static unsigned rd16\(.*", src).group(0),
         re.search(r"static uint32_t rd32\(.*", src).group(0),
         re.search(r"static void wr16\(.*", src).group(0),
@@ -197,10 +201,21 @@ def check_text_code(cc, src, nfaces):
     check(base is not None and int(base.group(1), 16) == prompt_assets.BIND_BASE,
           "host/prompts.c BIND_BASE is not nx2/prompt_assets.py BIND_BASE")
     harness = "\n".join([
-        "#include <stdio.h>", "#include <stdlib.h>", '#include "gpu/vk/vk_api.h"',
+        "#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", '#include "gpu/vk/vk_api.h"',
         "#define PAD_BASE 0x%X" % prompt_assets.PAD_BASE, "#define FACE_CODES %d" % prompt_assets.FACE_CODES,
         "#define STATIC_AT %d" % prompt_assets.STATIC_AT, base.group(0), *defines(src),
         "static int keyboard_built = 1;",
+        "static int hos_binding(int set, int button, int slot) {",
+        "    if (set == HOS_BIND_KEY) {",
+        *("        if (button == %d) return slot ? %d : %d;" % (b, k[1], k[0]) for b, k in KEYS.items()),
+        "        return 0;",
+        "    }",
+        *("    if (button == %d) return slot ? %d : %d;" % (b, s[1], s[0]) for b, s in SLOTS.items()),
+        "    return -1;",
+        "}",
+        block(src, "static int first_key("),
+        block(src, "static int first_pad("),
+        block(src, "static void current_binds("),
         # (key_slot as host/prompts.c's, without the font: each button and key a code of its own, in the order they come)
         "static unsigned char slot_button[SLOTS], slot_key[SLOTS];",
         "static int nslots;",
@@ -217,9 +232,11 @@ def check_text_code(cc, src, nfaces):
         block(src, "static int text_code("),
         "int main(int argc, char **argv) {",
         "    int bind[BINDS];",
-        "    for (int b = 0; b < HOS_SW_N; b++) bind[b] = -1, bind[HOS_SW_N + b] = 0;",
-        *("    bind[%d] = %d;" % kv for kv in BIND.items()),
-        *("    bind[HOS_SW_N + %d] = %d;" % (b, first_key(b)) for b in KEYS),
+        "    current_binds(bind);",
+        "    if (argc > 1 && !strcmp(argv[1], \"binds\")) {",
+        "        for (int b = 0; b < BINDS; b++) printf(\"%d\\n\", bind[b]);",
+        "        return 0;",
+        "    }",
         "    for (int i = 2; i < argc; i++) printf(\"%d\\n\", text_code((unsigned)strtoul(argv[i], NULL, 0), atoi(argv[1]), bind));",
         "    return 0;",
         "}", ""])
@@ -269,6 +286,10 @@ def check_text_code(cc, src, nfaces):
                     pad = BIND[b] if ART(b) else pads_of[prompt_assets.DEFAULT[b]]
                     want = prompt_assets.BIND_BASE + (f * nsw + b) * npad + pad
                 check(g == want, "face %d: text code U+%04X became %d, not %d" % (f, code, g, want))
+        # (the snapshot the textures and the live check compare: each button's first pad input, Input 2's when Input 1 is clear)
+        binds = [int(x) for x in subprocess.run([str(exe), "binds"], check=True, capture_output=True, text=True).stdout.split()]
+        want = [BIND.get(b, -1) for b in range(nsw)] + [first_key(b) for b in range(nsw)]
+        check(binds == want, "current_binds %r, not %r" % (binds, want))
         # (a code given out names its button: on another face it becomes that face's code for the button)
         out = subprocess.run([str(exe), "0", str(prompt_keys.SLOT_BASE)], check=True, capture_output=True, text=True).stdout.split()
         check(out == ["-1"], "a slot not given out in this run named a button: %r" % out)

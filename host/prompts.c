@@ -125,10 +125,16 @@ static int first_key(int b) {
     return k > 0 && k <= 0xFF ? k : 0;
 }
 
-/* the controls now (BINDS: hos_binding's, as the Controls page sets them): the pad input bound to each Switch button, then its
-   first key */
+/* the first pad input bound to Switch button b (HOS_PAD_*, the second slot's when the first is clear), -1 none */
+static int first_pad(int b) {
+    const int pad = hos_binding(HOS_BIND_PAD, b, 0);
+    return pad >= 0 ? pad : hos_binding(HOS_BIND_PAD, b, 1);
+}
+
+/* the controls now (BINDS: hos_binding's, as the Controls page sets them): the first pad input bound to each Switch button,
+   then its first key */
 static void current_binds(int *bind) {
-    for (int b = 0; b < HOS_SW_N; b++) bind[b] = hos_binding(HOS_BIND_PAD, b, 0), bind[HOS_SW_N + b] = first_key(b);
+    for (int b = 0; b < HOS_SW_N; b++) bind[b] = first_pad(b), bind[HOS_SW_N + b] = first_key(b);
 }
 
 static int keyboard_built;   /* (the build made the keyboard face: prompts/keyboard/; choose_face) */
@@ -217,7 +223,7 @@ static int cmap4_bind(uint8_t *st, size_t n, int face) {
             done++;
             continue;
         }
-        const int pad = hos_binding(HOS_BIND_PAD, b, 0), bound = pad >= 0 && pad < HOS_PAD_ART_N;   /* (a paddle: the default's icon) */
+        const int pad = first_pad(b), bound = pad >= 0 && pad < HOS_PAD_ART_N;   /* (a paddle: the default's icon) */
         const unsigned gid = cmap4_glyph(st, n, base + (unsigned)(bound ? pad : switch_pad[b]));
         if (gid && cmap4_point(st, segs, switch_code[b], gid)) done += bound && !keys;
     }
