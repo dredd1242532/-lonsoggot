@@ -70,8 +70,10 @@ Runtime inputs are explicit library files:
 | `LONGSHOT_MOLTENVK` | Required approved MoltenVK dylib, packaged as `libMoltenVK.dylib`; not a Vulkan loader/ICD configuration download |
 | `LONGSHOT_VK_PREBUILT` | Optional already-built `longshot_vk.dylib`; its actual target/minimum-OS/closure is checked too |
 
-SDL2-compat's SDL3 is a dynamic `dlopen` dependency, not necessarily an `LC_LOAD_DYLIB` edge: supply both SDL files,
-normally from one target-specific prefix. An SDL3-directed search path without an explicit SDL3 input is refused.
+SDL2-compat's SDL3 is a dynamic `dlopen` dependency, not necessarily an `LC_LOAD_DYLIB` edge or an SDL3-named rpath
+(its own build has only `@loader_path`): supply both SDL files, normally from one target-specific prefix. An SDL2
+library whose file names SDL3 anywhere (case-insensitive) requires the explicit SDL3 input and its internal alias;
+a classic SDL2 that names no SDL3 needs none.
 The supported dependency recipe must account for any other dynamically loaded plugins; a load-command walk alone
 cannot discover arbitrary runtime filenames. All selected SDL3/MoltenVK/codec dependencies receive the same checks.
 
@@ -85,10 +87,22 @@ is no `approved` boolean, unknown-member waiver or cosmetic deployment stamping.
 **receipt-qualified unversioned assembly**, not `LC_BUILD_VERSION`-proven objects. This still does not prove
 execution on an actual macOS 14.4 installation.
 
+Archive framing is checked before any member is read: each member size must be plain decimal and inside the
+archive, and members are thin target Mach-O objects. A member's object is exactly the extent its own load commands
+describe (segments, sections, relocations, symbol/string and dynamic-symbol tables, linkedit data). Apple `ar` pads
+members with newlines inside the member size; fewer than eight trailing `0x0a` bytes are that framing, and
+anything else, or a load command with file data the reader cannot bound, is refused. Member SHA-256 values (in the
+receipt, its review rows and archive-member import providers) cover only the object bytes, so they equal the
+original NASM output's digest. No member is trimmed, stamped or rewritten.
+
 The renderer has install name `@rpath/longshot_vk.dylib`, `@loader_path` rpath, system libc++, dead stripping and
 an explicit undefined-error link. The executable exports `_hos_posix_*` for explicit canonical service lookups.
 Neither `-Bsymbolic`, flat namespace nor blanket dynamic lookup is used. Weak optional imports with known provider
-libraries retain their linker semantics; unbound imports, including weak ones, are rejected. Host services use
+libraries retain their linker semantics; unbound imports, including weak ones, are rejected. That check reads the
+binding dyld actually applies (the `LC_DYLD_INFO` bind, weak-bind and lazy-bind opcodes, or the chained-fixups
+import table) as well as the symbol table: a flat-lookup or main-executable import, or a library ordinal naming no
+loaded dylib, is refused. C++ weak-definition coalescing (ordinal -3, recorded by ld only for a weak definition it
+found while linking) remains two-level. Host services use
 explicit `hos_posix_*` lookups rather than unbound weak linkage. `hot_order.txt` remains unchanged: the build writes
 `hot_order.txt.macos` with Mach-O underscores. GNU ELF symbol/strip commands are not used on Mach-O.
 
@@ -96,7 +110,8 @@ After both links, `nx2/darwin_package.py` copies the admitted closure into owned
 to the qualified target, rewrites non-system loads to `@loader_path/<name>`, removes external rpaths, and applies
 local ad-hoc signatures (`codesign --sign -`, no account/certificate/keychain changes). Only verified copies replace
 build outputs. `longshot-macos.json` records the actual complete output set and hashes; `make_game.py` stages and
-verifies that set, including SDL aliases and transitive libraries rather than a fixed three-file list. A leftover
+verifies that set, including SDL aliases and transitive libraries rather than a fixed three-file list. Only alias
+entries may be symlinks; every other manifest entry and the manifest itself must be a regular file. A leftover
 unmanaged SDL3/Vulkan loader may not override the selected runtime. Inputs outside owned output storage are never
 rewritten. This is a relocatable source-build directory, not a notarized `.app`, launcher or published release.
 

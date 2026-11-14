@@ -107,6 +107,20 @@ def sdl_flags(missing=None):
         return None
 
 
+def names_sdl3(path):
+    """SDL2-compat dlopens SDL3 by file name; that edge is data in the image, not a load command or an rpath.
+
+    Any SDL3 name anywhere in the selected SDL2 file (case-insensitive) makes SDL3 a required, packaged input."""
+    tail = b""
+    with open(path, "rb") as f:
+        while data := f.read(1 << 20):
+            block = tail + data.lower()
+            if b"sdl3" in block:
+                return True
+            tail = block[-3:]
+    return False
+
+
 def dependencies(names, prebuilt="", missing=None, executable_dir=""):
     """Use the same exact library files for admission, the link and packaging."""
     from darwin_package import DependencyError, Plan
@@ -135,8 +149,9 @@ def dependencies(names, prebuilt="", missing=None, executable_dir=""):
                 raise DependencyError("select one SDL2 dylib (not a static SDL archive)")
             plan.add(roots[0], SDL_LIB)
             plan.sdl = sdl[0], pinned
-            if any("sdl3" in p.lower() for p in plan.files[roots[0]]["rpaths"]) and not os.environ.get("LONGSHOT_SDL3"):
-                raise DependencyError("SDL2-compat's SDL3 search path requires explicit LONGSHOT_SDL3=<library.dylib>")
+            if names_sdl3(roots[0]) and not os.environ.get("LONGSHOT_SDL3"):
+                raise DependencyError("this SDL2 library names SDL3 (SDL2-compat loads it at run time, whatever its rpaths "
+                                      "say): set LONGSHOT_SDL3=<library.dylib>")
         except (DependencyError, OSError) as e:
             errors.append("SDL2 for macOS: " + str(e))
     sdl3 = os.environ.get("LONGSHOT_SDL3", "")

@@ -366,6 +366,52 @@ class MacFinishOutputTests(unittest.TestCase):
         self.assertTrue((self.out / "libSDL3.dylib").is_symlink())
         self.assertEqual(os.readlink(self.out / "libSDL3.dylib"), target.name)
 
+    @unittest.skipIf(os.name == "nt", "macOS packages use POSIX symlinks")
+    def test_only_alias_entries_may_be_symlinks(self):
+        for label in ("dylib", "manifest"):
+            name = "libdecoder-helper.7.dylib" if label == "dylib" else self.package.MANIFEST
+            path = self.built / name
+            outside = self.root / ("outside %s, same bytes" % label)
+            path.rename(outside)
+            path.symlink_to(outside)  # identical bytes through the link: only its kind differs
+            before = {p.name: p.read_bytes() for p in self.out.iterdir()}
+            with self.subTest(label=label), self.assertRaisesRegex(self.package.DependencyError, "not a regular file: " + name):
+                self.finish()
+            self.assertEqual({p.name: p.read_bytes() for p in self.out.iterdir()}, before)
+            self.assertFalse(any(p.is_symlink() for p in self.out.iterdir()))
+            path.unlink()
+            outside.rename(path)
+        self.finish()  # the regular-file package still deploys
+        self.assertFalse(any(p.is_symlink() for p in self.out.iterdir()))
+
+    @unittest.skipIf(os.name == "nt", "macOS dependency alias uses a POSIX symlink")
+    def test_retry_after_stopped_first_sdl3_install_replaces_its_dangling_staged_alias(self):
+        target = self.built / "libSDL3.0.dylib"
+        target.write_bytes(b"authored SDL3 provider")
+        (self.built / "libSDL3.dylib").symlink_to(target.name)
+        path = self.built / self.package.MANIFEST
+        manifest = json.loads(path.read_text())
+        manifest["files"][target.name] = {"sha256": self.package.digest(target), "kind": "dylib"}
+        manifest["files"]["libSDL3.dylib"] = {"sha256": self.package.digest(target), "kind": "alias", "target": target.name}
+        path.write_text(json.dumps(manifest))
+        copy = make_game.shutil.copy2
+
+        def stopped(src, dst, **kwargs):
+            if Path(src).name == "image.bin":  # staged last, after the alias
+                raise PermissionError(errno.EACCES, "authored stop after the alias was staged")
+            return copy(src, dst, **kwargs)
+
+        with mock.patch.object(make_game.shutil, "copy2", side_effect=stopped), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.finish()
+        staged = self.out / "libSDL3.dylib.new"
+        self.assertTrue(staged.is_symlink())
+        self.assertFalse(staged.exists(), "the first install's staged alias must dangle for this regression")
+        self.finish()
+        self.assertEqual(os.readlink(self.out / "libSDL3.dylib"), target.name)
+        self.assertEqual((self.out / "libSDL3.dylib").read_bytes(), b"authored SDL3 provider")
+        self.assertEqual(list(self.out.glob("*.new")), [])
+
     def test_unmanaged_loader_cannot_override_newly_packaged_moltenvk(self):
         extra = self.out / "libvulkan.1.dylib"
         extra.write_bytes(b"authored unapproved leftover loader")

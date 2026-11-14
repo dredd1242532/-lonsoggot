@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import struct
 import subprocess
 import tempfile
@@ -18,6 +19,14 @@ MANIFEST = "longshot-macos.json"
 CPU = {"arm64": 0x100000c, "x86_64": 0x1000007}
 LOAD_DYLIB = {0xc, 0x80000018, 0x20, 0x8000001f, 0x80000023}
 RUNTIME_NAMES = ("libSDL2-2.0.0.dylib", "libSDL3.0.dylib", "libSDL3.dylib", "libMoltenVK.dylib", "libvulkan.1.dylib")
+# Load commands whose file data is in a linkedit_data_command (dataoff, datasize).
+LINKEDIT_DATA = {0x1d, 0x1e, 0x26, 0x29, 0x2b, 0x2e, 0x36, 0x37, 0x38, 0x3a, 0x80000033, 0x80000034}
+# Load commands that own no file range outside themselves.
+NO_FILE_DATA = {0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xc, 0xd, 0xe, 0xf, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x17,
+                0x80000018, 0x1a, 0x1b, 0x8000001c, 0x8000001f, 0x20, 0x80000023, 0x24, 0x25, 0x27, 0x80000028, 0x2a,
+                0x2d, 0x2f, 0x30, 0x32, 0x39}
+ZEROFILL = {0x1, 0xc, 0x12}  # S_ZEROFILL, S_GB_ZEROFILL, S_THREAD_LOCAL_ZEROFILL sections have no file bytes
+AR_PADDING = 8  # Apple ar pads a Mach-O member's payload with up to 7 newlines inside the member size
 
 
 class DependencyError(ValueError):
@@ -72,20 +81,163 @@ def _payload_digest(f, start, length):
     return h.hexdigest()
 
 
-def _inspect(f, start, length, arch, read_symbols=False):
+def _decimal(field, label):
+    """An ar header number: ASCII decimal digits, left-aligned and space-padded. No sign or other spelling."""
+    text = field.rstrip(b" ")
+    if not text or not text.isdigit():
+        raise DependencyError("invalid archive %s: %r" % (label, field))
+    return int(text)
+
+
+def _file_ranges(cmd, data):
+    """The (offset, size) file ranges a load command owns; None when its file layout is not known here."""
+    if cmd == 0x19:  # LC_SEGMENT_64: segment contents, each section's contents and relocations
+        ranges = [struct.unpack_from("<QQ", data, 40)]
+        for i in range(struct.unpack_from("<I", data, 64)[0]):
+            size, offset, _, reloff, nreloc, flags = struct.unpack_from("<QIIIII", data, 72 + i * 80 + 40)
+            if flags & 0xff not in ZEROFILL:
+                ranges.append((offset, size))
+            ranges.append((reloff, nreloc * 8))
+        return ranges
+    if cmd == 0x2:  # LC_SYMTAB
+        symoff, nsyms, stroff, strsize = struct.unpack_from("<4I", data, 8)
+        return [(symoff, nsyms * 16), (stroff, strsize)]
+    if cmd == 0xb:  # LC_DYSYMTAB: TOC, 64-bit module table, references, indirect symbols, relocations
+        v = struct.unpack_from("<18I", data, 8)
+        return [(v[6], v[7] * 8), (v[8], v[9] * 56), (v[10], v[11] * 4), (v[12], v[13] * 4), (v[14], v[15] * 8),
+                (v[16], v[17] * 8)]
+    if cmd in LINKEDIT_DATA or cmd in (0x3, 0x21, 0x2c):  # linkedit data, LC_SYMSEG, encryption ranges
+        return [struct.unpack_from("<II", data, 8)]
+    if cmd == 0x16:  # LC_TWOLEVEL_HINTS
+        offset, hints = struct.unpack_from("<II", data, 8)
+        return [(offset, hints * 4)]
+    if cmd in (0x22, 0x80000022):  # LC_DYLD_INFO[_ONLY]: rebase, bind, weak-bind, lazy-bind and export data
+        v = struct.unpack_from("<10I", data, 8)
+        return list(zip(v[::2], v[1::2]))
+    if cmd == 0x31:  # LC_NOTE
+        return [struct.unpack_from("<QQ", data, 24)]
+    return [] if cmd in NO_FILE_DATA else None
+
+
+def _uleb(data, at):
+    value = shift = 0
+    while True:
+        if at >= len(data):
+            raise DependencyError("truncated Mach-O binding opcode")
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7f) << shift
+        if not byte & 0x80:
+            return value, at
+        shift += 7
+        if shift > 63:
+            raise DependencyError("oversized Mach-O binding number")
+
+
+def _bind_stream(data, lazy=False, weak=False):
+    """(library ordinal, symbol) for every bind an LC_DYLD_INFO opcode stream performs.
+
+    The lazy stream is a sequence of self-contained entries, each ended by DONE. Weak binding coalesces by name and
+    ignores ordinals; any ordinal a weak stream nevertheless sets is checked like the others."""
+    binds, ordinal, symbol, at = [], None if weak else 0, None, 0
+    while at < len(data):
+        opcode, immediate = data[at] & 0xf0, data[at] & 0x0f
+        at += 1
+        if opcode == 0x00:  # DONE
+            if not lazy:
+                break
+            ordinal, symbol = 0, None
+        elif opcode == 0x10:  # SET_DYLIB_ORDINAL_IMM
+            ordinal = immediate
+        elif opcode == 0x20:  # SET_DYLIB_ORDINAL_ULEB
+            ordinal, at = _uleb(data, at)
+        elif opcode == 0x30:  # SET_DYLIB_SPECIAL_IMM: 0 self, -1 main executable, -2 flat lookup, -3 weak lookup
+            ordinal = immediate - 16 if immediate else 0
+        elif opcode == 0x40:  # SET_SYMBOL_TRAILING_FLAGS_IMM
+            name_end = data.find(b"\0", at)
+            if name_end < 0:
+                raise DependencyError("unterminated Mach-O bind symbol")
+            symbol, at = data[at:name_end].decode("utf-8"), name_end + 1
+        elif opcode == 0x50:  # SET_TYPE_IMM
+            pass
+        elif opcode in (0x60, 0x70, 0x80):  # SET_ADDEND_SLEB, SET_SEGMENT_AND_OFFSET_ULEB, ADD_ADDR_ULEB
+            _, at = _uleb(data, at)
+        elif opcode in (0x90, 0xa0, 0xb0, 0xc0):  # the DO_BIND family
+            for _ in range({0xa0: 1, 0xc0: 2}.get(opcode, 0)):
+                _, at = _uleb(data, at)
+            if symbol is None:
+                raise DependencyError("Mach-O bind has no symbol")
+            if ordinal is not None:
+                binds.append((ordinal, symbol))
+        elif opcode == 0xd0 and immediate in (0, 1):  # THREADED: SET_BIND_ORDINAL_TABLE_SIZE_ULEB or APPLY
+            if immediate == 0:
+                _, at = _uleb(data, at)
+        else:
+            raise DependencyError("unknown Mach-O bind opcode %#x" % data[at - 1])
+    return binds
+
+
+def _chained_imports(data):
+    """(library ordinal, symbol) for every LC_DYLD_CHAINED_FIXUPS import; dyld resolves each one at load."""
+    if len(data) < 28:
+        raise DependencyError("truncated Mach-O chained-fixups header")
+    version, _, imports, symbols, count, form, names = struct.unpack_from("<7I", data)
+    width = {1: 4, 2: 8, 3: 16}.get(form)
+    if version != 0 or names != 0 or width is None:
+        raise DependencyError("unsupported Mach-O chained-fixups imports (version %d, format %d, symbol format %d)" %
+                              (version, form, names))
+    if imports > len(data) or count > (len(data) - imports) // width or symbols > len(data):
+        raise DependencyError("Mach-O chained-fixups imports extend past their data")
+    result = []
+    for i in range(count):
+        if width == 16:  # DYLD_CHAINED_IMPORT_ADDEND64: 16-bit ordinal, 0xfff1..0xffff are the negative specials
+            raw = struct.unpack_from("<Q", data, imports + 16 * i)[0]
+            ordinal, offset = raw & 0xffff, raw >> 32
+            ordinal -= 0x10000 if ordinal > 0xfff0 else 0
+        else:  # DYLD_CHAINED_IMPORT[_ADDEND]: 8-bit ordinal, 0xf1..0xff are the negative specials
+            raw = struct.unpack_from("<I", data, imports + width * i)[0]
+            ordinal, offset = raw & 0xff, raw >> 9
+            ordinal -= 0x100 if ordinal > 0xf0 else 0
+        name_end = data.find(b"\0", symbols + offset)
+        if symbols + offset >= len(data) or name_end < 0:
+            raise DependencyError("invalid Mach-O chained-fixups import name")
+        result.append((ordinal, data[symbols + offset:name_end].decode("utf-8")))
+    return result
+
+
+def _import(ordinal, dylibs, symbol):
+    """Strict two-level binding: a loaded dylib (1..N), this image (0) or weak-definition coalescing (-3).
+
+    ld records -3 only for a weak definition it found while linking. Flat lookup (-2) and the main executable (-1)
+    are the unbound dynamic-lookup forms the strict link contract forbids; any other ordinal names no image."""
+    if ordinal in (-1, -2):
+        raise DependencyError("unbound dynamic-lookup/executable import in Mach-O image (%s, %s); use explicit host "
+                              "services" % (symbol, "flat lookup" if ordinal == -2 else "main executable"))
+    if ordinal < -3 or ordinal > dylibs:
+        raise DependencyError("unresolved two-level import %s: library ordinal %d, %d loaded dylibs" % (symbol, ordinal, dylibs))
+
+
+def _inspect(f, start, length, arch, read_symbols=False, member=False):
     end = start + length
     magic = _read(f, start, 8, end)
+    fat = {b"\xca\xfe\xba\xbe": (">", False), b"\xbe\xba\xfe\xca": ("<", False),
+           b"\xca\xfe\xba\xbf": (">", True), b"\xbf\xba\xfe\xca": ("<", True)}
+    if member and (magic == b"!<arch>\n" or magic[:4] in fat):
+        raise DependencyError("archive member is not a thin Mach-O object")
     if magic == b"!<arch>\n":
         position, members, strings = start + 8, [], b""
         while position < end:
             header = _read(f, position, 60, end)
             if header[58:] != b"`\n":
                 raise DependencyError("invalid archive member header")
-            name = header[:16].decode("ascii").strip()
-            size = int(header[48:58])
-            body, count = position + 60, size
+            body, size = position + 60, _decimal(header[48:58], "member size")
+            if size > end - body:
+                raise DependencyError("archive member extends past its archive")
+            name, count = header[:16].decode("ascii").strip(), size
             if name.startswith("#1/"):
-                n = int(name[3:])
+                n = _decimal(name[3:].encode("ascii"), "member name length")
+                if n > count:
+                    raise DependencyError("archive member name extends past its member")
                 name = _read(f, body, n, body + count).rstrip(b"\0").decode("utf-8")
                 body, count = body + n, count - n
             elif name == "//":
@@ -93,19 +245,25 @@ def _inspect(f, start, length, arch, read_symbols=False):
             elif name.startswith("/") and name[1:].isdigit():
                 name = strings[int(name[1:]):].split(b"/\n", 1)[0].decode("utf-8")
             if name not in ("/", "//", "/SYM64/") and not name.startswith("__.SYMDEF"):
-                member = _inspect(f, body, count, arch, read_symbols=True)
-                if member["kind"] != "object":
+                item = _inspect(f, body, count, arch, read_symbols=True, member=True)
+                if item["kind"] != "object":
                     raise DependencyError("archive member is not a target Mach-O object: " + name)
-                member.update(ordinal=len(members), name=name.removesuffix("/"), sha256=_payload_digest(f, body, count))
-                members.append(member)
+                # The object is exactly the bytes its own load commands describe. Only Apple ar's newline padding may
+                # follow it inside the member; the digest never covers that framing.
+                used = item["object_bytes"]
+                padding = _read(f, body + used, count - used, body + count)
+                if len(padding) >= AR_PADDING or padding != b"\n" * len(padding):
+                    raise DependencyError("archive member %s has %d bytes after its Mach-O object that are not Apple ar "
+                                          "newline padding" % (name, len(padding)))
+                item.update(ordinal=len(members), name=name.removesuffix("/"), sha256=_payload_digest(f, body, used),
+                            padding_bytes=len(padding))
+                members.append(item)
             position += 60 + size + (size & 1)
         if position != end or not members:
             raise DependencyError("empty or malformed Mach-O archive")
         floors = [m["minimum_os"] for m in members if m["minimum_os"] is not None]
         return {"kind": "archive", "arch": arch, "minimum_os": max(floors, key=version) if floors else None,
                 "members": len(members), "archive_members": members, "loads": [], "rpaths": [], "id": ""}
-    fat = {b"\xca\xfe\xba\xbe": (">", False), b"\xbe\xba\xfe\xca": ("<", False),
-           b"\xca\xfe\xba\xbf": (">", True), b"\xbf\xba\xfe\xca": ("<", True)}
     if magic[:4] in fat:
         endian, wide = fat[magic[:4]]
         n = struct.unpack(endian + "I", magic[4:])[0]
@@ -134,6 +292,7 @@ def _inspect(f, start, length, arch, read_symbols=False):
     commands = _read(f, start + 32, sizeofcmds, end)
     position, floor, loads, rpaths, install_id, symtab = 0, None, [], [], "", None
     code_sections, section_count, instruction_bytes = set(), 0, 0
+    binding, chained, ranges = [], [], []
     for _ in range(ncmds):
         if position + 8 > len(commands):
             raise DependencyError("truncated Mach-O load command")
@@ -175,6 +334,15 @@ def _inspect(f, start, length, arch, read_symbols=False):
             rpaths.append(_name(data, struct.unpack_from("<I", data, 8)[0]))
         elif cmd == 2:  # LC_SYMTAB; undefined dynamic-lookup ordinals evade the strict link contract
             symtab = struct.unpack_from("<4I", data, 8)
+        elif cmd in (0x22, 0x80000022):  # LC_DYLD_INFO[_ONLY]: the bind, weak-bind and lazy-bind opcode streams
+            binding.append(struct.unpack_from("<6I", data, 16))
+        elif cmd == 0x80000034:  # LC_DYLD_CHAINED_FIXUPS: the import table dyld binds
+            chained.append(struct.unpack_from("<II", data, 8))
+        if member:
+            owned = _file_ranges(cmd, data)
+            if owned is None:
+                raise DependencyError("archive member load command %#x has file data this reader cannot bound" % cmd)
+            ranges += owned
         position += size
     if position != len(commands):
         raise DependencyError("inconsistent Mach-O load-command table")
@@ -184,6 +352,9 @@ def _inspect(f, start, length, arch, read_symbols=False):
         raise DependencyError("requires macOS %s, newer than target %s" % (floor, MINIMUM_OS))
     if filetype == 6 and not install_id:
         raise DependencyError("dylib has no install name")
+    object_bytes = max([32 + sizeofcmds] + [offset + size for offset, size in ranges if size])
+    if member and object_bytes > length:
+        raise DependencyError("Mach-O object data extends past its archive member")
     defined, undefined, entries = set(), set(), set()
     if symtab and (filetype != 1 or read_symbols):
         offset, count, stroff, strsize = symtab
@@ -194,8 +365,11 @@ def _inspect(f, start, length, arch, read_symbols=False):
             if kind & 0xe0 or not kind & 1:  # debugging/local symbols are not external bindings
                 continue
             is_undefined = kind & 0x0e == 0 and not value
-            if filetype != 1 and is_undefined and desc >> 8 in (0xfe, 0xff):
-                raise DependencyError("unbound dynamic-lookup/executable import in Mach-O image; use explicit host services")
+            if filetype != 1 and is_undefined:
+                # 0xfe is a library ordinal only in an image with that many dylibs (mach-o/nlist.h).
+                library = desc >> 8
+                _import(-1 if library == 0xff else -2 if library == 0xfe and len(loads) < 0xfe else library, len(loads),
+                        "symbol table entry %d" % i)
             if read_symbols:
                 name_end = strings.find(b"\0", string_index)
                 if string_index >= len(strings) or name_end < 0:
@@ -204,8 +378,20 @@ def _inspect(f, start, length, arch, read_symbols=False):
                 (undefined if is_undefined else defined).add(name)
                 if not is_undefined and section in code_sections:
                     entries.add(name)
+    # The symbol table describes; dyld binds from LC_DYLD_INFO opcodes or the chained-fixups imports. Check those.
+    for bind, bind_size, weak, weak_size, lazy, lazy_size in binding:
+        for offset, size, is_lazy, is_weak in ((bind, bind_size, False, False), (weak, weak_size, False, True),
+                                               (lazy, lazy_size, True, False)):
+            if size:
+                for ordinal, symbol in _bind_stream(_read(f, start + offset, size, end), is_lazy, is_weak):
+                    _import(ordinal, len(loads), symbol)
+    for offset, size in chained:
+        for ordinal, symbol in _chained_imports(_read(f, start + offset, size, end)):
+            _import(ordinal, len(loads), symbol)
     result = {"kind": kinds[filetype], "arch": arch, "minimum_os": floor, "loads": loads,
               "rpaths": rpaths, "id": install_id}
+    if member:
+        result["object_bytes"] = object_bytes
     if read_symbols:
         result.update(defined_symbols=sorted(defined), undefined_symbols=sorted(undefined), entry_symbols=sorted(entries),
                       instruction_bytes=instruction_bytes)
@@ -485,12 +671,16 @@ def read_manifest(folder, optional=False):
 
 
 def package_files(folder):
+    """Every manifest-owned name, verified. Only alias entries may be symlinks; the maker copies links as links."""
     data = read_manifest(folder)
-    for name, item in data["files"].items():
+    for name, item in list(data["files"].items()) + [(MANIFEST, {})]:
         path = Path(folder) / name
-        if item.get("kind") == "alias" and (not path.is_symlink() or os.readlink(path) != item["target"]):
-            raise DependencyError("package alias changed before deployment: " + name)
-        if digest(Path(folder) / name) != item["sha256"]:
+        if item.get("kind") == "alias":
+            if not path.is_symlink() or os.readlink(path) != item["target"]:
+                raise DependencyError("package alias changed before deployment: " + name)
+        elif not stat.S_ISREG(os.lstat(path).st_mode):
+            raise DependencyError("packaged file is not a regular file: " + name)
+        if name != MANIFEST and digest(path) != item["sha256"]:
             raise DependencyError("packaged file changed before deployment: " + name)
     return sorted(data["files"]) + [MANIFEST]
 

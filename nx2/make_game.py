@@ -2519,7 +2519,8 @@ def main(a=None):
         staged.append((launcher, os.path.join(out, BESIDE[0])))
     for src, dst in staged:
         try:
-            if os.path.exists(dst + ".new"):
+            # (macOS: an alias staged by a stopped first install can dangle until its target is swapped in: lexists sees the link)
+            if (os.path.lexists if DARWIN else os.path.exists)(dst + ".new"):
                 os.remove(dst + ".new")
             shutil.copy2(src, dst + ".new", follow_symlinks=False) if DARWIN else shutil.copy2(src, dst + ".new")
         except PermissionError:
