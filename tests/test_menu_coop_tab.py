@@ -1114,7 +1114,7 @@ def main():
         "@@TAB_AWAY@@": between(menu, "        // (the tabs: LB and RB", "        const int tab_count ="),
         "@@CLOSED@@": block(block(menu, "void menu_tick() {"), "if (!now_open) {"),
         "@@STATUS@@": block(coop_draw, "static const char* const meaning[]") + "\n" +
-                      between(coop_draw, "const bool known =", "    c.d->PushClipRect") + "\nreturn " + status + ";",
+                      re.search(r"const bool known = [^;]+;", coop_draw).group(0) + "\nreturn " + status + ";",
         "@@HELP_NARROW@@": help_text[0],
         "@@HELP_WIDE@@": help_text[1],
         "@@PROMPTS@@": between(draw, "    const bool confirms =", "    const float bar_top ="),

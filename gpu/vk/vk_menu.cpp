@@ -4011,6 +4011,8 @@ void draw_coop_rows(ui::Ctx& c, float cx0, float cx1, float top, float bottom, i
                                           "Reaching the relay.", "Give the room's secret to those you play with.",
                                           "The relay went silent: joining the room again."};
     const bool known = v.state >= 0 && v.state <= HOS_COOP_STATE_RECONNECTING;
+    // Use the tab's existing top gap: always visible, without taking space from the status or scrolling rows.
+    ui::text_mid(c, c.f.strong, 16 * s, left + 20 * s, top - 12 * s, ui::kGoldHi, "Experimental");
     c.d->PushClipRect(ImVec2(cx0, top - 8 * s), ImVec2(cx1, std::max(top, bottom) + 8 * s), true);
     ui::box(c, ImVec2(left, top), ImVec2(right, top + box_h));
     std::string head = v.room_title[0] ? v.room_title : known ? states[v.state] : "";

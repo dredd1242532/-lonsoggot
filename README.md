@@ -500,6 +500,9 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 | | Room rules | Outside a room, and in a room you made: opens the Room rules page, the rules of a room you make: Progress, Items, Songs, Quest items (Shared, Per player; Shared), Small keys (One pool, Per player; One pool), Rupees, Ammunition (One pool, Per player; Per player), and Co-op at start (Off, On; Off): see [co-op](docs/coop.md) | |
 | | Native hit observations (Room rules) | Off, On: share committed native loss diagnostics with accepted peers; does not enable PvP or change anyone's hearts | Off |
 
+The Co-op tab shows **Experimental** above its status box on every visit. This is a label, not another menu row;
+the tab name and existing rows are unchanged. Use a save copy for playtesting. See [co-op](docs/coop.md#the-co-op-tab).
+
 - **Quality preset** sets Render resolution, Window scaling filter, Sharpness, Frame pacing, Game speed, Profile
   and the video memory limits for a card with that much memory. It leaves the Upscaler and Frame generation as
   you chose them: with DLSS, FSR 3.1 or FSR 4, the preset's resolution becomes their nearest mode. Changing most other

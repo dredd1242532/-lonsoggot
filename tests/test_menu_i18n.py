@@ -132,6 +132,14 @@ class MenuI18nTests(unittest.TestCase):
                 with self.subTest(table=table, text=text):
                     self.assertIn(text, dict(pairs), "missing consent text (English fallback is allowed)")
 
+    def test_coop_experimental_label_has_catalogue_entries(self):
+        text = "Experimental"
+        self.assertIn(text, self.menu)
+        self.assertEqual(len(self.tables), 13)
+        for table, pairs in self.tables.items():
+            with self.subTest(table=table):
+                self.assertIn(text, dict(pairs), "missing Experimental label (English fallback is allowed)")
+
     def test_plural_forms(self):
         # (i18n::plural: Russian and Polish ask for a third form, " settings (many)", for 5 and up; the menu shows it
         # nowhere else, so only their tables have it)

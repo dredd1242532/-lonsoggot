@@ -184,6 +184,10 @@ others already; nothing is taken from anyone when it goes.
 
 ### The Co-op tab
 
+The word **Experimental** stays above the tab's status box on every visit, even while co-op is off. It is a label,
+not a setting or a first-use notice; the tab name and the existing rows are unchanged. Use a copy of your save for
+playtesting, and expect behaviour to change between builds.
+
 The Insert menu's last tab does the same from the game, with no setting written by hand. **Your name** and **Relay**
 are `coop_name` and `coop_server`. **Make a room** and **Join a room** (the secret typed or pasted) switch co-op on for
 this run and make or join the room. In a room the tab shows its state and the relay's round trip, the **Room secret**
