@@ -3424,6 +3424,8 @@ bool menu_env_on(const char* env_name, const char* ini_key_name, bool def = fals
     if (v < 0 || version < since) return def;
     return v != 0;
 }
+/// (the Recorder thread row: vk_recorder.h reads its line with menu_env_on, when RX_VK_RECORDER is unset)
+const bool rec_row_hook = (::mkwvk::rec::g_row_on = menu_env_on, true);
 /// (longshot) How far a draw keeps the descriptors (and the banks) of the draw before it, one switch for the three it had:
 ///   2  the Descriptor reuse row's On (the default since options_version 4): kept through registrations of the texture slots
 ///      it does not sample. What it does sample is checked by slot version, and the samplers by their registrations'

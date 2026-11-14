@@ -29,6 +29,9 @@
 //                        line), RX_VK_RECORDER_SPIN_US (the recorder's spin with nothing to run, before it sleeps: default adaptive 20-200),
 //                        RX_VK_RECORDER_OWN=1 (a recording slot's own resets at its reuse without the wait: OwnSlot, below),
 //                        RX_VK_RECORDER_IDLE=wait (the recorder waits on the ring's counter after a 20 us spin: Recorder::idle)
+//   RX_VK_RECORDER unset: the Debug tab's Recorder thread row (recorder_thread=1 in longshot_options.ini, read once with the
+//                        mode) is thread, with RX_VK_RECORDER_OWN on unless it is set; refused with RX_VK_PARALLEL>=2 as above.
+//                        RX_VK_RECORDER set to anything decides alone, and the start line names which of the two chose
 //
 // A packet: [Packet header: thunk, next, op, size][the call's closure: its value arguments and the arena pointers of its copies],
 // preceded in the arena by the copied arrays. The arena is the recording thread's own (thread_local: the parallel replay's workers each
@@ -180,11 +183,20 @@ inline bool parallel_configured() {
     const char* p = getenv("RX_VK_PARALLEL");
     return p && atoi(p) >= 2;
 }
-/// RX_VK_RECORDER: sync; defer, thread (serial only: refused, off, with RX_VK_PARALLEL); anything else, or unset, off
-inline int mode_from_env(bool* refused) {
+/// (set by vk_draw.cpp: its menu_env_on, which reads a Debug row's line in longshot_options.ini in the game folder; null in the
+/// tests that do not set it: no row)
+inline bool (*g_row_on)(const char* env_name, const char* ini_key_name, bool def, int since) = nullptr;
+/// RX_VK_RECORDER: sync; defer, thread (serial only: refused, off, with RX_VK_PARALLEL); anything else, off. Unset: the Debug
+/// tab's Recorder thread row (recorder_thread=1: thread, refused as RX_VK_PARALLEL refuses the switch; *row says it decided)
+inline int mode_from_env(bool* refused, bool* row) {
     const char* e = getenv("RX_VK_RECORDER");
-    *refused = false;
-    if (!e) return OFF;
+    *refused = false, *row = false;
+    if (!e) {
+        if (!g_row_on || !g_row_on("RX_VK_RECORDER", "recorder_thread", false, 0)) return OFF;
+        *row = true;
+        *refused = parallel_configured();
+        return *refused ? OFF : THREAD;
+    }
     if (!strcmp(e, "sync")) return SYNC;
     if (!strcmp(e, "defer") || !strcmp(e, "thread")) {
         if (!parallel_configured()) return e[0] == 'd' ? DEFER : THREAD;
@@ -194,8 +206,9 @@ inline int mode_from_env(bool* refused) {
     return OFF;
 }
 inline int mode_init() {
-    bool refused;
-    const int m = mode_from_env(&refused);
+    bool refused, row;
+    const int m = mode_from_env(&refused, &row);
+    const char* own = getenv("RX_VK_RECORDER_OWN");
     const char* p = getenv("RX_VK_RECORDER_POISON");
     g_poison.store((m == DEFER || m == THREAD) && p && atoi(p) != 0, std::memory_order_relaxed);
     if (m == THREAD) {
@@ -203,13 +216,16 @@ inline int mode_init() {
             if (atoi(mb) > 0) g_ring_bytes = size_t(std::min(atoi(mb), 1024)) << 20;
         if (const char* s = getenv("RX_VK_RECORDER_STATS")) g_stats_log = atoi(s) != 0;
         if (const char* s = getenv("RX_VK_RECORDER_SPIN_US")) g_spin_ns = (uint64_t)std::max(1, atoi(s)) * 1000;
-        g_own = env_on("RX_VK_RECORDER_OWN");
+        g_own = own ? !env_value_off(own) : row;   // (env_on's rule; unset, on with the row)
         const char* idle = getenv("RX_VK_RECORDER_IDLE");
         g_idle_wait = idle && !strcmp(idle, "wait");
     }
     int was = -1;
     if (!g_mode.compare_exchange_strong(was, m, std::memory_order_relaxed)) return was;   // (another thread read it first)
-    if (refused)   // (once: the thread that set the mode)
+    if (refused && row)   // (once: the thread that set the mode)
+        ::mkwvk::logf("vk: the Recorder thread row (recorder_thread=1 in longshot_options.ini) refused: RX_VK_PARALLEL=%s records a "
+                      "command buffer on several threads; the recorder is off", getenv("RX_VK_PARALLEL"));
+    else if (refused)
         ::mkwvk::logf("vk: RX_VK_RECORDER=%s refused: RX_VK_PARALLEL=%s records a command buffer on several threads (deferred "
                       "packets are the recording thread's own); the recorder is off",
                       getenv("RX_VK_RECORDER"), getenv("RX_VK_PARALLEL"));
@@ -218,13 +234,17 @@ inline int mode_init() {
                       "reset, submit, wait, readback, destruction and replay lock release (serial replay only)%s",
                       g_poison.load(std::memory_order_relaxed) ? "; the arena poisoned after each drain" : "");
     else if (m == THREAD)
-        ::mkwvk::logf("vk: RX_VK_RECORDER=thread: vkCmd* packed on the replay thread and run in order by a recorder thread; the "
+        ::mkwvk::logf("vk: %s: vkCmd* packed on the replay thread and run in order by a recorder thread; the "
                       "replay waits for it at each command buffer begin, end and reset, submit, wait, readback, destruction and "
                       "replay lock release (serial replay only); ring %zu KB, spin %s%llu us%s%s%s",
+                      row ? "the Recorder thread row (recorder_thread=1 in longshot_options.ini; RX_VK_RECORDER unset)"
+                          : "RX_VK_RECORDER=thread",
                       g_ring_bytes >> 10, g_idle_wait || g_spin_ns ? "" : "adaptive 20-",
                       (unsigned long long)(g_idle_wait ? kSpinLo / 1000 : g_spin_ns ? g_spin_ns / 1000 : 200),
                       g_poison.load(std::memory_order_relaxed) ? "; packets poisoned once run" : "",
-                      g_own ? "; a recording slot's own resets at its reuse without the wait (RX_VK_RECORDER_OWN=1)" : "",
+                      !g_own ? ""
+                      : own ? "; a recording slot's own resets at its reuse without the wait (RX_VK_RECORDER_OWN=1)"
+                            : "; a recording slot's own resets at its reuse without the wait (with the row)",
                       g_idle_wait ? "; idle: waits on the ring (RX_VK_RECORDER_IDLE=wait)" : "");
     return m;
 }

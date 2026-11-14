@@ -1137,6 +1137,7 @@ const char* hn_intel_compiles(int v, int variant) {
     return hint_in(t, 2, 0, v, variant);
 }
 MENU_HINTS(hn_robust, 0, "On, on every card.", "Can be faster on some NVIDIA cards.", "Always on.")
+const char* hn_recorder_thread(int v, int variant);   // (below the restart rows' start values, which it reads)
 MENU_HINTS(hn_fps, 0, nullptr, "The frame rate. With frame generation on, the game's own rate too.",
            "And the game's frame time, with its 1% low: the rate of its slowest 1% of frames over the last 10 seconds.",
            "And a graph of the last 4 seconds' frame times, with a line at the Game frame rate cap's.",
@@ -1491,6 +1492,9 @@ Row rows[] = {
     {TAB_DEBUG, "Sampler cache", &opts.sampler_cache, 0, 1, 1, tx_onoff,
      "What a sampler holds is kept beside it on the replay thread, so resolving a sampler that was not registered anew takes no "
      "lock. Helps while the game streams textures. Changes at once.", nullptr, false, true},
+    {TAB_DEBUG, "Recorder thread", &opts.recorder_thread, 0, 1, 1, tx_onoff,
+     "The renderer's Vulkan commands are handed to a second thread, which sends them to the driver while the renderer goes on "
+     "with the next ones. Can be faster on a CPU with cores to spare. Applies after a restart.", hn_recorder_thread, true, true},
     {TAB_DEBUG, "Robust buffers", &opts.robust, 0, 2, 1, tx_robust,
      "Bounds-checked buffer reads: a read past a buffer's end is dropped instead of stopping the GPU. Applies after a "
      "restart.", hn_robust, true, true},
@@ -1747,6 +1751,18 @@ int restart_slot_of(const Row& r) { return restart_slot[&r - rows]; }
 bool restart_changed(const Row& r) {
     const int slot = restart_slot_of(r);
     return r.value && r.restart && slot >= 0 && row_restart_value(r) != restart_state.start[slot];
+}
+/// The Recorder thread row's line: On when the game started, but the recorder is not running this run (RX_VK_RECORDER said
+/// otherwise, RX_VK_PARALLEL refused it, or its thread or ring could not be made: vk_recorder.h, the log says which)
+const char* hn_recorder_thread(int, int variant) {
+    static const char* const off = "Not running this time: RX_VK_RECORDER or RX_VK_PARALLEL is set (longshot_env.txt or the "
+                                   "environment), or the thread could not start. The log says which.";
+    if (variant >= 0) return variant == 0 ? off : nullptr;
+    int i = 0;
+    while (i < kRows && rows[i].value != &opts.recorder_thread) i++;
+    const bool started_on = i < kRows && restart_slot[i] >= 0 && restart_state.start[restart_slot[i]] != 0;
+    namespace rec = ::mkwvk::rec;
+    return started_on && (rec::mode() != rec::THREAD || rec::g_rec.broken.load(std::memory_order_relaxed)) ? off : nullptr;
 }
 void restart_values(int* now) {
     for (int i = 0; i < kRows; i++)
