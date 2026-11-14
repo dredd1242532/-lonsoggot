@@ -194,6 +194,9 @@ relay and room-secret fields have no character picker, so they do not show Chara
 The Controls page's hold-to-toggle applies to gameplay, not these text actions. Editing uses physical pad presses
 and the keyboard's editing keys; saving a name or relay keeps the controls' saved Toggle flags, and changing a Toggle
 keeps the name and relay.
+The text-field fixture composes the actual raw-pad edge/repeat path with text release in one host callback table.
+It retains the combined Mono/custom-size restart and gameplay-latch isolation cases; chat shortcut dispatch is
+exercised separately by the chat fixture, not replaced by a dummy implementation in the raw-pad test.
 
 ## The log
 

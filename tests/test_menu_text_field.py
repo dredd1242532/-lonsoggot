@@ -101,7 +101,8 @@ int release_text(int focus, uint32_t* out, int max) {
     ++text_releases;
     return 0;
 }
-struct { int (*take_text)(int, uint32_t*, int); } text_host{release_text}, *host = &text_host;
+uint32_t hos_pad_raw();
+struct { int (*take_text)(int, uint32_t*, int); uint32_t (*pad_raw)(); } text_host{release_text, hos_pad_raw}, *host = &text_host;
 @@CUT@@
 static const uint32_t K = HOS_TEXT_KEY;
 static void type(TextField& f, const char* s) {
@@ -159,7 +160,6 @@ void tap(int button, int count = 1) {
 // The host's raw pad callback and the menu's edge/repeat path, not a latched game-button word.
 uint32_t pad_raw_now = 0;
 @@PAD_RAW@@
-struct { uint32_t (*pad_raw)(); } host_value{hos_pad_raw}, *host = &host_value;
 void routed_tick() {
     const bool mine = true;
     bool pad_last = false, held[5] = {};
@@ -661,7 +661,9 @@ def main():
     focused = block(menu, "if (editing && (open_now.load() || editing == &chat_field)) {")
     win = (ROOT / "host/display.c").read_text(encoding="utf-8")
     win_keys = block(win[win.index("case WM_KEYDOWN: {"):], "if (hos_text_focus()) {")
-    pad_poll = between(menu, "    static uint32_t pad_held = 0;", "#ifndef VK_RSHIFT")
+    # Raw polling brackets chat's separately tested shortcut dispatch; keep the physical edge/prompts path whole.
+    pad_poll = between(menu, "    static uint32_t pad_held = 0;", "    const bool chat_active =")
+    pad_poll += between(menu, "    if (pad_press) pad_last = true;", "#ifndef VK_RSHIFT")
     pad_edge = between(menu, "    auto pad = ", "\n")
     pad_repeat = block(menu, "    {   // holding an arrow or the D-pad repeats it:")
     with tempfile.TemporaryDirectory(prefix="menu-text-") as tmp:
