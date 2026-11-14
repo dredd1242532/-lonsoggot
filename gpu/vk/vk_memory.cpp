@@ -2072,6 +2072,7 @@ struct LateStats {
             sync_pages = 0, sync_known = 0, sync_left_unknown = 0;
 } st_lfx;
 std::vector<uint32_t> shadow_forgotten_last;   // (sorted)
+bool shadow_forgotten_all = false;   // (the forget's lists overflowed: no page synced since is known to equal guest memory)
 struct ShadowSynced { uint64_t lo, page; VkBuffer shadow; };
 std::vector<ShadowSynced> shadow_synced;   // (synced since the last write-back's forget, into that shadow; pools_mu)
 void shadow_sync_copy(VkCommandBuffer up, VkBuffer src, Pool& p, const std::vector<VkBufferCopy>& rs) {
@@ -2085,7 +2086,8 @@ void shadow_sync_copy(VkCommandBuffer up, VkBuffer src, Pool& p, const std::vect
         for (uint64_t pg = r.dstOffset >> kPageShift; r.size && pg <= (r.dstOffset + r.size - 1) >> kPageShift; pg++)
             shadow_synced.push_back({p.lo, pg, p.shadow}), st_lfx.sync_pages++;
 }
-// (after the write-back's forget: the pages synced since, known as the sync left them. Not the ones the forget has just cleared
+// (after the write-back's forget: the pages synced since, known as the sync left them. Not after a forget whose lists overflowed
+// (shadow_written_all: the pages written are not known, so none of the synced ones is), and not the ones the forget has just cleared
 // because the replay's own writes or the collection reported them since the capture: guest memory has newer words there than the
 // shadow, which holds the capture's. Known, they were not read into the shadow again at the write-back, and the diff pass wrote
 // the mirror's words of a span whole over guest memory's newer ones, which the late pages' fix then read as stamped words.
@@ -2096,7 +2098,8 @@ void shadow_synced_known() {
         if (it == imported.end() || !it->second.shadow || it->second.shadow != s.shadow) continue;
         std::vector<uint64_t>& known = it->second.shadow_known;
         if ((s.page >> 6) >= known.size()) continue;
-        if (std::binary_search(shadow_forgotten_last.begin(), shadow_forgotten_last.end(), (uint32_t)((s.lo >> kPageShift) + s.page))) {
+        if (shadow_forgotten_all ||
+            std::binary_search(shadow_forgotten_last.begin(), shadow_forgotten_last.end(), (uint32_t)((s.lo >> kPageShift) + s.page))) {
             st_lfx.sync_left_unknown++;
             continue;
         }
@@ -5275,7 +5278,7 @@ void shadows_forget_written() {
     if (all)   // (written for a long while with no write-back to read the list: nothing of guest memory is known)
         for (auto& [lo, pool] : imported)
             if (pool.shadow) std::fill(pool.shadow_known.begin(), pool.shadow_known.end(), 0ull);
-    shadow_forgotten_last.clear();
+    shadow_forgotten_last.clear(), shadow_forgotten_all = all;
     if (!shadow_bytes) return;
     // (in this order, each page counted under the first that reports it: the collection's and the replay's counts are what the
     // captures alone would have left known)
