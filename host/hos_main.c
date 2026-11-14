@@ -41,6 +41,9 @@ const char *hos_version(void) { return LONGSHOT_VERSION; }   /* (discord_rpc.c's
 #include <unistd.h>
 #include <sys/syscall.h>
 #endif
+#if defined(__APPLE__)
+#include "posix/darwin_mem.h"
+#endif
 /* (linux) the separator of the paths the executable's folder is joined with */
 #ifdef _WIN32
 #define SEP 92
@@ -146,6 +149,19 @@ static int reserve_guest(void) {
     void hos_commit_init(void);
     hos_commit_init();
     return VirtualAlloc((void *)A64_HOST_BASE, GUEST_SPACE, MEM_RESERVE | watch, PAGE_NOACCESS) == (void *)A64_HOST_BASE;
+#elif defined(__APPLE__)
+    /* Keep the whole window RW and demand-paged, without replacing an occupant. */
+    void hos_commit_init(void);
+    hos_commit_init();
+    const int ok = darwin_mem_map((void *)A64_HOST_BASE, GUEST_SPACE, PROT_READ | PROT_WRITE) == (void *)A64_HOST_BASE;
+    if (!ok) {
+        const char *why = errno == EEXIST ? "address range already occupied" : strerror(errno);
+        if (startup_stderr >= 0) dprintf(startup_stderr, "mem: cannot reserve macOS guest window: %s\n", why);
+        hos_log("mem: cannot reserve macOS guest window at %#llx (%llu GiB): %s",
+                (unsigned long long)A64_HOST_BASE, (unsigned long long)(GUEST_SPACE >> 30), why);
+    }
+    if (startup_stderr >= 0) close(startup_stderr), startup_stderr = -1;
+    return ok;
 #else
     /* (linux) the whole window readable and writable at once, its pages made as they are first touched (no commit
        step: MAP_NORESERVE). Decommitting is madvise (host/posix/win32_posix.c VirtualFree): the pages read as zero. */
@@ -230,7 +246,11 @@ static int reserve_guest(void) {
 int hos_guest_memfd = -1;
 int hos_posix_guest_memfd(void) { return hos_guest_memfd; }
 int hos_posix_guest_discard(void *p, size_t n) {
+#if defined(__APPLE__)
+    return darwin_mem_discard(p, n);
+#else
     return madvise(p, n, hos_guest_memfd >= 0 ? MADV_REMOVE : MADV_DONTNEED);
+#endif
 }
 #endif
 

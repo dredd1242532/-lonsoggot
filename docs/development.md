@@ -120,6 +120,31 @@ address needs a separate qualification. The x86 assembly and Windows/Linux paths
 This CPU-only check compiles `host/posix/darwin_cpu.c` explicitly. It does not enable macOS in `nx2/build.py` or
 establish that the game builds or runs on macOS; the Darwin build's host source list must include that new file.
 
+### macOS guest-memory groundwork
+
+`host/posix/darwin_mem.c` supplies the memory primitives for macOS, targeting 14.4 or later. It reserves the
+512 GiB guest window at its fixed address without replacing an occupant. The window is readable/writable and
+demand-paged; a 64 KiB guest commit preserves existing bytes. This is memory groundwork, not a complete macOS build:
+the macOS source lists must link this file wherever they link `host/posix/win32_posix.c`, including the renderer.
+
+The low-level discard zeroes exactly the requested bytes. Complete interior host pages get fresh anonymous backing;
+partial host-page edges are zeroed in place, so adjacent live 4 KiB guest pages survive a free on native 16 KiB hosts.
+The Win32 layer retains its existing guest-page contracts: MEM_DECOMMIT rounds outward to 4 KiB, and MEM_RESET
+discards only complete 4 KiB pages inside the request. The Darwin helper adapts that range to the host granule.
+`MADV_DONTNEED` is not used for zero-on-free on Darwin. Host allocation and protection use the process's real page
+size (16 KiB on native Apple Silicon, 4 KiB under Rosetta), not the guest's granule. Guest dirty tracking is unchanged.
+
+The caller must own writable anonymous memory and serialize its lifetime. Existing GPU-import checks still select
+in-place zeroing: replacing imported backing is not safe, and GPU sharing is not qualified by these CPU tests.
+Heap shrink still zeroes without reclaiming, and optional write-watch and general `VirtualQuery` are separate work.
+The byte-preservation guarantee does not repair the address-region allocator's existing unlock-before-discard race.
+
+`python -I -B tests/test_darwin_guest_memory.py --cc clang` compiles the real helper and text-extracted callers for
+the current native architecture. On Apple Silicon, add `--arch arm64 --arch x86_64` for explicit two-route acceptance
+(the latter requires Rosetta; the test never installs it). It uses no game or graphics device, checks collision
+refusal, neighboring subpages, byte-exact helper discard, guest-rounded wrappers, errors, and resident memory before
+readback. `--source <tree>` runs the same check against another source tree.
+
 ## Switches for testing and debugging
 
 The running game reads its switches from the environment or from `longshot_env.txt` beside `image.bin` (one

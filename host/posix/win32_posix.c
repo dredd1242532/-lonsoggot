@@ -15,6 +15,9 @@
 #include <sys/syscall.h>
 #include <sys/time.h>
 #include <ucontext.h>
+#if defined(__APPLE__)
+#include "darwin_mem.h"
+#endif
 
 /* the guest window (third_party/a64-kit/rt/a64.h A64_HOST_BASE, host/hos.h HOS_GUEST_SPACE): one mapping, all of it
    readable and writable, which VirtualQuery reports as committed without asking the kernel */
@@ -642,32 +645,58 @@ static pthread_mutex_t regions_mu = PTHREAD_MUTEX_INITIALIZER;
 /* guest pages given back so that they read as zero: MADV_REMOVE when the window is the memfd's (hos_main.c), as
    MADV_DONTNEED leaves a shared mapping's pages as they were; MADV_DONTNEED elsewhere */
 static int discard_pages(void *p, size_t n) {
+#if defined(__APPLE__)
+    return darwin_mem_discard(p, n);
+#else
     typedef int (*DiscardFn)(void *, size_t);
     static DiscardFn fn;
     static int looked;
     if (!looked) fn = (DiscardFn)dlsym(RTLD_DEFAULT, "hos_posix_guest_discard"), looked = 1;
     if (fn && (uintptr_t)p >= GUEST_LO && (uintptr_t)p + n <= GUEST_HI) return fn(p, n);
     return madvise(p, n, MADV_DONTNEED);
+#endif
 }
 void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
+#if defined(__APPLE__)
+    if (size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr > UINTPTR_MAX - 4095) {
+        last_error = ERROR_INVALID_PARAMETER;
+        return NULL;
+    }
+#endif
     const uintptr_t page = 4096;
     if (type & MEM_RESET) {   /* (the contents are not wanted any more: they read as zero after this) */
         const uintptr_t lo = ((uintptr_t)addr + page - 1) & ~(page - 1), hi = ((uintptr_t)addr + size) & ~(page - 1);
+#if defined(__APPLE__)
+        if (hi > lo && discard_pages((void *)lo, hi - lo)) { fail_errno(); return NULL; }
+#else
         if (hi > lo) discard_pages((void *)lo, hi - lo);
+#endif
         return addr;
     }
     if (addr && (type & MEM_COMMIT) && !(type & MEM_RESERVE)) {
         /* (inside a reservation: made accessible; the guest window is accessible already) */
         if ((uintptr_t)addr >= GUEST_LO && (uintptr_t)addr + size <= GUEST_HI) return addr;
+#if defined(__APPLE__)
+        if (darwin_mem_protect(addr, size, prot_of(protect))) { fail_errno(); return NULL; }
+#else
         const uintptr_t lo = (uintptr_t)addr & ~(page - 1), hi = ((uintptr_t)addr + size + page - 1) & ~(page - 1);
         if (mprotect((void *)lo, hi - lo, prot_of(protect))) { fail_errno(); return NULL; }
+#endif
         return addr;
     }
     const int prot = (type & MEM_COMMIT) ? prot_of(protect) : PROT_NONE;
+#if defined(__APPLE__)
+    void *p = darwin_mem_map(addr, size, prot);
+#else
     void *p = mmap(addr, size, prot, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | (addr ? MAP_FIXED_NOREPLACE : 0), -1, 0);
+#endif
     if (p == MAP_FAILED || (addr && p != addr)) {
         if (p != MAP_FAILED) munmap(p, size);
+#if defined(__APPLE__)
+        fail_errno();
+#else
         last_error = ERROR_INVALID_PARAMETER;
+#endif
         return NULL;
     }
     pthread_mutex_lock(&regions_mu);
@@ -678,6 +707,12 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
 }
 BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
     if (type & MEM_DECOMMIT) {   /* (kept mapped: decommitted memory reads as zero when touched again) */
+#if defined(__APPLE__)
+        if (size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr + size > UINTPTR_MAX - 4095) {
+            last_error = ERROR_INVALID_PARAMETER;
+            return FALSE;
+        }
+#endif
         const uintptr_t lo = (uintptr_t)addr & ~(uintptr_t)4095, hi = ((uintptr_t)addr + size + 4095) & ~(uintptr_t)4095;
         return discard_pages((void *)lo, hi - lo) == 0 ? TRUE : fail_errno();
     }
@@ -685,7 +720,11 @@ BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
         pthread_mutex_lock(&regions_mu);
         for (int i = 0; i < 256; i++)
             if (regions[i].base == (uintptr_t)addr) {
+#if defined(__APPLE__)
+                if (munmap(addr, regions[i].size)) { pthread_mutex_unlock(&regions_mu); return fail_errno(); }
+#else
                 munmap(addr, regions[i].size);
+#endif
                 regions[i].base = 0;
                 pthread_mutex_unlock(&regions_mu);
                 return TRUE;
@@ -697,9 +736,14 @@ BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
     return FALSE;
 }
 BOOL VirtualProtect(void *addr, SIZE_T size, DWORD protect, DWORD *old) {
+#if defined(__APPLE__)
+    if (old) *old = PAGE_READWRITE;
+    return darwin_mem_protect(addr, size, prot_of(protect)) == 0 ? TRUE : fail_errno();
+#else
     const uintptr_t lo = (uintptr_t)addr & ~(uintptr_t)4095, hi = ((uintptr_t)addr + size + 4095) & ~(uintptr_t)4095;
     if (old) *old = PAGE_READWRITE;
     return mprotect((void *)lo, hi - lo, prot_of(protect)) == 0 ? TRUE : fail_errno();
+#endif
 }
 SIZE_T VirtualQuery(const void *addr, MEMORY_BASIC_INFORMATION *mbi, SIZE_T size) {
     if (size < sizeof *mbi) return 0;
