@@ -36,6 +36,7 @@
   --sl-text-h1: 2.65rem;
   --sl-line-height: 1.65;
   --sl-nav-height: 5rem;
+  --sl-menu-button-size: 2.75rem;
   --sl-sidebar-width: 16.5rem;
   --sl-content-width: 49rem;
 
@@ -65,7 +66,6 @@
   --panel: #eef0ea;
   --panel-hover: #e5e8e1;
 }
-@media (max-width: 70rem) { :root { --sl-nav-height: 8rem; } }
 
 * { scrollbar-color: var(--sl-color-gray-4) transparent; }
 ::selection { background: #466b4c; color: #fff9dc; }
