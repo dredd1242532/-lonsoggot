@@ -138,7 +138,8 @@ def _no_fork():
 def file_jobs():
     """Processes for the per-file passes (split_big, edit_c) and for the emit: LONGSHOT_LIFT_JOBS, else the cores this process
     may use (at most 16; each holds its run's texts and the pages of the lift it touches), and at most one per 2 GB of available
-    memory (on Windows too: its available physical memory): a Steam Deck (16 GB) ran out with 8, and the system's out-of-memory
+    memory where they are forked (one per 0.75 GB where they are spawned: Windows, its available physical memory): a Steam
+    Deck (16 GB) ran out with 8, and the system's out-of-memory
     handling stopped the lift ("lift.py stopped (signal 15): BrokenPipeError") or one worker (the update then sat at "jump tables"
     for good). The per-file workers take a file's path and read the file themselves, so they start as new processes (spawn) where
     they cannot be forked: the three passes over the 1.5 GB of C took ~30 s in one process on Windows"""
