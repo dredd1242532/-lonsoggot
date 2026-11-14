@@ -32,6 +32,12 @@ typedef HANDLE File;
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <mach-o/dyld_images.h>
+#include <mach-o/loader.h>
+#endif
 typedef int File;
 #define NO_FILE (-1)
 #endif
@@ -69,7 +75,13 @@ static CONTEXT dump_context;
 static EXCEPTION_POINTERS dump_pointers = {&dump_exception, &dump_context};
 static wchar_t dump_temp[PATH_CAP], dump_dir[PATH_CAP], dump_status_temp[PATH_CAP];
 #else
+#ifdef __APPLE__
+/* The kernel's record of dyld's image list (TASK_DYLD_INFO), found at startup. */
+static uintptr_t dyld_infos;
+static size_t dyld_infos_size;
+#else
 static int maps_fd = -1;
+#endif
 #endif
 
 static uint64_t epoch_now(void) {
@@ -248,12 +260,51 @@ static int safe_read(uintptr_t address, void *out, size_t size) {
 #ifdef _WIN32
     SIZE_T n = 0;
     return ReadProcessMemory(self_process, (const void *)address, out, size, &n) && n == size;
+#elif defined(__APPLE__)
+    /* A Mach call on this task's own port: an unmapped or unreadable page returns
+       an error instead of faulting (the Darwin form of process_vm_readv). */
+    mach_vm_size_t n = 0;
+    return mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size,
+                                  (mach_vm_address_t)(uintptr_t)out, &n) == KERN_SUCCESS && n == size;
 #else
     struct iovec local = {out, size}, remote = {(void *)address, size};
     return syscall(SYS_process_vm_readv, (long)session.pid, &local, 1UL, &remote, 1UL, 0UL) == (ssize_t)size;
 #endif
 }
 #ifndef _WIN32
+#ifdef __APPLE__
+/* dyld's image list is read only through safe_read: no dladdr or _dyld_* call,
+   which can take dyld's lock, in a signal. It includes images loaded since startup;
+   dyld clears infoArray while it changes the list. */
+static int dyld_snapshot(struct dyld_all_image_infos *all) {
+    memset(all, 0, sizeof *all);
+    return dyld_infos && safe_read(dyld_infos, all, dyld_infos_size < sizeof *all ? dyld_infos_size : sizeof *all) &&
+           all->infoArray;
+}
+/* The __TEXT segment's size from an image's own Mach-O load commands. The image is
+   mapped at its header, so __TEXT runs from vmaddr + slide (slide = header - vmaddr). */
+static int text_range(uintptr_t header, uintptr_t *lo, uint64_t *size) {
+    struct mach_header_64 mh;
+    if (!safe_read(header, &mh, sizeof mh) || mh.magic != MH_MAGIC_64 || mh.sizeofcmds > (1u << 20)) return 0;
+    uintptr_t at = header + sizeof mh;
+    const uintptr_t end = at + mh.sizeofcmds;
+    for (uint32_t i = 0; i < mh.ncmds && end - at >= sizeof(struct load_command); ++i) {
+        struct segment_command_64 segment;
+        if (!safe_read(at, &segment, sizeof(struct load_command)) || segment.cmdsize < sizeof(struct load_command) ||
+            segment.cmdsize > end - at) return 0;
+        if (segment.cmd == LC_SEGMENT_64 && segment.cmdsize >= sizeof segment) {
+            if (!safe_read(at, &segment, sizeof segment)) return 0;
+            if (!memcmp(segment.segname, SEG_TEXT, sizeof SEG_TEXT)) {
+                const uintptr_t slide = header - (uintptr_t)segment.vmaddr;
+                *lo = (uintptr_t)segment.vmaddr + slide; *size = segment.vmsize;
+                return 1;
+            }
+        }
+        at += segment.cmdsize;
+    }
+    return 0;
+}
+#else
 /* /proc/self/maps is opened at startup, read only through read/lseek here, and
    includes modules loaded since startup. No dladdr/loader lock in a signal. */
 static int hex_digit(unsigned char c) {
@@ -288,6 +339,7 @@ static int map_line(const char *line, CrashMap *map) {
     return 1;
 }
 #endif
+#endif
 static int module_at(uintptr_t pc, char *name, size_t cap, uint64_t *offset) {
 #ifdef _WIN32
     MEMORY_BASIC_INFORMATION mbi;
@@ -307,6 +359,32 @@ static int module_at(uintptr_t pc, char *name, size_t cap, uint64_t *offset) {
     for (; n + 1 < sizeof raw; ++n) if (!safe_read(base + exports.Name + n, raw + n, 1) || !raw[n]) break;
     raw[n] = 0;
     hos_crash_redact(name, cap, raw, n); return name[0] != 0;
+#elif defined(__APPLE__)
+    /* The image whose header is the nearest at or below pc, if its __TEXT holds pc:
+       __TEXT starts at each image's header and images never overlap. The offset is
+       from the header, dladdr's load base. dyld, not in infoArray, is the last entry. */
+    struct dyld_all_image_infos all, again;
+    if (!dyld_snapshot(&all)) return 0;
+    uintptr_t header = 0, path = 0;
+    for (uint32_t i = 0; i <= all.infoArrayCount; ++i) {
+        struct dyld_image_info image = {all.dyldImageLoadAddress, all.dyldPath, 0};
+        if (i < all.infoArrayCount && !safe_read((uintptr_t)(all.infoArray + i), &image, sizeof image)) return 0;
+        const uintptr_t at = (uintptr_t)image.imageLoadAddress;
+        if (at && at <= pc && at > header) header = at, path = (uintptr_t)image.imageFilePath;
+    }
+    uintptr_t lo; uint64_t size;
+    if (!header || !path || !text_range(header, &lo, &size) || pc < lo || pc - lo >= size) return 0;
+    static char file[PATH_CAP];
+    size_t n = 0;
+    for (; n + 1 < sizeof file; ++n) if (!safe_read(path + n, file + n, 1) || !file[n]) break;
+    file[n] = 0;
+    /* The list changed during the read: unknown, not a guess. */
+    if (!dyld_snapshot(&again) || again.infoArray != all.infoArray || again.infoArrayCount != all.infoArrayCount ||
+        again.infoArrayChangeTimestamp != all.infoArrayChangeTimestamp || !file[0]) return 0;
+    const char *leaf = basename_of(file);
+    hos_crash_redact(name, cap, leaf, length(leaf, 512));
+    *offset = pc - header;
+    return 1;
 #else
     if (maps_fd < 0) return 0;
     static char chunk[1024], line[PATH_CAP + 128], path[PATH_CAP + 128];
@@ -792,10 +870,21 @@ void hos_crash_record_start(const char *dir, const char *version, const char *lo
 #else
     struct stat st;
     if (fstat(STDERR_FILENO, &st) == 0 && S_ISREG(st.st_mode)) {
+#ifdef __APPLE__
+        if (fcntl(STDERR_FILENO, F_GETPATH, session.log_path) == -1) session.log_path[0] = 0;
+#else
         ssize_t n = readlink("/proc/self/fd/2", session.log_path, sizeof session.log_path - 1);
         if (n > 0) session.log_path[n] = 0;
+#endif
     }
+#ifdef __APPLE__
+    struct task_dyld_info dyld;
+    mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_DYLD_INFO, (task_info_t)&dyld, &count) == KERN_SUCCESS)
+        dyld_infos = (uintptr_t)dyld.all_image_info_addr, dyld_infos_size = (size_t)dyld.all_image_info_size;
+#else
     maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+#endif
 #endif
     /* Icon launches supply the exact destination selected before log rotation,
        including the logs/ folder or the host's fallback beside the game.
