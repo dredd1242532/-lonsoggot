@@ -54,9 +54,9 @@
 #include "drawn_writeback.h"
 #include "vram_compact.h"
 #include "evict_reason.h"
+#include "wrote_regions.h"
 #include "keep_rendered.h"
 #include "target_overlap.h"
-#include "wrote_regions.h"
 #include "host_shaders/block_linear_unswizzle_2d_comp_spv.h"
 #ifndef LONGSHOT_ENV_H   // (env_on: the switches' one rule)
 #include "longshot_env.h"
