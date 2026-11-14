@@ -20,6 +20,11 @@ const char *hos_report_run_id(void) {
         int ok;
 #ifdef _WIN32
         ok = RtlGenRandom(bytes, sizeof bytes) != 0;
+#elif defined(__APPLE__)
+        /* macOS has no getrandom. getentropy(2) returns 0 with all 16 bytes from the
+           kernel generator, or -1: no partial result to loop over (at most 256 bytes
+           per call), and Fortuna does not block (random(4)). Failure keeps "unknown". */
+        ok = getentropy(bytes, sizeof bytes) == 0;
 #else
         size_t used = 0;
         while (used < sizeof bytes) {
