@@ -5,7 +5,7 @@ Its `main` takes reviewed pull requests only. You work on branches of your own f
 as on GitHub.
 
 One sign-in covers everything on magicbean.dev: Forgejo signs people in with Discord, and the team chat (Matrix) asks
-Forgejo who you are. So you sign in once, with **Sign in with Discord**, and git, the team chat and test requests all
+Forgejo who you are. So you sign in once, with **Sign in with Discord**, and git and the team chat both
 use it. The first time creates your account.
 
 ## Set up once

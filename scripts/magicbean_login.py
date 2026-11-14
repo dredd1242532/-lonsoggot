@@ -1,4 +1,4 @@
-"""One sign-in for the team's services on magicbean.dev, used by team_chat.py, test_requests.py and forge.py.
+"""One sign-in for the team's services on magicbean.dev, used by team_chat.py and forge.py.
 
 Everything there signs in through Forgejo (git.magicbean.dev), which signs people in with Discord. So there is one
 trip through the browser: Sign in with Discord on git.magicbean.dev and approve. The browser comes back to a one-time

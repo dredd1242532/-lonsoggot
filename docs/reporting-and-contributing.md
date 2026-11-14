@@ -20,10 +20,9 @@ your user name taken out. Never attach game files, keys or saves.
 
 ## Help with testing
 
-Fixes often need checking on hardware the developer doesn't have: another graphics card, Linux, a Steam Deck. The team
-posts test requests on [Discord](https://discord.gg/magicbean); pick one up, play the change, and say what you saw,
-including what didn't work. The [testing guide](https://git.magicbean.dev/MagicBeanDev/Longshot/src/branch/main/docs/test-requests.md)
-explains how.
+Fixes often need checking on hardware the developer doesn't have: another graphics card, Linux, a Steam Deck. You can
+lend your PC to the [Test Farm](test-farm.md): a small app builds approved changes on your hardware and
+posts the numbers on the pull request, with no one at the keyboard.
 
 ## Improve the documentation or the code
 

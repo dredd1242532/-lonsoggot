@@ -37,6 +37,7 @@ export default defineConfig({
       { label: 'Development', items: [
         { label: 'Progress', slug: 'progress' },
         { label: 'Contributing', slug: 'contributing' },
+        { label: 'Test Farm', slug: 'contributing/test-farm' },
         { label: 'Source code ↗', link: repository },
       ] },
       { label: 'About', items: [

@@ -9,6 +9,7 @@ export const contentPages: Record<string, string> = {
   'help': 'docs/common-issues.md',
   'help/report': 'docs/reporting-and-contributing.md',
   'contributing': 'CONTRIBUTING.md',
+  'contributing/test-farm': 'docs/test-farm.md',
 };
 
 // The other way round, for rewriting a document's links to other published documents. docs/README.md is the docs

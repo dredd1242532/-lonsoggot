@@ -31,7 +31,7 @@ it is skipped when a git sign-in is saved already (--again redoes it). Then it:
     git push, git fetch and jj git push sign in by themselves, the token renewed when it runs out;
   - adds the remote "forge" for MagicBeanDev/Longshot to the repository you run it in, unless one already points there
     (fetch from it; its main takes reviewed pull requests only, nobody pushes to it).
-That is all reading, testing and test requests need. To send changes, fork sets up pushing: it makes your fork,
+That is all reading and testing need. To send changes, fork sets up pushing: it makes your fork,
 <you>/Longshot, if you have none, and adds the remote "forge-fork" for it (push your branches there). pr create does
 the same when it hasn't been done. pr create opens a pull request from BRANCH on your fork into Longshot's main (push
 the branch to your fork first: jj git push --remote forge-fork -b BRANCH, or git push forge-fork BRANCH). git calls

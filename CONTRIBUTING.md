@@ -51,7 +51,7 @@ Five minutes, then a first build.
 
    Click **Sign in with Discord** (or sign in with the email account you made on git.magicbean.dev) and approve. That
    one sign-in covers git.magicbean.dev (git signs in by itself from then on, and the remote `forge` points at
-   Longshot), the team chat and [test requests](docs/test-requests.md). The first time creates your account.
+   Longshot) and the team chat. The first time creates your account.
    [docs/forge.md](docs/forge.md) has the details and the other commands.
 
 3. **Check the game-free tests run** (no game needed):
@@ -72,7 +72,7 @@ break.
 
 | | What |
 |---|---|
-| **Test on other hardware** | NVIDIA cards are the most tested; the README's [status table](README.md#project-status) says what works where, and the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/) lists the runs behind it. Reports from AMD and Intel cards, other drivers, other distributions and SteamOS help even when everything works. Pull requests that need a run on your hardware are queued as [test requests](docs/test-requests.md). |
+| **Test on other hardware** | NVIDIA cards are the most tested; the README's [status table](README.md#project-status) says what works where, and the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/) lists the runs behind it. Reports from AMD and Intel cards, other drivers, other distributions and SteamOS help even when everything works. Lend your PC to the [Test Farm](docs/test-farm.md) and it tests pull requests on your hardware for you. |
 | **Play further** | The tested area is the start of the game. Reaching new areas, cutscenes, menus and items finds problems nobody has seen. |
 | **Report what is broken** | Use the [issue forms](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/new/choose): game problem, install or build problem, save problem or idea. Include the version, your hardware, where you were and `longshot_log.txt`. |
 | **Send a fix** | Branch, fix, test, open a pull request from your fork ([how](#commits-and-pull-requests)). Small, focused changes are the easiest to review. |
