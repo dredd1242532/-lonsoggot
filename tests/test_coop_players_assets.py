@@ -316,6 +316,9 @@ class Assets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             entries = contract_entries()
             self.assertEqual({age for kind, age, _ in entries if kind == 'actor'}, {'Child', 'Adult'})
+            self.assertEqual({name for kind, name, _ in entries if kind == 'animation'},
+                             {'Child_animation', 'Adult_animation'})
+            self.assertEqual(len(entries), 7)
             required = {name: rom.one(path) if '*' in path else path for _, name, path in entries}
             expected = set(required.values())
             self.assertEqual(a.generate(rom, tmp), len(expected))
@@ -347,19 +350,22 @@ class Assets(unittest.TestCase):
             self.assertEqual(rom.files, before)
 
     def test_generated_primary_slot_covers_the_body_without_player_components(self):
-        rom = FakeRomfs()
-        source = rom.files['AS/Child.asb.zs']
-        with tempfile.TemporaryDirectory() as tmp:
-            a.generate(rom, tmp)
-            pack = a.sarc_read((Path(tmp) / 'Pack/Actor/CoopPuppet_Child.pack.zs').read_bytes())
-            params = a.Byml(pack['Actor/CoopPuppet_Child.engine__actor__ActorParam.bgyml']).root['Components']
-            self.assertEqual(params['ASRef'], '?AS/CoopPuppet_Child.root.asb')
-            self.assertNotIn('PlayerRef', params)
-            generated = (Path(tmp) / 'AS/CoopPuppet_Child.root.asb.zs').read_bytes()
-            expected = bytearray(source)
-            struct.pack_into('<I', expected, 0x84, 0)
-            self.assertEqual(generated, expected)  # only the primary mask binding changes
-            self.assertEqual(rom.files['AS/Child.asb.zs'], source)
+        for age in ('Child', 'Adult'):
+            with self.subTest(age=age), tempfile.TemporaryDirectory() as tmp:
+                rom = FakeRomfs()
+                source_path = 'AS/' + age + '.asb.zs'
+                source = rom.files[source_path]
+                a.generate(rom, tmp)
+                name = 'CoopPuppet_' + age
+                pack = a.sarc_read((Path(tmp) / ('Pack/Actor/' + name + '.pack.zs')).read_bytes())
+                params = a.Byml(pack['Actor/' + name + '.engine__actor__ActorParam.bgyml']).root['Components']
+                self.assertEqual(params['ASRef'], '?AS/' + name + '.root.asb')
+                self.assertNotIn('PlayerRef', params)
+                generated = (Path(tmp) / ('AS/' + name + '.root.asb.zs')).read_bytes()
+                expected = bytearray(source)
+                struct.pack_into('<I', expected, 0x84, 0)
+                self.assertEqual(generated, expected)  # only the primary mask binding changes
+                self.assertEqual(rom.files[source_path], source)
 
     def test_primary_mask_uses_named_source_index_and_refuses_unknown_layouts(self):
         source = bytearray(animation_fixture())
@@ -373,12 +379,13 @@ class Assets(unittest.TestCase):
                 a.body_animation(bad)
 
     def test_missing_full_body_mask_refuses_before_writing_assets(self):
-        rom = FakeRomfs()
-        rom.files['AS/Child.asb.zs'] = animation_fixture().replace(b'All_PB', b'Absent')
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(ValueError, 'full-body mask'):
-                a.generate(rom, tmp)
-            self.assertFalse(any(Path(tmp).rglob('*.zs')))
+        for age in ('Child', 'Adult'):
+            with self.subTest(age=age), tempfile.TemporaryDirectory() as tmp:
+                rom = FakeRomfs()
+                rom.files['AS/' + age + '.asb.zs'] = animation_fixture().replace(b'All_PB', b'Absent')
+                with self.assertRaisesRegex(ValueError, 'full-body mask'):
+                    a.generate(rom, tmp)
+                self.assertFalse(any(Path(tmp).rglob('*.zs')))
 
 
     def test_missing_animation_component_refuses_generation(self):
@@ -494,12 +501,12 @@ class Loader(unittest.TestCase):
             wrong = original.with_name(original.name + '.unrelated')
             original.rename(wrong)
             try:
-                # Both the child's count and the old child+adult count must refuse.
+                # Neither the exact total nor unrelated extra files can hide a missing requirement.
                 for filler in (False, True):
-                    with self.subTest(missing=name, legacy_fifth=filler):
-                        extra = self.assets / 'unrelated-fifth-file.bin'
+                    with self.subTest(missing=name, extra_file=filler):
+                        extra = self.assets / 'unrelated-extra-file.bin'
                         if filler:
-                            extra.write_bytes(b'authored unrelated file, not an adult actor')
+                            extra.write_bytes(b'authored unrelated file, not a required asset')
                         try:
                             self.assert_ready(0)
                         finally:

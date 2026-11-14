@@ -937,6 +937,11 @@ the upper-body pose. Other partial slots, commands and clips remain unchanged. T
 for standing and movement, not full controller-driven upper-body, face, fingers, IK or equipment parity. The source
 graph is never changed, and the generated graph has its own resource name so it cannot alter the local player.
 
+Each age requires its own generated graph as well as its actor pack: two actor/animation pairs and three shared
+tables. The full-body binding is checked from that age's local source, never copied from the other age.
+Authored generation and loader checks cover both ages; adult standing, walking and equipment composition still
+require separate game evidence and are not established by the child pose proof.
+
 `tests/test_coop_players_assets.py --cc gcc` runs authored generation through the unchanged production loader over
 real temporary directories (native Win32 file calls on Windows, the production POSIX file calls on Linux).
 `--mods-revision COMMIT` selects that commit's `host/mods.c` without altering it; `--mods-source PATH` selects a saved
