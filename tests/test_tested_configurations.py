@@ -269,7 +269,7 @@ class Fragments(unittest.TestCase):
 
     def test_cli_ascii_pipe_emits_the_arrow_containing_source_as_utf8(self):
         # A redirected TextIOWrapper stand-in, not a native Windows runtime test.
-        with io.TextIOWrapper(io.BytesIO(), encoding="ascii") as pipe:
+        with io.TextIOWrapper(io.BytesIO(), encoding="ascii", newline="\n") as pipe:
             code, _, errors = self.invoke([], stream=pipe)
             pipe.flush()
             self.assertEqual((code, errors), (0, ""))
