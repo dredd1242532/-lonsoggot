@@ -652,5 +652,18 @@ See [control.md](control.md) for the fields, sampling, bounds and examples.
 | `tests/` | the game-free checks, all run by `tests/run_all.py` |
 | `third_party/` | a64-kit (with Hookshot's changes, marked `(hookshot)`, and Longshot's, `(longshot)`: its PROVENANCE.md), libopus, zbic (Atmosphere's zstd with ZBIC, for unpacking only), SDL2's licence, Dear ImGui and its Vulkan backend, zstd's decoder, the Libertinus fonts |
 
+The POSIX layer's macOS wait subset is in `host/posix/darwin_wait.c` (macOS 14.4 or newer):
+public address waits, uptime deadlines and initialized SRW locks. `python -I -B tests/test_darwin_waits.py`
+compiles the actual wait functions and runs them without a game or device; on Apple Silicon,
+`--arch arm64 --arch x86_64` also checks the Rosetta route when Rosetta is installed. QPC, ticks and
+deadlines use awake uptime, like Linux's `CLOCK_MONOTONIC`; civil FILETIME remains realtime.
+`WakeByAddressSingle` broadcasts, as this layer already does on Linux; the Darwin address sequence
+buckets can also cause unrelated spurious wakes, so callers must recheck their predicates.
+The layer's relative-only waitable timers still ignore the wait's millisecond limit, periodic/APC
+requests and timer flags; polling wait-all still consumes ready objects before all are ready.
+This is not a complete macOS host port: thread, memory, fiber and fault-context APIs remain Linux-specific.
+The macOS build must add `darwin_wait.c` beside `win32_posix.c` in both host and renderer source lists;
+that build-script integration is separate from this wait change.
+
 License: GPL-3.0-or-later, as mkw-recomp: a64-kit's translator is suyu's (GPL-2.0-or-later) and Eden's code is
 GPL-3.0.

@@ -25,6 +25,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
+#if defined(__APPLE__)
+#include "darwin_wait.h"
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -150,14 +153,29 @@ void SetLastError(DWORD e);
 #define _ReadWriteBarrier() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 #define YieldProcessor() __builtin_ia32_pause()
 
+#if defined(__APPLE__)
+/* SRW storage can start at zero, but the native lock must be initialized before use. */
+typedef DarwinSRWLock SRWLOCK, *PSRWLOCK;
+#define SRWLOCK_INIT DARWIN_SRWLOCK_INIT
+#else
 /* ---- locks: SRW locks are POSIX rwlocks (zero-initialised is valid, as on Windows); condition variables a futex
    word, so they wait with either an SRW lock or a critical section ---- */
 typedef pthread_rwlock_t SRWLOCK, *PSRWLOCK;
 #define SRWLOCK_INIT PTHREAD_RWLOCK_INITIALIZER
+#endif
 typedef struct { volatile uint32_t seq; } CONDITION_VARIABLE, *PCONDITION_VARIABLE;
 #define CONDITION_VARIABLE_INIT {0}
 #define CONDITION_VARIABLE_LOCKMODE_SHARED 0x1
 typedef pthread_mutex_t CRITICAL_SECTION, *LPCRITICAL_SECTION;
+#if defined(__APPLE__)
+static inline void InitializeSRWLock(SRWLOCK *l) { darwin_srw_init(l); }
+static inline void AcquireSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_wrlock(darwin_srw_native(l)); }
+static inline void ReleaseSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
+static inline void AcquireSRWLockShared(SRWLOCK *l) { pthread_rwlock_rdlock(darwin_srw_native(l)); }
+static inline void ReleaseSRWLockShared(SRWLOCK *l) { pthread_rwlock_unlock(&l->lock); }
+static inline BOOL TryAcquireSRWLockExclusive(SRWLOCK *l) { return darwin_srw_trylock(l, 0); }
+static inline BOOL TryAcquireSRWLockShared(SRWLOCK *l) { return darwin_srw_trylock(l, 1); }
+#else
 static inline void InitializeSRWLock(SRWLOCK *l) { pthread_rwlock_init(l, NULL); }
 static inline void AcquireSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_wrlock(l); }
 static inline void ReleaseSRWLockExclusive(SRWLOCK *l) { pthread_rwlock_unlock(l); }
@@ -165,6 +183,7 @@ static inline void AcquireSRWLockShared(SRWLOCK *l) { pthread_rwlock_rdlock(l); 
 static inline void ReleaseSRWLockShared(SRWLOCK *l) { pthread_rwlock_unlock(l); }
 static inline BOOL TryAcquireSRWLockExclusive(SRWLOCK *l) { return pthread_rwlock_trywrlock(l) == 0; }
 static inline BOOL TryAcquireSRWLockShared(SRWLOCK *l) { return pthread_rwlock_tryrdlock(l) == 0; }
+#endif
 void InitializeCriticalSection(CRITICAL_SECTION *cs);
 static inline BOOL InitializeCriticalSectionAndSpinCount(CRITICAL_SECTION *cs, DWORD n) { (void)n; InitializeCriticalSection(cs); return TRUE; }
 static inline void EnterCriticalSection(CRITICAL_SECTION *cs) { pthread_mutex_lock(cs); }
@@ -183,15 +202,23 @@ void WakeByAddressAll(void *addr);
 /* ---- time ---- */
 static inline BOOL QueryPerformanceFrequency(LARGE_INTEGER *f) { f->QuadPart = 1000000000LL; return TRUE; }
 static inline BOOL QueryPerformanceCounter(LARGE_INTEGER *c) {
+#if defined(__APPLE__)
+    c->QuadPart = darwin_now_ns();
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     c->QuadPart = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+#endif
     return TRUE;
 }
 static inline ULONGLONG GetTickCount64(void) {
+#if defined(__APPLE__)
+    return (ULONGLONG)(darwin_now_ns() / 1000000LL);
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (ULONGLONG)ts.tv_sec * 1000 + (ULONGLONG)ts.tv_nsec / 1000000;
+#endif
 }
 static inline DWORD GetTickCount(void) { return (DWORD)GetTickCount64(); }
 void Sleep(DWORD ms);
