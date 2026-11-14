@@ -60,7 +60,7 @@ def check_source():
         raise SystemExit("vk_memory.cpp: gpu_buffer_bind() no longer serves a binding past every game pool from the mirror first")
     if "sparse_want(" in slow[past:at]:
         raise SystemExit("vk_memory.cpp: gpu_buffer_bind() wants blocks no game pool is in")
-    need(block(mem, "bool sparse_gaps_outside_pools("), ["sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end())",
+    need(block(mem, "bool sparse_gaps_outside_pools("), ["sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end(), live)",
                                                        "if (!block_has(p, i) && i - a < live.size() && live[i - a]) return false;"],
          "sparse_gaps_outside_pools()")
     need(slow[at:slow.index("mirror_sync(*p);")], ["sparse_want(*p, off, size);", "note_direct_write(*p, off, size)",
@@ -70,9 +70,13 @@ def check_source():
     grow = block(mem, "void sparse_grow_all(const std::vector<Pool*>& pools) {")
     need(grow, ["sparse_bind_infos(infos)", "full_barrier(up,", "vkCmdCopyBuffer(up, p.buffer, p.mirror", "cap_pages_over(p,",
                 "sparse_table(p, ma, i, i + 1)", "shadow_forget(p, c.dstOffset, c.size)", "p.released[i] = nullptr;", "++p.release_gen[i];",
-                "mirror_bytes + taking + b > mirror_budget()", "p.refill.clear();"], "sparse_grow_all()")
+                "mirror_bytes + taking + b > mirror_budget()", "p.refill.clear();", "late_fix_emit();",
+                "vkCmdCopyBuffer(up, buf, p.mirror"], "sparse_grow_all()")
     if not grow.index("vkCmdCopyBuffer(up, p.buffer, p.mirror") < grow.index("sparse_table(p, ma, i, i + 1)"):
         raise SystemExit("vk_memory.cpp: sparse_grow_all() points the page table at blocks before it fills them")
+    # (as mirror_sync and mirror_make: the late pages' fix recorded before anything copies out of a capture's buffer)
+    if not grow.index("cap_pages_over(p,") < grow.index("late_fix_emit(") < grow.index("vkCmdCopyBuffer(up, buf, p.mirror"):
+        raise SystemExit("vk_memory.cpp: sparse_grow_all() copies out of a capture's buffer before the late pages' fix")
     rel = block(mem, "void sparse_release() {")
     need(rel, ["guest_pages_set(a, e, p.address + (a - p.lo))", "dead_blocks.push_back(",
                "std::max(mem_rec_value, p.last_value)", "|| p.wanted[i]",
@@ -85,7 +89,8 @@ def check_source():
     need(block(mem, "void sparse_reap() {"), ["sparse_live.erase(dead_sparse.front().buffer)", "destroy_sparse_buffer(",
                                               "dead_sparse.front().value <= mem_completed"], "sparse_reap()'s freed mirrors")
     need(block(mem, "void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {"),
-         ["if (p->sparse) {   // (longshot: never from a sparse mirror's block with no memory"], "memory_end_submission()")
+         ["if (p->sparse) {   // (longshot: never from a sparse mirror's block with no memory",
+          "if (!sparse_gaps_outside_pools(*p, c.src, c.size)) {"], "memory_end_submission()")
     need(block(mem, "void retire_pool(std::map<uint64_t, Pool>::iterator it) {"), ["std::erase(sparse_wanted, old)"], "retire_pool()")
     begin = block(mem, "void memory_begin_submission() {")
     need(begin, ["if (mirror_sparse_on()) {", "sparse_release();", "sparse_want_live();", "sparse_grow_all(grow);", "sparse_reap();"],

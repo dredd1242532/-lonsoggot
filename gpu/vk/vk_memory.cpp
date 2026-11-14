@@ -3357,7 +3357,8 @@ bool sparse_gaps_outside_pools(const Pool& p, uint64_t off, uint64_t size) {
     // (the blocks [a, e) within the pool, block-aligned from p.lo as the mirror's: live[i - a] is block i's)
     const uint64_t lo = p.lo + (uint64_t)a * b, hi = std::min(p.hi, p.lo + (uint64_t)e * b);
     if (hi <= lo) return true;
-    const std::vector<uint8_t> live = sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end());
+    thread_local std::vector<uint8_t> live;   // (kept: this runs at each such binding, and at write-backs that reach one)
+    sparse_mirror::live_blocks(lo, hi, b, guest_pools.begin(), guest_pools.end(), live);
     for (size_t i = a; i < e; i++)
         if (!block_has(p, i) && i - a < live.size() && live[i - a]) return false;
     return true;
@@ -4948,6 +4949,7 @@ void sparse_grow_all(const std::vector<Pool*>& pools) {
             std::map<VkBuffer, std::vector<VkBufferCopy>> over;
             for (const VkBufferCopy& c : fill) cap_pages_over(p, p.lo + c.dstOffset, p.lo + c.dstOffset + c.size, over);
             if (!over.empty()) {
+                late_fix_emit();   // (the late pages' fix, before the copies out of a capture's buffer below: as mirror_make)
                 VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};   // (after the fill)
                 mb.srcStageMask = mb.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
                 mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
@@ -5608,10 +5610,18 @@ void memory_end_submission(VkCommandBuffer cmd, uint64_t part) {
                 for (const auto& c : in) before += c.size;
                 for (const auto& c : out) after += c.size;
                 if (after != before) {
+                    // (expected where those blocks are all outside every game pool, a binding served from the mirror past a
+                    // pool's end: nothing of the game's there. Told only where a game pool is: not expected)
+                    bool in_pool = false;
+                    for (const auto& c : in)
+                        if (!sparse_gaps_outside_pools(*p, c.src, c.size)) {
+                            in_pool = true;
+                            break;
+                        }
                     static int logged;
-                    if (logged++ < 8)
-                        logf("vk: sparse mirror of pool %#llx: %llu bytes of a write-back reached blocks with no memory: left out",
-                             (unsigned long long)p->lo, (unsigned long long)(before - after));
+                    if (in_pool && logged++ < 8)
+                        logf("vk: sparse mirror of pool %#llx: %llu bytes of a write-back reached blocks with no memory where a game "
+                             "pool is: left out", (unsigned long long)p->lo, (unsigned long long)(before - after));
                     runs.clear();
                     for (const auto& c : out) runs.push_back({c.src, c.dst, c.size});
                 }

@@ -19,11 +19,11 @@
 namespace sparse_mirror {
 
 /// The blocks of a mirror of [lo, hi), `block` bytes each, that any of the game's pools [first, last) reaches (sorted by
-/// lo, as guest_pools; an earlier pool may reach past later ones): 1, the others 0
+/// lo, as guest_pools; an earlier pool may reach past later ones): 1, the others 0. Into `live`, whose storage is kept
 template <class It>
-std::vector<uint8_t> live_blocks(uint64_t lo, uint64_t hi, uint64_t block, It first, It last) {
-    std::vector<uint8_t> live(hi > lo && block ? (size_t)((hi - lo + block - 1) / block) : 0, 0);
-    if (live.empty()) return live;
+void live_blocks(uint64_t lo, uint64_t hi, uint64_t block, It first, It last, std::vector<uint8_t>& live) {
+    live.assign(hi > lo && block ? (size_t)((hi - lo + block - 1) / block) : 0, 0);
+    if (live.empty()) return;
     // (every pool that starts below hi: one that starts far below lo can still reach into it)
     const It end = std::upper_bound(first, last, hi - 1, [](uint64_t a, const auto& p) { return a < p.lo; });
     for (It it = first; it != end; ++it) {
@@ -31,6 +31,12 @@ std::vector<uint8_t> live_blocks(uint64_t lo, uint64_t hi, uint64_t block, It fi
         const uint64_t a = std::max(it->lo, lo) - lo, b = std::min(it->hi, hi) - lo;
         for (uint64_t i = a / block; i < (b + block - 1) / block; i++) live[(size_t)i] = 1;
     }
+}
+/// The same, returned
+template <class It>
+std::vector<uint8_t> live_blocks(uint64_t lo, uint64_t hi, uint64_t block, It first, It last) {
+    std::vector<uint8_t> live;
+    live_blocks(lo, hi, block, first, last, live);
     return live;
 }
 
