@@ -1229,9 +1229,9 @@ Row rows[] = {
      "With Native, how the game's scene meets the peak brightness. Vanilla: the game's own curve. PsychoV35: RenoDX's "
      "tone mapper, the same mid grey with highlights that roll off into the peak and keep their colour.",
      nullptr, false, true},
-    {TAB_GRAPHICS, "Detail", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GRAPHICS, "Colour filter", &opts.colour_filter, 0, 3, 1, tx_colour_filter,
-     "Colour-blindness correction, not simulation. Game image only. Works in SDR and Expanded HDR; disabled in Native HDR. Changes at once.", nullptr, false, true},
+     "Colour-blindness correction, not simulation. Game image only. Works in SDR and Expanded HDR; bypassed only while showing Native HDR. Changes at once.", nullptr, false, true},
+    {TAB_GRAPHICS, "Detail", nullptr, 0, 0, 0, nullptr, nullptr, nullptr, false, true, -1, true},
     {TAB_GRAPHICS, "Anisotropic filtering", &opts.anisotropy, 0, 4, 1, tx_anisotropy,
      "Keeps textures sharp on surfaces seen at a slant, such as the ground ahead: higher is sharper in the distance, for a "
      "little GPU time. Game's is the console's own (1x or 2x).", nullptr, false, true},

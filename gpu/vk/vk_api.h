@@ -54,8 +54,6 @@ enum { HOS_OPT_SKIP_OPENING = 52 };
 /* (HOS_OPT_FPS_CAP, 53: the Game frame rate cap row, host/nn_vi.c fps_refresh reads it at each present: 0 the console's 60, then
    90, 120, 144, 165, 240, 6 Uncapped; a change applies in play) */
 enum { HOS_OPT_FPS_CAP = 53 };
-/* Graphics: live colour correction, 0 Off, 1 Protanopia, 2 Deuteranopia, 3 Tritanopia. */
-enum { HOS_OPT_COLOUR_FILTER = 56 };
 /* Damage taken: 0 Half, 1 Normal (unchanged), 2 Double, 3 Quadruple. */
 enum { HOS_OPT_DAMAGE_TAKEN = 55 };
 

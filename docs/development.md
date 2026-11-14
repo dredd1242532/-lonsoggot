@@ -578,6 +578,7 @@ number is not the obvious one:
 | `resolution` | 0 Auto, 1 100%, 2 75%, 3 67%, 4 50% |
 | `output_res` | A size, `<width>x<height>`: 2048x1152 (the game's own), one of the screen's display modes (the menu's Aspect ratio and Output resolution rows), or any other with each side a multiple of 8 (rounded down), at least 640x360, at most 5120x2880's pixels, 5:4 to 48:9; anything else is the game's own. A size more than 1 % off 16:9 sets the picture's shape (`host/hos_wide_size.h` `hos_output_own_shape`). The Aspect ratio row saves `ultrawide=` 1 for the monitor's own shape, else 0; another shape is `output_res`'s own. The numbers saved before (0 2048x1152, 1 2560x1440, 2 3840x2160, 3 1920x1080, 4 5120x1440, 5 5120x2880) are still read |
 | `upscaling` | 0 Off, 1 Catmull-Rom, 2 Lanczos |
+| `colour_filter` | 0 Off (default), 1 Protanopia, 2 Deuteranopia, 3 Tritanopia. Live final-image correction before host overlays and Expanded HDR encoding; only actual Native HDR/PQ bypasses it. Native selected on an SDR display still permits correction. Independent of quality presets |
 | `compile_shaders` | No menu row: the Builder's, `make_game.py --compile-shaders`'s and the launcher's Compile shaders, read by a preparation (`vk_draw.cpp` `compile_all`). 0 Most (the default), 1 All (the predicted pipelines too). A file with only this line still makes the game's first start a first start |
 | `sharpness`, `rumble_strength`, `motion_sensitivity_x`, `motion_sensitivity_y` | percent |
 | `mouse_sensitivity` | hundredths: 100 is 1.00 |

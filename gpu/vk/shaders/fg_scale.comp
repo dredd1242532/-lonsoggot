@@ -87,7 +87,9 @@ float dither(ivec2 g) { return (fract(52.9829189 * fract(0.06711056 * float(g.x)
 // Correction follows scaling/sharpening, before Expanded HDR encoding and host overlays.
 vec3 accessible(vec3 c) {
     // Keep the old shader path exact with neutral settings, even while scaling is active.
-    if (pc.colour[0] == 1.0 && pc.colour[4] == 1.0 && pc.colour[8] == 1.0) return c;
+    if (pc.colour[0] == 1.0 && pc.colour[1] == 0.0 && pc.colour[2] == 0.0 &&
+        pc.colour[3] == 0.0 && pc.colour[4] == 1.0 && pc.colour[5] == 0.0 &&
+        pc.colour[6] == 0.0 && pc.colour[7] == 0.0 && pc.colour[8] == 1.0) return c;
     vec3 linear = mix(c / 12.92, pow(max((c + 0.055) / 1.055, vec3(0.0)), vec3(2.4)), greaterThan(c, vec3(0.04045)));
     linear = vec3(dot(vec3(pc.colour[0], pc.colour[1], pc.colour[2]), linear),
                   dot(vec3(pc.colour[3], pc.colour[4], pc.colour[5]), linear),

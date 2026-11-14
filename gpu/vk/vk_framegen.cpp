@@ -19,6 +19,7 @@
 
 #include <cmath>
 
+#include "colour_filter.h"
 #include "vk_framegen.h"
 #include "vk_antilag.h"   // (AMD Anti-Lag 2: which game frame a set shows, antilag_frame / antilag_present_frame)
 #include "vk_dlss.h"   // (NVIDIA DLSS Frame Generation through NGX: dlss_fg_frames)
@@ -34,7 +35,6 @@
 #include "shaders/fg_luma_comp_spv.h"
 #include "shaders/fg_median_comp_spv.h"
 #include "shaders/fg_scale_comp_spv.h"
-#include "colour_filter.h"
 #include "shaders/fg_scale_pq_comp_spv.h"   // (fg_scale.comp with FG_SCALE_PQ: an RGB10A2 destination)
 #include "shaders/fg_synth_comp_spv.h"
 #include "shaders/hdr_encode_comp_spv.h"
@@ -594,8 +594,8 @@ bool wide_sides_possible() { return wide_possible.load(std::memory_order_relaxed
 VkImage framegen_scale(VkCommandBuffer cmd, VkImageView src, VkImage image, uint32_t sw, uint32_t sh, const int crop[4], uint32_t dw, uint32_t dh,
                        bool pq) {
     const WideSides wide = wide_now.load(std::memory_order_relaxed);   // (wide_sides_tick, each present)
-    // Native HDR supplies PQ codes, not sRGB. Leave that path unchanged, including its SDR fallback.
-    const int colour = opts.hdr == 2 ? 0 : opts.colour_filter;
+    // PQ codes are not sRGB. Native selected on an SDR display still needs correction.
+    const int colour = pq ? 0 : opts.colour_filter;
     if (!opts.upscale && !opts.sharpness && !wide.side && !colour) return VK_NULL_HANDLE;
     if (!src || !image || !sw || !sh || !dw || !dh) return VK_NULL_HANDLE;
     const PresentSourceRect source = present_source_rect(sw, sh, crop);

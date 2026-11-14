@@ -539,6 +539,11 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Anisotropic filtering** keeps textures sharp on surfaces seen at a slant: the paths and floors ahead of Link. The game
   asks for 1x or 2x, which at a PC's resolutions smears the ground a few metres off; 16x costs little on most cards, and
   Game's is the console's own. `RX_VK_ANISO=<n>` sets it for one run (0: the game's).
+- **Colour filter** (after the HDR rows) corrects the game picture and HUD for Protanopia, Deuteranopia or
+  Tritanopia; Off keeps the original picture. It is correction, not simulation, and cannot replace non-colour cues.
+  It works in SDR and Expanded HDR. Only an actual Native HDR/PQ picture bypasses it; selecting Native on an SDR
+  display still permits correction. The saved option is `colour_filter=0` (Off), `1` (Protanopia), `2`
+  (Deuteranopia) or `3` (Tritanopia), independent of quality presets.
 - **Upscaler Off** (`dlss=6` in `longshot_options.ini`) is for slow GPUs and for measuring: no DLSS, no FSR, and not the
   game's own network either, which otherwise runs on every frame (at the game's usual 3/4 share it scales the 3D up and
   smooths its edges; at 100% a pass of the same kind still smooths them). In its place the 3D is stretched to the output
