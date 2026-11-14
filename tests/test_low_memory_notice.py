@@ -5,8 +5,13 @@ exercise the exact 7639 MiB RAM + 32767 MiB swap report, boundaries, query failu
 unit conversion and headless behavior. Windows retains its RAM + page-file rule.
 On Linux, a second build selects the production Windows policy after the host
 headers are included; its memory query and UI remain spies, not Windows runtime.
+On macOS, the real <sys/sysctl.h> struct xsw_usage and an authored sysctlbyname
+report hw.memsize and vm.swapusage in bytes: the same cases under macOS's
+physical-RAM rule, its dynamic-swap wording and boot log, byte-to-MiB truncation,
+and both queries' failure diagnostics. --arch builds and runs one macOS
+architecture (x86_64 under Rosetta).
 
-    python -I -B tests/test_low_memory_notice.py [--cc gcc] [--source host/hos_main.c]
+    python -I -B tests/test_low_memory_notice.py [--cc gcc] [--source host/hos_main.c] [--arch arm64|x86_64]
 """
 import argparse
 from pathlib import Path
@@ -67,6 +72,36 @@ static int GlobalMemoryStatusEx(MEMORYSTATUSEX *m) {
     m->ullTotalPageFile = (ram_mb + swap_mb) << 20;
     return !query_failed;
 }
+#elif defined(__APPLE__)
+/* macOS reports bytes through sysctl. The real header gives struct xsw_usage's
+   layout; the spy accepts only the reads production should make. */
+#include <errno.h>
+#include <stdint.h>
+#include <sys/sysctl.h>
+static unsigned long long byte_slack;   /* (bytes short of the next MiB: the units check) */
+static int bad_queries;
+static char logs[4096];   /* (every boot line of one notice, not only the last) */
+static int spy_sysctlbyname(const char *name, void *old, size_t *oldlen, void *new_value, size_t new_len) {
+    if (!name || !old || !oldlen || new_value || new_len) return ++bad_queries, errno = EINVAL, -1;
+    if (!strcmp(name, "hw.memsize") && *oldlen == sizeof(uint64_t)) {
+        if (query_failed == 1) return errno = EPERM, -1;
+        const uint64_t bytes = (ram_mb << 20) + byte_slack;
+        memcpy(old, &bytes, sizeof bytes);
+        return 0;
+    }
+    if (!strcmp(name, "vm.swapusage") && *oldlen == sizeof(struct xsw_usage)) {
+        if (query_failed == 2) return errno = ENOMEM, -1;
+        struct xsw_usage usage;
+        memset(&usage, 0, sizeof usage);
+        usage.xsu_total = (swap_mb << 20) + byte_slack;
+        usage.xsu_used = usage.xsu_total / 4;   /* (distinct from the total: the notice reports allocated swap) */
+        usage.xsu_avail = usage.xsu_total - usage.xsu_used;
+        memcpy(old, &usage, sizeof usage);
+        return 0;
+    }
+    return ++bad_queries, errno = ENOENT, -1;
+}
+#define sysctlbyname spy_sysctlbyname
 #else
 struct sysinfo { unsigned long totalram, totalswap; unsigned mem_unit; };
 static int sysinfo(struct sysinfo *m) {
@@ -83,6 +118,9 @@ static void hos_log(const char *fmt, ...) {
     va_start(a, fmt);
     vsnprintf(last_log, sizeof last_log, fmt, a);
     va_end(a);
+#if defined(__APPLE__)
+    snprintf(logs + strlen(logs), sizeof logs - strlen(logs), "%s\n", last_log);
+#endif
 }
 static int MessageBoxA(void *w, const char *text, const char *caption, unsigned type) {
     (void)w, (void)caption, (void)type;
@@ -110,6 +148,8 @@ int main(void) {
         ram_mb = cases[i][0], swap_mb = cases[i][1];
 #if defined(__linux__) && !defined(_WIN32)
         const int expected = ram_mb < 10240;
+#elif defined(__APPLE__)
+        const int expected = ram_mb < 10240;   /* (macOS too: physical RAM alone; swap is allocated as needed) */
 #else
         const int expected = ram_mb + swap_mb < 10240;
 #endif
@@ -120,6 +160,12 @@ int main(void) {
             CHECK(strstr(text, "The game starts anyway."), "Linux warning does not explain that startup continues");
             CHECK(strstr(text, "unresponsive") && strstr(text, "not a replacement for RAM"), "missing paging caution");
             CHECK(strstr(text, "16 GB") && strstr(text, "13 GiB"), "missing RAM guidance");
+#elif defined(__APPLE__)
+            CHECK(strstr(text, "The game starts anyway."), "macOS warning does not explain that startup continues");
+            CHECK(strstr(text, "This Mac has") && strstr(text, "allocated swap") &&
+                  strstr(text, "not a fixed memory limit") && strstr(text, "unresponsive"), "missing macOS swap caution");
+            CHECK(strstr(text, "16 GB") && strstr(text, "13 GiB"), "missing RAM guidance");
+            CHECK(!strstr(text, "the page file on Windows") && !strstr(text, "This PC"), "Windows or Linux guidance in the macOS warning");
 #else
             CHECK(strstr(text, "It starts now anyway."), "legacy warning does not explain that startup continues");
             CHECK(strstr(text, "the page file on Windows") && strstr(text, "two together"), "missing commit-limit guidance");
@@ -134,14 +180,24 @@ int main(void) {
 #ifndef _WIN32
             sdl_loads = 0;
 #endif
+#if defined(__APPLE__)
+            logs[0] = 0;
+#endif
             headless(quiet ? "1" : "0");
             memory_notice();
+#if defined(__APPLE__)
+            CHECK(!bad_queries, "production asked sysctl for another name or size, or wrote to it");
+#endif
             CHECK(boxes == (expected && !quiet), "wrong message-box count");
             CHECK((strstr(last_log, "LOW MEMORY") != NULL) == expected, "wrong boot log decision");
             CHECK(strstr(last_log, "MB of memory") && strstr(last_log, "MB of swap"), "missing exact boot counts");
             if (boxes) CHECK(!strcmp(box_text, text), "message differs from the warning text");
 #ifndef _WIN32
             CHECK(sdl_loads == boxes, "SDL loaded without showing a warning");
+#endif
+#if defined(__APPLE__)
+            CHECK(strstr(logs, "boot: macOS manages swap dynamically; the swap figure is currently allocated, not a fixed commit limit\n"),
+                  "macOS boot log does not qualify the allocated swap");
 #endif
         }
         printf("PASS: %llu MiB RAM + %llu MiB swap, warning=%d, visible/headless\n", ram_mb, swap_mb, expected);
@@ -150,11 +206,29 @@ int main(void) {
 #ifndef _WIN32
     mem_unit = 4096;
 #endif
+#if defined(__APPLE__)
+    byte_slack = (1ull << 20) - 1;
+#endif
     headless("1"); memory_notice();
     CHECK(strstr(last_log, "7639 MB of memory, 32767 MB of swap"), "memory-query units changed");
     query_failed = 1; last_log[0] = 0; boxes = 0;
+#if defined(__APPLE__)
+    logs[0] = 0;
+#endif
     memory_notice();
+#if defined(__APPLE__)
+    /* (macOS logs why it cannot tell, and still invents no warning) */
+    CHECK(strstr(logs, "boot: cannot query physical RAM on macOS (") && strstr(logs, strerror(EPERM)), "failed RAM query: no diagnostic");
+    CHECK(!strstr(logs, "LOW MEMORY") && !strstr(logs, "MB of memory") && !boxes, "failed RAM query invents a warning");
+    query_failed = 2; logs[0] = 0; boxes = 0, sdl_loads = 0;
+    headless("0"); memory_notice();
+    CHECK(strstr(logs, "boot: 7639 MB of RAM; allocated swap is unavailable (") && strstr(logs, strerror(ENOMEM)),
+          "failed swap query: no diagnostic with the RAM it read");
+    CHECK(!strstr(logs, "LOW MEMORY") && !boxes && !sdl_loads, "failed swap query: the notice went on without its swap figure");
+    CHECK(!bad_queries, "production asked sysctl for another name or size, or wrote to it");
+#else
     CHECK(!last_log[0] && !boxes, "failed memory query invents a warning");
+#endif
     puts("PASS: memory-query units and failure");
     return 0;
 }
@@ -165,7 +239,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", default="gcc")
     parser.add_argument("--source", type=Path, default=ROOT / "host" / "hos_main.c")
+    parser.add_argument("--arch", choices=("arm64", "x86_64"))
     args = parser.parse_args()
+    if args.arch and sys.platform != "darwin":
+        parser.error("--arch is macOS-only")
     src = args.source.read_text(encoding="utf-8")
     boot = src.index('hos_log("boot: image %zu MB')
     call = src.find("memory_notice();", boot)
@@ -173,6 +250,8 @@ def main():
         raise SystemExit("FAIL: the game does not check its memory at boot")
     if "#include <sys/sysinfo.h>" not in src:
         raise SystemExit("FAIL: host/hos_main.c reads Linux's memory without <sys/sysinfo.h>")
+    if "#include <sys/sysctl.h>" not in src:
+        raise SystemExit("FAIL: host/hos_main.c reads macOS's memory without <sys/sysctl.h>")
     define = next(line for line in src.splitlines() if line.startswith("#define HOS_MEMORY_NEEDED_MB"))
     code = "\n".join((define, block(src, "static int memory_notice_text("), block(src, "static void memory_notice(void) {")))
     variants = [("native", [])]
@@ -184,12 +263,17 @@ def main():
             c.write_text(FIXTURE.replace("@@CODE@@", code), encoding="utf-8")
             command = [args.cc, "-x", "c", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-O1", *flags,
                        "-I", str(ROOT / "gpu" / "vk" / "compat"), str(c), "-o", str(exe)]
+            if sys.platform == "darwin":
+                command += ["-mmacosx-version-min=14.4"]
+                if args.arch:
+                    command += ["-arch", args.arch]
             r = subprocess.run(command, capture_output=True, text=True, timeout=120)
             if r.returncode:
                 print(r.stdout + r.stderr)
                 raise SystemExit("the fixture did not build: " + label)
-            r = subprocess.run([str(exe)], capture_output=True, text=True, timeout=30)
-            print(label + (" (not Windows execution)" if flags else "") + ":")
+            run = (["arch", "-" + args.arch] if args.arch else []) + [str(exe)]
+            r = subprocess.run(run, capture_output=True, text=True, timeout=30)
+            print(label + (" (not Windows execution)" if flags else "") + (" [%s]" % args.arch if args.arch else "") + ":")
             print(r.stdout, end="")
             if r.returncode:
                 raise SystemExit("FAIL: memory_notice " + label)
