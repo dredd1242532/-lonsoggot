@@ -299,8 +299,8 @@ class MetadataContracts(PackageFixture):
         with mock.patch.object(darwin_build, "ffmpeg_flags", return_value=(["-I" + str(inc)], ["-L" + str(lib)] + ["-l" + n for n in names])), \
                 mock.patch.object(darwin_build, "sdl_flags", return_value=([], [str(sdl)])), \
                 mock.patch.dict(os.environ, {"LONGSHOT_MOLTENVK": str(molten), "LONGSHOT_SDL2": str(sdl), "LONGSHOT_SDL3": ""}), \
-                mock.patch.object(darwin_build.toolchain, "architecture", return_value="arm64"), \
-                mock.patch.object(darwin_build.toolchain, "darwin_sdk", return_value=str(self.sdk)), \
+                mock.patch.object(darwin_build.darwin_toolchain, "architecture", return_value="arm64"), \
+                mock.patch.object(darwin_build.darwin_toolchain, "darwin_sdk", return_value=str(self.sdk)), \
                 mock.patch.object(darwin_build.toolchain, "need", side_effect=lambda p: p):
             missing = []
             self.assertIsNone(darwin_build.dependencies(names, missing=missing))
@@ -387,8 +387,8 @@ class MetadataContracts(PackageFixture):
         with mock.patch.object(darwin_build, "ffmpeg_flags", return_value=(["-I" + str(inc)], ["-L" + str(lib)] + ["-l" + n for n in names])), \
                 mock.patch.object(darwin_build, "sdl_flags", return_value=([], [str(sdl)])), \
                 mock.patch.dict(os.environ, {"LONGSHOT_MOLTENVK": str(molten), "LONGSHOT_SDL2": str(sdl), "LONGSHOT_SDL3": ""}), \
-                mock.patch.object(darwin_build.toolchain, "architecture", return_value="arm64"), \
-                mock.patch.object(darwin_build.toolchain, "darwin_sdk", return_value=str(self.sdk)), \
+                mock.patch.object(darwin_build.darwin_toolchain, "architecture", return_value="arm64"), \
+                mock.patch.object(darwin_build.darwin_toolchain, "darwin_sdk", return_value=str(self.sdk)), \
                 mock.patch.object(darwin_build.toolchain, "need", side_effect=lambda p: p):
             plan = darwin_build.dependencies(names)
             self.assertIn("libSDL2-2.0.0.dylib", plan.names)
@@ -409,7 +409,7 @@ class MetadataContracts(PackageFixture):
             missing = []
             self.assertIsNone(darwin_build.dependencies(names, missing=missing))
             self.assertTrue(any("newer than target 14.4" in m for m in missing), missing)
-            with mock.patch.object(darwin_build.toolchain, "architecture", return_value="x86_64"):
+            with mock.patch.object(darwin_build.darwin_toolchain, "architecture", return_value="x86_64"):
                 missing = []
                 self.assertIsNone(darwin_build.dependencies(names, missing=missing))
                 self.assertTrue(any("x86_64" in m for m in missing), missing)
@@ -741,7 +741,7 @@ class RealPackage(unittest.TestCase):
         member = compile_c("archive", "int from_archive(void) { return 5; }\n")
         static = vendor / "libauthored.a"
         run(["/usr/bin/ar", "rcs", static, member])
-        plan = package.Plan(arch, tc.darwin_sdk(), out)
+        plan = package.Plan(arch, ns["darwin_toolchain"].darwin_sdk(), out)
         pinned, _ = plan.pin_link_flags(["-L" + str(vendor), "-lmiddle", str(static)])
         plan.add(sdl, "libSDL2-2.0.0.dylib")
         plan.add(sdl3, "libSDL3.0.dylib")

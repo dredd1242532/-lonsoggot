@@ -126,7 +126,7 @@ def dependencies(names, prebuilt="", missing=None, executable_dir=""):
     from darwin_package import DependencyError, Plan
     errors = []
     try:
-        plan = Plan(toolchain.architecture(), toolchain.darwin_sdk(), executable_dir)
+        plan = Plan(darwin_toolchain.architecture(), darwin_toolchain.darwin_sdk(), executable_dir)
     except (DependencyError, OSError, SystemExit) as e:
         if missing is not None:
             missing.append("macOS toolchain: " + str(e))
@@ -235,7 +235,7 @@ def compiler_key():
 def post_link(path):
     from darwin_package import DependencyError, inspect
     try:
-        inspect(path, toolchain.architecture())
+        inspect(path, darwin_toolchain.architecture())
     except DependencyError as e:
         print("macOS post-link check failed: " + str(e), flush=True)
         return False

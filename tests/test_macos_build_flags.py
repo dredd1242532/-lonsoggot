@@ -402,20 +402,20 @@ class DiscoveryContracts(unittest.TestCase):
         fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "check_darwin_prerequisites")
         for arch in ("arm64", "x86_64"):
             ns, _ = command_space(SOURCE, arch=arch)
-            tc, commands, inspected = ns["toolchain"], [], []
+            tc, dt, commands, inspected = ns["toolchain"], ns["darwin_toolchain"], [], []
             plan = types.SimpleNamespace(ffmpeg=([], ["/authored/ffmpeg.dylib"]), sdl=([], ["/authored/SDL2.dylib"]))
             build = types.SimpleNamespace(prebuilt_renderer=lambda: "/authored/renderer.dylib", FFMPEG_LIBS=ns["FFMPEG_LIBS"],
                                           darwin_build=types.SimpleNamespace(dependencies=lambda *a: plan), target=ns["target"])
             def run(command, **kwargs):
                 commands.append(command)
                 return subprocess.CompletedProcess(command, 0, "", "")
-            scope = {"os": ns["os"], "ROOT": str(self.root), "_toolchain": tc, "sys": sys, "subprocess": subprocess,
+            scope = {"os": ns["os"], "ROOT": str(self.root), "_toolchain": tc, "_darwin": dt, "sys": sys, "subprocess": subprocess,
                      "tempfile": tempfile, "fail": self.fail,
                      "darwin_package": types.SimpleNamespace(DependencyError=ValueError,
                          inspect=lambda path, target: inspected.append((path, target)))}
             exec(compile(ast.Module(body=[fn], type_ignores=[]), "make_game.py", "exec"), scope)
             with self.subTest(arch=arch), mock.patch.dict(sys.modules, {"build": build}), \
-                    mock.patch.object(tc, "version", return_value="authored command fixture"), \
+                    mock.patch.object(dt, "version", return_value="authored command fixture"), \
                     mock.patch.object(subprocess, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
                 scope["check_darwin_prerequisites"](str(self.root))
             self.assertEqual(len(commands), 2)
