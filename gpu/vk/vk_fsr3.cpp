@@ -798,8 +798,8 @@ bool fsr3_wanted() { return !fsr3_on_chain() && fsr3_chosen(); }
 // The chain's frame into the passes above: its colour (the network's input as it samples it), its depth reversed for FSR
 // (the chain's prep takes it so for an engine with fsr_depth), its motion toward the frame before in render pixels with the
 // skinned draws' own drawn over the camera's (vk_temporal.cpp actor_motion), and the jitter the host gave the camera. The
-// passes' picture (RGBA16F at the output size) is copied into the chain's output, which the chain squares back into the
-// network's output with dlss_out.comp, as fsr3_upscale's own last pass does.
+// passes' picture (RGBA16F at the output size) is copied into the chain's output. The existing perceptual path squares it
+// into the network's packed output; PsychoV35's linear HDR path writes it unchanged into matching RGBA16F output.
 namespace {
 struct ChainState {
     std::chrono::steady_clock::time_point last{};
