@@ -10,9 +10,10 @@ and compiled with stubs for a made-up GPU, checks:
   the sampled view, with its swizzle: each texel reads what NVN's definition of the format says, alpha one where the
   format has none, and a widened image holds alpha one itself (storage views and copies read it without the swizzle).
 
-NVN's definitions: the component order of nvn_api.h's names; packed formats name their components from the lowest bit
-(nn::gfx's ImageFormat_R5_G6_B5_Unorm is NVN_FORMAT_RGB565, red in bits 0-4, as both of LS's renderers read it). Vulkan's:
-the spec's format tables (components in name order in memory; packed formats from the most significant bit).
+NVN's definitions: the component order of nvn_api.h's names; packed formats name their components from the lowest bit, as
+RGB565 (red in bits 0-4) is read by both of LS's renderers and by deko3d (source/maxwell/format_traits.inc: RGB5A1, BGR5,
+BGR5A1, A1BGR5, RGB_BC1 and BGRA8, with alpha one for BGR5 and RGB_BC1). Vulkan's: the spec's format tables (components
+in name order in memory; packed formats from the most significant bit).
 Synthetic data only. python -I -B tests/test_nvn_formats.py --headers <Vulkan headers> [--cxx clang++]
 """
 import argparse
@@ -26,7 +27,7 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}", "--headers", "{vulkan_headers}"]
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# NVN formats with no texture mapping, and why: vertex attribute formats (nn::gfx names none of them as an image format;
+# NVN formats with no texture mapping, and why: vertex attribute formats (deko3d's image formats name none of them;
 # vk_draw.cpp vertex_format maps each)
 LEFT_OUT = {
     **{v: "vertex only: an integer read as float" for v in range(0x51, 0x69)},
