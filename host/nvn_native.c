@@ -1142,8 +1142,18 @@ NV(nvnEventGetValue) {
     {   /* (longshot, experiment) HOS_PRESENT_NOWAIT=1: OoT's present poll (hos_thread.c present_poll) sees its frame's
            event signalled at once: the replay reads memory as submitted, so the game may go on to the next frame
            while this one is replayed, as far as the window's textures and the replay's queue let it */
+        /* (longshot) RX_VK_ASYNC=2, the render thread (gpu/vk/vk_replay.cpp behind_on): the same, as its rule. The event is
+           signalled by the GPU at the end of the frame's work, so the poll held the game until the replay it had just handed
+           over was recorded and run: 20 of a 37 ms frame asleep here with RX_VK_ASYNC=1 (profiled). Answered at once, the
+           presenting thread goes on to its present, where the render thread holds it while the present before is not
+           replayed (RX_VK_PRESENTS_AHEAD), and holds the present itself until the main thread's signal for the frame. The
+           idea of answering the poll from the present's hand-over is Hookshot PR 2910's (rx_release_due):
+           https://git.notrexed.dev/Hookshot/Hookshot/pulls/2910. HOS_PRESENT_NOWAIT=0 with RX_VK_ASYNC=2: polled, as before */
         static int nowait = -1;
-        if (nowait < 0) nowait = getenv("HOS_PRESENT_NOWAIT") && atoi(getenv("HOS_PRESENT_NOWAIT")) != 0;
+        if (nowait < 0) {
+            const char *e = getenv("HOS_PRESENT_NOWAIT"), *a = getenv("RX_VK_ASYNC");
+            nowait = e ? atoi(e) != 0 : a && atoi(a) == 2;
+        }
         if (nowait && (c->x[30] == 0x805904a0 || c->x[30] == 0x80590530)) { RET(1); return; }
     }
     uint32_t v = 0; nvn_gpu_read(((const nvn_event *)P(0))->gpu, &v, 4); RET(v);
