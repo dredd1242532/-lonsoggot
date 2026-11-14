@@ -74,6 +74,10 @@ struct Row { int* value; int hi; bool restart; };
 Row rows[] = {{&opts.ultrawide, 0, true}, {&opts.output_res, 0, true}, {&opts.audio_output, 3, true}};
 constexpr int kRows = 3;
 int restart_slot[kRows] = {0, 1, 2};
+int mods_slot = -1;   // (the Mods tab's slot, which restart_values fills after the rows': no mods here)
+bool can_mods() { return false; }
+uint32_t hos_pad_raw();
+struct { uint32_t (*pad_raw)(); uint64_t (*mods_changed)(); } host_value{hos_pad_raw, nullptr}, *host = &host_value;
 namespace mr = menu_restart;
 struct RestartState : mr::State {
     int noted = 0;
@@ -149,7 +153,6 @@ void tap(int button, int count = 1) {
 // The host's raw pad callback and the menu's edge/repeat path, not a latched game-button word.
 uint32_t pad_raw_now = 0;
 @@PAD_RAW@@
-struct { uint32_t (*pad_raw)(); } host_value{hos_pad_raw}, *host = &host_value;
 void routed_tick() {
     const bool mine = true;
     bool pad_last = false, held[5] = {};
