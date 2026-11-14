@@ -334,8 +334,10 @@ memory and are not always faster. **Build memory**: Automatic keeps the free-mem
 `LONGSHOT_MEM_LIMIT_GB`, so the compilers may reserve that much together whatever is free now (the ones that always run,
 up to 4 on Windows, still run under a smaller number). The builders' `--cli` passes both on as it finds them.
 
-On macOS, the compile gate reads `HOST_VM_INFO64` through `ctypes`, using the host's page size. Its available-RAM
-estimate counts free, file-backed and volatile purgeable pages, with the speculative file cache counted only once.
+On macOS, the compile gate reads the kernel's VM counters with read-only `sysctlbyname` calls through `ctypes`, using
+`hw.pagesize`. Its available-RAM estimate counts free, file-backed and volatile purgeable pages, with the speculative
+file cache counted only once. Unlike `host_statistics64`, these reads do not reuse its rate-limited one-second snapshot;
+only the library bindings and page size are cached. The three counters are read separately, not as an atomic snapshot.
 It does not treat all inactive pages as free: those include anonymous memory that may need swapping. Wired memory,
 compressed memory and swap are not added. File-backed pages may need writeback or reloading, so this is not an allocation
 guarantee; the existing 1.5 GB reserve and one-compiler floor still apply. `proc_pidinfo` supplies resident bytes and

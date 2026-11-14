@@ -22,17 +22,6 @@ sys.path.insert(0, str(ROOT / "nx2"))
 memory = importlib.import_module("darwin_memory")
 
 
-def vm_bytes():
-    # HOST_VM_INFO64_REV1 is 38 32-bit words on both 64-bit Mac ABIs.
-    data = bytearray(152)
-    for offset, value in ((0, 100), (4, 20), (8, 30), (12, 40), (88, 7), (92, 11),
-                          (128, 50), (132, 60), (136, 80), (140, 90)):
-        struct.pack_into("<I", data, offset, value)
-    for offset in (*range(16, 88, 8), *range(96, 128, 8), 144):
-        struct.pack_into("<Q", data, offset, (1 << 40) + offset)
-    return bytes(data)
-
-
 def actual_build(source):
     tree = ast.parse(source.read_text(encoding="utf-8"))
     names = {"free_mb", "rss_mb"}
@@ -45,80 +34,75 @@ def actual_build(source):
 
 
 class DarwinMemoryTests(unittest.TestCase):
-    def test_vm_layout_and_64_bit_counters(self):
-        self.assertEqual(ctypes.sizeof(memory.VMStatistics64), 152)
-        self.assertEqual(ctypes.alignment(memory.VMStatistics64), 8)
-        self.assertEqual(memory.HOST_VM_INFO64_REV1_COUNT, 38)
-        stats = memory.VMStatistics64.from_buffer_copy(vm_bytes())
-        self.assertEqual((stats.free_count, stats.purgeable_count, stats.speculative_count), (100, 7, 11))
-        self.assertEqual((stats.external_page_count, stats.internal_page_count), (80, 90))
-        self.assertEqual(stats.zero_fill_count, (1 << 40) + 16)
-        self.assertEqual(stats.purges, (1 << 40) + 80)
-        self.assertEqual(stats.decompressions, (1 << 40) + 96)
-        self.assertEqual(stats.total_uncompressed_pages_in_compressor, (1 << 40) + 144)
+    def test_unsigned_32_and_64_bit_counter_layouts(self):
+        for size, value in ((4, 0xffffffff), (8, (1 << 40) + 12345)):
+            with self.subTest(size=size):
+                data = value.to_bytes(size, "little")
+                self.assertEqual(memory.decode_uint(data, size), value)
+                self.assertEqual(memory.decode_uint(data + b"\xff" * 8, size), value)
+        for size in (0, 1, 2, 3, 5, 7, 9):
+            with self.subTest(size=size), self.assertRaises(ValueError):
+                memory.decode_uint(b"\0" * 16, size)
         with self.assertRaises(ValueError):
-            memory.VMStatistics64.from_buffer_copy(vm_bytes()[:-1])
+            memory.decode_uint(b"\0" * 7, 8)
+
+    def sysctl_fixture(self, size, value, result=0):
+        def read(name, buffer, length, new_value, new_length):
+            self.assertEqual(name, b"vm.page_free_count")
+            self.assertIsNone(new_value)
+            self.assertEqual(new_length, 0)   # Read-only: never write a kernel setting.
+            n = ctypes.cast(length, ctypes.POINTER(ctypes.c_size_t))
+            self.assertEqual(n.contents.value, 8)
+            ctypes.memmove(buffer, value.to_bytes(8, "little"), 8)
+            n.contents.value = size
+            return result
+        return SimpleNamespace(sysctlbyname=read)
+
+    def test_sysctl_uses_returned_size_not_buffer_capacity(self):
+        for size, value, expected in ((4, 0xaabbccdd12345678, 0x12345678), (8, (1 << 40) + 12345, (1 << 40) + 12345)):
+            with self.subTest(size=size):
+                with mock.patch.object(memory, "_sysctl", return_value=self.sysctl_fixture(size, value)):
+                    self.assertEqual(memory.sysctl_uint(b"vm.page_free_count"), expected)
+
+    def test_failed_or_short_sysctl_is_not_available_memory(self):
+        for size, result, error in ((8, -1, OSError), (3, 0, ValueError), (9, 0, ValueError)):
+            with self.subTest(size=size, result=result):
+                with mock.patch.object(memory, "_sysctl", return_value=self.sysctl_fixture(size, 123, result)):
+                    with self.assertRaises(error):
+                        memory.sysctl_uint(b"vm.page_free_count")
 
     def test_available_classes_and_host_page_sizes(self):
-        stats = memory.VMStatistics64.from_buffer_copy(vm_bytes())
+        values = {b"vm.page_free_count": 89, b"vm.page_pageable_external_count": 80, b"vm.page_purgeable_count": 7}
+        with mock.patch.object(memory, "sysctl_uint", side_effect=values.__getitem__) as read:
+            counts = memory.page_counts()
+        self.assertEqual(counts, (89, 80, 7))
+        self.assertEqual(read.call_args_list, [mock.call(name) for name in values])
         for page_size in (4096, 16384):
             with self.subTest(page_size=page_size):
-                # 100 free (11 speculative included), 80 file-backed (same 11), 7 purgeable.
-                self.assertEqual(memory.available_bytes(stats, page_size), 176 * page_size)
-        for name in ("active_count", "inactive_count", "wire_count", "internal_page_count",
-                     "compressor_page_count", "throttled_count"):
-            setattr(stats, name, 0xffffffff)
-        self.assertEqual(memory.available_bytes(stats, 16384), 176 * 16384)
-        # A transient cross-counter skew must not subtract real free pages.
-        stats.external_page_count = 0
-        self.assertEqual(memory.available_bytes(stats, 4096), 107 * 4096)
+                # Free excludes speculative; those pages are counted in the file cache, once.
+                self.assertEqual(memory.available_bytes(counts, page_size), 176 * page_size)
+        # No inactive, anonymous, wired, compressor or swap counter was requested.
+        self.assertEqual(memory.available_bytes((0, 0, 0), 16384), 0)
+        self.assertEqual(memory.available_bytes((1 << 40, 0, 0), 16384), (1 << 40) * 16384)
 
-    def test_empty_and_large_available_counts(self):
-        stats = memory.VMStatistics64()
-        self.assertEqual(memory.available_bytes(stats, 16384), 0)
-        stats.free_count = 0xffffffff
-        self.assertEqual(memory.available_bytes(stats, 16384), 0xffffffff * 16384)
-
-    def mach_fixture(self, result=0, count=38, page_size=16384, page_result=0):
-        def pages(host, output):
-            self.assertEqual(host, 23)
-            ctypes.cast(output, ctypes.POINTER(ctypes.c_size_t)).contents.value = page_size
-            return page_result
-
-        def snapshot(host, flavor, output, out_count):
-            self.assertEqual((host, flavor), (23, 4))
-            n = ctypes.cast(out_count, ctypes.POINTER(ctypes.c_uint32))
-            self.assertEqual(n.contents.value, 38)
-            ctypes.memmove(output, vm_bytes(), 152)
-            n.contents.value = count
-            return result
-
-        return SimpleNamespace(mach_host_self=mock.Mock(return_value=23), host_page_size=pages,
-                               host_statistics64=mock.Mock(side_effect=snapshot), mach_port_deallocate=mock.Mock())
-
-    def test_kernel_snapshot_and_port_release(self):
-        lib = self.mach_fixture()
-        with mock.patch.object(memory, "_mach", return_value=(lib, ctypes.c_uint32(17))):
-            stats, pages = memory.vm_statistics()
-        self.assertEqual((stats.free_count, pages), (100, 16384))
-        lib.mach_port_deallocate.assert_called_once_with(17, 23)
-
-    def test_kernel_failures_release_port(self):
-        for kwargs in ({"result": 5}, {"count": 37}, {"page_size": 0}, {"page_result": 5}):
-            with self.subTest(**kwargs):
-                lib = self.mach_fixture(**kwargs)
-                with mock.patch.object(memory, "_mach", return_value=(lib, ctypes.c_uint32(17))):
-                    with self.assertRaises(OSError):
-                        memory.vm_statistics()
-                lib.mach_port_deallocate.assert_called_once_with(17, 23)
+    def test_only_the_immutable_page_size_is_cached(self):
+        memory._page_size.cache_clear()
+        self.addCleanup(memory._page_size.cache_clear)
+        with mock.patch.object(memory, "sysctl_uint", return_value=16384) as read:
+            self.assertEqual(memory._page_size(), 16384)
+            self.assertEqual(memory._page_size(), 16384)
+        read.assert_called_once_with(b"hw.pagesize")
+        memory._page_size.cache_clear()
+        with mock.patch.object(memory, "sysctl_uint", return_value=0):
+            with self.assertRaises(ValueError):
+                memory._page_size()
 
     def test_free_mb_uses_fresh_kernel_reading(self):
-        first, second = memory.VMStatistics64(), memory.VMStatistics64()
-        first.free_count, second.free_count = 128, 64
-        with mock.patch.object(memory, "vm_statistics", side_effect=[(first, 16384), (second, 16384)]) as read:
+        with mock.patch.object(memory, "sysctl_uint", side_effect=[128, 0, 0, 64, 0, 0]) as read, \
+                mock.patch.object(memory, "_page_size", return_value=16384):
             self.assertEqual(memory.free_mb(), 2)
             self.assertEqual(memory.free_mb(), 1)
-        self.assertEqual(read.call_count, 2)
+        self.assertEqual(read.call_count, 6)
 
     def test_process_layout_and_exact_size(self):
         self.assertEqual(ctypes.sizeof(memory.ProcessTaskInfo), 96)

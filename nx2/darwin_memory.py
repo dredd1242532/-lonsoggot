@@ -1,24 +1,14 @@
 """macOS memory snapshots for the compile gate; no subprocess or third-party package.
 
-The layouts are the fixed-width HOST_VM_INFO64 revision 1 prefix in
-<mach/vm_statistics.h>/<mach/host_info.h> and PROC_PIDTASKINFO in <sys/proc_info.h>.
-They are the same on arm64 and x86_64; newer VM-statistics fields are not requested.
-Only the library bindings are cached, never the available memory or process tree.
+sysctl(3) supplies unsigned 32- or 64-bit page counts; PROC_PIDTASKINFO uses
+the fixed-width layout in <sys/proc_info.h>, the same on arm64 and x86_64.
+Only library bindings and the immutable host page size are cached, never page
+counts or the process tree. host_statistics64 can return a one-second-old cache
+after a burst of gate reads, so the available-memory reader uses sysctl instead.
 """
 import ctypes
 import functools
 import sys
-
-
-class VMStatistics64(ctypes.LittleEndianStructure):
-    _fields_ = [(name, ctypes.c_uint32) for name in ("free_count", "active_count", "inactive_count", "wire_count")] + \
-               [(name, ctypes.c_uint64) for name in ("zero_fill_count", "reactivations", "pageins", "pageouts", "faults",
-                                                    "cow_faults", "lookups", "hits", "purges")] + \
-               [(name, ctypes.c_uint32) for name in ("purgeable_count", "speculative_count")] + \
-               [(name, ctypes.c_uint64) for name in ("decompressions", "compressions", "swapins", "swapouts")] + \
-               [(name, ctypes.c_uint32) for name in ("compressor_page_count", "throttled_count", "external_page_count",
-                                                    "internal_page_count")] + \
-               [("total_uncompressed_pages_in_compressor", ctypes.c_uint64)]
 
 
 class ProcessTaskInfo(ctypes.LittleEndianStructure):
@@ -29,25 +19,18 @@ class ProcessTaskInfo(ctypes.LittleEndianStructure):
                                                    "threadnum", "numrunning", "priority")]
 
 
-HOST_VM_INFO64 = 4
-HOST_VM_INFO64_REV1_COUNT = ctypes.sizeof(VMStatistics64) // ctypes.sizeof(ctypes.c_int32)
 PROC_PIDTASKINFO = 4
 
 
 @functools.lru_cache(maxsize=1)
-def _mach():
+def _sysctl():
     if sys.platform == "darwin":
         lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
-        lib.mach_host_self.argtypes = []
-        lib.mach_host_self.restype = ctypes.c_uint32
-        lib.host_page_size.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_size_t)]
-        lib.host_page_size.restype = ctypes.c_int
-        lib.host_statistics64.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
-        lib.host_statistics64.restype = ctypes.c_int
-        lib.mach_port_deallocate.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
-        lib.mach_port_deallocate.restype = ctypes.c_int
-        return lib, ctypes.c_uint32.in_dll(lib, "mach_task_self_")
-    raise OSError("Mach memory statistics require macOS")
+        lib.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                                    ctypes.c_void_p, ctypes.c_size_t]
+        lib.sysctlbyname.restype = ctypes.c_int
+        return lib
+    raise OSError("Darwin memory statistics require macOS")
 
 
 @functools.lru_cache(maxsize=1)
@@ -62,44 +45,52 @@ def _libproc():
     raise OSError("libproc memory statistics require macOS")
 
 
-def vm_statistics():
-    """One kernel snapshot and its host page size, in bytes; a failed/short read raises OSError."""
-    lib, task = _mach()
-    host = lib.mach_host_self()
-    try:
-        page_size = ctypes.c_size_t()
-        if lib.host_page_size(host, ctypes.byref(page_size)) or not page_size.value:
-            raise OSError("host_page_size failed")
-        stats = VMStatistics64()
-        count = ctypes.c_uint32(HOST_VM_INFO64_REV1_COUNT)
-        if lib.host_statistics64(host, HOST_VM_INFO64, ctypes.byref(stats), ctypes.byref(count)) or \
-                count.value != HOST_VM_INFO64_REV1_COUNT:
-            raise OSError("host_statistics64 failed or returned a short snapshot")
-        return stats, page_size.value
-    finally:
-        # mach_host_self acquires a send right: do not leak one on every gate poll.
-        lib.mach_port_deallocate(task.value, host)
+def decode_uint(data, size):
+    """Decode a sysctl integer's returned bytes, not its buffer capacity (both Mac ABIs are little-endian)."""
+    if size not in (4, 8) or len(data) < size:
+        raise ValueError("unexpected sysctl integer size")
+    return int.from_bytes(data[:size], "little")
 
 
-def available_bytes(stats, page_size):
+def sysctl_uint(name):
+    data = ctypes.create_string_buffer(8)
+    size = ctypes.c_size_t(ctypes.sizeof(data))
+    if _sysctl().sysctlbyname(name, data, ctypes.byref(size), None, 0):
+        raise OSError("sysctlbyname failed: " + name.decode("ascii"))
+    return decode_uint(data.raw, size.value)
+
+
+def page_counts():
+    """Free (without speculative), pageable file-backed (including speculative), and volatile purgeable pages."""
+    return tuple(sysctl_uint(name) for name in (b"vm.page_free_count", b"vm.page_pageable_external_count",
+                                               b"vm.page_purgeable_count"))
+
+
+@functools.lru_cache(maxsize=1)
+def _page_size():
+    size = sysctl_uint(b"hw.pagesize")
+    if not size:
+        raise ValueError("hw.pagesize returned zero")
+    return size
+
+
+def available_bytes(counts, page_size):
     """Estimate RAM available without swapping anonymous pages, not an allocation guarantee.
 
-    vm_statistics.h: free_count already includes speculative pages. File-backed
-    (external) pages include that speculative cache too, so count it just once.
-    mmap(2): purgeable memory is anonymous; it is separate from the file cache.
-    Apple's 'Caching and Purgeable Memory': volatile pages can be discarded, not
-    paged out. Other anonymous, wired and compressor pages are not available.
-    Inactive alone is not reclaimable: it includes anonymous pages needing swap.
+    vm_statistics.h and Apple's host.c: free_count includes speculative pages;
+    vm.page_free_count does not. Pageable file-backed pages include that cache,
+    so page_counts counts it once. mmap(2): purgeable memory is anonymous and
+    separate from file-backed pages. Apple's 'Caching and Purgeable Memory':
+    volatile pages can be discarded, not paged out. Other anonymous, wired and
+    compressor pages are not available. Inactive alone includes memory needing swap.
     File-backed pages can require writeback/reload; this is an estimate like
-    MemAvailable, not its kernel watermark calculation. The gate keeps its reserve.
+    MemAvailable, not its watermark calculation. The gate keeps its reserve.
     """
-    pages = stats.free_count + max(0, stats.external_page_count - stats.speculative_count) + stats.purgeable_count
-    return pages * page_size
+    return sum(counts) * page_size
 
 
 def free_mb():
-    stats, page_size = vm_statistics()
-    return available_bytes(stats, page_size) >> 20
+    return available_bytes(page_counts(), _page_size()) >> 20
 
 
 def process_rss(pid):
