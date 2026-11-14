@@ -337,6 +337,29 @@ class Sessions(unittest.TestCase):
         self.assertTrue(stopped["process_exited"])
         self.assertFalse(self.m.same_process(info["pid"], info["process_start"]))
 
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin's start identity (every session test uses the others)")
+    def test_darwin_process_identity(self):
+        me = self.m.process_start(os.getpid())
+        boot = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"], capture_output=True, text=True,
+                              check=True, timeout=10).stdout.strip()
+        self.assertEqual((me["clock"], me["boot"]), ("darwin-start-us", boot))
+        self.assertEqual(self.m.process_start(os.getpid()), me)
+        before = time.time()
+        child = subprocess.Popen([sys.executable, "-I", "-c", ""])
+        after = time.time()
+        birth = self.m.process_start(child.pid)
+        self.assertNotEqual(birth, me)
+        # (the start time is the fork's microsecond wall clock, so it lies between the two readings)
+        self.assertLessEqual(int(before * 1e6) - 1000, birth["ticks"])
+        self.assertLessEqual(birth["ticks"], int(after * 1e6) + 1000)
+        deadline = time.monotonic() + 10
+        while self.m.process_start(child.pid) is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertIsNone(self.m.process_start(child.pid))
+        os.kill(child.pid, 0)   # (not yet reaped: a zombie still holds the pid, and counts as dead)
+        self.assertEqual(child.wait(timeout=10), 0)
+        self.assertIsNone(self.m.process_start(child.pid))
+
     def test_sampled_state_after_reattach(self):
         session = self.start(profile="test", ready="play")
         attached = self.m.Session.attach(session.folder)

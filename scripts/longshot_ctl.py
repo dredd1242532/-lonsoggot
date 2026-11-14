@@ -617,6 +617,28 @@ def process_start(pid):
             return {"clock": "windows-filetime", "ticks": (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime}
         finally:
             k.CloseHandle(h)
+    if sys.platform == "darwin":
+        # (sysctl kern.proc.pid: struct kinfo_proc, 648 bytes on arm64 and x86_64, starts with the start time, a
+        # struct timeval set at fork and never adjusted, and has p_stat at 36 (5: a zombie) and p_pid at 40; a gone pid
+        # answers with no bytes. kern.bootsessionuuid is the boot's identity, as Linux's boot_id.)
+        import ctypes
+        import struct
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                                ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        libc.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t),
+                                      ctypes.c_void_p, ctypes.c_size_t]
+        info, size = ctypes.create_string_buffer(648), ctypes.c_size_t(648)
+        mib = (ctypes.c_int * 4)(1, 14, 1, pid)   # (CTL_KERN, KERN_PROC, KERN_PROC_PID)
+        if libc.sysctl(mib, 4, info, ctypes.byref(size), None, 0) != 0 or size.value != 648:
+            return None
+        seconds, microseconds = struct.unpack_from("=qi", info.raw, 0)
+        if info.raw[36] == 5 or struct.unpack_from("=i", info.raw, 40)[0] != pid:
+            return None
+        boot, size = ctypes.create_string_buffer(64), ctypes.c_size_t(64)
+        if libc.sysctlbyname(b"kern.bootsessionuuid", boot, ctypes.byref(size), None, 0) != 0 or not boot.value:
+            return None
+        return {"clock": "darwin-start-us", "ticks": seconds * 1000000 + microseconds, "boot": boot.value.decode()}
     try:
         fields = Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()
         if fields[0] in ("Z", "X"):
