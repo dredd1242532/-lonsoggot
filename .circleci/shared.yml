@@ -856,6 +856,7 @@ jobs:
           root: .
           paths:
             - release.env
+            - tools.lock
 
   release-linux:
     executor: ubuntu22
