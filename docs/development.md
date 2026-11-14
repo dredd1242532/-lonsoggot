@@ -101,8 +101,10 @@ trace; `HOS_TRACE`'s calls are trace. `tests/test_log_levels.py` checks the tags
 demand-paged; a 64 KiB guest commit preserves existing bytes. This is memory groundwork, not a complete macOS build:
 the macOS source lists must link this file wherever they link `host/posix/win32_posix.c`, including the renderer.
 
-Discard zeroes exactly the requested bytes. Complete interior host pages get fresh anonymous backing; partial
-host-page edges are zeroed in place, so adjacent live 4 KiB guest pages survive a free on native 16 KiB hosts too.
+The low-level discard zeroes exactly the requested bytes. Complete interior host pages get fresh anonymous backing;
+partial host-page edges are zeroed in place, so adjacent live 4 KiB guest pages survive a free on native 16 KiB hosts.
+The Win32 layer retains its existing guest-page contracts: MEM_DECOMMIT rounds outward to 4 KiB, and MEM_RESET
+discards only complete 4 KiB pages inside the request. The Darwin helper adapts that range to the host granule.
 `MADV_DONTNEED` is not used for zero-on-free on Darwin. Host allocation and protection use the process's real page
 size (16 KiB on native Apple Silicon, 4 KiB under Rosetta), not the guest's granule. Guest dirty tracking is unchanged.
 
@@ -112,9 +114,10 @@ Heap shrink still zeroes without reclaiming, and optional write-watch and genera
 The byte-preservation guarantee does not repair the address-region allocator's existing unlock-before-discard race.
 
 `python -I -B tests/test_darwin_guest_memory.py --cc clang` compiles the real helper and text-extracted callers for
-arm64 and x86-64 and runs both (the latter through Rosetta). It uses no game or graphics device, checks collision
-refusal, neighboring subpages, byte-unaligned discards, failure results, and resident memory before readback.
-`--source <tree>` runs the same check against another source tree; `--arch` selects one route for a targeted run.
+the current native architecture. On Apple Silicon, add `--arch arm64 --arch x86_64` for explicit two-route acceptance
+(the latter requires Rosetta; the test never installs it). It uses no game or graphics device, checks collision
+refusal, neighboring subpages, byte-exact helper discard, guest-rounded wrappers, errors, and resident memory before
+readback. `--source <tree>` runs the same check against another source tree.
 
 ## Switches for testing and debugging
 

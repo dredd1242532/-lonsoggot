@@ -658,15 +658,17 @@ static int discard_pages(void *p, size_t n) {
 }
 void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
 #if defined(__APPLE__)
-    if (!size || size > UINTPTR_MAX - (uintptr_t)addr) { last_error = ERROR_INVALID_PARAMETER; return NULL; }
-#else
-    const uintptr_t page = 4096;
+    if (size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr > UINTPTR_MAX - 4095) {
+        last_error = ERROR_INVALID_PARAMETER;
+        return NULL;
+    }
 #endif
+    const uintptr_t page = 4096;
     if (type & MEM_RESET) {   /* (the contents are not wanted any more: they read as zero after this) */
-#if defined(__APPLE__)
-        if (discard_pages(addr, size)) { fail_errno(); return NULL; }
-#else
         const uintptr_t lo = ((uintptr_t)addr + page - 1) & ~(page - 1), hi = ((uintptr_t)addr + size) & ~(page - 1);
+#if defined(__APPLE__)
+        if (hi > lo && discard_pages((void *)lo, hi - lo)) { fail_errno(); return NULL; }
+#else
         if (hi > lo) discard_pages((void *)lo, hi - lo);
 #endif
         return addr;
@@ -706,11 +708,13 @@ void *VirtualAlloc(void *addr, SIZE_T size, DWORD type, DWORD protect) {
 BOOL VirtualFree(void *addr, SIZE_T size, DWORD type) {
     if (type & MEM_DECOMMIT) {   /* (kept mapped: decommitted memory reads as zero when touched again) */
 #if defined(__APPLE__)
-        return discard_pages(addr, size) == 0 ? TRUE : fail_errno();
-#else
+        if (size > UINTPTR_MAX - (uintptr_t)addr || (uintptr_t)addr + size > UINTPTR_MAX - 4095) {
+            last_error = ERROR_INVALID_PARAMETER;
+            return FALSE;
+        }
+#endif
         const uintptr_t lo = (uintptr_t)addr & ~(uintptr_t)4095, hi = ((uintptr_t)addr + size + 4095) & ~(uintptr_t)4095;
         return discard_pages((void *)lo, hi - lo) == 0 ? TRUE : fail_errno();
-#endif
     }
     if (type & MEM_RELEASE) {
         pthread_mutex_lock(&regions_mu);

@@ -6,10 +6,13 @@ The fixture traps unrelated Windows OOM handling instead of faking a successful
 memory call. --source selects an unmodified source tree for the failing-base test.
 
 python -I -B tests/test_darwin_guest_memory.py [--cc clang] [--arch arm64|x86_64]
+The ordinary suite runs the current native architecture. On Apple Silicon,
+--arch arm64 --arch x86_64 explicitly tests both routes and requires Rosetta.
 """
 import argparse
 import ast
 from pathlib import Path
+import platform
 import shlex
 import subprocess
 import sys
@@ -181,12 +184,15 @@ def main():
     ap.add_argument("--out", type=Path, help="retain generated fixture sources and binaries in a new directory")
     args = ap.parse_args()
     if sys.platform == "darwin":
+        arches = args.arch or [platform.machine()]
+        if any(arch not in ("arm64", "x86_64") for arch in arches):
+            ap.error("unsupported Darwin architecture: " + ", ".join(arches))
         if args.out:
             args.out.mkdir(parents=True, exist_ok=False)
-            run(args.source.resolve(), args.out.resolve(), args.cc, args.arch or ["arm64", "x86_64"])
+            run(args.source.resolve(), args.out.resolve(), args.cc, arches)
         else:
             with tempfile.TemporaryDirectory(prefix="darwin-mem-") as tmp:
-                run(args.source.resolve(), Path(tmp), args.cc, args.arch or ["arm64", "x86_64"])
+                run(args.source.resolve(), Path(tmp), args.cc, arches)
     else:
         print("SKIP: Darwin guest memory requires macOS Mach VM (Windows and Linux unchanged)")
 

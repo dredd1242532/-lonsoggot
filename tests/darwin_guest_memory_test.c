@@ -78,7 +78,12 @@ static void byte_ranges(uint64_t addr, size_t page) {
                 Ctx c = {0}; c.x[0] = addr + off; c.x[1] = n;
                 physical_svc(&c, 0x2D); CHECK(c.x[0] == 0);
             }
-            memset(expected + off, 0, n);
+            /* The helper is byte-exact. Public wrapper contracts stay those of
+               the existing POSIX layer: decommit outward, reset inward, at 4 KiB. */
+            size_t lo = off, hi = off + n;
+            if (op == 1 || op == 3) { lo &= ~(size_t)4095; hi = (hi + 4095) & ~(size_t)4095; }
+            if (op == 2) { lo = (lo + 4095) & ~(size_t)4095; hi &= ~(size_t)4095; }
+            if (hi > lo) memset(expected + lo, 0, hi - lo);
             CHECK(!memcmp(p, expected, bytes));
             hos_commit(addr + off, n);
             CHECK(!memcmp(p, expected, bytes));
@@ -88,7 +93,7 @@ static void byte_ranges(uint64_t addr, size_t page) {
     CHECK(!hos_posix_guest_discard(p + 3, 0));
     CHECK(!memcmp(p, expected, bytes));
     free(expected);
-    printf("BYTE_RANGES cases=%u host_page=%zu outside_unchanged=1 zero_on_recommit=1\n", count, page);
+    printf("BYTE_RANGES cases=%u host_page=%zu helper_byte_exact=1 wrappers_guest_rounded=1 zero_on_recommit=1\n", count, page);
 }
 static void host_allocations(size_t page) {
     unsigned char *p = VirtualAlloc(NULL, 4 * page, MEM_RESERVE, PAGE_NOACCESS);
@@ -96,7 +101,7 @@ static void host_allocations(size_t page) {
     CHECK(protection(p) == VM_PROT_NONE);
     CHECK(!VirtualFree(p + 1, page, MEM_DECOMMIT));
     CHECK(GetLastError() == ERROR_ACCESS_DENIED);
-    CHECK(!VirtualAlloc(p + 1, page, MEM_RESET, PAGE_READWRITE));
+    CHECK(!VirtualAlloc(p, page, MEM_RESET, PAGE_READWRITE));
     CHECK(GetLastError() == ERROR_ACCESS_DENIED);
     CHECK(VirtualAlloc(p + 4096, 4096, MEM_COMMIT, PAGE_READWRITE) == p + 4096);
     CHECK(protection(p + 4096) == (VM_PROT_READ | VM_PROT_WRITE));
@@ -113,13 +118,14 @@ static void host_allocations(size_t page) {
     CHECK(GetLastError() == ERROR_ALREADY_EXISTS);
     expect_bytes(p, 4 * page, 0x83);
     CHECK(VirtualFree(p + 3, 2 * page + 17, MEM_DECOMMIT));
-    expect_bytes(p, 3, 0x83); expect_bytes(p + 3, 2 * page + 17, 0);
-    expect_bytes(p + 2 * page + 20, 2 * page - 20, 0x83);
+    const size_t discarded = (2 * page + 20 + 4095) & ~(size_t)4095;
+    expect_bytes(p, discarded, 0);
+    expect_bytes(p + discarded, 4 * page - discarded, 0x83);
     CHECK(VirtualFree(p, 0, MEM_RELEASE));
     CHECK(VirtualAlloc(p, 4 * page, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) == p);
     expect_bytes(p, 4 * page, 0);
     CHECK(VirtualFree(p, 0, MEM_RELEASE));
-    printf("HOST_ALLOC page=%zu reserve_commit_protect_release=1 duplicate_preserved=1 decommit_exact=1\n", page);
+    printf("HOST_ALLOC page=%zu reserve_commit_protect_release=1 duplicate_preserved=1 decommit_guest_rounded=1\n", page);
 }
 static void region_lifecycle(void) {
     uint64_t addr[8];
