@@ -101,8 +101,10 @@ Neither `-Bsymbolic`, flat namespace nor blanket dynamic lookup is used. Weak op
 libraries retain their linker semantics; unbound imports, including weak ones, are rejected. That check reads the
 binding dyld actually applies (the `LC_DYLD_INFO` bind, weak-bind and lazy-bind opcodes, or the chained-fixups
 import table) as well as the symbol table: a flat-lookup or main-executable import, or a library ordinal naming no
-loaded dylib, is refused. C++ weak-definition coalescing (ordinal -3, recorded by ld only for a weak definition it
-found while linking) remains two-level. Host services use
+loaded dylib, is refused. Ordinal -3 (`BIND_SPECIAL_DYLIB_WEAK_LOOKUP`, used for C++ weak definitions) is accepted,
+but it is not two-level: dyld resolves it by a process-wide search, in load order, among images with weak
+definitions. ld records it only for a weak definition it resolved while linking. In the lazy-bind stream a library
+ordinal carries across entries, as dyld applies it. Host services use
 explicit `hos_posix_*` lookups rather than unbound weak linkage. `hot_order.txt` remains unchanged: the build writes
 `hot_order.txt.macos` with Mach-O underscores. GNU ELF symbol/strip commands are not used on Mach-O.
 

@@ -257,7 +257,8 @@ class MetadataContracts(PackageFixture):
                                                               symbol_ordinal=1))
                     with self.assertRaisesRegex(package.DependencyError, error):
                         package.inspect(path, "arm64")
-        # Weak coalescing binds by name and sets no ordinal; it is not a flat import.
+        # A weak-bind entry that sets no ordinal coalesces by name (dyld's load-order search among weak definitions);
+        # it is not a BIND_SPECIAL_DYLIB_FLAT_LOOKUP import.
         package.inspect(self.put("weak.dylib", bound_image(streams={"weak": bind_opcodes((None, "_coalesced"))})), "arm64")
         # The symbol table's own ordinal must name a loaded dylib too.
         with self.assertRaisesRegex(package.DependencyError, "unresolved two-level"):
@@ -274,6 +275,15 @@ class MetadataContracts(PackageFixture):
                  "import name")):
             with self.subTest(malformed=label), self.assertRaisesRegex(package.DependencyError, error):
                 package.inspect(self.put("malformed.dylib", content), "arm64")
+
+    def test_lazy_done_keeps_the_library_ordinal_like_dyld(self):
+        # dyld keeps the library ordinal across a lazy-stream DONE: _x below binds by flat lookup (-2), not ordinal 0.
+        flat = b"\x3e\x00\x72\x10\x40_x\x00\x90\x00"
+        with self.assertRaisesRegex(package.DependencyError, "_x, flat lookup"):
+            package.inspect(self.put("lazy flat.dylib", bound_image(streams={"lazy": flat}, symbol_ordinal=1)), "arm64")
+        # The same carry-over through a loaded dylib's ordinal stays admitted.
+        known = b"\x11\x00\x72\x10\x40_x\x00\x90\x00"
+        package.inspect(self.put("lazy known.dylib", bound_image(streams={"lazy": known}, symbol_ordinal=1)), "arm64")
 
     def test_sdl2_compat_requires_sdl3_whatever_its_rpath(self):
         names = ("avcodec", "swscale", "swresample", "avutil")
@@ -784,8 +794,9 @@ extern "C" int cxx_entry(int n) {
 
 @unittest.skipUnless(sys.platform == "darwin", "real links require macOS; authored binding metadata runs everywhere")
 class RealBindingFormats(unittest.TestCase):
-    """Real ld output in both binding formats. C++ weak-definition coalescing and lazy/weak binds are two-level; a
-    flat (dynamic_lookup) import is refused from the binding data even when the symbol table claims a library."""
+    """Real ld output in both binding formats. Lazy and weak binds and C++ weak-definition lookups (-3: dyld's load-order
+    search among weak definitions, which ld emits only for weak definitions it resolved) are admitted; a flat
+    (dynamic_lookup) import is refused from the binding data even when the symbol table claims a library."""
 
     def test_chained_fixups_and_opcode_streams_from_real_links(self):
         if FIXTURES_OUT:

@@ -137,8 +137,9 @@ def _uleb(data, at):
 def _bind_stream(data, lazy=False, weak=False):
     """(library ordinal, symbol) for every bind an LC_DYLD_INFO opcode stream performs.
 
-    The lazy stream is a sequence of self-contained entries, each ended by DONE. Weak binding coalesces by name and
-    ignores ordinals; any ordinal a weak stream nevertheless sets is checked like the others."""
+    In the lazy stream DONE ends one entry: like dyld it clears the symbol but keeps the library ordinal already set, so
+    a later entry without its own SET_DYLIB binds through that ordinal. Weak binding coalesces by name and ignores
+    ordinals; any ordinal a weak stream nevertheless sets is checked like the others."""
     binds, ordinal, symbol, at = [], None if weak else 0, None, 0
     while at < len(data):
         opcode, immediate = data[at] & 0xf0, data[at] & 0x0f
@@ -146,7 +147,7 @@ def _bind_stream(data, lazy=False, weak=False):
         if opcode == 0x00:  # DONE
             if not lazy:
                 break
-            ordinal, symbol = 0, None
+            symbol = None
         elif opcode == 0x10:  # SET_DYLIB_ORDINAL_IMM
             ordinal = immediate
         elif opcode == 0x20:  # SET_DYLIB_ORDINAL_ULEB
@@ -206,10 +207,12 @@ def _chained_imports(data):
 
 
 def _import(ordinal, dylibs, symbol):
-    """Strict two-level binding: a loaded dylib (1..N), this image (0) or weak-definition coalescing (-3).
+    """Bindings the strict link contract admits: a loaded dylib (1..N), this image (0) or weak-definition lookup (-3).
 
-    ld records -3 only for a weak definition it found while linking. Flat lookup (-2) and the main executable (-1)
-    are the unbound dynamic-lookup forms the strict link contract forbids; any other ordinal names no image."""
+    -3 is not two-level: dyld resolves it by a process-wide search, in load order, among images with weak
+    definitions. It is admitted because ld records it only for a weak definition it resolved while linking. Flat
+    lookup (-2) and the main executable (-1) are the unbound dynamic-lookup forms the contract forbids; any other
+    ordinal names no image."""
     if ordinal in (-1, -2):
         raise DependencyError("unbound dynamic-lookup/executable import in Mach-O image (%s, %s); use explicit host "
                               "services" % (symbol, "flat lookup" if ordinal == -2 else "main executable"))
