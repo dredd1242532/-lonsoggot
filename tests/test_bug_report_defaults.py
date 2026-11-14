@@ -79,7 +79,7 @@ def fixture(source):
 #include <iterator>
 #include <string>
 #include <vector>
-#include "host/hos_wide_size.h"
+#include "host/hos_wide.h"
 #include "gpu/vk/display_modes.h"
 #include "gpu/vk/upscaler_rows.h"
 using namespace mkwvk;
@@ -92,6 +92,7 @@ int lang_saved; // language.txt's language, as the stand-in reads it
 int game_lang_index() { return lang_saved; }
 }
 static uint32_t screen_w, screen_h;
+struct { struct { uint32_t width = 0, height = 0; } swap_extent; } dev;
 bool screen_size(uint32_t* w, uint32_t* h) {
     if (!screen_w || !screen_h) return false;
     *w = screen_w; *h = screen_h; return true;
@@ -101,7 +102,7 @@ std::vector<display_modes::Size> screen_modes() { return {}; }
 int upscaler() { return opts.dlss; } // authored available engine; no backend/GPU call
 std::vector<std::string> gpu_device_names{"Authored GPU"};
 int mic_calls;
-struct Host { const char* (*mic_name)(int); };
+struct Host { const char* (*mic_name)(int); float (*aspect_ratio)() = nullptr; };
 const char* mic_name(int) { ++mic_calls; return "PRIVATE_MICROPHONE_NAME"; }
 Host host_storage{mic_name}; Host* host = &host_storage;
 bool mic_missing = false; int mic_listed = 1; std::string mic_want;

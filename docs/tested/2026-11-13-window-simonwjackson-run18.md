@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-13 | PR #142 plus this commit's Window fade hook, build `longshot-fadefill-f8d5b964-candidate2`, source stamp `54ac1df6` | NixOS 26.11, Linux 7.2.7, private Sway/Xwayland | RX 7900 XT, RADV Mesa 26.2.3 | Ryzen 5 7600X, 32 GB | Window 2520x1080, centred blurred menus, 1920x1080 output height, game upscaler, FG/HDR off, compute mesh fallback | Copied Market save; debug teleport to Kokiri Forest; 140 transition captures | Loading fade fills the wider picture; icon stays in the centred layout. Inspected capture; no performance claim. Windows, HDR, black-side mode and other GPUs not run |

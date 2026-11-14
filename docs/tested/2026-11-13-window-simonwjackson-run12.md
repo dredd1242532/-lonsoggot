@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-13 | main `f3fe1763dda2`, default-path pair 1 | NixOS 26.11, Linux 7.2.7, private Sway/Xwayland | RX 7900 XT, RADV Mesa 26.2.3 | Ryzen 5 7600X, 32 GB | Monitor's shape; 1280x720 drawable, 1920x1080 output, render 100%, game upscaler, FG/HDR off, uncapped, V-Sync Auto, compute mesh fallback | Castle Town wooden door, same copied save, stationary after warm-up; 30 s sample | Last five presents readings: 55.6, 56.5, 56.1, 56.3, 56.6; median 56.30 FPS. Interleaved main/PR/main/PR; no concurrent heavy build. Same-spot 2520x1080 resized screenshot attached to PR #142. No GPU fault |

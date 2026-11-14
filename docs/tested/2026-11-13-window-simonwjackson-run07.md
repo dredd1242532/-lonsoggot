@@ -1,0 +1,3 @@
+| Date | Build | OS / desktop | GPU / driver | CPU / RAM | Settings | Where | Result |
+|---|---|---|---|---|---|---|---|
+| 2026-11-13 | PR #142 `1c66d19b`, historical run 2 | NixOS 26.11, Linux 7.2.7, private Sway/Xwayland | RX 7900 XT, RADV Mesa 26.2.3 | Ryzen 5 7600X, 32 GB | 1920x1080, render 100%, game upscaler, FG/HDR off, uncapped, V-Sync Auto, Window; compute mesh fallback | Castle Town wooden door, same copied save, stationary after warm-up | Last five presents readings: 53.0, 53.6, 53.7, 53.4, 52.7; median 53.40 FPS. Interleaved main/PR/main/PR; historical measurements from [#142](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/142), not the later review-fix build |
