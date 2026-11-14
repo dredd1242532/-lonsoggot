@@ -56,7 +56,7 @@ what does not yet. Open problems are collected in tracking issues, linked below.
 | Hyrule Field, Castle Town, Kakariko and the dungeons | ⚠️ Players got there, with open bugs: lighting and shadows ([#1004](https://github.com/NotRexed/Hookshot/issues/1004)), crashes and freezes ([#2507](https://github.com/NotRexed/Hookshot/issues/2507)) |
 | Ultrawide and 4:3 | ✅ Works. The Aspect ratio row's default, Monitor's shape, widens the 3D to the screen and keeps the HUD and movies in the middle 16:9 ([#2119](https://github.com/NotRexed/Hookshot/pull/2119)) |
 | NVIDIA cards | ✅ Works. The most tested |
-| AMD cards | ⚠️ Many tested: reports from the RX 6600, RX 6800 XT, RX 7800 XT, RX 7900 XTX and RX 9070 XT. On Windows, the RX 6000 cards (Navi 21 and 22) draw task and mesh shaders through the compute fallback by default, as the driver lost the GPU with them ([#1747](https://github.com/NotRexed/Hookshot/pull/1747), [#1992](https://github.com/NotRexed/Hookshot/pull/1992), [#2215](https://github.com/NotRexed/Hookshot/pull/2215)). Driver crashes and device lost are still reported ([#996](https://github.com/NotRexed/Hookshot/issues/996)) |
+| AMD cards | ⚠️ Many tested: reports from the RX 6600, RX 6800 XT, RX 7800 XT, RX 7900 XTX and RX 9070 XT. On Windows, the RX 6600 to RX 6950 XT and their mobile and Pro models (Navi 21, 22 and 23) draw task and mesh shaders through the compute fallback by default: the driver lost the GPU on their own mesh shaders on an RX 6700 XT, an RX 6800 XT and, in one report in Mako, an RX 6600 ([#1747](https://github.com/NotRexed/Hookshot/pull/1747), [#1992](https://github.com/NotRexed/Hookshot/pull/1992), [#2215](https://github.com/NotRexed/Hookshot/pull/2215)); another RX 6600 played 15-20 minutes on them ([Longshot #130](https://git.magicbean.dev/MagicBeanDev/Longshot/issues/130)). The RX 6400 and 6500 XT (Navi 24) keep their own mesh shaders, as no report has them losing the GPU; `RX_VK_TASK_MESH_FALLBACK=1` tries the fallback. Driver crashes and device lost are still reported ([#996](https://github.com/NotRexed/Hookshot/issues/996)) |
 | Intel cards | ❓ Few reports, many of them black screens or crashes ([#999](https://github.com/NotRexed/Hookshot/issues/999)) |
 | Cards without mesh shaders (such as NVIDIA GTX 10 and AMD RX 5000) | ⚠️ Run through the compute fallback (since v2.0.6), which runs the mesh programs as compute shaders on cards with buffer device addresses: slower, and it leaves out the mesh draws that take their count from a buffer ([#640](https://github.com/NotRexed/Hookshot/issues/640)) |
 | Linux | ✅ Works with the AppImage. Tested on several distributions (CachyOS, Fedora, Bazzite, SteamOS) and cards, with open problems on some AMD cards ([#1000](https://github.com/NotRexed/Hookshot/issues/1000)) |
@@ -96,7 +96,7 @@ Longshot's first version will be **v3.0.0**; the launcher's first will be **v1.0
 **Your game copy:** program `0400486024DEC000` · update **v131072** · build `e0f3ccfa`.
 Use a `.nup` file, or the `romfs` and `exefs` folders. Other game versions are not supported.
 
-These are estimates from the [tested configurations](docs/tested-configurations.md), not a promise of a particular
+These are estimates from the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/), not a promise of a particular
 frame rate: the game runs on more than this, and performance depends on the resolution and settings you choose.
 
 | Component | Minimum | Recommended |
@@ -110,7 +110,7 @@ frame rate: the game runs on more than this, and performance depends on the reso
 | **Storage** | **About 60 GB free while building.** A hard drive works, but builds are much slower. | **An SSD with about 60 GB free.** |
 
 Memory use depends on the build, driver and scene: recent Linux/NVIDIA runs used roughly
-13–19 GiB for the game alone (see [tested configurations](docs/tested-configurations.md)), so even a 16 GB PC can need
+13–19 GiB for the game alone (see the [tested configurations catalogue](https://longshot.magicbean.dev/tested-configurations/)), so even a 16 GB PC can need
 swap. Leave room for the desktop and other programs.
 Swap can prevent an out-of-memory exit, but it is not extra RAM; heavy swapping can make the whole desktop unresponsive.
 
@@ -384,7 +384,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 |---|---|---|---|
 | Graphics | Quality preset | Custom, Minimum (4GB), Low (6GB), Balanced (8GB), High (12GB), Ultra (16GB+), Auto (this PC) | Auto (this PC) on a first start; Custom in an options file from before it |
 | | Aspect ratio | The shapes your screen's resolutions have, narrowest first (5:4, 4:3, 16:10, 16:9, 21:9, 32:9, ...), your monitor's own marked "(monitor's)" (after a restart) | Your monitor's |
-| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own) at 16:9; your screen's own size is marked "(native)" (after a restart) | 2048x1152, or your screen's size where it is smaller (a Steam Deck's 1280x800, a 1080p monitor); Auto (this PC) leaves it as it is |
+| | Output resolution | The Aspect ratio's sizes: your screen's resolutions and the common ones (1440p, 4K, 5K at 16:9; 1920x1200, 2560x1600 at 16:10; 3440x1440 at 21:9; ...), and 2048x1152 (the game's own reduced size, 80% of its 2560x1440, marked "(reduced)") at 16:9; your screen's own size is marked "(native)" (after a restart) | 2560x1440, the game's own picture, or your screen's size where it is smaller (a Steam Deck's 1280x800, a 1080p monitor), at its own shape (a 2560x1080 ultrawide starts at 2560x1080, a 2256x1504 laptop at 2256x1504); Auto (this PC) leaves it as it is |
 | | Profile | Docked, Handheld (after a restart) | Docked; a quality preset sets it |
 | | Upscaler | Game's own, NVIDIA DLSS (only in builds with NVIDIA's DLSS SDK, below, on NVIDIA RTX GPUs), AMD FSR 3.1 (every build, on GPUs it runs on, below), AMD FSR 4 (only in builds with FSR 4, below, on GPUs AMD's files cover), Off (no upscaling). NVIDIA DLAA and AMD FSR 4 Native AA are DLSS's and FSR 4's Native, chosen on the Render resolution row | Game's own; Auto (this PC) chooses DLSS or FSR 4 where they run |
 | | DLSS model | Transformer (K), Transformer 2 (M), Transformer 2 (L), NVIDIA default (shown where DLSS runs; used by DLSS and DLAA) | Transformer (K) |
@@ -456,7 +456,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
 - **Auto (this PC)**, which a first start begins on, chooses for the PC it runs on: the memory tier from the card's
   video memory (an integrated GPU, a Steam Deck or a card without mesh shaders at Minimum), DLSS on an NVIDIA RTX card
   or FSR 4 on an AMD RX 9000 where the build has them (else the game's own upscaler). It leaves the Output resolution as
-  it is: on a first start the game's own 2048x1152, or the screen's size where that is smaller. In the first minute of play it then measures the GPU: while
+  it is: on a first start the game's own 2560x1440, or the screen's size where that is smaller. In the first minute of play it then measures the GPU: while
   frames are missed with the GPU over 90% busy it lowers the Render resolution a step, and while the frame rate cap holds
   with the GPU under half busy it raises it a step, up to the best mode that still upscales (DLSS or FSR Quality, or 100%
   with the game's own; never DLAA or native AA). At most two steps; a PC that holds its cap keeps its picture. It chooses again when the card or the screen changes. `longshot_log.txt`'s
@@ -534,7 +534,7 @@ HDR, Detail, and GPU and memory (last: the rows to change when something is wron
   targets get a bigger GPU pool, so a full-size 3D fits. Where the screen's modes are not known (Linux), the menu offers
   1920x1080, 2560x1440, 3840x2160, 5120x1440 and 5120x2880. For a size the menu does not offer, set
   `output_res=<width>x<height>` in `longshot_options.ini`: each side a multiple of 8, at least 640x360, at most 5120x2880's
-  pixels, and between 5:4 and 48:9 in shape; anything else uses the game's 2048x1152. The menu then offers it as its own
+  pixels, and between 5:4 and 48:9 in shape; anything else uses the game's reduced 2048x1152. The menu then offers it as its own
   choice. A picture wider or narrower than 16:9 is kept to 5120x2160's pixels, so above that a size of another shape is
   not a native frame. A size's own shape sets the camera's, even when the OS reports a single 16:9 primary monitor. For
   three 16:9 monitors, use `5760x1080` or `7680x1440` and a window or logical display
@@ -1000,10 +1000,11 @@ switch that stands in for a menu row (`RX_VK_PACE`, `RX_VK_UPSCALE`, `RX_VK_FRAM
 
 To enable the debug tools, turn **Debug tools** on in the menu's Debug tab (or add `HOS_OOT_CHEATS=1` to
 `longshot_env.txt` in the game folder). The tools then show below it on the same tab. **Damage taken** is in the
-**Player** group beside **Heart protection**: Half, Normal (the default), Double or Quadruple. It applies only while
-Debug tools is on: off, Link takes Normal damage, and the saved choice returns when the tools do. Heart protection takes
-priority while enabled. The tab's Developer section, always shown, has the Descriptor reuse, Sampler cache, Robust
-buffers and ASTC as RGBA8 rows.
+**Player** group beside **Heart protection**: Half, Normal (the default), Double or Quadruple (`damage_taken=0/1/2/3`
+in `longshot_options.ini`). It applies only while Debug tools is on: off, Link takes Normal damage, and the saved
+choice returns when the tools do. Heart protection takes priority while enabled. Half scales the full hit before life
+is clamped to zero: with two quarter hearts left, a four-quarter hit still kills. The tab's Developer section, always
+shown, has the Descriptor reuse, Sampler cache, Robust buffers and ASTC as RGBA8 rows.
 
 A save whose minimap stopped showing after a Teleport on an earlier build (the area left had hidden it, and the flag
 stayed set in the save) is mended by the Teleport itself: teleport to an outdoor area, wait until you can move, then
