@@ -43,7 +43,8 @@ def march_on_linux(text):
         if path == "/proc/cpuinfo":
             return io.StringIO(text)
         return real_open(path, *args, **kwargs)
-    with mock.patch.object(host_cpu.os, "name", "posix"), mock.patch.object(builtins, "open", fake_open):
+    with mock.patch.object(host_cpu.os, "name", "posix"), mock.patch.object(builtins, "open", fake_open), \
+            mock.patch.object(sys, "platform", "linux"):
         return host_cpu.host_march()
 
 
@@ -65,10 +66,10 @@ class HostMarch(unittest.TestCase):
             return real_open(path, *args, **kwargs)
 
         with mock.patch.object(host_cpu.os, "name", "posix"), mock.patch.object(builtins, "open", fake_deck), \
-                mock.patch.dict(os.environ, {}, clear=True):
+                mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(sys, "platform", "linux"):
             self.assertEqual(host_cpu.host_mtune(), "znver2")
 
-        with mock.patch.dict(os.environ, {"RX_STEAMDECK": "1"}, clear=True):
+        with mock.patch.dict(os.environ, {"RX_STEAMDECK": "1"}, clear=True), mock.patch.object(sys, "platform", "linux"):
             self.assertEqual(host_cpu.host_mtune(), "znver2")
 
     def test_windows(self):
@@ -92,14 +93,14 @@ class HostMarch(unittest.TestCase):
         """'this CPU has no AVX2' only when the CPU chose the level: an RX_MARCH of znver2 (AVX2 and more) said it too"""
         build = (ROOT / "nx2" / "build.py").read_text(encoding="utf-8")
         start = build.index('MARCH = os.environ.get("RX_MARCH") or host_march()')
-        block = build[start:build.index("CPU = [", start)]
+        block = build[start:build.index("CPU = ", start)]
         for env, host, want in (({"RX_MARCH": "znver2"}, "x86-64-v3", "built for znver2 (RX_MARCH)"),
                                 ({"RX_MARCH": "x86-64-v3"}, "x86-64", ""),
                                 ({}, "x86-64-v2", "this CPU has no AVX2"),
                                 ({}, "x86-64-v3", "")):
             out = io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
-                exec(block, {"os": os, "host_march": lambda h=host: h})
+                exec(block, {"os": os, "host_march": lambda h=host: h, "DARWIN": False})
             if want:
                 self.assertIn(want, out.getvalue(), env)
             else:
@@ -113,6 +114,7 @@ class AppImageCheck(unittest.TestCase):
 
     def setUp(self):
         self.make_game = load("make_game_cpu_test", ROOT / "nx2" / "make_game.py")
+        self.make_game.DARWIN = False   # this fixture is AppImage's Linux policy, even when the test runs on a Mac
 
     def run_check(self, env, march, fsr=False):
         fake = mock.MagicMock(host_march=mock.MagicMock(return_value=march))

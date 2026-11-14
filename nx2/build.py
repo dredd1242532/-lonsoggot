@@ -63,11 +63,15 @@ PGO = os.environ.get("RX_PGO", "")
 # (host/posix: its windows.h is found first), the window and sound on SDL2. LONGSHOT_SYSROOT=<dir>: compile and link
 # against that root (the AppImage's: glibc 2.35, so the game runs on older systems than the one that built it).
 # LONGSHOT_VK_PREBUILT=<longshot_vk.so>: the Vulkan back end as built already (the AppImage's), not compiled here.
-LINUX = not toolchain.windows()   # (longshot: RX_TARGET=windows on Linux builds the Windows game, with llvm-mingw)
+SYSTEM = toolchain.system()
+LINUX = SYSTEM == "linux"
+DARWIN = sys.platform == "darwin" and SYSTEM == "macos"
+if DARWIN:
+    import darwin_build
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("LONGSHOT_SYSROOT", "")
-EXE = "longshot" if LINUX else "longshot.exe"
-VK_LIB = "longshot_vk.so" if LINUX else "longshot_vk.dll"
+EXE = darwin_build.EXE if DARWIN else ("longshot" if LINUX else "longshot.exe")
+VK_LIB = darwin_build.VK_LIB if DARWIN else ("longshot_vk.so" if LINUX else "longshot_vk.dll")
 
 
 def check_vk_symbols(so):
@@ -83,6 +87,8 @@ def check_vk_symbols(so):
     globals written inside an anonymous namespace, which makes a different symbol that nothing
     defines.
     """
+    if DARWIN:
+        return darwin_build.post_link(so)
     nm = shutil.which("nm") or shutil.which("llvm-nm")
     if not nm:
         return True   # (not a reason to fail a build; the check is a guard, not a dependency)
@@ -143,13 +149,15 @@ def HOT_ORDER():
     p = os.path.join(kit.WORK, "hot_order.txt")
     if not os.path.exists(p) or os.environ.get("RX_NO_ORDER"):
         return []
+    if DARWIN:
+        return linker("-order_file", darwin_build.order_file(p))
     if LINUX:
         return linker("--symbol-ordering-file=" + p, "--no-warn-symbol-ordering")
     return linker("/order:@" + p.replace("\\", "/"), "/ignore:4037")
 
 
-HOST_LIBS = ["-lpthread", "-ldl", "-lm"] if LINUX else \
-    ["-lwinhttp", "-luser32", "-lwinmm", "-ladvapi32", "-lole32", "-lshell32", "-lgdi32", "-ldbghelp"]
+HOST_LIBS = [] if DARWIN else (["-lpthread", "-ldl", "-lm"] if LINUX else
+    ["-lwinhttp", "-luser32", "-lwinmm", "-ladvapi32", "-lole32", "-lshell32", "-lgdi32", "-ldbghelp"])
 GPU = os.path.join(kit.HERE, "..", "gpu")
 # FFmpeg (libavcodec's VP8/VP9 decoders, swscale) for nn::codec's video decoders (host/nn_video.c): the static build
 # in the Eglantine clone's package cache
@@ -205,6 +213,44 @@ def ngx_sdk(sdk, linux):
               "DLSS" % (sdk, os.path.basename(ngx_library(sdk, linux)), "linux" if linux else "windows"), flush=True)
         return ""
     return sdk
+
+
+def executable_link(cc, exe, rsp, *, wgpu=False, manifest="", resource=""):
+    """The real executable command, callable with authored objects and no game or generated headers."""
+    if DARWIN:
+        return [cc] + target() + toolchain.native_link() + ["-o", exe] + \
+            linker("-map", exe + ".map", "-dead_strip", "-exported_symbol", "_hos_posix_*", "-rpath", "@executable_path") + \
+            ["@" + rsp] + HOT_ORDER() + (["-fprofile-instr-generate"] if PGO == "gen" else []) + \
+            (FFMPEG_MAC[1] if FFMPEG_MAC else [])
+    if LINUX:
+        return [cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") + \
+            ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() + \
+            (["-fprofile-instr-generate"] if PGO == "gen" else []) + (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS
+    return [cc] + toolchain.native_target() + toolchain.native_link() + \
+        ["-o", exe] + linker("/map:" + exe[:-4] + ".map") + [toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS + \
+        ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) + \
+        ([resource] if resource else []) + [manifest] + \
+        ([toolchain.link_opt("/subsystem:windows"), toolchain.link_opt("/entry:mainCRTStartup")] if os.environ.get("RX_RELEASE") == "1" else []) + \
+        ([os.path.join(WGPU, "lib", "wgpu_native.dll.lib")] if wgpu else []) + \
+        ([os.path.join(FFMPEG, "lib", l + ".lib") for l in ("avcodec", "swscale", "swresample", "avutil")] +
+         ["-lbcrypt", "-lmfplat", "-lmfuuid", "-lstrmiids", "-lole32"] if FFMPEG else []) + \
+        ([os.path.join(dav1d_windows(), "lib", "libdav1d.a")] if dav1d_windows() else []) + \
+        (["-lc++", "-lunwind"] if toolchain.mingw() else [])
+
+
+def renderer_link(cc, cxx, vdll, vrsp):
+    """Mach-O stays two-level and rejects undefined symbols; ELF/COFF arrays are unchanged."""
+    if DARWIN:
+        return [cxx] + target() + toolchain.native_link() + ["-dynamiclib", "-o", vdll] + \
+            linker("-map", vdll + ".map", "-dead_strip", "-undefined", "error", "-install_name",
+                   "@rpath/" + os.path.basename(vdll), "-rpath", "@loader_path") + ["@" + vrsp, "-stdlib=libc++"]
+    if LINUX:
+        return [cxx] + target() + ["-fuse-ld=lld", "-shared", "-o", vdll] + \
+            linker("-Map=" + vdll + ".map") + ["-Wl,-Bsymbolic", "-Wl,--gc-sections", "-static-libstdc++", "-static-libgcc", "@" + vrsp] + \
+            ([ngx_library(NGX_SDK, True)] if NGX_SDK else []) + ["-ldl", "-lpthread", "-lm"]
+    return [cc] + toolchain.native_target() + toolchain.native_link() + \
+        ["-shared", "-o", vdll] + linker("/map:" + vdll[:-4] + ".map") + ["@" + vrsp, "-luser32"] + \
+        (["-lc++", "-lunwind"] if toolchain.mingw() else []) + ngx_link(NGX_SDK, toolchain.mingw())
 
 
 # LONGSHOT_NGX_SDK=<folder>: the Vulkan back end with NVIDIA DLSS Super Resolution, from NVIDIA's NGX SDK fetched into that
@@ -296,6 +342,8 @@ def header_package(cpm_name, probe, env=None, work=None):
                 parent = os.path.dirname(e)
                 if os.path.normpath(os.path.join(parent, "include")) == os.path.normpath(e):
                     return parent
+    if DARWIN and ok("/opt/homebrew"):
+        return "/opt/homebrew"
     for prefix in ("/usr/local", "/usr"):
         if ok(prefix):
             return prefix
@@ -588,6 +636,9 @@ def ffmpeg_linux(missing=None):
 if LINUX:
     FFMPEG_LX = ffmpeg_linux()
     FFMPEG = None
+elif DARWIN:
+    FFMPEG_MAC = darwin_build.ffmpeg_flags(FFMPEG_LIBS)
+    FFMPEG = None
 
 
 def ffmpeg_version_key():
@@ -598,6 +649,8 @@ def ffmpeg_version_key():
         incs.append(os.path.join(FFMPEG, "include"))
     if LINUX and FFMPEG_LX:
         incs += [f[2:] for f in FFMPEG_LX[0] if f.startswith("-I")]
+    if DARWIN and FFMPEG_MAC:
+        incs += [f[2:] for f in FFMPEG_MAC[0] if f.startswith("-I")]
     incs.append("/usr/include")
     for inc in incs:
         parts = []
@@ -625,24 +678,50 @@ WRITE_TRACK = [] if os.environ.get("RX_SOFT_WRITE_WATCH") == "0" else ["-DA64_WR
 from host_cpu import host_march, host_mtune   # (make_game.py asks it too: the AppImage's renderer)
 
 MARCH = os.environ.get("RX_MARCH") or host_march()
-if os.environ.get("RX_MARCH"):
+if DARWIN:
+    if toolchain.architecture() == "arm64" and MARCH.startswith(("x86", "znver", "haswell", "skylake")):
+        raise SystemExit("RX_MARCH=%s is x86-specific; use RX_ARCH=x86_64, or an ARM level for arm64" % MARCH)
+    print("build: macOS %s%s" % (toolchain.architecture(), " -march=" + MARCH if MARCH else " (baseline ISA)"), flush=True)
+elif os.environ.get("RX_MARCH"):
     if MARCH != "x86-64-v3":
         print("build: the game is built for %s (RX_MARCH)" % MARCH, flush=True)
 elif MARCH != "x86-64-v3":
     print("build: this CPU has no AVX2: the game is built for %s (a little slower)" % MARCH, flush=True)
-CPU = ["-march=" + MARCH, "-ffp-contract=off"]
+CPU = (["-march=" + MARCH] if MARCH else []) + ["-ffp-contract=off"]
 MTUNE = os.environ.get("RX_MTUNE") or host_mtune()
 if MTUNE:
     CPU += ["-mtune=" + MTUNE]
+CX16 = [] if DARWIN and toolchain.architecture() == "arm64" else ["-mcx16"]
 OPT = "O1"   # (the lifted code's level; code_hot.c's is RX_HOT_OPT)
 
 
 def flags(gen, rt64, opt, polls):
     return target() + CPU + [
         "-I" + rt64, "-I" + gen, "-I" + os.path.join(kit.KIT, "rt"), "-I" + NX2_RT, "-Wno-everything",
-        "-fno-strict-aliasing", "-mcx16", "-" + opt, "-g0", "-mllvm", "-rotation-max-header-size=0",
+        "-fno-strict-aliasing"] + CX16 + ["-" + opt, "-g0", "-mllvm", "-rotation-max-header-size=0",
         "-ffunction-sections", "-mllvm", "-capture-tracking-max-uses-to-explore=5000"] + \
         (["-DA64_POLLING"] if polls else []) + WRITE_TRACK
+
+
+def host_flags(gen, rt64):
+    return target() + CPU + (["-I" + POSIX] if DARWIN else (["-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else [])) + \
+        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-Wno-everything", "-O2", "-g0"] + CX16 + ["-DA64_POLLING"] + WRITE_TRACK
+
+
+def renderer_flags(vk, spirv_headers, vk_headers, vma_headers, gen_dir):
+    return target() + CPU + (["-fPIC", "-I" + POSIX] if DARWIN else (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else [])) + [
+        "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
+        "-include", "string", "-include", "vector",
+        "-std=c++20", "-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DVK_NO_PROTOTYPES", "-DMKWVK_BUILDING",
+        *(["-DLONGSHOT_RELEASE"] if os.environ.get("RX_RELEASE") == "1" else []),
+        "-DMKWVK_INCLUDES=2",
+        "-I" + os.path.join(vk, "compat"), "-I" + os.path.join(GPU, "compat"), "-I" + os.path.join(vk, "eden"),
+        "-I" + os.path.join(GPU, "third_party", "suyu"),
+        "-I" + os.path.join(vk, "sirit", "include"), "-I" + os.path.join(vk, "sirit", "src"),
+        "-I" + os.path.join(spirv_headers, "include"), "-I" + os.path.join(spirv_headers, "include", "spirv", "unified1"),
+        "-I" + os.path.join(vk_headers, "include"), "-I" + os.path.join(vma_headers, "include"),
+        "-I" + vk, "-I" + gen_dir,
+        "-I" + os.path.join(kit.ROOT, "third_party", "zbic")]
 
 
 def write_info(out):
@@ -670,6 +749,8 @@ def flag_text(fl):
         else:
             f = f.replace(kit.ROOT, "<root>")
         kept.append(f)
+    if DARWIN:
+        kept.append("macos-toolchain=" + darwin_build.compiler_key())
     return " ".join(kept)
 
 
@@ -998,6 +1079,9 @@ def main():
     p.add_argument("--kept-lift", metavar="LIST", help="(make_game.py) the lifted C was let go after the last build: its objects "
                    "by this list (KEPT_LIST); exit status KEPT_STALE when it no longer fits")
     a = p.parse_args()
+    if DARWIN and (os.environ.get("LONGSHOT_NGX_SDK") or FSR):
+        print("macOS: NVIDIA NGX and AMD's FSR runtime have no supported library here; build without those options", flush=True)
+        return 1
     sa = os.path.join(kit.WORK, "sa")
     gen = os.path.join(sa if a.standalone else kit.WORK, "gen")
     out = os.path.join(sa if a.standalone else kit.WORK, "build")
@@ -1044,10 +1128,12 @@ def main():
         # its own stand-ins, host/posix/linux_stubs.c)
         have_wgpu = os.path.isfile(os.path.join(WGPU, "include", "webgpu", "webgpu.h"))
         host_srcs = sorted(os.path.join(HOST, f) for f in os.listdir(HOST) if f.endswith(".c") and (f != "pgo_rt.c" or PGO == "gen")
-                           and not (LINUX and f in ("display.c", "mf_av1.c", "rx_nowgpu.c")) and (f != "rx_nowgpu.c" or not have_wgpu)
+                           and not ((LINUX or DARWIN) and f in ("display.c", "mf_av1.c", "rx_nowgpu.c")) and (f != "rx_nowgpu.c" or not have_wgpu)
                            and (f != "dav1d_av1.c" or dav1d_windows()))
         if LINUX:   # (the window on SDL2, the Win32 calls on POSIX, no Media Foundation and no WebGPU renderer)
             host_srcs += [os.path.join(POSIX, f) for f in ("win32_posix.c", "display_sdl.c", "linux_stubs.c", "prof.c")]
+        elif DARWIN:
+            host_srcs += darwin_build.posix_sources(POSIX)
     else:
         srcs += [os.path.join(NX2_RT, "eden_shim.c"), write_info(out)]
     if kit.env_on("RX_VK_ONLY"):   # (no lift needed: the back end alone)
@@ -1092,11 +1178,10 @@ def main():
         fp(deps), fp(norm(fl)), fp(norm(hot_fl)), code.hexdigest()[:10],
         sum(1 for x in srcs if os.path.basename(x).startswith("code_"))), flush=True)
     # the runtime: ordinary C at -O2, with its own headers (any host/*.h change rebuilds all of it)
-    host_fl = target() + CPU + (["-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + \
-        ["-I" + HOST, "-I" + rt64, "-I" + gen, "-Wno-everything", "-O2", "-g0", "-mcx16", "-DA64_POLLING"] + WRITE_TRACK
+    host_fl = host_flags(gen, rt64)
     host_deps = deps + b"".join(open(os.path.join(HOST, f), "rb").read() for f in sorted(os.listdir(HOST))
                                 if f.endswith(".h"))
-    if LINUX:
+    if LINUX or DARWIN:
         host_deps += b"".join(open(os.path.join(POSIX, f), "rb").read() for f in sorted(os.listdir(POSIX)) if f.endswith(".h"))
     host_deps += open(os.path.join(GPU, "vk", "vk_api.h"), "rb").read()   # (the renderer ABI used by host/rx_backend.c)
     host_deps += open(os.path.join(GPU, "vk", "dlss_math.h"), "rb").read()   # (host/rx_backend.c's DLSS jitter)
@@ -1112,6 +1197,7 @@ def main():
               host_fl + ["-I" + os.path.join(OPUS, "include")] +
               (["-I" + os.path.join(FFMPEG, "include")] if FFMPEG else []) +
               (FFMPEG_LX[0] if LINUX and FFMPEG_LX else []) +
+              (FFMPEG_MAC[0] if DARWIN and FFMPEG_MAC else []) +
               ([stamp_def] if os.path.basename(s) == "hos_main.c" else []) +
               (["-I" + ZSTD] if os.path.basename(s) in ZSTD_HOST else []) +
               (dav1d_fl if os.path.basename(s) in ("nn_video.c", "dav1d_av1.c") else []),
@@ -1131,8 +1217,8 @@ def main():
         jobs += zstd_jobs(cc, target() + CPU + ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DZSTD_DISABLE_ASM",
                                                 "-DZSTD_LEGACY_SUPPORT=0", "-DZSTD_MULTITHREAD=0"], obj_dir, "zstd_")
     # the renderer (C++20, NDEBUG: no asserts in it or suyu), when a wgpu-native release is there
-    wgpu = a.standalone and not LINUX and os.path.isfile(os.path.join(WGPU, "include", "webgpu", "webgpu.h"))
-    if a.standalone and not wgpu and not LINUX:
+    wgpu = a.standalone and not (LINUX or DARWIN) and os.path.isfile(os.path.join(WGPU, "include", "webgpu", "webgpu.h"))
+    if a.standalone and not wgpu and not (LINUX or DARWIN):
         print("no wgpu-native at %s (WGPU_NATIVE): building without the renderer" % WGPU)
     if wgpu:
         cxx = toolchain.need(toolchain.find("clang++"))
@@ -1180,23 +1266,8 @@ def main():
             with open(f, "rb") as src:
                 stamp.update(os.path.relpath(f, vk).replace("\\", "/").encode() + src.read().replace(bytes((13, 10)), bytes((10,))))
         shader_stamp = "-DLONGSHOT_SHADER_STAMP=0x%sull" % stamp.hexdigest()[:16]
-        vflags = target() + CPU + (["-fPIC", "-I" + POSIX, "-D_GNU_SOURCE"] if LINUX else []) + [   # (longshot: the replay is the frame's limit now)
-            # (what the code takes for granted, which newer C++ libraries bring in by themselves and older ones do not: issue 48)
-            "-include", "algorithm", "-include", "cstdio", "-include", "cstdlib", "-include", "cstring", "-include", "functional",
-            "-include", "string", "-include", "vector",
-            "-std=c++20", "-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-DVK_NO_PROTOTYPES", "-DMKWVK_BUILDING",
-            *(["-DLONGSHOT_RELEASE"] if os.environ.get("RX_RELEASE") == "1" else []),   # (the shaders precompiled before the game)
-            # (Eden's recompiler before suyu's root: suyu has its own shader_recompiler/ headers, and a Shader::Info
-            # of the other layout in some objects is what crashed the descriptor walk. MKWVK_INCLUDES changes the
-            # object keys, which leave the include folders out, when this order changes)
-            "-DMKWVK_INCLUDES=2",
-            "-I" + os.path.join(vk, "compat"), "-I" + os.path.join(GPU, "compat"), "-I" + os.path.join(vk, "eden"),
-            "-I" + os.path.join(GPU, "third_party", "suyu"),
-            "-I" + os.path.join(vk, "sirit", "include"), "-I" + os.path.join(vk, "sirit", "src"),
-            "-I" + os.path.join(spirv_headers, "include"), "-I" + os.path.join(spirv_headers, "include", "spirv", "unified1"),
-            "-I" + os.path.join(vk_headers, "include"), "-I" + os.path.join(vma_headers, "include"),
-            "-I" + vk, "-I" + gen_dir,
-            "-I" + os.path.join(kit.ROOT, "third_party", "zbic")]
+        # Includes keep Eden's recompiler before suyu's; MKWVK_INCLUDES keys that order.
+        vflags = renderer_flags(vk, spirv_headers, vk_headers, vma_headers, gen_dir)
         # (NVIDIA DLSS, a local build's option: scripts/ngx_sdk.py. Only vk_dlss.cpp sees NVIDIA's headers; without them
         # it is the stubs that say DLSS is not there)
         ngx_flags = ["-DLONGSHOT_NGX", "-I" + os.path.join(NGX_SDK, "include")] if NGX_SDK else []
@@ -1229,7 +1300,7 @@ def main():
         # (zstd's decoder and encoder: third_party/zbic's single file, built below with the program cache's zstd; it serves
         # the game's font files too, so the decompression-only third_party/zstd is not built as well)
         # (the bundled fonts, compiled in: nx2/ui_fonts.py's file of the build's own)
-        vk_jobs.append((cxx, fonts_cpp, os.path.join(obj_dir, "vk_ui_fonts.o"), target() + (["-fPIC"] if LINUX else []) + ["-O0", "-g0", "-w"],
+        vk_jobs.append((cxx, fonts_cpp, os.path.join(obj_dir, "vk_ui_fonts.o"), target() + (["-fPIC"] if LINUX or DARWIN else []) + ["-O0", "-g0", "-w"],
                         b""))
         for src in vk_sources():
             name = os.path.relpath(src, vk).replace(os.sep, "_")[:-4]
@@ -1248,7 +1319,7 @@ def main():
         zstd_src = os.path.join(kit.ROOT, "third_party", "zbic", "zstd.c")
         zstd_deps = b"".join(open(os.path.join(zbic, f), "rb").read() for f in ("zstd.h", "zstd_errors.h"))
         vk_jobs.append((cc, zstd_src, os.path.join(obj_dir, "vk_zstd.o"),
-                        target() + CPU + (["-fPIC"] if LINUX else []) +
+                        target() + CPU + (["-fPIC"] if LINUX or DARWIN else []) +
                         ["-O2", "-g0", "-DNDEBUG", "-Wno-everything", "-fvisibility=hidden", "-I" + zbic], zstd_deps))
         if NGX_SDK and not LINUX and toolchain.mingw():
             # (llvm-mingw: NVIDIA's static library was built with Microsoft's compiler for its static runtime (/MT). What it asks
@@ -1261,6 +1332,11 @@ def main():
             pdeps = tree_headers(POSIX)
             for f in ("win32_posix.c",):
                 vk_jobs.append((cc, os.path.join(POSIX, f), os.path.join(obj_dir, "vk_posix_" + f[:-2] + ".o"), cflags, pdeps))
+        elif DARWIN:
+            cflags = target() + CPU + ["-fPIC", "-O2", "-g0", "-Wno-everything", "-I" + POSIX]
+            pdeps = tree_headers(POSIX)
+            for src in darwin_build.posix_sources(POSIX, renderer=True):
+                vk_jobs.append((cc, src, os.path.join(obj_dir, "vk_posix_" + os.path.basename(src)[:-2] + ".o"), cflags, pdeps))
         jobs += vk_jobs
     vk_only = kit.env_on("RX_VK_ONLY")   # (the renderer alone, the game's objects as they are)
     if vk_only:
@@ -1335,14 +1411,11 @@ def main():
     objs = [j[2] for j in jobs if j[2] not in vk_objs]
     rsp = os.path.join(out, "objs.rsp")
     open(rsp, "w", encoding="utf-8").write("\n".join('"%s"' % o.replace("\\", "/") for o in objs))
-    if a.standalone and not vk_only and LINUX:
+    if a.standalone and not vk_only and (LINUX or DARWIN):
         exe = os.path.join(out, EXE)   # (+ longshot.map: crash offsets -> f_<guest address>)
         t = time.time()
         # (--export-dynamic-symbol: the window's state, which the Vulkan back end's own Win32 calls read by name)
-        r = subprocess.run([cc] + target() + ["-fuse-ld=lld", "-o", exe] + linker("-Map=" + exe + ".map") +
-                           ["-Wl,--gc-sections", "-Wl,--export-dynamic-symbol=hos_posix_*", "@" + rsp] + HOT_ORDER() +
-                           (["-fprofile-instr-generate"] if PGO == "gen" else []) +
-                           (FFMPEG_LX[1] if FFMPEG_LX else []) + HOST_LIBS,
+        r = subprocess.run(executable_link(cc, exe, rsp),
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
@@ -1350,24 +1423,20 @@ def main():
             print("\n".join(undefined[:60]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
         print("linked %s: %d MB (%.0fs)" % (exe, os.path.getsize(exe) >> 20, time.time() - t))
-        sdl = os.environ.get("LONGSHOT_SDL2", "")   # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)
-        if sdl and os.path.exists(sdl):
-            import shutil
-            shutil.copyfile(sdl, os.path.join(out, "libSDL2-2.0.so.0"))
+        if DARWIN:
+            darwin_build.copy_sdl(out)
+        else:
+            sdl = os.environ.get("LONGSHOT_SDL2", "")   # (libSDL2-2.0.so.0 beside it, when the AppImage brings one)
+            if sdl and os.path.exists(sdl):
+                import shutil
+                shutil.copyfile(sdl, os.path.join(out, "libSDL2-2.0.so.0"))
     elif a.standalone and not vk_only:
         exe = os.path.join(out, "longshot.exe")   # (+ longshot.map: crash offsets -> f_<guest address>)
         t = time.time()
-        r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
-                           ["-o", exe] + linker("/map:" + exe[:-4] + ".map") + [toolchain.link_opt("/stack:8388608"), "@" + rsp] + HOT_ORDER() + HOST_LIBS +
-                           ([toolchain.link_opt("/nodefaultlib:clang_rt.profile.lib")] if PGO == "gen" else []) +
-                           ([os.path.join(kit.WORK, "longshot.res")] if os.path.exists(os.path.join(kit.WORK, "longshot.res")) else []) +   # (nx2/make_icon.py)
-                           [win_manifest.write(os.path.join(out, "longshot_manifest.res"))] +   # (UTF-8 paths: nx2/win_manifest.py)
-                           ([toolchain.link_opt("/subsystem:windows"), toolchain.link_opt("/entry:mainCRTStartup")] if os.environ.get("RX_RELEASE") == "1" else []) +   # (no console window)
-                           ([os.path.join(WGPU, "lib", "wgpu_native.dll.lib")] if wgpu else []) +
-                           ([os.path.join(FFMPEG, "lib", l + ".lib") for l in ("avcodec", "swscale", "swresample", "avutil")] +
-                            ["-lbcrypt", "-lmfplat", "-lmfuuid", "-lstrmiids", "-lole32"] if FFMPEG else []) +
-                           ([os.path.join(dav1d_windows(), "lib", "libdav1d.a")] if dav1d_windows() else []) +
-                           (["-lc++", "-lunwind"] if toolchain.mingw() else []),   # (llvm-mingw: the C++ parts' runtime, linked in; MSVC's comes by itself)
+        resource = os.path.join(kit.WORK, "longshot.res")
+        r = subprocess.run(executable_link(cc, exe, rsp, wgpu=wgpu,
+                           resource=resource if os.path.exists(resource) else "",
+                           manifest=win_manifest.write(os.path.join(out, "longshot_manifest.res"))),
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:
@@ -1407,27 +1476,23 @@ def main():
         vrsp = os.path.join(out, "vk_objs.rsp")
         open(vrsp, "w", encoding="utf-8").write("\n".join('"%s"' % j[2].replace("\\", "/") for j in vk_jobs))
         t = time.time()
-        if LINUX:   # (its C++ runtime inside: the game folder runs where the AppImage's sysroot is older than the system)
-            link = [toolchain.need(toolchain.find("clang++"))] + target() + ["-fuse-ld=lld", "-shared", "-o", vdll] + \
-                linker("-Map=" + vdll + ".map") + ["-Wl,-Bsymbolic", "-Wl,--gc-sections", "-static-libstdc++", "-static-libgcc", "@" + vrsp] + \
-                ([ngx_library(NGX_SDK, True)] if NGX_SDK else []) + ["-ldl", "-lpthread", "-lm"]
-        else:
-            link = [cc] + toolchain.native_target() + toolchain.native_link() + \
-                ["-shared", "-o", vdll] + linker("/map:" + vdll[:-4] + ".map") + ["@" + vrsp, "-luser32"] +                 (["-lc++", "-lunwind"] if toolchain.mingw() else []) + ngx_link(NGX_SDK, toolchain.mingw())
+        link = renderer_link(cc, toolchain.need(toolchain.find("clang++")) if LINUX or DARWIN else cc, vdll, vrsp)
         r = subprocess.run(link, capture_output=True, text=True)
         if r.returncode:
             undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
             print("%s link FAILED, %d undefined symbols" % (VK_LIB, len(undefined)))
             print("\n".join(undefined[:60]) if undefined else (r.stdout + r.stderr)[-3000:])
             return 1
-        if LINUX and not check_vk_symbols(vdll):
+        if (LINUX or DARWIN) and not check_vk_symbols(vdll):
             return 1
         print("linked %s: %d MB (%.0fs)" % (vdll, os.path.getsize(vdll) >> 20, time.time() - t))
     if a.dll:
         dll = os.path.join(out, "longshot_game.dll")   # (+ longshot_game.map: crash offsets -> f_<guest address>)
         t = time.time()
-        r = subprocess.run([cc] + toolchain.native_target() + toolchain.native_link() +
-                           ["-shared", "-o", dll] + linker("/map:" + dll[:-4] + ".map") + ["@" + rsp],
+        link = (renderer_link(cc, cc, dll, rsp) if DARWIN else
+                [cc] + toolchain.native_target() + toolchain.native_link() +
+                ["-shared", "-o", dll] + linker("/map:" + dll[:-4] + ".map") + ["@" + rsp])
+        r = subprocess.run(link,
                            capture_output=True, text=True)
         undefined = sorted({l.strip() for l in (r.stdout + r.stderr).splitlines() if "undefined symbol" in l})
         if r.returncode:

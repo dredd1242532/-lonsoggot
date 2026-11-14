@@ -45,7 +45,7 @@ def main():
         other = vk / "vk_other.cpp"
         other.write_text("// unrelated backend source\n", encoding="utf-8")
         def jobs(sdk_path=sdk):
-            ns = dict(os=os, hashlib=hashlib, kit=SimpleNamespace(ROOT=str(root)), NGX_SDK=str(sdk_path) if sdk_path else "",
+            ns = dict(os=os, hashlib=hashlib, kit=SimpleNamespace(ROOT=str(root)), DARWIN=False, NGX_SDK=str(sdk_path) if sdk_path else "",
                       vk=str(vk), GPU=str(root / "gpu"), vk_jobs=[], cxx=a.cxx, obj_dir=str(root / "obj"),
                       vflags=["-std=c++17", "-O0"], imgui_flags=[], imgui_users=(), shader_stamp="", stamp_def="",
                       vk_lib_deps=b"", logo_text=b"", imgui_deps=b"", vk_sources=lambda: [str(src), str(other)])

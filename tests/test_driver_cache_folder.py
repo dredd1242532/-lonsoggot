@@ -8,6 +8,7 @@ new name would start every player's cache from nothing.
 python -I -B tests/test_driver_cache_folder.py [--cxx c++]
 """
 import argparse
+import ast
 import os
 from pathlib import Path
 import re
@@ -51,8 +52,10 @@ def main():
         raise SystemExit("FAIL: the Linux main does not call driver_cache_folder")
     if main_fn.index("driver_cache_folder();") > main_fn.index("hos_display_init()"):
         raise SystemExit("FAIL: driver_cache_folder runs after the window (SDL) may have loaded Vulkan")
-    exe_name = re.search(r'^EXE = "([^"]+)" if LINUX', (ROOT / "nx2" / "build.py").read_text(encoding="utf-8"), re.M)
-    if not exe_name or exe_name.group(1) != "longshot":
+    tree = ast.parse((ROOT / "nx2" / "build.py").read_text(encoding="utf-8"))
+    expr = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "EXE" for t in n.targets))
+    exe_name = eval(compile(ast.Expression(expr), "Linux executable name", "eval"), {"LINUX": True, "DARWIN": False})
+    if exe_name != "longshot":
         raise SystemExit("FAIL: the Linux game is no longer named longshot (nx2/build.py EXE): NVIDIA's cache is filed by that name")
 
     cxx = shutil.which(args.cxx)

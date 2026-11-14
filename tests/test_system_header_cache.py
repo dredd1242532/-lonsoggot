@@ -112,6 +112,7 @@ class HeaderCacheTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.object(make_game, 'ROOT', str(tools)))
             stack.enter_context(mock.patch.object(make_game, 'LINUX', False))
+            stack.enter_context(mock.patch.object(make_game, 'DARWIN', False))
             stack.enter_context(mock.patch.dict(sys.modules, {'toolchain': Toolchain}))
             stack.enter_context(mock.patch.object(make_game.tempfile, 'TemporaryDirectory',
                                                  side_effect=lambda: REAL_TEMPORARY(dir=self.root)))

@@ -51,7 +51,7 @@ class CpmDiscoveryTests(unittest.TestCase):
         # so the real build module discovers packages in this owned layout instead.
         kit = types.SimpleNamespace(ROOT=str(self.tools), HERE=str(self.tools / "nx2"),
                                     WORK=str(self.tools / "work"))
-        toolchain = types.SimpleNamespace(windows=lambda: os.name == "nt")
+        toolchain = types.SimpleNamespace(windows=lambda: os.name == "nt", system=lambda: "windows" if os.name == "nt" else "linux")
 
         def no_process(command, *args, **kwargs):
             if command[0] == "pkg-config":
@@ -65,6 +65,7 @@ class CpmDiscoveryTests(unittest.TestCase):
         with (mock.patch.dict(sys.modules, {"kit": kit, "rtgen": types.ModuleType("rtgen"),
                                            "toolchain": toolchain}),
               mock.patch.object(sys, "path", list(sys.path)),
+              mock.patch.object(sys, "platform", "linux" if sys.platform == "darwin" else sys.platform),
               mock.patch.dict(os.environ, env, clear=False),
               mock.patch.object(subprocess, "run", side_effect=no_process),
               mock.patch.object(subprocess, "Popen", side_effect=AssertionError("Unexpected process launch"))):

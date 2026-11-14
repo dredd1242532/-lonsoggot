@@ -2,9 +2,17 @@
 CPU without x86-64-v3's features (AVX2, FMA, BMI2, MOVBE) gets x86-64-v2, or the x86-64 baseline. RX_MARCH, read by
 build.py, still chooses."""
 import os
+import sys
+
+if sys.platform == "darwin":
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "third_party", "a64-kit", "tools"))
+    import toolchain
 
 
 def host_march():
+    if sys.platform == "darwin" and os.name != "nt":
+        # Rosetta advertises v2. Native arm64 needs no x86 -march (RX_MARCH still overrides in build.py).
+        return "" if toolchain.architecture() == "arm64" else "x86-64-v2"
     want = ("avx2", "fma", "bmi2", "movbe")
     try:
         if os.name == "nt":
@@ -26,6 +34,8 @@ def host_march():
 
 def host_mtune():
     """Tuning target for the host CPU (e.g. znver2 for Steam Deck APU 0405/0932)"""
+    if sys.platform == "darwin" and os.name != "nt":
+        return ""
     if os.environ.get("RX_STEAMDECK") == "1":
         return "znver2"
     if os.name != "nt":

@@ -126,7 +126,7 @@ class MakeGameTests(unittest.TestCase):
             self.assertIsNone(make_game.place_fsr_runtime(game))   # (nothing fetched: nothing placed)
             ffx_sdk.fetch(os.path.join(tmp, "sdk"), opener=Opener(data), say=lambda _: None)
             placed = make_game.place_fsr_runtime(game)
-            if make_game.LINUX:
+            if make_game.LINUX or make_game.DARWIN:
                 self.assertIsNone(placed)   # (AMD's runtime is Windows' alone)
             else:
                 self.assertEqual(placed, game)

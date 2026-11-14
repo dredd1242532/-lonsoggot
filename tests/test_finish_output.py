@@ -72,6 +72,7 @@ class FinishOutputTests(unittest.TestCase):
             # Comprehensions use globals. Keep one namespace, as in production, and discover only authored setup files.
             namespace = dict(make_game.__dict__, built=str(self.built), out=str(self.out), work=str(self.work),
                              ROOT=str(self.root / "tools"), LINUX=False if launcher else make_game.LINUX,
+                             DARWIN=False if launcher else make_game.DARWIN,
                              a=SimpleNamespace(fsr=False, no_fsr=False, update=None, fetch_fsr_runtime=False))
             exec(FINISH, namespace)
 

@@ -22,6 +22,8 @@ BUILD_SCRIPT = ROOT / "nx2" / "build.py"
 def production_code(path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     names = {"tree_headers", "vk_sources", "flag_text", "object_key", "zstd_jobs"}
+    if any(isinstance(n, ast.FunctionDef) and n.name == "renderer_flags" for n in tree.body):
+        names.add("renderer_flags")
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
     assert {n.name for n in functions} == names
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -96,7 +98,7 @@ class ShaderStampCacheTests(unittest.TestCase):
         namespace = {
             "os": os, "hashlib": hashlib,
             "GPU": str(self.root / "gpu"), "POSIX": str(self.root / "host/posix"), "HOST": str(self.root / "host"),
-            "LINUX": linux, "CPU": ["-march=x86-64"],
+            "LINUX": linux, "DARWIN": False, "CPU": ["-march=x86-64"],
             "kit": SimpleNamespace(ROOT=str(self.root), HERE=str(self.root / "nx2")),
             "toolchain": SimpleNamespace(find=lambda name: name, need=lambda name: name, mingw=lambda: mingw),
             "target": lambda: ["--target=x86_64-linux-gnu" if linux else "--target=x86_64-w64-mingw32"],

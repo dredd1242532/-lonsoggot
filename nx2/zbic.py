@@ -14,19 +14,42 @@ import toolchain
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(os.path.dirname(HERE), "third_party", "zbic")
 DLL = os.path.join(SRC, "zbic.dll" if os.name == "nt" else "zbic.so")
+if sys.platform == "darwin":
+    DLL = os.path.join(SRC, "zbic-%s.dylib" % toolchain.architecture(host=True))
 _lib = None
+
+def command():
+    """Compiler arguments without decoding a file or loading the library."""
+    srcs = [os.path.join(SRC, "zstd.c"), os.path.join(SRC, "zbic_api.c")]
+    return [toolchain.need(toolchain.find("clang", host=True)), *toolchain.native_target(host=True), *toolchain.native_link(host=True),
+            "-O2", "-dynamiclib" if sys.platform == "darwin" else "-shared", *([] if os.name == "nt" else ["-fPIC"]),
+            "-DZSTD_ZBIC_SUPPORT=1", "-I", SRC, "-o", DLL, *srcs]
+
 
 
 def _build():
     # (the one that came with the tools is used as it is. This compared file dates, which unpacking a zip can change: the source then
     # looked newer, and reading a .nup needed Microsoft's C library, which a player need not have at that point)
-    if os.path.exists(DLL):
-        return
-    srcs = [os.path.join(SRC, "zstd.c"), os.path.join(SRC, "zbic_api.c")]
-    cmd = [toolchain.need(toolchain.find("clang", host=True)), *toolchain.native_target(host=True), *toolchain.native_link(host=True),
-           "-O2", "-shared", *([] if os.name == "nt" else ["-fPIC"]), "-DZSTD_ZBIC_SUPPORT=1", "-I", SRC, "-o", DLL, *srcs]
+    if sys.platform == "darwin":
+        import hashlib
+        cmd = command()
+        body = b"".join(open(os.path.join(SRC, n), "rb").read() for n in ("zstd.c", "zbic_api.c", "zstd.h", "zstd_errors.h"))
+        key = hashlib.sha256(body + ("\n".join(cmd) + "\n" + toolchain.version("clang", host=True)).encode()).hexdigest()
+        try:
+            with open(DLL + ".sha256") as f:
+                if os.path.isfile(DLL) and f.read() == key:
+                    return
+        except FileNotFoundError:
+            pass
+    else:
+        if os.path.exists(DLL):
+            return
+        cmd = command()
     print("building", os.path.basename(DLL), file=sys.stderr)
     subprocess.run(cmd, check=True)
+    if sys.platform == "darwin":
+        with open(DLL + ".sha256", "w") as f:
+            f.write(key)
 
 
 def lib():

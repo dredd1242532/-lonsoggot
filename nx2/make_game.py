@@ -54,10 +54,14 @@ import toolchain as _toolchain
 import disk as _disk
 # (longshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (LONGSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
-LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
+SYSTEM = _toolchain.system()
+LINUX, CROSS = SYSTEM == "linux", _toolchain.windows() and os.name != "nt"
+DARWIN = sys.platform == "darwin" and SYSTEM == "macos"
 # (SDL2.dll is sdl2-compat: it loads SDL3.dll from beside the exe. Left out of bin\ since v2.0.0, it said "Failed loading SDL3
 # library" three times and no controller worked: Discord #bug-reporting, 11-08)
 BESIDE = ["longshot", "longshot_vk.so", "libSDL2-2.0.so.0"] if LINUX else ["longshot.exe", "longshot_vk.dll", "SDL2.dll", "SDL3.dll", "wgpu_native.dll"]
+if DARWIN:
+    from darwin_build import BESIDE
 LANGUAGES = [("en-US", "English (US)"), ("en-GB", "English (UK)"), ("fr", "French (France)"), ("fr-CA", "French (Canada)"), ("de", "German"),
              ("it", "Italian"), ("es", "Spanish (Spain)"), ("es-419", "Spanish (Latin America)"), ("pt-BR", "Portuguese (Brazil)"), ("nl", "Dutch"),
              ("pl", "Polish"), ("ru", "Russian"), ("ja", "Japanese"), ("ko", "Korean"), ("zh-Hans", "Chinese (Simplified)"),
@@ -125,7 +129,7 @@ def check_writable(out):
                      for d in protected)
         where = (" Windows protects folders under Program Files and Windows, and only lets administrators write there."
                  if inside and isinstance(e, PermissionError) else "")
-        example = "~/Games/Longshot" if LINUX else r"C:\Games\Longshot"
+        example = "~/Games/Longshot" if LINUX or DARWIN else r"C:\Games\Longshot"
         fail("The game folder %s can't be written to (%s).%s In Longshot Builder, choose a game folder of your own, for example "
              "%s, and build again." % (out, e.strerror or e, where, example))
 
@@ -582,6 +586,8 @@ def check_cpu(fsr=False):
     (scripts/linux/appimage.sh), while the game follows this PC (nx2/host_cpu.py): on a CPU without AVX2 it would stop at
     its start. Said now, before the game is read, not 40 minutes in (issue 363). fsr: this build has AMD FSR 4, which compiles its
     own back end (nx2/build.py prebuilt_renderer), for this PC"""
+    if DARWIN:
+        return   # macOS's selected architecture and libraries are checked by its preflight, not AppImage's ISA policy
     if not os.environ.get("LONGSHOT_VK_PREBUILT") or os.environ.get("RX_MARCH") or fsr:
         return
     sys.path.insert(0, HERE)
@@ -759,6 +765,66 @@ def check_linux_prerequisites(work=None):
     print("Linux build prerequisites: OK", flush=True)
 
 
+def check_darwin_prerequisites(work=None):
+    """Game-free target/tool/library checks; no game, device or window is opened."""
+    if os.environ.get("LONGSHOT_NGX_SDK") or os.environ.get("LONGSHOT_FSR") == "1":
+        fail("NVIDIA NGX and AMD's FSR runtime have no macOS build in this tree; build without those options.")
+    import build
+    missing = []
+    requirements = os.path.join(ROOT, "requirements.txt")
+    if os.path.isfile(requirements):
+        with open(requirements, encoding="utf-8") as f:
+            for line in f:
+                pin = re.match(r"([A-Za-z0-9_]+)==", line)
+                if pin and importlib.util.find_spec(pin[1]) is None:
+                    missing.append("Python module %s (install requirements.txt with %s)" % (pin[1], sys.executable))
+    prebuilt = build.prebuilt_renderer()
+    if prebuilt:
+        try:
+            r = subprocess.run([_toolchain.need(_toolchain.find("lipo")), "-verify_arch", _toolchain.architecture(), prebuilt],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode:
+                missing.append("macOS renderer %s has no %s Mach-O slice: %s" % (prebuilt, _toolchain.architecture(), r.stderr.strip()))
+        except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
+            missing.append("macOS renderer architecture check: %s" % e)
+    else:
+        for (name, _, probe, env), found in zip(build.VK_HEADERS, build.vulkan_headers(work)):
+            if not found:
+                missing.append("%s header %s (RX_CPM, %s, /opt/homebrew, /usr/local or /usr)" % (name, probe, env))
+    ffmpeg = build.darwin_build.ffmpeg_flags(build.FFMPEG_LIBS, missing)
+    sdl = build.darwin_build.sdl_flags(missing)
+    for name in ("clang", "clang++", "llvm-profdata"):
+        try:
+            path = _toolchain.need(_toolchain.find(name))
+            print("the %s: %s (%s)" % (name, path, _toolchain.version(name)), flush=True)
+        except (OSError, SystemExit, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            missing.append("%s: %s" % (name, e))
+    try:
+        flags = build.target() + _toolchain.native_link()
+        with tempfile.TemporaryDirectory() as d:
+            for name, text, extra in (
+                ("clang", "extern unsigned avcodec_version(void); extern int SDL_GetCPUCount(void);\n"
+                 "int main(void) { return avcodec_version() == 0 || SDL_GetCPUCount() == 0; }\n",
+                 (ffmpeg[1] if ffmpeg else []) + (sdl[1] if sdl else [])),
+                ("clang++", "#include <string>\nint main(int argc, char **argv) { std::string s(argv[0]); return s.empty(); }\n",
+                 ["-std=c++20", "-stdlib=libc++"])):
+                if name == "clang" and (not ffmpeg or not sdl):
+                    continue
+                src = os.path.join(d, "t.cpp" if name == "clang++" else "t.c")
+                with open(src, "w") as f:
+                    f.write(text)
+                r = subprocess.run([_toolchain.need(_toolchain.find(name))] + flags + [src, "-o", os.path.join(d, "t")] + extra,
+                                   capture_output=True, text=True, timeout=60)
+                if r.returncode:
+                    missing.append("macOS %s link for %s: %s" % (name, _toolchain.architecture(), (r.stdout + r.stderr).strip()))
+    except (OSError, SystemExit, subprocess.TimeoutExpired) as e:
+        missing.append("macOS compiler/linker: %s" % e)
+    if missing:
+        fail("Missing macOS build prerequisites: " + "; ".join(" ".join(m.splitlines()) for m in missing))
+    print("macOS build prerequisites: OK (%s, minimum 14.4; LLVM 23.1.5 is the release pin, other versions accepted)" %
+          _toolchain.architecture(), flush=True)
+
+
 def requested_jobs(value):
     """The builder's explicit worker override, or None to keep its automatic selection."""
     if value is None or value == "":
@@ -795,7 +861,7 @@ def chosen_jobs(given):
 def bundled_mingw():
     """(as TotK Recomp's installer) llvm-mingw in the tools folder: its clang, headers and libraries build the game, and nothing of
     Visual Studio or the Windows SDK is needed. LONGSHOT_MINGW set already wins; LONGSHOT_MSVC=1: the Visual Studio route"""
-    if LINUX or os.environ.get("LONGSHOT_MSVC") == "1":
+    if LINUX or DARWIN or os.environ.get("LONGSHOT_MSVC") == "1":
         return os.environ.get("LONGSHOT_MINGW", "")
     if not os.environ.get("LONGSHOT_MINGW"):
         here = os.path.join(ROOT, "llvm-mingw")
@@ -839,6 +905,8 @@ def check_windows_sdk(work=None):
     """The compiler is bundled; Microsoft's C library and Windows SDK may not be, by their licences. Found now, not 40 minutes in."""
     if LINUX:
         return check_linux_prerequisites(work)
+    if DARWIN:
+        return check_darwin_prerequisites(work)
     if bundled_mingw():
         return check_mingw()
     if CROSS:
@@ -1035,7 +1103,7 @@ def stop_stray_compilers(work, default_work):
     An interrupted Builder update can leave a compiler holding a64_fpx.h (Errno 22)
     or its output executable (WinError 1224), including across packaged versions.
     Unknown orphan ownership is preserved. Never terminate an unexamined child tree."""
-    if LINUX:
+    if LINUX or DARWIN:
         return
     ps = ("Get-CimInstance Win32_Process | "
           "Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
@@ -1190,6 +1258,8 @@ def drop_stale_objects(work):
     if LINUX:
         _drop_stale_linux(work)
         return
+    if DARWIN:
+        return   # build.flag_text keys every object by its macOS compiler, architecture and SDK
     sys.path.insert(0, os.path.join(ROOT, "third_party", "a64-kit", "tools"))
     import hashlib
     import toolchain
@@ -1484,7 +1554,7 @@ def build_language(a, out):
 def profile_readable(prof):
     """(linux) the profile is made by a recent clang (the Windows tools'): an older one, the system's, cannot read it and stops the
     build. Then the game is built without it (a little slower in play), not at all"""
-    if not LINUX:
+    if not (LINUX or DARWIN):
         return True
     sys.path.insert(0, os.path.join(ROOT, "third_party", "a64-kit", "tools"))
     import toolchain
@@ -1492,8 +1562,9 @@ def profile_readable(prof):
         src = os.path.join(d, "t.c")
         with open(src, "w") as f:
             f.write("int f(int x) { return x + 1; }" + chr(10))
-        r = subprocess.run([toolchain.find("clang"), "-O2", "-Wno-everything", "-fprofile-instr-use=" + prof, "-c", src, "-o",
-                            os.path.join(d, "t.o")], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        r = subprocess.run([toolchain.find("clang")] + (toolchain.native_target() if DARWIN else []) +
+                           ["-O2", "-Wno-everything", "-fprofile-instr-use=" + prof, "-c", src, "-o", os.path.join(d, "t.o")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("this compiler cannot read the play profile (%s): building without it" % (r.stderr.strip().splitlines() or ["?"])[-1],
               flush=True)
@@ -1863,6 +1934,8 @@ def ngx_script():
 
 
 def ngx_platform():
+    if DARWIN:
+        return "macos"
     return "linux" if LINUX else "windows"
 
 
@@ -1870,6 +1943,8 @@ def fetch_ngx_sdk(a):
     """--fetch-ngx-sdk (the Longshot Builder's NVIDIA DLSS tick): NVIDIA's DLSS SDK into LONGSHOT_NGX_SDK before the build, once
     NVIDIA's license was accepted (--accept-nvidia-license: the builder asked first). Only what is missing or not the file
     expected is downloaded"""
+    if DARWIN:
+        fail("NVIDIA's NGX SDK has no macOS build in this tree.")
     sdk = os.environ.get("LONGSHOT_NGX_SDK", "")
     if not sdk:
         fail("--fetch-ngx-sdk needs LONGSHOT_NGX_SDK, the folder NVIDIA's DLSS SDK goes into.")
@@ -1886,6 +1961,8 @@ def fetch_ngx_sdk(a):
 
 def ngx_built():
     """This build has NVIDIA DLSS: LONGSHOT_NGX_SDK holds this platform's library (what nx2/build.py takes)"""
+    if DARWIN:
+        return False
     sdk = os.environ.get("LONGSHOT_NGX_SDK", "")
     return bool(sdk) and os.path.isfile(ngx_script().library(sdk, ngx_platform()))
 
@@ -1936,7 +2013,7 @@ def place_fsr_runtime(out):
     """(AMD FSR 4, --fetch-fsr-runtime) AMD's runtime into the game folder, where gpu/vk/vk_fsr4.cpp looks. Returns the folder,
     or None when nothing was fetched"""
     ffx = ffx_script()
-    if LINUX or not ffx.complete(ffx_folder()):
+    if LINUX or DARWIN or not ffx.complete(ffx_folder()):
         return None
     if ffx.others(out):
         ffx.install(ffx_folder(), out, say=lambda line: print(line, flush=True))   # (it says what it left alone)
@@ -1952,6 +2029,8 @@ def place_ngx_runtime(out):
     DLSS Frame Generation's beside it (nvngx_dlssg.dll, libnvidia-ngx-dlssg.so.<version>), without which NGX takes the
     driver's own, maybe older, copy. Never NGX's core (_nvngx.dll is the driver's) and nothing beside the exe. Returns DLSS's
     runtime placed, or None"""
+    if DARWIN:
+        return None   # no macOS NGX runtime exists in the SDK's manifest
     ngx = ngx_script()
     platform = ngx_platform()
     sdk = os.environ.get("LONGSHOT_NGX_SDK", "")
@@ -2142,6 +2221,8 @@ def main(a=None):
     # Vulkan back end, as with DLSS, so the AppImage's prebuilt one is neither checked nor used. One set in the shell is not
     # taken for this build's: --fsr, or the folder's mark, decides)
     fsr = fsr_wanted(a, out)
+    if DARWIN and fsr:
+        fail("AMD's FSR runtime has no macOS build in this tree; build without --fsr.")
     if fsr:
         os.environ["LONGSHOT_FSR"] = "1"
     else:
@@ -2154,7 +2235,7 @@ def main(a=None):
     drop_stale_objects(work)
     # (AMD FSR 4: the folder's mark for the next --update)
     if fsr:
-        if getattr(a, "fetch_fsr_runtime", False) and not LINUX:
+        if getattr(a, "fetch_fsr_runtime", False) and not (LINUX or DARWIN):
             fetch_fsr_runtime(a)
         elif getattr(a, "fetch_fsr_runtime", False):
             print("--fetch-fsr-runtime: AMD publishes this runtime for Windows only; on Linux see the readme "
@@ -2415,11 +2496,13 @@ def main(a=None):
     if LINUX:
         script = os.path.join(ROOT, "builder", "linux", "longshot-folder")
         launcher = script if os.environ.get("LONGSHOT_TOOLS") and os.path.isfile(script) else None
+    elif DARWIN:
+        launcher = None   # source-built executable; no Windows setup or AppImage launcher on macOS
     else:
         launcher = launcher if os.path.isfile(launcher) else None
     game_dir = os.path.join(out, "bin") if launcher else out
     os.makedirs(game_dir, exist_ok=True)
-    ffmpeg_dlls = [] if LINUX else sorted(f for f in os.listdir(built) if f.endswith(".dll") and f.startswith(("av", "sw")))
+    ffmpeg_dlls = [] if LINUX or DARWIN else sorted(f for f in os.listdir(built) if f.endswith(".dll") and f.startswith(("av", "sw")))
     for n in BESIDE + ffmpeg_dlls:
         src = os.path.join(built, n)
         if os.path.exists(src):
@@ -2436,7 +2519,7 @@ def main(a=None):
             fail("Could not stage the new build at %s. Check that %s is readable and the staged file and output folder are writable, "
                  "close any program using that file, then retry. No installed files were replaced; the compiled source is still available."
                  % (dst + ".new", src))
-    if not LINUX:   # (a copy of this game still running holds its exe: one with no window is a leftover, ended; else named)
+    if not (LINUX or DARWIN):   # (a copy of this game still running holds its exe: one with no window is a leftover, ended; else named)
         shown = end_stale_games([game_dir, out])
         if shown:
             fail("Longshot is still running from this folder (%s). Close it, then retry. No installed files were replaced."
@@ -2448,7 +2531,7 @@ def main(a=None):
             fail("Could not replace %s. Close any running copy of Longshot and check that the file and folder are writable, then retry. "
                  "Staged replacements remain beside the installed files; the compiled source remains at %s." % (dst, src))
     if launcher:   # (a folder built before the launcher: its libraries left the folder for bin\; longshot is the launcher now)
-        stale = [] if LINUX else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
+        stale = [] if LINUX or DARWIN else sorted(f for f in os.listdir(out) if f.endswith(".dll") and f.startswith(("av", "sw")))
         for n in BESIDE[1:] + stale + ["longshot.map", "longshot-game.exe"]:
             try:
                 if os.path.isfile(os.path.join(out, n)):
@@ -2478,7 +2561,7 @@ def main(a=None):
         print("the button prompts of other controllers were not made: the game shows its own", flush=True)
         shutil.rmtree(prompts, ignore_errors=True)
     icon = os.path.join(ROOT, "assets", "longshot.png")
-    if LINUX and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
+    if (LINUX or DARWIN) and os.path.exists(icon):   # (the window's icon: host/posix/display_sdl.c)
         copy_writable(icon, os.path.join(out, "longshot.png"))   # (a second build overwrites the first's)
     seed_pipelines(out)
     ship_state_list(out)

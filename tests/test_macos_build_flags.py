@@ -1,0 +1,489 @@
+"""Game-free build command contracts, including real Mach-O links on macOS.
+
+The frozen Windows/Linux arrays came from main 514591a3's expressions, not a
+reimplementation of them. --source checks another tree without importing its
+builder or touching its work folder. --capture-main emits those reference arrays
+from the old main expressions for review; it is not used during a test run.
+
+On macOS, --llvm-prefix adds a second compiler to the real arm64/Rosetta fixture.
+--fixtures-out keeps exact sources, commands and products outside the checkout.
+No renderer, SDL, Metal or Vulkan device is created.
+"""
+import argparse
+import ast
+import contextlib
+import hashlib
+import importlib.util
+import io
+import json
+import os
+from pathlib import Path
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest import mock
+
+RUN_ALL_ARGS = []
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT
+LLVM_PREFIX = None
+FIXTURES_OUT = None
+BASE = "514591a30d707fe9f3ad31eae148c3cc1e750bff"
+WORK = "/fixture/Games, Zelda"
+FUNCTIONS = {"target", "linker", "HOT_ORDER", "flags", "host_flags", "renderer_flags", "executable_link",
+             "renderer_link", "ngx_library", "ngx_link", "ffmpeg_linux", "header_package", "cpm_dirs", "cpm_package",
+             "check_vk_symbols", "flag_text"}
+CONSTANTS = {"NX2_RT", "HOST", "POSIX", "SYSROOT", "SYSTEM", "LINUX", "DARWIN", "EXE", "VK_LIB", "HOST_LIBS",
+             "GPU", "WRITE_TRACK"}
+ROUTES = (("linux", "linux", "posix", False), ("msvc", "win32", "nt", False), ("mingw", "linux", "posix", True))
+
+
+def load_file(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def os_view(name, env):
+    fields = {key: getattr(os, key) for key in dir(os) if not key.startswith("__")}
+    fields.update(name=name, environ=env)
+    return types.SimpleNamespace(**fields)
+
+
+def command_space(source, system="darwin", name="posix", mingw=False, arch="arm64", extras=False, real=False, work=WORK):
+    """Execute only declarations and command expressions; never import build.py or kit.py."""
+    env = dict(os.environ) if real else {}
+    env.pop("RX_TARGET", None)
+    env.pop("LONGSHOT_MINGW", None)
+    if system == "darwin":
+        env["RX_ARCH"] = arch
+        if not real:
+            env["SDKROOT"] = "/fixture/Mac SDK, path"
+    else:
+        env["RX_MARCH"] = "x86-64-v3"
+    if mingw:
+        env.update(RX_TARGET="windows", LONGSHOT_MINGW="/fixture/llvm-mingw")
+    if extras:
+        env.update(RX_RELEASE="1", RX_PGO="gen", RX_MTUNE="znver2", LONGSHOT_SYSROOT="/fixture/sysroot")
+    osproxy = os_view(name, env)
+    tc = load_file("build_flags_toolchain", source / "third_party/a64-kit/tools/toolchain.py")
+    tc.os = osproxy
+    tc.sys = types.SimpleNamespace(platform=system)
+    if not real:
+        tc.platform = types.SimpleNamespace(machine=lambda: "arm64")
+        tc.find = lambda tool, host=False: "/fixture/tools/" + tool
+        tc.need = lambda path: path
+        tc.lld_link = lambda: "/fixture/tools/lld-link.exe"
+        if hasattr(tc, "darwin_sdk"):
+            tc.darwin_sdk = lambda: env["SDKROOT"]
+    kitroot = str(source) if real else "/fixture/tree"
+    ns = {"os": osproxy, "sys": types.SimpleNamespace(platform=system), "toolchain": tc,
+          "kit": types.SimpleNamespace(ROOT=kitroot, HERE=kitroot + "/nx2", KIT=kitroot + "/third_party/a64-kit", WORK=work),
+          "DARWIN": False, "PGO": env.get("RX_PGO", ""), "OPT": "O1", "FFMPEG_LIBS": ("avcodec", "swscale", "swresample", "avutil"),
+          "FFMPEG_LX": ([], ["-lavcodec", "-lswscale", "-lswresample", "-lavutil"]) if extras else None,
+          "FFMPEG_MAC": None, "FFMPEG": "/fixture/ffmpeg" if extras and (name == "nt" or mingw) else None,
+          "NGX_SDK": "/fixture/ngx" if extras else "", "WGPU": "/fixture/wgpu", "CX16": ["-mcx16"],
+          "shutil": shutil, "subprocess": subprocess, "hashlib": hashlib}
+    if (source / "nx2/darwin_build.py").exists():
+        with mock.patch.dict(sys.modules, {"toolchain": tc}):
+            darwin = load_file("build_flags_darwin", source / "nx2/darwin_build.py")
+        darwin.os = osproxy
+        if not real:
+            darwin.order_file = lambda path: path + ".macos"
+        ns["darwin_build"] = darwin
+    cpu_tree = ast.parse((source / "nx2/host_cpu.py").read_text())
+    cpuns = {"os": osproxy, "sys": ns["sys"], "toolchain": tc}
+    exec(compile(ast.Module(body=[n for n in cpu_tree.body if isinstance(n, ast.FunctionDef)], type_ignores=[]),
+                 "host_cpu.py", "exec"), cpuns)
+    ns.update(host_march=cpuns["host_march"], host_mtune=cpuns["host_mtune"])
+    path = source / "nx2/build.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in FUNCTIONS]
+    exec(compile(ast.Module(body=body, type_ignores=[]), str(path), "exec"), ns)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in CONSTANTS for t in node.targets):
+            exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), ns)
+    start = next(i for i, n in enumerate(tree.body) if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "MARCH")
+    stop = next(i for i in range(start + 1, len(tree.body)) if isinstance(tree.body[i], ast.FunctionDef))
+    with contextlib.redirect_stdout(io.StringIO()):
+        exec(compile(ast.Module(body=tree.body[start:stop], type_ignores=[]), str(path), "exec"), ns)
+    ns["dav1d_windows"] = lambda: "/fixture/dav1d" if extras else None
+    return ns, tree
+
+
+def snapshot(ns, tree, old=False, extras=False):
+    """Main's original AST expressions and the branch's callable builders use identical inputs."""
+    work = ns["kit"].WORK
+    values = {"cc": "/fixture/tools/clang", "cxx": "/fixture/tools/clang++", "gen": work + "/gen", "rt64": work + "/rt64",
+              "vk": ns["GPU"] + "/vk", "spirv_headers": "/fixture/spirv", "vk_headers": "/fixture/vulkan",
+              "vma_headers": "/fixture/vma", "gen_dir": work + "/generated", "out": work + "/build",
+              "wgpu": extras, "rsp": work + "/objs.rsp", "vrsp": work + "/vk_objs.rsp"}
+    values.update(exe=values["out"] + "/" + ns["EXE"], vdll=values["out"] + "/" + ns["VK_LIB"])
+    ns.update(values)
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    if old:
+        # These are expressions in 514591a3, selected by their actual output variable/call, not rewritten flags.
+        host = next(n.value for n in ast.walk(main) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "host_fl" for t in n.targets))
+        renderer = next(n.value for n in ast.walk(main) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "vflags" for t in n.targets))
+        links = [n.value for n in ast.walk(main) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "link" for t in n.targets)]
+        cmds = [n.args[0] for n in ast.walk(main) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and isinstance(n.func.value, ast.Name) and n.func.value.id == "subprocess" and n.func.attr == "run"
+                and n.args and isinstance(n.args[0], ast.BinOp)]
+        # Linux executable, Windows executable, game DLL; AST walk retains their source order here.
+        cmds.sort(key=lambda n: n.lineno)
+        links.sort(key=lambda n: n.lineno)
+        ns["win_manifest"] = types.SimpleNamespace(write=lambda p: p)
+        def expression(node):
+            return eval(compile(ast.Expression(node), "main-command", "eval"), ns)
+        with mock.patch.object(os.path, "exists", side_effect=lambda p: p.endswith("hot_order.txt") or (extras and p.endswith("longshot.res"))):
+            return {"target": ns["target"](), "lifted": ns["flags"](values["gen"], values["rt64"], "O1", True),
+                    "host": expression(host), "renderer": expression(renderer),
+                    "executable_link": expression(cmds[0 if ns["LINUX"] else 1]),
+                    "renderer_link": expression(links[0 if ns["LINUX"] else 1])}
+    with mock.patch.object(os.path, "exists", return_value=True):
+        return {"target": ns["target"](), "lifted": ns["flags"](values["gen"], values["rt64"], "O1", True),
+                "host": ns["host_flags"](values["gen"], values["rt64"]),
+                "renderer": ns["renderer_flags"](values["vk"], values["spirv_headers"], values["vk_headers"], values["vma_headers"], values["gen_dir"]),
+                "executable_link": ns["executable_link"](values["cc"], values["exe"], values["rsp"], wgpu=extras,
+                    manifest=values["out"] + "/longshot_manifest.res", resource=work + "/longshot.res" if extras else ""),
+                "renderer_link": ns["renderer_link"](values["cc"], values["cxx"], values["vdll"], values["vrsp"])}
+
+
+class CommandContracts(unittest.TestCase):
+    def test_windows_linux_equal_frozen_main(self):
+        frozen = json.loads((ROOT / "tests/build_flags_main.json").read_text())
+        self.assertEqual(frozen["base"], BASE)
+        for label, system, name, mingw in ROUTES:
+            for extras in (False, True):
+                key = label + ("-full" if extras else "-plain")
+                with self.subTest(key):
+                    ns, tree = command_space(SOURCE, system, name, mingw, extras=extras)
+                    self.assertEqual(snapshot(ns, tree, old="executable_link" not in ns, extras=extras), frozen["routes"][key])
+
+    def test_mac_is_not_linux(self):
+        for arch in ("arm64", "x86_64"):
+            with self.subTest(arch):
+                ns, _ = command_space(SOURCE, arch=arch)
+                self.assertFalse(ns["LINUX"], "macOS is classified as Linux and receives ELF/x86 flags")
+                self.assertTrue(ns["DARWIN"])
+                self.assertEqual(ns["EXE"], "longshot")
+                self.assertEqual(ns["VK_LIB"], "longshot_vk.dylib")
+                flags = ns["flags"](WORK + "/gen", WORK + "/rt64", "O1", True)
+                self.assertIn("-mmacosx-version-min=14.4", flags)
+                self.assertEqual(flags[flags.index("-arch") + 1], arch)
+                self.assertEqual("-mcx16" in flags, arch == "x86_64")
+                self.assertEqual("-march=x86-64-v2" in flags, arch == "x86_64")
+                self.assertNotIn("-march=x86-64-v3", flags)
+                self.assertIn("-ffp-contract=off", flags)
+
+    def test_mac_link_paths_are_separate_and_strict(self):
+        ns, tree = command_space(SOURCE)
+        self.assertTrue(ns["DARWIN"], "no Mach-O target")
+        formed = snapshot(ns, tree)
+        for key in ("executable_link", "renderer_link"):
+            cmd = formed[key]
+            self.assertNotIn("-fuse-ld=lld", cmd)
+            self.assertFalse(any(x.startswith("-Wl,") for x in cmd), cmd)
+            self.assertIn("-dead_strip", cmd)
+            for i, value in enumerate(cmd):
+                if value in ("-map", "-install_name", "-rpath", "-order_file", "-exported_symbol"):
+                    self.assertEqual(cmd[i - 1], "-Xlinker")
+                    self.assertEqual(cmd[i + 1], "-Xlinker")
+        self.assertIn("_hos_posix_*", formed["executable_link"])
+        self.assertIn(WORK + "/hot_order.txt.macos", formed["executable_link"])
+        self.assertIn("@rpath/longshot_vk.dylib", formed["renderer_link"])
+        self.assertIn("@loader_path", formed["renderer_link"])
+        self.assertIn("error", formed["renderer_link"])
+        self.assertNotIn("dynamic_lookup", formed["renderer_link"])
+        self.assertNotIn("-static-libgcc", formed["renderer_link"])
+
+    def test_darwin_source_list_takes_future_helpers(self):
+        ns, _ = command_space(SOURCE)
+        self.assertTrue("darwin_build" in ns, "no Darwin source selection")
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("darwin_wait.c", "darwin_mem.c", "darwin_cpu.c", "darwin_vulkan.c", "darwin_future.c", "darwin_wait.h", "prof.c"):
+                Path(d, n).touch()
+            host = [Path(p).name for p in ns["darwin_build"].posix_sources(d)]
+            renderer = [Path(p).name for p in ns["darwin_build"].posix_sources(d, renderer=True)]
+        self.assertEqual(host, ["win32_posix.c", "display_sdl.c", "linux_stubs.c", "darwin_cpu.c", "darwin_future.c", "darwin_mem.c", "darwin_vulkan.c", "darwin_wait.c"])
+        self.assertNotIn("prof.c", renderer)
+        self.assertNotIn("darwin_cpu.c", renderer)
+        self.assertNotIn("darwin_vulkan.c", renderer)
+        self.assertIn("darwin_mem.c", renderer)
+        self.assertIn("darwin_wait.c", renderer)
+
+    def test_sdk_and_compiler_change_cache_identity(self):
+        ns, _ = command_space(SOURCE)
+        self.assertTrue("darwin_build" in ns, "no macOS compiler identity")
+        with mock.patch.object(ns["darwin_build"], "compiler_key", return_value="apple21"):
+            apple = ns["flag_text"](["-arch", "arm64", "-O2"])
+        with mock.patch.object(ns["darwin_build"], "compiler_key", return_value="llvm23"):
+            llvm = ns["flag_text"](["-arch", "arm64", "-O2"])
+        self.assertNotEqual(apple, llvm)
+
+
+class DiscoveryContracts(unittest.TestCase):
+    def setUp(self):
+        self.tc = load_file("discovery_toolchain", SOURCE / "third_party/a64-kit/tools/toolchain.py")
+        self.tc.sys = types.SimpleNamespace(platform="darwin")
+        self.tmp = tempfile.TemporaryDirectory(prefix="longshot tools, ")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.tc.os = os_view("posix", {})
+
+    def test_prefix_path_xcrun_order_and_missing(self):
+        self.assertTrue(hasattr(self.tc, "_xcrun"), "tool discovery never asks xcrun on main")
+        for tool in ("clang", "clang++", "llvm-profdata"):
+            with self.subTest(tool):
+                prefix = self.root / "LLVM, chosen"
+                p = prefix / "bin" / tool
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("authored executable sentinel\n")
+                p.chmod(0o700)
+                self.tc.os.environ["EMSDK"] = str(prefix)
+                with mock.patch.object(self.tc.shutil, "which", return_value="/path/" + tool) as which, \
+                        mock.patch.object(self.tc, "_xcrun", return_value="/xcrun/" + tool) as xcrun:
+                    self.assertEqual(self.tc.find(tool), str(p))
+                    which.assert_not_called()
+                    xcrun.assert_not_called()
+                    p.unlink()
+                    self.assertEqual(self.tc.find(tool), "/path/" + tool)
+                    xcrun.assert_not_called()
+                    which.return_value = None
+                    self.assertEqual(self.tc.find(tool), "/xcrun/" + tool)
+                    xcrun.return_value = ""
+                    with self.assertRaisesRegex(SystemExit, "EMSDK.*PATH.*xcrun"):
+                        self.tc.need(self.tc.find(tool))
+
+    def test_host_architecture_does_not_follow_game_switch(self):
+        self.assertTrue(hasattr(self.tc, "architecture"), "no host/target architecture separation")
+        self.tc.platform = types.SimpleNamespace(machine=lambda: "arm64")
+        self.tc.os.environ.update(RX_ARCH="x86_64", SDKROOT=self.tmp.name)
+        self.assertEqual(self.tc.architecture(), "x86_64")
+        self.assertEqual(self.tc.architecture(host=True), "arm64")
+        self.tc.os.environ["RX_ARCH"] = "invalid"
+        with self.assertRaisesRegex(SystemExit, "RX_ARCH"):
+            self.tc.architecture()
+
+    def test_pkg_config_preserves_spaces_and_explicit_prefix(self):
+        ns, _ = command_space(SOURCE)
+        self.assertTrue("darwin_build" in ns, "no Darwin pkg-config parser")
+        darwin = ns["darwin_build"]
+        seen = []
+        def run(cmd, **kw):
+            seen.append((cmd, kw["env"]))
+            out = r"-I/opt/a\ b,c/include" if "--cflags" in cmd else r"-L/opt/a\ b,c/lib -lavcodec"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+        with mock.patch.object(darwin.shutil, "which", return_value="/opt/homebrew/bin/pkg-config"), \
+                mock.patch.object(darwin.subprocess, "run", side_effect=run):
+            flags = darwin.pkg_config(["libavcodec"], prefix="/chosen SDK, x86", static=True)
+        self.assertEqual(flags, (["-I/opt/a b,c/include"], ["-L/opt/a b,c/lib", "-lavcodec"]))
+        for cmd, env in seen:
+            self.assertIn("--static", cmd)
+            self.assertEqual(env["PKG_CONFIG_PATH"], "/chosen SDK, x86/lib/pkgconfig" + os.pathsep + "/chosen SDK, x86/share/pkgconfig")
+            self.assertEqual(env["PKG_CONFIG_LIBDIR"], env["PKG_CONFIG_PATH"])
+
+    def test_translated_python_defaults_to_native_game_but_keeps_its_helpers(self):
+        self.assertTrue(hasattr(self.tc, "_apple_silicon"), "main has no physical/process CPU distinction")
+        self.tc.platform = types.SimpleNamespace(machine=lambda: "x86_64")
+        with mock.patch.object(self.tc, "_apple_silicon", return_value=True):
+            self.assertEqual(self.tc.architecture(), "arm64")
+            self.assertEqual(self.tc.architecture(host=True), "x86_64")
+
+    def test_helpers_use_process_architecture_not_rx_arch(self):
+        ns, _ = command_space(SOURCE, arch="x86_64")
+        self.assertTrue(ns["DARWIN"], "main has no macOS helper path")
+        tc = ns["toolchain"]
+        for process_arch in ("arm64", "x86_64"):
+            tc.platform = types.SimpleNamespace(machine=lambda a=process_arch: a)
+            with self.subTest(process_arch=process_arch), mock.patch.dict(sys.modules, {"toolchain": tc, "kit": ns["kit"]}), \
+                    mock.patch.object(sys, "path", list(sys.path)), mock.patch.object(sys, "platform", "darwin"):
+                emitter = load_file("mac_emit", SOURCE / "third_party/a64-kit/lift/build_emit.py")
+                zbic = load_file("mac_zbic", SOURCE / "nx2/zbic.py")
+                for module, output in ((emitter, emitter.OUT), (zbic, zbic.DLL)):
+                    self.assertIn(process_arch + ".dylib", output)
+                    cmd = module.command()
+                    self.assertEqual(cmd[cmd.index("-arch") + 1], process_arch)
+                    self.assertIn("-mmacosx-version-min=14.4", cmd)
+                    self.assertIn("-dynamiclib", cmd)
+
+    def test_maker_dispatches_to_macos_without_windows_or_linux_probe(self):
+        tree = ast.parse((SOURCE / "nx2/make_game.py").read_text())
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "check_windows_sdk")
+        called = []
+        ns = {"LINUX": False, "DARWIN": True, "check_darwin_prerequisites": lambda work: called.append(work),
+              "bundled_mingw": lambda: self.fail("macOS selected a Windows toolchain probe")}
+        exec(compile(ast.Module(body=[fn], type_ignores=[]), "make_game.py", "exec"), ns)
+        ns["check_windows_sdk"]("authored empty work")
+        self.assertEqual(called, ["authored empty work"])
+
+
+C_LIBRARY = r'''#include <dlfcn.h>
+int fixture_value = 11;
+__attribute__((noinline)) int fixture_collision(void) { return fixture_value; }
+int library_a(void) { return fixture_collision(); }
+int library_host(void) {
+    int (*fn)(void) = (int (*)(void))dlsym(RTLD_DEFAULT, "hos_posix_fixture");
+    return fn ? fn() : -1;
+}
+'''
+CPP_LIBRARY = r'''#include <string>
+extern "C" {
+int fixture_value = 22;
+__attribute__((noinline)) int fixture_collision(void) { return fixture_value; }
+int library_b(const char *input) {
+    std::string text(input);
+    text.append(64, 'x');
+    return text.size() == 65 ? fixture_collision() : -1;
+}
+}
+'''
+C_MAIN = r'''#include <dlfcn.h>
+#include <stdio.h>
+int unused_fixture(void) { return 71; }
+__attribute__((noinline)) int hos_posix_order_one(void) { return 1; }
+__attribute__((noinline)) int hos_posix_order_two(void) { return 2; }
+int hos_posix_fixture(void) { return 99; }
+int main(void) {
+    void *a = dlopen("@rpath/library A, one.dylib", RTLD_NOW | RTLD_GLOBAL);
+    void *b = dlopen("@rpath/library B, two.dylib", RTLD_NOW | RTLD_GLOBAL);
+    if (!a || !b) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
+    int (*av)(void) = (int (*)(void))dlsym(a, "library_a");
+    int (*bv)(const char *) = (int (*)(const char *))dlsym(b, "library_b");
+    int (*host)(void) = (int (*)(void))dlsym(a, "library_host");
+    int *ad = (int *)dlsym(a, "fixture_value"), *bd = (int *)dlsym(b, "fixture_value");
+    int ok = av && bv && host && ad && bd && av() == 11 && bv("B") == 22 && host() == 99 && ad != bd;
+    if (ok) { *ad = 31; *bd = 42; ok = av() == 31 && bv("B") == 42; }
+    ok = ok && dlsym(RTLD_DEFAULT, "unused_fixture") == NULL;
+    printf("binding own_a=%d own_b=%d host_export=%d distinct_data=%d result=%s\n",
+           av ? av() : -1, bv ? bv("B") : -1, host ? host() : -1, ad != bd, ok ? "PASS" : "FAIL");
+    dlclose(b); dlclose(a);
+    return ok ? 0 : 1;
+}
+'''
+
+
+@unittest.skipUnless(sys.platform == "darwin", "real Mach-O links require macOS; command contracts run everywhere")
+class RealMachO(unittest.TestCase):
+    def test_c_cpp_links_load_exports_order_and_local_binding(self):
+        self.assertTrue((SOURCE / "nx2/darwin_build.py").is_file(), "main has no callable Mach-O command path")
+        if FIXTURES_OUT:
+            root = FIXTURES_OUT
+            root.mkdir(parents=True, exist_ok=False)
+        else:
+            tmp = tempfile.TemporaryDirectory(prefix="longshot link, ")
+            self.addCleanup(tmp.cleanup)
+            root = Path(tmp.name)
+        compilers = [("apple", None)] + ([("llvm23", LLVM_PREFIX)] if LLVM_PREFIX else [])
+        for label, prefix in compilers:
+            for arch in ("arm64", "x86_64"):
+                if arch == "arm64" and platform.machine() != "arm64":
+                    self.skipTest("arm64 execution requires Apple Silicon; this process is not native arm64")
+                with self.subTest(compiler=label, arch=arch):
+                    self.fixture(root / (label + " " + arch + ", test"), prefix, arch)
+
+    def fixture(self, out, prefix, arch):
+        out.mkdir()
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RX_", "HOS_", "LONGSHOT_", "DYLD_")) and k not in ("EMSDK", "SDKROOT")}
+        env["RX_ARCH"] = arch
+        if prefix:
+            env["EMSDK"] = str(prefix)
+        else:
+            # Do not accidentally test a Homebrew compiler as Apple's.
+            env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        with mock.patch.dict(os.environ, env, clear=True):
+            ns, _ = command_space(SOURCE, arch=arch, real=True, work=str(out))
+        tc = ns["toolchain"]
+        commands = []
+        def run(cmd, good=True):
+            cmd = [str(c) for c in cmd]
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+            commands.append({"command": cmd, "returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+            (out / "commands.json").write_text(json.dumps(commands, indent=2) + "\n")
+            print("COMMAND " + shlex.join(cmd), flush=True)
+            if result.stdout:
+                print(result.stdout, end="", flush=True)
+            if result.stderr:
+                print(result.stderr, end="", flush=True)
+            if good:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            else:
+                self.assertNotEqual(result.returncode, 0, "an unresolved Mach-O symbol was accepted")
+            return result.stdout + result.stderr
+        cc, cxx = tc.need(tc.find("clang")), tc.need(tc.find("clang++"))
+        run([cc, "--version"])
+        run([cxx, "--version"])
+        run([tc.need(tc.find("llvm-profdata")), "--version"])
+        paths = {"a": out / "library A.c", "b": out / "library B.cpp", "main": out / "host main.c"}
+        for key, text in (("a", C_LIBRARY), ("b", CPP_LIBRARY), ("main", C_MAIN)):
+            paths[key].write_text(text)
+        (out / "hot_order.txt").write_text("hos_posix_order_two\nhos_posix_order_one\n")
+        cflags = ns["flags"](str(out / "gen"), str(out / "rt64"), "O1", True)
+        hostflags = ns["host_flags"](str(out / "gen"), str(out / "rt64"))
+        cppflags = ns["renderer_flags"](str(SOURCE / "gpu/vk"), str(out / "spirv"), str(out / "vulkan"), str(out / "vma"), str(out / "generated"))
+        for key, compiler, flags in (("a", cc, cflags), ("b", cxx, cppflags), ("main", cc, hostflags)):
+            run([compiler] + flags + ["-c", paths[key], "-o", out / (key + ".o")])
+        for key, name in (("a", "library A, one.dylib"), ("b", "library B, two.dylib")):
+            rsp = out / (key + ".rsp")
+            rsp.write_text('"%s"\n' % (out / (key + ".o")))
+            lib = out / name
+            run(ns["renderer_link"](cc, cxx, str(lib), str(rsp)))
+            load = run(["/usr/bin/otool", "-l", lib])
+            self.assertIn("@rpath/" + name, load)
+            self.assertIn("minos 14.4", load)
+            self.assertIn("@loader_path", load)
+            if key == "b":
+                imports = run(["/usr/bin/nm", "-u", lib])
+                self.assertRegex(imports, r"(__1|Znwm|ZdlPv)", "C++ work was optimized away, not a runtime-library proof")
+        rsp = out / "main.rsp"
+        rsp.write_text('"%s"\n' % (out / "main.o"))
+        exe = out / "host executable, test"
+        run(ns["executable_link"](cc, str(exe), str(rsp)))
+        self.assertTrue(Path(str(exe) + ".map").is_file())
+        syms = run(["/usr/bin/nm", "-n", exe])
+        self.assertLess(syms.index("_hos_posix_order_two"), syms.index("_hos_posix_order_one"))
+        self.assertNotIn("_unused_fixture", syms)
+        self.assertEqual((out / "hot_order.txt.macos").read_text(), "_hos_posix_order_two\n_hos_posix_order_one\n")
+        load = run(["/usr/bin/otool", "-l", exe])
+        self.assertIn("minos 14.4", load)
+        result = run((["/usr/bin/arch", "-x86_64"] if arch == "x86_64" else []) + [exe])
+        self.assertIn("binding own_a=31 own_b=42 host_export=99 distinct_data=1 result=PASS", result)
+        bad = out / "undefined.c"
+        bad.write_text("extern int missing_external(void); int exported(void) { return missing_external(); }\n")
+        run([cc] + cflags + ["-c", bad, "-o", out / "undefined.o"])
+        badrsp = out / "undefined.rsp"
+        badrsp.write_text('"%s"\n' % (out / "undefined.o"))
+        badresult = run(ns["renderer_link"](cc, cxx, str(out / "bad.dylib"), str(badrsp)), good=False)
+        self.assertIn("missing_external", badresult)
+        print("MACHO compiler=%s arch=%s min=14.4 links=3 load=PASS exports=PASS order=PASS binding=PASS undefined=rejected" %
+              ("LLVM23" if prefix else "Apple21", arch), flush=True)
+
+
+def capture_main():
+    routes = {}
+    for label, system, name, mingw in ROUTES:
+        for extras in (False, True):
+            ns, tree = command_space(SOURCE, system, name, mingw, extras=extras)
+            routes[label + ("-full" if extras else "-plain")] = snapshot(ns, tree, old=True, extras=extras)
+    return {"base": BASE, "source_sha256": {n: hashlib.sha256((SOURCE / n).read_bytes()).hexdigest()
+            for n in ("nx2/build.py", "third_party/a64-kit/tools/toolchain.py")}, "routes": routes}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=ROOT)
+    parser.add_argument("--capture-main", action="store_true")
+    parser.add_argument("--llvm-prefix", type=Path)
+    parser.add_argument("--fixtures-out", type=Path)
+    args, rest = parser.parse_known_args()
+    SOURCE, LLVM_PREFIX, FIXTURES_OUT = args.source, args.llvm_prefix, args.fixtures_out
+    if args.capture_main:
+        print(json.dumps(capture_main(), indent=2))
+    else:
+        unittest.main(argv=[sys.argv[0], *rest])

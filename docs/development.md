@@ -38,6 +38,47 @@ The sysroot (`scripts/linux/deps.sh tools`) copies the system libraries it takes
 development alias such as `libmvec.so` becomes the library's bytes, so the packed tool does not depend on the player's
 filesystem. Only its own relative `lib -> usr/lib` stays a link.
 
+macOS has an **experimental build-command path**, not a working game port yet. It selects Mach-O rather than ELF,
+targets macOS 14.4, and defaults to arm64 on Apple Silicon (`RX_ARCH=x86_64` selects the Rosetta route). Keep the
+compiler native: compile with its `-arch x86_64`, then run the resulting program under Rosetta, not clang itself.
+Windows and Linux still form their original compiler/linker commands.
+
+On macOS, `EMSDK` may name a normal LLVM prefix (`bin/`) or the existing emsdk layout (`upstream/bin/`); compiler
+and `llvm-profdata` discovery then tries PATH and `xcrun`. The SDK is `SDKROOT`, otherwise `xcrun --sdk macosx
+--show-sdk-path`. A found `ld64.lld` links Mach-O; otherwise Apple's `ld` does. The source preflight prints each
+compiler/profile tool's actual version. LLVM 23.1.5 is the release tool pin; Apple clang is accepted, not relabelled
+as that pin. Passing tiny C/C++ links does not qualify another compiler for the full generated game or its profile.
+
+macOS FFmpeg and SDL2 are found with `pkg-config` (PATH, then `/opt/homebrew/bin/pkg-config`).
+`LONGSHOT_FFMPEG` selects only that prefix's `.pc` files, including static transitive dependencies when it has no
+`lib/libavcodec.dylib`; otherwise the installed Homebrew packages can supply them. An x86_64 target needs x86_64
+libraries: an arm64-only Homebrew installation is not a Rosetta SDK. The preflight links against the selected
+FFmpeg and SDL2 to catch an incompatible architecture. `LONGSHOT_SDL2` still names a library file, a `.dylib` on
+macOS, copied as `libSDL2-2.0.0.dylib`; its own dependencies must remain installed. This is not a relocatable app
+bundle or a dependency packer. No dependency is downloaded by the preflight.
+
+The macOS renderer is `longshot_vk.dylib`, with install name `@rpath/longshot_vk.dylib`, `@loader_path` rpath,
+system libc++, dead stripping and a strict undefined-symbol link. The executable exports `hos_posix_*` for the
+Win32 layer's explicit `dlsym` lookups. `hot_order.txt` stays unchanged: the build writes `hot_order.txt.macos`
+with Mach-O's leading underscores. Neither `-Bsymbolic` nor a flat namespace is used; each dylib's own strong
+definitions bind locally under Mach-O's default two-level namespace. This is checked with a two-library fixture,
+not asserted as a one-for-one ELF option. ELF `nm -D` and GNU stripping are skipped with an explicit log reason.
+
+The host includes every existing `host/posix/darwin_*.c` alongside the shared Win32/SDL layer, but not Linux's
+`host/posix/prof.c`. Helpers loaded by Python (`a64emit`, `zbic`) use the Python process's architecture, not
+`RX_ARCH`, with architecture-specific dylib names and compiler/flag-sensitive cache stamps. The host/renderer's
+Darwin API, memory, signals, profiler, CPU assembly and dynamic-loader work must be integrated separately before
+LS can compile or run. The custom `RX_PGO=gen` runtime is still COFF-specific; NVIDIA NGX, the AMD FSR runtime and
+the WebGPU backend have no macOS route here. There is no macOS launcher, signing or packaging step.
+
+Game-free command and binding checks (no source-tree `--check` or `--dry-run` needed):
+
+```
+python -I -B tests/test_macos_build_flags.py
+python -I -B tests/test_macos_build_flags.py --llvm-prefix /path/to/LLVM-23.1.5
+```
+
+
 On Linux, a game folder's `longshot` (`builder/linux/longshot-folder`) starts the program named by `builder=` in
 `longshot_version.txt`, the one that built the folder (the Longshot Launcher, or a builder AppImage), with
 `--launch <folder>`; when that one is gone, it starts `bin/longshot` (`tests/test_linux_downgrade.py`). The builders have
@@ -320,12 +361,15 @@ A build reads and writes tens of gigabytes. When the game folder or the build fi
 | `LONGSHOT_MINGW=<dir>`, `LONGSHOT_MSVC=1` | The llvm-mingw to build with; the Visual Studio route instead |
 | `RX_CPM=<dir>`, `WGPU_NATIVE=<dir>` | The CPM cache (Vulkan and SPIR-V headers, VMA, FFmpeg) and wgpu-native |
 | `RX_TARGET=windows` | On Linux: the Windows game, with llvm-mingw's Linux build in `LONGSHOT_MINGW` |
+| `RX_ARCH=arm64` or `x86_64` | (macOS only) The game/renderer architecture; default arm64 on Apple Silicon, x86_64 on Intel. Helpers loaded by Python keep that process's architecture |
+| `EMSDK=<dir>`, `SDKROOT=<dir>` | (macOS) Explicit LLVM prefix (`bin/` or `upstream/bin/`), before PATH and `xcrun`; explicit Apple SDK, otherwise `xcrun`'s macOS SDK. Minimum target stays 14.4 |
+| `LONGSHOT_FFMPEG=<dir>`, `LONGSHOT_SDL2=<file.dylib>` | (macOS) FFmpeg prefix with `.pc` metadata, or an explicit SDL2 library; otherwise pkg-config/Homebrew. All linked libraries must contain the chosen architecture |
 | `RX_RELEASE=1` | A release build (`make_game.py` sets it): no console window, the shaders prepared before the title |
 | `RX_PGO=gen` or `RX_PGO=<file>` | The hot code counting its branches for a profile, or built with one (`make_game.py` passes the shipped profile) |
 | `RX_HOT_OPT=<level>` | The hot pieces' optimisation level (default `O2`); `O1` for [a faster build for development](#a-faster-build-for-development) |
-| `RX_MARCH=<level>` | The CPU level to build for (default this PC's: `x86-64-v3`, else `x86-64-v2`, else `x86-64`) |
+| `RX_MARCH=<level>` | The CPU level to build for (Windows/Linux: this PC's `x86-64-v3`, else `x86-64-v2`, else `x86-64`; macOS x86_64: `x86-64-v2`; macOS arm64: no `-march` by default). An explicit level must match the target architecture |
 | `RX_VK_ONLY=1` | Only the Vulkan back end, with no lift |
-| `LONGSHOT_VK_PREBUILT=<longshot_vk.so>` | (Linux) The Vulkan back end as built already, the AppImage's; set aside by a build with DLSS (`LONGSHOT_NGX_SDK`) or AMD FSR 4 (`LONGSHOT_FSR=1`, `make_game.py --fsr`), which compiles its own |
+| `LONGSHOT_VK_PREBUILT=<library>` | The Vulkan back end as built already (`longshot_vk.so` on Linux, `longshot_vk.dylib` on macOS). macOS checks its Mach-O architecture. On Linux a build with DLSS (`LONGSHOT_NGX_SDK`) or AMD FSR 4 (`LONGSHOT_FSR=1`, `make_game.py --fsr`) compiles its own |
 | `OOT_WORK`, `OOT_DUMP`, `OOT_EXEFS`, `OOT_ROMFS` | The work folder and the dump's folders, over `work/dump.txt` |
 
 The Longshot Launcher's build settings set two of these for its build. **Build workers**: Automatic keeps

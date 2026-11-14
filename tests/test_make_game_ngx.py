@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("make_game_ngx_under_test", ROOT / "nx2" / "make_game.py")
 make_game = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(make_game)
+make_game.DARWIN = False   # the authored Windows/Linux SDK cases below, not the test host's platform
 
 
 class NgxRuntimeTests(unittest.TestCase):

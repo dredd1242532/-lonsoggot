@@ -46,6 +46,8 @@ class LinuxPreflightTests(unittest.TestCase):
         self.stack.enter_context(mock.patch.dict(os.environ, {}, clear=True))
         self.stack.enter_context(mock.patch.dict(sys.modules))
         self.stack.enter_context(mock.patch.object(sys, "path", list(sys.path)))
+        if sys.platform == "darwin":
+            self.stack.enter_context(mock.patch.object(sys, "platform", "linux"))
         # Import only production modules, without reading a developer's dump.txt or
         # probing the actual system's pkg-config at import time.
         os.environ["OOT_WORK"] = str(self.root / "work")
