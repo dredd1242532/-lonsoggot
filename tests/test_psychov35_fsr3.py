@@ -36,6 +36,7 @@ namespace ur=mkwvk::upscaler_rows;
 bool display_hdr=false,enabled=false;int hdr=0,tone=0,mode=ur::FSR3;
 bool scene_tonemap_on(){return display_hdr && hdr==2 && tone==1;}
 int temporal_mode(){return mode;}
+bool temporal_off(){return mode==ur::OFF;}
 int env_switch(const char*){return enabled?1:0;}
 using VkFormat=int;
 constexpr int VK_FORMAT_B10G11R11_UFLOAT_PACK32=122,VK_FORMAT_R16G16B16A16_SFLOAT=97;
@@ -62,7 +63,9 @@ int main(int argc,char**){
   assert(!temporal_colour_pair(97,122) && !temporal_colour_pair(122,97));
  }
  display_hdr=true;hdr=2;tone=1;mode=ur::GAME;assert(!temporal_scene_format(97)); // Legacy own-input route.
- mode=ur::OFF;assert(!temporal_scene_format(97));
+ // Off has a separate bypass policy; it must not become an HDR temporal engine.
+ // Do not require its independent format gate to reject a buffer after the Off fix merges.
+ mode=ur::OFF;assert(!ur::takes_psychov35(mode));
  mode=ur::FSR3;assert(temporal_scene_format(97)==enabled);
 }
 '''.replace('/* CALLBACK */', callback).replace('/* REGISTRATION */', registration)

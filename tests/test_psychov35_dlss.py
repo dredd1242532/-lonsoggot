@@ -85,7 +85,7 @@ int main(int argc, char**) {
       }
     }
   }
-  // FSR 3.1 on the shared chain now takes linear HDR too; the legacy route maps to GAME and stays excluded.
+  // Only the HDR engines take linear input. Off accepts RGBA separately, decoding the network input itself.
   assert(ur::takes_psychov35(ur::DLSS) && ur::takes_psychov35(ur::DLAA) && ur::takes_psychov35(ur::FSR4) &&
          ur::takes_psychov35(ur::FSR4_AA) && ur::takes_psychov35(ur::FSR3));
   assert(!ur::takes_psychov35(ur::GAME) && !ur::takes_psychov35(ur::OFF));
