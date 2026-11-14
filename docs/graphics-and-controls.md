@@ -16,7 +16,7 @@ example to leave <kbd>Insert</kbd> to another overlay.
 
 ![Graphics tab with Quality preset selected, setting rows on the left, help on the right, and keyboard navigation along the bottom.](images/guide/settings-graphics.png)
 
-*Menu layout: tabs at the top, settings on the left and help on the right. This UI-only v3.0.0-rc.3 example uses a
+*Menu layout: tabs at the top, settings on the left and help on the right. This UI-only development-build example uses a
 plain background and bundled fonts. The displayed Custom values are illustrative; use the starting points below.
 Available options vary with your graphics card and build.*
 
