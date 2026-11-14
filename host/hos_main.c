@@ -2162,6 +2162,12 @@ int main(int argc, char **argv) {
     SetThreadDescription(t, L"Game");
     if (window) hos_display_loop();   /* (does not return: the window's events until the process ends) */
     WaitForSingleObject(t, INFINITE);
+#if defined(__APPLE__)
+    /* game_main may end only its pthread. Do not run C++ static destructors under the remaining
+       threads/GPU work; use the same process teardown as the ordinary game/window exit paths. */
+    ExitProcess(0);
+#else
     return 0;
+#endif
 }
 #endif
