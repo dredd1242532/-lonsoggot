@@ -2065,11 +2065,11 @@ bool shadow_follows_sync_on() {
 }
 // (longshot) Always-on counts for the late pages' summary line, one for each way a late page's words or a CPU read of them go
 // (plain counters, pools_mu held; read and reset with the 600-recording line): reads on the CPU by branch, pages fixed by kind,
-// pages a mirror sync copied into a shadow, made known by it, and of those the ones the replay or the collection wrote again
-// since (shadow_forgotten_last, set by the write-back's forget: pages the capture did not take)
+// pages a mirror sync copied into a shadow, made known by it, and the ones left unknown because the replay or the collection
+// wrote them since (shadow_forgotten_last, set by the write-back's forget: pages the capture did not take)
 struct LateStats {
     int64_t rd_fixed = 0, rd_earlier_rec = 0, rd_not_recorded = 0, rd_this_part = 0, fix_diff_pages = 0, fix_whole_pages = 0,
-            sync_pages = 0, sync_known = 0, sync_known_again = 0;
+            sync_pages = 0, sync_known = 0, sync_left_unknown = 0;
 } st_lfx;
 std::vector<uint32_t> shadow_forgotten_last;   // (sorted)
 struct ShadowSynced { uint64_t lo, page; VkBuffer shadow; };
@@ -2085,17 +2085,23 @@ void shadow_sync_copy(VkCommandBuffer up, VkBuffer src, Pool& p, const std::vect
         for (uint64_t pg = r.dstOffset >> kPageShift; r.size && pg <= (r.dstOffset + r.size - 1) >> kPageShift; pg++)
             shadow_synced.push_back({p.lo, pg, p.shadow}), st_lfx.sync_pages++;
 }
-void shadow_synced_known() {   // (after the write-back's forget: the pages synced since, known as the sync left them)
+// (after the write-back's forget: the pages synced since, known as the sync left them. Not the ones the forget has just cleared
+// because the replay's own writes or the collection reported them since the capture: guest memory has newer words there than the
+// shadow, which holds the capture's. Known, they were not read into the shadow again at the write-back, and the diff pass wrote
+// the mirror's words of a span whole over guest memory's newer ones, which the late pages' fix then read as stamped words.
+// Left unknown they are read from guest memory at the next write-back that writes the page back)
+void shadow_synced_known() {
     for (const ShadowSynced& s : shadow_synced) {   // (a shadow made since has not had the copy: shadow_synced_freed)
         const auto it = imported.find(s.lo);
         if (it == imported.end() || !it->second.shadow || it->second.shadow != s.shadow) continue;
         std::vector<uint64_t>& known = it->second.shadow_known;
-        if ((s.page >> 6) < known.size()) {
-            known[s.page >> 6] |= 1ull << (s.page & 63);
-            st_lfx.sync_known++;
-            if (std::binary_search(shadow_forgotten_last.begin(), shadow_forgotten_last.end(), (uint32_t)((s.lo >> kPageShift) + s.page)))
-                st_lfx.sync_known_again++;
+        if ((s.page >> 6) >= known.size()) continue;
+        if (std::binary_search(shadow_forgotten_last.begin(), shadow_forgotten_last.end(), (uint32_t)((s.lo >> kPageShift) + s.page))) {
+            st_lfx.sync_left_unknown++;
+            continue;
         }
+        known[s.page >> 6] |= 1ull << (s.page & 63);
+        st_lfx.sync_known++;
     }
     shadow_synced.clear();
 }
@@ -2547,7 +2553,7 @@ void late_fix_emit() {
              "first; stamps %zu blocks (%llu KB); of the reads on the CPU, %lld waited for an earlier part's fix, %lld copied the page "
              "again instead (that part not waited for); the paths: reads on the CPU with the fix done %lld, of an earlier recording %lld, "
              "not recorded yet %lld, of this part %lld; pages fixed from stamps %lld, from snapshots %lld; the shadows: %lld pages "
-             "synced from captures, %lld made known by it, %lld of those also written by the replay or the collection since",
+             "synced from captures, %lld made known by it, %lld left unknown because the replay or the collection wrote them since",
              (long long)st_lf_takes, (long long)st_lf_fixed, st_lf_fixed ? (double)st_lf_pages / st_lf_fixed : 0.0,
              st_lf_fixed ? (double)st_lf_fixes / st_lf_fixed : 0.0, (long long)st_lf_fell[1],
              (long long)st_lf_fell[3], (long long)st_lf_fell[4], (long long)st_lf_fell[5], (long long)st_lf_fell[6],
@@ -2555,7 +2561,7 @@ void late_fix_emit() {
              (unsigned long long)(stamp_bytes >> 10), (long long)st_lf_part_waits, (long long)st_lf_part_fell,
              (long long)st_lfx.rd_fixed, (long long)st_lfx.rd_earlier_rec, (long long)st_lfx.rd_not_recorded, (long long)st_lfx.rd_this_part,
              (long long)st_lfx.fix_diff_pages, (long long)st_lfx.fix_whole_pages, (long long)st_lfx.sync_pages, (long long)st_lfx.sync_known,
-             (long long)st_lfx.sync_known_again);
+             (long long)st_lfx.sync_left_unknown);
         st_lf_takes = st_lf_fixed = st_lf_pages = st_lf_fixes = st_lf_cpu_reads = st_lf_no_table = st_lf_moved = st_lf_part_waits = st_lf_part_fell = 0;
         st_lfx = LateStats{};
         for (int64_t& f : st_lf_fell) f = 0;

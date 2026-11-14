@@ -571,6 +571,7 @@ int main() {
     {
         reset();
         const uint64_t other = pg + 1;                      // (a second page of the pool: synced, not written since)
+        std::fill(imported[kLo].shadow_known.begin(), imported[kLo].shadow_known.end(), 0ull);
         std::vector<VkBufferCopy> rs{{0, pg * 4096 - kLo, 4096}, {4096, other * 4096 - kLo, 4096}};
         shadow_sync_copy(1, kCapBuf, imported[kLo], rs);
         CHECK(st_lfx.sync_pages == 2 && shadow_synced.size() == 2 && cmd_copies.size() == 2);
@@ -578,8 +579,8 @@ int main() {
         shadow_synced_known();
         const std::vector<uint64_t>& known = imported[kLo].shadow_known;
         const uint64_t i = pg - (kLo >> kPageShift), j = other - (kLo >> kPageShift);
-        CHECK((known[i >> 6] >> (i & 63) & 1) && (known[j >> 6] >> (j & 63) & 1));   // (both known: the sync left them so)
-        CHECK(st_lfx.sync_known == 2 && st_lfx.sync_known_again == 1 && shadow_synced.empty());
+        CHECK(!(known[i >> 6] >> (i & 63) & 1) && (known[j >> 6] >> (j & 63) & 1));   // (the page written since stays unknown)
+        CHECK(st_lfx.sync_known == 1 && st_lfx.sync_left_unknown == 1 && shadow_synced.empty());
     }
     // (q) a page the replay or the collection wrote after the capture a mirror sync copied into the shadow: the write-back's forget
     // clears it (guest memory has newer words than the shadow), and the sync's "known" afterwards must not set it again (the shadow
