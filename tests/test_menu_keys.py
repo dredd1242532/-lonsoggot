@@ -28,7 +28,10 @@ RUN_ALL_ARGS = ["--cxx", "{cxx}"]
 ROOT = Path(__file__).resolve().parents[1]
 
 FIXTURE = r'''#include "gpu/vk/vk_menu_keys.h"
+// rx_nvn.h is a C header; keep its layout assertions active in this C++ fixture.
+#define _Static_assert static_assert
 #include "gpu/vk/vk_api.h"
+#undef _Static_assert
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
