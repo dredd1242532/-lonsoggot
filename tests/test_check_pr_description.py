@@ -520,6 +520,44 @@ class Running(unittest.TestCase):
         self.assertEqual(check.strip_wip("fix: WIP: x"), "fix: WIP: x")
         self.assertEqual(check.title_type("WIP: perf(vk)!: x"), "perf")
 
+    def test_file_mode_uses_wip_title(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tmp = Path(folder) / "body.md"
+            tmp.write_text(drop(GOOD, "Why"), encoding="utf-8")
+            for title in ("WIP: " + FIX, "[WIP] " + FIX, "wip: " + FIX, "  WIP:" + FIX):
+                with self.subTest(title=title):
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        result = check.main(["--file", str(tmp), "--title", title])
+                    self.assertEqual(result, 0)
+                    self.assertIn("::notice::Work in progress", out.getvalue())
+                    self.assertIn("no ## Why section", out.getvalue())
+                    self.assertNotIn("::error::", out.getvalue())
+
+    def test_file_mode_requires_complete_non_wip_body(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tmp = Path(folder) / "body.md"
+            tmp.write_text(drop(GOOD, "Why"), encoding="utf-8")
+            for title in (FIX, "fix: WIP: no", "WIPE: no", None, ""):
+                with self.subTest(title=title):
+                    argv = ["--file", str(tmp)]
+                    if title is not None:
+                        argv += ["--title", title]
+                    out = io.StringIO()
+                    with contextlib.redirect_stdout(out):
+                        result = check.main(argv)
+                    self.assertEqual(result, 1)
+                    self.assertIn("::error::no ## Why section", out.getvalue())
+                    self.assertNotIn("::notice::Work in progress", out.getvalue())
+
+    def test_wip_title_does_not_skip_review(self):
+        body = drop(GOOD, "Why")
+        want = ["no ## Why section (.forgejo/pull_request_template.md)"]
+        for title in ("WIP: " + FIX, "[WIP] " + FIX, "wip: " + FIX, "  WIP:" + FIX):
+            with self.subTest(title=title):
+                self.assertEqual(check.review(body, title=title), (want, []))
+                self.assertEqual(check.problems(body, title=title), want)
+
     def test_main_and_wip(self):
         folder = Path(tempfile.mkdtemp())
         tmp, diff = folder / "body.md", folder / "pr.diff"

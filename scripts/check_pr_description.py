@@ -709,7 +709,7 @@ def main(argv=None):
     a = p.parse_args(argv)
     merge_base, diff, title = None, None, a.title
     if a.file:
-        body, wip = Path(a.file).read_text(encoding="utf-8"), a.wip
+        body, wip = Path(a.file).read_text(encoding="utf-8"), is_draft(title, a.wip)
         diff = Path(a.diff).read_text(encoding="utf-8", errors="replace") if a.diff else None
     else:
         pr = fetch(a.server, a.repo, a.pr)
