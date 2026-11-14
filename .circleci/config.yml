@@ -44,7 +44,7 @@ workflows:
           force-full: true  # main runs everything before the nightly
           # dry-run until cutover: Forgejo's release.yml is still the live publisher (docs/ci.md)
           extra-params: >-
-            {"nightly":false,"release_dry_run":true,"website_refresh":false,
+            {"nightly":true,"release_dry_run":true,"website_refresh":false,
             "vulkan_dlss":false,"fork_pr":0,"fork_sha":""}
   setup-release:
     when: (pipeline.git.tag or "") starts-with "v"
