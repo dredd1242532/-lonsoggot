@@ -51,6 +51,8 @@ ARTIFACTS = {
     "Longshot-linux-x86_64": "Longshot-{tag}-x86_64.AppImage",
     "LongshotBuilder-windows": "LongshotBuilder-{tag}-windows-x64.zip",
 }
+# (the actions that build: a push is "synchronized" in Forgejo's payload, "synchronize" in GitHub's and in the workflow's types)
+ACTIONS = ("opened", "synchronize", "synchronized", "reopened", "edited")
 # (a run that is building, or will: an edit of its head builds nothing more. A run that passed counts only with its builders'
 # artifacts: an edit's run that built nothing passes too)
 BUILDING = ("running", "waiting", "blocked")
@@ -111,7 +113,7 @@ def name(event, runs=None, released=None, artifacts=None):
     off builds it once and editing the description afterwards builds nothing. runs, released: the head's runs and whether its
     release is out, artifacts(run id) (the tests pass theirs; else asked of the server)"""
     pr = event.get("pull_request") or {}
-    if is_draft(pr) or event.get("action") not in ("opened", "synchronize", "reopened", "edited"):
+    if is_draft(pr) or event.get("action") not in ACTIONS:
         return None
     tag = tag_of(pr.get("number"), (pr.get("head") or {}).get("sha"))
     if event.get("action") != "edited":

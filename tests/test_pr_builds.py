@@ -28,7 +28,7 @@ HEAD = "1a2b3c4d" + "5" * 32
 OTHER = "9f3e21ab" + "6" * 32
 
 
-def event(action="synchronize", number=222, title="fix(vk): HUD and lighting", head=HEAD, draft=False):
+def event(action="synchronized", number=222, title="fix(vk): HUD and lighting", head=HEAD, draft=False):
     return {"action": action, "pull_request": {"number": number, "title": title, "draft": draft, "head": {"sha": head}}}
 
 
@@ -46,7 +46,8 @@ BOTH = [{"name": "Longshot-linux-x86_64"}, {"name": "LongshotBuilder-windows"}, 
 
 class NameTests(unittest.TestCase):
     def test_a_push_builds_its_head(self):
-        for action in ("opened", "synchronize", "reopened"):
+        # (Forgejo's payload says "synchronized" for a push; GitHub's, and the workflow's types, "synchronize")
+        for action in ("opened", "synchronized", "synchronize", "reopened"):
             self.assertEqual(pr_builds.name(event(action)), "pr-222-1a2b3c4d")
 
     def test_a_draft_builds_nothing(self):
@@ -305,6 +306,10 @@ class WorkflowTests(unittest.TestCase):
             text = (WORKFLOWS / wf).read_text(encoding="utf-8")
             self.assertIn("RELEASE_BUILD: ${{ inputs.tag != '' && !startsWith(inputs.tag, 'pr-') && '1' || '' }}", text, wf)
             self.assertNotRegex(text, r"if: .*env\.RELEASE_TAG", wf)
+
+    def test_a_push_cancels_the_build_before_it(self):
+        wf = (WORKFLOWS / "pr-build.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event.action == 'synchronized'", wf)
 
     def test_the_artifacts_are_the_builders(self):
         # (pr_builds.ARTIFACTS names what build-linux.yml and build-windows.yml upload)
