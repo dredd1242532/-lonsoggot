@@ -348,12 +348,10 @@ static std::atomic<int> in_real_wait{0}, real_wait_returns{0}, real_timeouts{0};
 static std::atomic<bool> no_timeout{false};
 constexpr uint32_t kLongWaitMs = 10000;
 static std::atomic<bool> entered_without_timeout{false};   // (the wait in progress was entered with the 10 s timeout)
-static std::atomic<uint64_t> last_call_ns{0}, last_return_ns{0};   // (the last wait that returned: its start and end)
-struct WaitSpan {
-    std::atomic<uint64_t> call{0}, ret{0}, seq{0};   // (seq: its number + 1, written last: a half-written entry is skipped)
-};
-static WaitSpan spans[256];   // (the returned waits' starts and ends, a ring of the last 256: the first return after a publish is
-static std::atomic<uint64_t> nspans{0};   // found even when later ones, early or kicked, follow it)
+// (real_parked: the time just before a publish, and the verdict on the first wait to return after it, judged by the wrapper as
+// it returns: 1 when that wait began before the publish and blocked 15 ms or more (the wake ended it), 2 otherwise)
+static std::atomic<uint64_t> judge_after_ns{0};
+static std::atomic<int> verdict{0};
 static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) {
     const bool inf = no_timeout;
     entered_without_timeout = inf;
@@ -364,10 +362,10 @@ static bool counted_real_wait(volatile void* a, void* c, size_t n, uint32_t ms) 
     if (!r && GetLastError() == ERROR_TIMEOUT) real_timeouts++;   // (a timeout, not an early return: WaitOnAddress may return early)
 #endif
     const uint64_t ret = rec::now_ns();
-    last_call_ns = call, last_return_ns = ret;   // (a pair, written at the return: the next wait does not touch them)
-    const uint64_t i = nspans.fetch_add(1);
-    WaitSpan& e = spans[i % 256];
-    e.call = call, e.ret = ret, e.seq = i + 1;
+    if (const uint64_t pub = judge_after_ns; pub && ret >= pub) {   // (the first return after the publish time, judged once)
+        int none = 0;
+        verdict.compare_exchange_strong(none, call < pub && ret - call >= 15000000 ? 1 : 2);
+    }
     in_real_wait--;
     real_wait_returns++;
     return r;
@@ -396,19 +394,7 @@ static bool publish_runs(int want) {
     if (ran) replay_mu.unlock();
     return ran;
 }
-/// the first wait that returned at or after `pub`: the one the publish ended (the recorder writes it before it runs the packet)
-static bool first_return_after(uint64_t pub, uint64_t& call, uint64_t& ret) {
-    const uint64_t n = nspans.load();
-    for (uint64_t i = n > 256 ? n - 256 : 0; i < n; i++) {
-        const WaitSpan& e = spans[i % 256];
-        if (e.seq != i + 1) continue;   // (being written, or already overwritten)
-        if (e.ret >= pub) {
-            call = e.call, ret = e.ret;
-            return true;
-        }
-    }
-    return false;
-}
+
 /// the recorder stopped through the renderer's own teardown (vkDestroyDevice's boundary), joined within 3 s, and a normal return:
 /// the process ends through exit() with nothing of the recorder left running
 static std::atomic<bool> stopped{false};
@@ -466,12 +452,13 @@ int main(int argc, char** argv) {
                 const int r0 = real_wait_returns;
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 if (real_wait_returns != r0 || in_real_wait != 1) continue;   // (it returned early: again)
-                const uint64_t pub = rec::now_ns();
+                verdict = 0;
+                judge_after_ns = rec::now_ns();
                 if (!publish_runs(++published)) fail("a publish did not wake the recorder waiting on W (3 s)");
+                judge_after_ns = 0;
                 // (the wait that returned began before the publish and blocked for 15 ms or more: no compare at its start, so the
                 // wake ended it. Otherwise inconclusive: again)
-                uint64_t call = 0, ret = 0;
-                woken = first_return_after(pub, call, ret) && call < pub && ret - call >= 15000000;
+                woken = verdict == 1;   // (the recorder judges a wait before it runs the packet that wait let through)
             }
             if (!woken) fail("no attempt showed the wake ending a blocked wait");
             no_timeout = false;
