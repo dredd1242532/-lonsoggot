@@ -5304,11 +5304,22 @@ int presents_ahead() {   // (RX_VK_PRESENTS_AHEAD=<n>: how many presents the gam
     return n;
 }
 
+/// (longshot) Which replay this run has, from the one place async_on and behind_on read: RX_VK_ASYNC when it is set (the
+/// switch, for testing, over the menu: 0 the submitting thread, 1 the older replay thread, 2 the render thread), else the
+/// Insert menu's Threaded rendering as this run resolved it (vk_menu.cpp menu_threaded_rendering: On, or what Auto picks),
+/// which is the render thread exactly as RX_VK_ASYNC=2 is. Read once: a change of the row applies at the next start
+int render_thread_mode() {
+    static const int mode = [] {
+        const char* e = getenv("RX_VK_ASYNC");
+        return e ? atoi(e) : menu_threaded_rendering() ? 2 : 0;
+    }();
+    return mode;
+}
 bool async_on() {
     // (longshot: off by default. OoT rewrites double-buffered data right after a submit with no fence, which lands
     // inside a replay running behind (TotK Recomp's reason to replay on the submitting thread): whole-screen white or
     // black frames, 28 per 1000 gameplay frames, against 1.3 synchronous, at the same frame rate. RX_VK_ASYNC=1: on)
-    static const bool on = getenv("RX_VK_ASYNC") && atoi(getenv("RX_VK_ASYNC")) != 0;
+    static const bool on = render_thread_mode() != 0;
     return on;
 }
 /// (longshot) RX_VK_ASYNC=2: the render thread. The replay thread of RX_VK_ASYNC=1, with the game let run a frame ahead of
@@ -5325,9 +5336,12 @@ bool async_on() {
 ///    waits for what was handed over before it; a release waits for the stopped work, as on the submitting thread;
 ///  - the occlusion queries stay on (occ_queries_on).
 bool behind_on() {
-    static const bool on = getenv("RX_VK_ASYNC") && atoi(getenv("RX_VK_ASYNC")) == 2;
+    static const bool on = render_thread_mode() == 2;   // (the switch, or the Threaded rendering row: render_thread_mode)
     return on;
 }
+// (the recorder's half of the Threaded rendering row: with RX_VK_RECORDER unset, vk_recorder.h's mode_from_env asks the row
+// through this, set before anything runs; the checks that build vk_recorder.h alone leave it null, the recorder off)
+[[maybe_unused]] const bool rec_setting_hooked = (rec::g_setting_thread = menu_threaded_rendering, true);
 
 void readback_fell_back(int what) {
     (what == 0 ? bh_st.rb_fallback : what == 1 ? bh_st.tex_page_only : what == 2 ? bh_st.tex_exact : bh_st.rb_exact)++;
@@ -5957,6 +5971,7 @@ void fill_replay_table(MkwVkRenderer& t) {
         if (id == HOS_OPT_FPS_CAP) return opts.fps_cap;
         if (id == HOS_OPT_HOLD_TOGGLE) return opts.hold_toggle;
         if (id == HOS_OPT_SKIP_TITLE) return opts.skip_title != 0;
+        if (id == HOS_OPT_RENDER_THREAD) return behind_on();   // (host/nvn_native.c: the present poll answered at once)
         return id == 0 ? opts.realtime : id == 1 ? menu_is_open() : id == 2 ? resolution_auto() && !temporal_full_scale() : id == 3 ? (temporal_full_scale() ? 10000 : resolution_scale()) : id == 4 ? opts.pad_background : id == 5 ? opts.text_speed : id == 6 ? opts.mouse_native :
                id == 7 ? opts.mouse_sens : id == 8 ? opts.mouse_invert : id == 9 ? opts.rumble : id == 16 ? opts.invert_cam_x : id == 17 ? opts.invert_cam_y : id == HOS_OPT_GYRO ? opts.gyro : id == HOS_OPT_GYRO_SENS_X ? opts.gyro_sens_x : id == HOS_OPT_GYRO_SENS_Y ? opts.gyro_sens_y : id == HOS_OPT_GYRO_INV_X ? opts.gyro_inv_x : id == HOS_OPT_GYRO_INV_Y ? opts.gyro_inv_y : id == HOS_OPT_GYRO_DEADZONE ? opts.gyro_deadzone :
                id == HOS_OPT_DLSS_JITTER_W || id == HOS_OPT_DLSS_JITTER_H || id == HOS_OPT_DLSS_JITTER_PHASES ? jitter_option(id) : 0;
