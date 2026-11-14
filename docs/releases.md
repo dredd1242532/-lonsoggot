@@ -103,8 +103,8 @@ Rotating the key: RELEASING.md, "Rotate the key".
 
 The builders need build tools that are not Longshot's own code. Windows (`windows-x64` lines): llvm-mingw, Python with the
 prompt packages, emsdk, the CPM cache (FFmpeg, Vulkan and SPIR-V headers, VMA, dav1d), wgpu-native, the prebuilt files of
-`third_party` (a64emit.dll, lld-link.exe, SDL2/SDL3, zbic.dll), and the play profile when there is one (optional: without
-it the game is built all the same, a little slower in play). Linux (`linux-x64` lines): LLVM's clang
+`third_party` (a64emit.dll, lld-link.exe, SDL2/SDL3, zbic.dll). No play profile is among them: play profiles are
+committed in `assets/profiles/`. Linux (`linux-x64` lines): LLVM's clang
 and lld (`emsdk`), the glibc 2.35 `sysroot`, `ffmpeg` with dav1d, `sdl2` and the Vulkan, SPIR-V and VMA headers (`cpm`).
 They are not in the release: `tools.lock` names them.
 
@@ -131,7 +131,7 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/
   name), and nothing prunes them, so an older version's tools stay downloadable. Where an archive came from (upstream for
   llvm-mingw, NotRexed/Hookshot's `builder-parts` release for those taken from Hookshot) is its fallback URL, so no install
   depends on a repository we do not control alone. An archive Longshot makes itself (the CPM cache with dav1d, the
-  prebuilt `third_party` files, the Linux tools, a play profile) is only in Packages, put there by `scripts/tools.py`.
+  prebuilt `third_party` files, the Linux tools) is only in Packages, put there by `scripts/tools.py`.
 - **Bumping a tool** is a pull request that edits `tools.lock`, with the archive uploaded by `scripts/tools.py mirror`,
   `add` or `assemble`: a new package version, then the line (RELEASING.md, "Bump a tool"). The release workflow refuses a
   `tools.lock` whose package files are not there with their size and SHA-256, or that lacks a tool the
@@ -139,8 +139,8 @@ tool llvm-mingw 20261104 windows-x64 5521…40f 191037046 LongshotBuilder/tools/
 - **Today's lock.** Windows: Python, emsdk and wgpu-native are taken as they are from Hookshot v2.1.0's Windows builder
   (NotRexed/Hookshot's `builder-parts` release), with their SHA-256; llvm-mingw is upstream's; the CPM cache is Hookshot
   v2.1.0's with dav1d added (`scripts/windows/dav1d.sh`), and `third-party` the prebuilt files of Hookshot v2.1.0's
-  `third_party` part (`assemble third-party`). Linux: `scripts/linux/deps.sh tools`'s. There is no play profile yet: the
-  lock has no `profile` line, and `check --require` does not ask for one.
+  `third_party` part (`assemble third-party`). Linux: `scripts/linux/deps.sh tools`'s. The lock has no play profile:
+  play profiles are committed in `assets/profiles/`.
 - **Linux.** The AppImage carries only the builder: its Python (the tools' download and `make_game.py` run on it,
   and its packages follow `requirements.txt`, which changes with the version), Longshot's sources and the prebuilt Vulkan
   back end. Each `linux-x64` tool's `dest` is where the AppImage had it (`usr/lib/longshot/emsdk`, `usr/share/longshot/cpm`,

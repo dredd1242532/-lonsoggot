@@ -38,7 +38,8 @@ def run(args, **kwargs):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--source', required=True, type=Path, help='clean LongshotLauncher rc.3 source checkout')
+    p.add_argument('--source', required=True, type=Path, help='clean LongshotLauncher source checkout')
+    p.add_argument('--version', required=True, help='Launcher release tag matching the source revision')
     p.add_argument('--output', required=True, type=Path)
     p.add_argument('--dotnet', default='dotnet', help='.NET 10 SDK executable')
     a = p.parse_args()
@@ -94,18 +95,19 @@ def main():
         run([a.dotnet, 'restore', str(stage / 'App/LongshotLauncher.csproj'), *restore_options], env=env)
         run([a.dotnet, 'restore', str(fixture / 'Capture.csproj'), *restore_options], env=env)
         shutil.copyfile(fixture / 'packages.lock.json', output / 'launcher-packages.lock.json')
-        run([a.dotnet, 'build', str(fixture / 'Capture.csproj'), '--no-restore', '-c', 'Release', '-p:LongshotTag=v1.0.0-rc.3'], env=env)
+        run([a.dotnet, 'build', str(fixture / 'Capture.csproj'), '--no-restore', '-c', 'Release', '-p:LongshotTag=' + a.version], env=env)
         with example_state(Path(tempfile.gettempdir()) / 'longshot-guide-example') as state:
             run([a.dotnet, str(fixture / 'bin/Release/net10.0/Capture.dll'), str(state), str(output)], env=env)
-    metadata = {'source_revision': revision, 'source_files': hashes,
+    metadata = {'source_revision': revision, 'launcher_version': a.version, 'source_files': hashes,
                 'fixture_files': {f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in
                                   ('scripts/screenshots/LauncherCapture.cs', 'scripts/screenshots/capture_launcher.py')},
-                'framework': 'Avalonia.Headless 12.1.6 with Skia; actual rc.3 views/view models',
+                'framework': 'Avalonia.Headless 12.1.6 with Skia; maintained views/view models',
                 'source_adapter': 'Only in temporary build: suppress FilesStepViewModel StartSearch(); replace host requirements probe with maintained Evaluate() on explicit illustrative 16 GB RAM, 12 threads, AVX2, 100 GB free, Vulkan 1.3/8 GB VRAM/mesh inputs. UI labels and layout unchanged.',
                 'state': 'Synthetic build marker, empty file selector, text-only import/target fixture; real confirmation dry run only.',
                 'sdk': run([a.dotnet, '--version'], capture_output=True).stdout.strip(),
                 'images': {f: hashlib.sha256((output / f).read_bytes()).hexdigest() for f in
-                           ('launcher-manage-saves.png', 'launcher-game-files.png', 'launcher-import-confirm.png')}}
+                           ('launcher-home.png', 'launcher-saves.png', 'launcher-import.png',
+                            'launcher-manage-saves.png', 'launcher-game-files.png', 'launcher-import-confirm.png')}}
     metadata['fixture_files']['scripts/screenshots/launcher-packages.lock.json'] = hashlib.sha256(package_lock.read_bytes()).hexdigest()
     (output / 'launcher-capture.json').write_text(json.dumps(metadata, indent=2) + '\n')
 

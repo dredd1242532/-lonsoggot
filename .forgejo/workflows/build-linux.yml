@@ -163,16 +163,6 @@ jobs:
           key: ${{ steps.objkey.outputs.key }}
           restore-keys: ${{ steps.objkey.outputs.prefix }}
 
-      # work/: the play profile made on the development PC (addresses and counts, no game code): tools.lock's profile when
-      # it has one (RELEASING.md, One-time setup); without it the game is built all the same, a little slower in play
-      - name: Play profile
-        run: |
-          if [ -f work/hot_order.txt ]; then echo "work/ is in the repository"; exit 0; fi
-          grep -q '^tool profile ' tools.lock || { echo "tools.lock has no profile yet: built without it"; exit 0; }
-          python3 -I scripts/tools.py install "$RUNNER_TEMP/profile" --only profile --cache "$RUNNER_TEMP/tools-cache"
-          mkdir -p work && cp -r "$RUNNER_TEMP"/profile/LongshotBuilder/tools/work/. work/
-          ls -la work
-
       # (the AppImage, named by the release's version: a release's tag or the nightly's name)
       - name: AppImage
         env:

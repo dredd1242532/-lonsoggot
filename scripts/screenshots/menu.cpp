@@ -13,6 +13,7 @@ extern "C" DWORD GetFileAttributesA(LPCSTR) { std::abort(); }
 // display inputs, not probes of the capture machine or claims about supported hardware.
 namespace mkwvk {
 const MkwVkHost* host = nullptr;
+Device dev{}; // No physical device: hide hardware-specific Debug actions in this UI-only fixture.
 void logf(const char*, ...) {}
 std::vector<std::string> gpu_device_names;
 bool dlss_built() { return false; }
@@ -112,7 +113,7 @@ int main(int argc, char** argv) {
         // Snapshot these fixture values as the starting state, without restart_init's language-file read.
         for (int i = 0; i < mkwvk::kRows; ++i) {
             auto& row = mkwvk::rows[i];
-            int slot = row.restart && row.value ? mkwvk::restart_state.add(*row.value) : -1;
+            int slot = row.restart && row.value ? mkwvk::restart_state.add(mkwvk::row_restart_value(row)) : -1;
             mkwvk::restart_slot[i] = slot;
             if (slot >= 0) mkwvk::restart_names[slot] = row.name;
         }

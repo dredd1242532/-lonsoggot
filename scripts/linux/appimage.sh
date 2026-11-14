@@ -12,7 +12,8 @@
 # The tools this build itself uses (clang for the Vulkan back end, the headers, the sysroot for the check below) are
 # tools.lock's, installed into build-linux/tools ($TOOLS) by scripts/tools.py install, as the builder installs them.
 # work/ (hot_funcs.txt, hot_order.txt, longshot_pieces.prof, image/chunks.txt: addresses and counts from playing, no game
-# code) is carried along when it is there.
+# code; longshot_vk.profdata: a developer's own renderer profile, used in place of the committed assets/profiles/ one) is carried
+# along when it is there. The renderer built here, and a player's own with DLSS or FSR 4, use the renderer's profile.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT=$PWD
@@ -32,7 +33,16 @@ S=$TOOLS/usr/lib/longshot/sysroot
 # ---- the Vulkan back end, built here once (it needs no game) ----
 VKW=$B/vk-work
 rm -rf "$VKW/sa/build/longshot_vk.so"
-OOT_WORK=$VKW RX_MARCH=x86-64-v3 RX_VK_ONLY=1 RX_RELEASE=1 "$PY" -I nx2/build.py --standalone --jobs "${JOBS:-$(nproc)}"
+# (its play profile: the checkout's work/longshot_vk.profdata when it has one, else the committed one, assets/profiles/
+# longshot_vk.profdata.xz, unpacked here: as nx2/make_game.py's vk_profile_for. Without either, built as before. Never
+# RX_VK_PGO from the shell: an AppImage's renderer does not count)
+VK_PGO=
+mkdir -p "$VKW"
+if [ -f work/longshot_vk.profdata ]; then VK_PGO=$ROOT/work/longshot_vk.profdata
+elif [ -f assets/profiles/longshot_vk.profdata.xz ]; then
+    xz -dc assets/profiles/longshot_vk.profdata.xz > "$VKW/longshot_vk.shipped.profdata"; VK_PGO=$VKW/longshot_vk.shipped.profdata
+fi
+OOT_WORK=$VKW RX_MARCH=x86-64-v3 RX_VK_ONLY=1 RX_RELEASE=1 RX_VK_PGO=$VK_PGO "$PY" -I nx2/build.py --standalone --jobs "${JOBS:-$(nproc)}"
 VK=$VKW/sa/build/longshot_vk.so
 [ -f "$VK" ] || { echo "longshot_vk.so was not built"; exit 1; }
 
@@ -80,7 +90,7 @@ cp -a third_party/a64-kit/* "$T/third_party/a64-kit/"
 rm -f "$T/third_party/a64-kit/tools/lld-link.exe"
 if [ -d work ]; then
     mkdir -p "$T/work/image"
-    for f in hot_funcs.txt hot_order.txt longshot_pieces.prof; do [ -f "work/$f" ] && cp "work/$f" "$T/work/"; done
+    for f in hot_funcs.txt hot_order.txt longshot_pieces.prof longshot_vk.profdata; do [ -f "work/$f" ] && cp "work/$f" "$T/work/"; done
     [ -f work/image/chunks.txt ] && cp work/image/chunks.txt "$T/work/image/"
 fi
 # (the pipeline state list's sources, assets/pipeline_states/, came with assets/ above, and are required: nx2/make_game.py merges

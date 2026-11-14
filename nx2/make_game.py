@@ -52,6 +52,8 @@ STARTED = time.time()   # (the build's total time, kept in build_times.json and 
 sys.path[:0] = [HERE, os.path.join(ROOT, "third_party", "a64-kit", "tools")]   # (python -I leaves the script folder off)
 import toolchain as _toolchain
 import disk as _disk
+import object_store as _object_store
+import lift_store as _lift_store
 # (longshot) RX_TARGET=windows on Linux: the Windows game, with llvm-mingw's Linux release (LONGSHOT_MINGW, or llvm-mingw
 # beside the builder), to run under Proton or copy to a Windows PC
 LINUX, CROSS = not _toolchain.windows(), _toolchain.windows() and os.name != "nt"
@@ -1127,6 +1129,17 @@ def _drop_stale_linux(work):
         f.write(stamp + chr(10))
 
 
+def object_stamps(obj_dir):
+    """The object keys the objects in obj_dir are stamped with (<obj>.sha1, nx2/build.py compile_one)"""
+    keys = []
+    with contextlib.suppress(OSError):
+        for f in os.listdir(obj_dir):
+            if f.endswith(".sha1"):
+                with contextlib.suppress(OSError), open(os.path.join(obj_dir, f)) as h:
+                    keys.append(h.read().strip())
+    return keys
+
+
 def prune_object_cache(work):
     """(issue 1287) The object cache down to the objects this build used: each object in sa/build/obj names its key in <obj>.sha1
     (nx2/build.py compile_one); cached objects no stamp names (earlier releases', other settings') go. Returns the bytes kept.
@@ -1481,10 +1494,11 @@ def build_language(a, out):
     return a.language or kept or (system_language() if a.prepare else None) or "en-US"
 
 
-def profile_readable(prof):
+def profile_readable(prof, any_os=False):
     """(linux) the profile is made by a recent clang (the Windows tools'): an older one, the system's, cannot read it and stops the
-    build. Then the game is built without it (a little slower in play), not at all"""
-    if not LINUX:
+    build. Then the game is built without it (a little slower in play), not at all. any_os: asked on Windows too (the renderer's
+    committed profile is recorded on Linux, and llvm-mingw's clang is another LLVM)"""
+    if not LINUX and not any_os:
         return True
     sys.path.insert(0, os.path.join(ROOT, "third_party", "a64-kit", "tools"))
     import toolchain
@@ -1492,12 +1506,46 @@ def profile_readable(prof):
         src = os.path.join(d, "t.c")
         with open(src, "w") as f:
             f.write("int f(int x) { return x + 1; }" + chr(10))
+        quiet = {"creationflags": 0x08000000} if os.name == "nt" else {}   # (CREATE_NO_WINDOW: no console from the launcher)
         r = subprocess.run([toolchain.find("clang"), "-O2", "-Wno-everything", "-fprofile-instr-use=" + prof, "-c", src, "-o",
-                            os.path.join(d, "t.o")], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                            os.path.join(d, "t.o")], capture_output=True, text=True, encoding="utf-8", errors="replace", **quiet)
     if r.returncode:
         print("this compiler cannot read the play profile (%s): building without it" % (r.stderr.strip().splitlines() or ["?"])[-1],
               flush=True)
     return r.returncode == 0
+
+
+VK_PROFILE = "longshot_vk.profdata"   # (the renderer's play profile, llvm-profdata's merge of an RX_VK_PGO=gen run's counters)
+# (the one every build uses: committed, xz, with its note in assets/profiles/README.md; unpacked into the work folder under its
+# own name, so a developer's work/longshot_vk.profdata copied there earlier is never mistaken for it)
+VK_PROFILE_SHIPPED = os.path.join("assets", "profiles", VK_PROFILE + ".xz")
+VK_PROFILE_UNPACKED = "longshot_vk.shipped.profdata"
+
+
+def vk_profile_for(work, environ, readable=None, root=ROOT):
+    """The renderer's profile nx2/build.py is given (RX_VK_PGO), or None. The checkout's work/longshot_vk.profdata when it has one
+    (a developer's recording, copied to <work> by main), else the committed assets/profiles/longshot_vk.profdata.xz, unpacked
+    into <work>; either only when this compiler reads it (on every system: the committed one comes from another LLVM than
+    llvm-mingw's). Not when RX_VK_PGO is set already (gen, or another profile: the developer's choice stands); with neither file
+    the renderer is built as it always was. After ProjectReLink's make_game.py"""
+    if environ.get("RX_VK_PGO"):
+        return None
+    own = os.path.join(work, VK_PROFILE)
+    if os.path.exists(os.path.join(root, "work", VK_PROFILE)) and os.path.exists(own):
+        prof = own
+    elif os.path.exists(os.path.join(root, VK_PROFILE_SHIPPED)):
+        import lzma
+        with lzma.open(os.path.join(root, VK_PROFILE_SHIPPED)) as f:
+            data = f.read()
+        prof = os.path.join(work, VK_PROFILE_UNPACKED)
+        # (written only when it differs: the object keys are its contents, and a compiler still ending from a cancelled build
+        # keeps the file mapped on Windows, WinError 1224)
+        if not os.path.exists(prof) or open(prof, "rb").read() != data:
+            with open(prof, "wb") as f:
+                f.write(data)
+    else:
+        return None
+    return prof if (readable or (lambda p: profile_readable(p, any_os=True)))(prof) else None
 
 
 def copy_writable(src, dst):
@@ -1622,8 +1670,9 @@ def note_shader_list(work, romfs, out):
 LIFT_KEY = ".lift_key"   # (in <work>/sa/gen: what the lifted C there was made from)
 # (the compile's own switches, read by nx2/build.py alone: the hot pieces' level and their profile. They are not the lift's, so a
 # development build at RX_HOT_OPT=O1 keeps the lifted C instead of translating the game again; tests/test_lift_cache.py checks
-# that nothing else the key covers reads them)
-COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO")
+# that nothing else the key covers reads them. The renderer's profile too, after ProjectReLink: a renderer profile made, changed or
+# taken away does not translate the game again)
+COMPILE_ONLY_ENV = ("RX_HOT_OPT", "RX_PGO", "RX_VK_PGO", "RX_VK_PGO_FILE")
 
 
 LIFT_SCRIPTS = ("lift.py", "split_hot.py")   # (in nx2/: the two steps of the lift)
@@ -1668,13 +1717,14 @@ def lift_sources():
     return sorted(seen)
 
 
-def lift_key(exefs, work, env, planning=True):
+def lift_key(exefs, work, env, planning=True, paths=None):
     """What the lift's output depends on: the game's code, the translator (lift_sources: the modules the lift imports from nx2/ and
     the vendored a64-kit, and their other files), the HLE functions host/ defines (hooked in the lift; the rest of host/ is compiled
     after it, so a change there alone does not lift again), the hot list, the chunk boundaries and the hot pieces, the lift's environment and the
     Python running it. A file the lift never reads may be in it (a new build then lifts again); one it reads must be.
     planning=False: all of it but the two files the lift itself writes for the next one (image/chunks.txt, image/hot_pieces.txt),
-    to tell whether anything else it reads changed while it ran"""
+    to tell whether anything else it reads changed while it ran. paths: each of the environment's values through it
+    (lift_share_key)"""
     import kit  # noqa: F401  (a64-kit on the path, for standalone)
     import standalone
     h = hashlib.sha1(sys.version.encode(), usedforsecurity=False)
@@ -1694,8 +1744,18 @@ def lift_key(exefs, work, env, planning=True):
                 h.update(hashlib.sha1(src.read(), usedforsecurity=False).digest())
     lift_env = dict(env, **{k: v for k, v in os.environ.items() if k.startswith(("A64_", "OOT_", "RX_"))})
     lift_env = {k: v for k, v in lift_env.items() if k not in COMPILE_ONLY_ENV}
+    if paths:
+        lift_env = {k: paths(v) for k, v in lift_env.items()}
     h.update(repr(sorted(lift_env.items())).encode())
     return h.hexdigest()
+
+
+def lift_share_key(exefs, work, out, env):
+    """(LONGSHOT_LIFT_STORE, nx2/lift_store.py) lift_key with the work and game folders' paths taken out of the lift's environment
+    (OOT_WORK, OOT_EXEFS, OOT_ROMFS, OOT_DUMP, A64_HOT_FUNCS): the files are hashed by their names in those folders already, and
+    the lifted C holds no folder path, so two work folders with the same share key lift the same C"""
+    w, o = os.path.abspath(work), os.path.abspath(out)
+    return lift_key(exefs, work, env, paths=lambda v: v.replace(w, "<work>").replace(o, "<out>"))
 
 
 def gen_print(gen):
@@ -1844,6 +1904,10 @@ def forget_failed_build(work, linked, failed=()):
         print("the build failed before the link: the next one translates the game again, and compiles only the files not "
               "compiled yet", flush=True)
         return
+    # (LONGSHOT_OBJ_STORE: the objects this link was made from go from the store as well, or the next try takes them from there)
+    store = _object_store.folder(work)
+    if store:
+        _object_store.forget(store, object_stamps(os.path.join(work, "sa", "build", "obj")))
     for sub in (os.path.join(work, "objcache"), os.path.join(work, "sa", "build", "obj")):
         shutil.rmtree(sub, ignore_errors=True)
     print("the build failed: the next one translates and compiles the game again (nothing of this one is reused)", flush=True)
@@ -1866,13 +1930,19 @@ def ngx_platform():
     return "linux" if LINUX else "windows"
 
 
+def ngx_folder():
+    """Where --fetch-ngx-sdk keeps NVIDIA's DLSS SDK between builds: LONGSHOT_NGX_SDK, else work/ngx-sdk here"""
+    return os.environ.get("LONGSHOT_NGX_SDK") or os.path.join(ROOT, "work", "ngx-sdk")
+
+
 def fetch_ngx_sdk(a):
     """--fetch-ngx-sdk (the Longshot Builder's NVIDIA DLSS tick): NVIDIA's DLSS SDK into LONGSHOT_NGX_SDK before the build, once
     NVIDIA's license was accepted (--accept-nvidia-license: the builder asked first). Only what is missing or not the file
     expected is downloaded"""
-    sdk = os.environ.get("LONGSHOT_NGX_SDK", "")
-    if not sdk:
-        fail("--fetch-ngx-sdk needs LONGSHOT_NGX_SDK, the folder NVIDIA's DLSS SDK goes into.")
+    # (the Builder drops a LONGSHOT_NGX_SDK set on the PC, so a launcher asking through --cli has none: the folder is ours then,
+    # and the rest of the build, which reads the variable, finds the SDK there)
+    sdk = ngx_folder()
+    os.environ["LONGSHOT_NGX_SDK"] = sdk
     if not a.accept_nvidia_license:
         fail("NVIDIA DLSS needs NVIDIA's license accepted first (--accept-nvidia-license).")
     ngx = ngx_script()
@@ -2243,7 +2313,8 @@ def main(a=None):
     check_supported_build(exefs)
 
     # (made once on the development PC: lists of addresses and counts, no game code)
-    for name in ("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", "longshot.res"):
+    # (longshot_vk.profdata: the renderer's own profile, counts over Longshot's own code)
+    for name in ("hot_funcs.txt", "hot_order.txt", "longshot_pieces.prof", VK_PROFILE, "longshot.res"):
         src = os.path.join(ROOT, "work", name)
         dst = os.path.join(work, name)
         # (copied only when it differs: a compiler still ending from a cancelled build keeps the profile mapped, WinError 1224)
@@ -2258,6 +2329,9 @@ def main(a=None):
         env["A64_HOT_FUNCS"] = os.path.join(work, "hot_funcs.txt")
     if os.path.exists(os.path.join(work, "longshot_pieces.prof")) and profile_readable(os.path.join(work, "longshot_pieces.prof")):
         env["RX_PGO"] = os.path.join(work, "longshot_pieces.prof")
+    vk_profile = vk_profile_for(work, os.environ)
+    if vk_profile:
+        env["RX_VK_PGO"] = vk_profile
 
     say("stage", "lift", "Translating the game to PC code")
     # (the same game, tools and settings as the lift before: its C is what this lift would write, and nothing recompiles from it. A
@@ -2298,22 +2372,35 @@ def main(a=None):
                             except OSError as e:
                                 fail("Could not remove earlier translated file %s: %s. The new translation has not started." %
                                      (os.path.join(gen_dir, f), e))
-                inputs = lift_key(exefs, work, env, planning=False)   # (what the lift reads and does not write, as it starts)
-                run(PY + ["nx2/lift.py", "--standalone", "--write", "--exefs", exefs, "--work", work], env)
-                if os.path.isfile(os.path.join(work, "sa", "gen", "code_hot.c")):
-                    run(PY + ["nx2/split_hot.py", os.path.join(work, "sa", "gen")], env)   # (eight files side by side: ~6 minutes, not 79)
-                # (the lift writes inputs of the next one: split_hot's kept pieces, image/hot_pieces.txt, which the key hashes. Its key is
-                # taken again now, from what the next build reads: taken before, in a fresh work folder (no hot_pieces.txt yet) it never
-                # matched the next build's, which translated the game again for nothing, ~5 minutes on Windows, and a player's first
-                # update after a new install did not keep the translation). Only when nothing else it reads changed while it ran: a
-                # translator file edited during the lift would otherwise stamp C made from the old one with the new one's key, and the
-                # next build would skip a lift it needs. Then the key from before stays, and the next build translates again. The key is
-                # taken before that comparison: a file edited between the two is caught by it, and one edited after it is in no key that is
-                # kept (SimonKimDev, #2686)
-                after = lift_key(exefs, work, env)
-                if lift_key(exefs, work, env, planning=False) == inputs:
-                    key = after
-                write_lift_key(work, key)
+                # (LONGSHOT_LIFT_STORE: the lift another work folder made from the same inputs, nx2/lift_store.py. Its share key is taken
+                # before the lift, from what this one starts from, as that folder's was; the restored folder gets that lift's chunk
+                # boundaries and hot pieces too, so its key is taken again after it)
+                lifts = _lift_store.root()
+                share = lift_share_key(exefs, work, out, env) if lifts else None
+                if share and _lift_store.restore(lifts, share, work, bad=lambda: lifted_cut_short(gen_dir)):
+                    print("the game was translated with these tools in another work folder: its translation is copied (%s)" %
+                          os.path.join(lifts, share), flush=True)
+                    key = lift_key(exefs, work, env)
+                    write_lift_key(work, key)
+                else:
+                    inputs = lift_key(exefs, work, env, planning=False)   # (what the lift reads and does not write, as it starts)
+                    run(PY + ["nx2/lift.py", "--standalone", "--write", "--exefs", exefs, "--work", work], env)
+                    if os.path.isfile(os.path.join(work, "sa", "gen", "code_hot.c")):
+                        run(PY + ["nx2/split_hot.py", os.path.join(work, "sa", "gen")], env)   # (eight files side by side: ~6 minutes, not 79)
+                    # (the lift writes inputs of the next one: split_hot's kept pieces, image/hot_pieces.txt, which the key hashes. Its key is
+                    # taken again now, from what the next build reads: taken before, in a fresh work folder (no hot_pieces.txt yet) it never
+                    # matched the next build's, which translated the game again for nothing, ~5 minutes on Windows, and a player's first
+                    # update after a new install did not keep the translation). Only when nothing else it reads changed while it ran: a
+                    # translator file edited during the lift would otherwise stamp C made from the old one with the new one's key, and the
+                    # next build would skip a lift it needs. Then the key from before stays, and the next build translates again. The key is
+                    # taken before that comparison: a file edited between the two is caught by it, and one edited after it is in no key that is
+                    # kept (SimonKimDev, #2686)
+                    after = lift_key(exefs, work, env)
+                    if lift_key(exefs, work, env, planning=False) == inputs:
+                        key = after
+                        if share and not lifted_cut_short(gen_dir):   # (for other work folders: nx2/lift_store.py)
+                            _lift_store.save(lifts, share, work)
+                    write_lift_key(work, key)
             cut = lifted_cut_short(gen_dir)
             if not cut:
                 break
@@ -2521,6 +2608,10 @@ def main(a=None):
                   "what changed (LONGSHOT_KEEP_BUILD_FILES=1 keeps all)" % (
                       work, kept >> 20, "" if lift_kept is None else " and the translation's other files (%d MB)" % (lift_kept >> 20)),
                   flush=True)
+    # (LONGSHOT_OBJ_STORE: the store's own clean-up, after the folder's; nx2/object_store.py prune)
+    removed, freed = _object_store.prune()
+    if removed:
+        print("object store: %d objects no work folder used lately let go (%d MB)" % (removed, freed >> 20), flush=True)
     total_seconds = time.time() - STARTED
     PHASES.enter(None)
     previous = record_times(work, run_files, compile_seconds, total_seconds, modules=plan[1],

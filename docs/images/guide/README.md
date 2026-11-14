@@ -8,9 +8,11 @@ links to those public files.
 ## Provenance
 
 `manifest.json` records each image's dimensions, SHA-256, capture conditions, application release and reviewed UI
-source hashes. The launcher captures use the official Linux x86_64 v1.0.0-rc.3 AppImage. Its release target and
-binary SHA-256 are recorded separately: a binary hash is not a source commit. The release tag's UI sources are
-identified by `reviewed_source`, without claiming a reproducible AppImage build.
+source hashes. All six launcher images are UI-only captures built from Launcher nightly-52-b1d9f7a9 source
+`b1d9f7a9b19fa99b91ec3e8cd24455d4703d6d25`; they replace the earlier official-AppImage and rc.3 fixture captures.
+The Graphics image is rendered from Longshot main `b2911d33405e84fdad97248b409814a40dce69cb`.
+These are real maintained views rendered with synthetic state, not screenshots of a running game or a claim of
+reproducible official binaries. `captured_source` and `reviewed_source` record the exact sources used.
 
 The screenshots show Longshot's own UI and branding with the launcher's bundled Inter fonts. The launcher
 sources and their license are in [LongshotLauncher](https://git.magicbean.dev/MagicBeanDev/LongshotLauncher);
@@ -20,8 +22,9 @@ own labels. The selected **Builds** version is release metadata, not evidence th
 
 ## Capture and maintenance
 
-1. Use the official launcher release in an isolated temporary launcher/config/data profile. Never point it at
-   a real game or save for a guide capture. Record the release, source commit, binary hash, UI scale and theme.
+1. Use a clean, pinned Launcher source checkout and the UI-only helper below, or an official release in an isolated
+   temporary profile. Never point it at a real game or save. Record the source/release, capture method, scale and
+   theme; record the binary hash only for an official-binary capture.
 2. Open the relevant screen. Use empty or clearly synthetic UI state for file/save workflows; do not import,
    export, replace or delete real saves to obtain an illustration.
 3. Capture the application window. Inspect the full image for personal paths, identifiers and private data.
@@ -139,9 +142,8 @@ changes: a successful old dependency hash check cannot detect an entirely new, u
 
 ## Launcher decision screens
 
-The additional `launcher-manage-saves.png`, `launcher-game-files.png` and `launcher-import-confirm.png` images
-render the release's maintained Avalonia views and view models with synthetic state. They are labelled UI-only
-examples, separate from the earlier official-AppImage window captures. `scripts/screenshots/LauncherCapture.cs`
+All six `launcher-*.png` images render the pinned release's maintained Avalonia views and view models with
+synthetic state. They are labelled UI-only examples. `scripts/screenshots/LauncherCapture.cs`
 uses Avalonia Headless with the real Skia renderer and bundled Inter fonts. It sends no desktop input, invokes no
 build or Import command, and verifies that confirmation's dry-run preview changes neither files nor directories.
 
@@ -149,7 +151,8 @@ From a Longshot checkout with Python 3 and the .NET 10 SDK:
 
 ```sh
 python -I scripts/screenshots/capture_launcher.py \
-  --source /path/to/clean/LongshotLauncher-rc.3 \
+  --source /path/to/clean/LongshotLauncher \
+  --version nightly-52-b1d9f7a9 \
   --output /tmp/longshot-launcher-guide
 ```
 
@@ -170,8 +173,10 @@ The helper builds a temporary copy of clean tracked Launcher sources. Two explic
 private game-file discovery and replace the host hardware probe with illustrative inputs to the real requirements
 evaluator (16 GB RAM, 12 CPU threads, AVX2, 100 GB free, Vulkan 1.3, 8 GB VRAM and mesh shaders). They do not change
 view markup, labels, layout or transfer logic. Tools-ready state uses the Launcher's existing screenshot helper.
-The synthetic build is a non-executable text marker. The confirmation's source/target slots contain only fixture
-text files, following the Launcher's own test convention. No fixture file is a usable game save.
+The candidate channel and v3.0.0-rc.3 game build are illustrative fixture inputs, independent of the Launcher nightly
+version. The synthetic build is a non-executable text marker. The confirmation's source/target slots contain only
+fixture text files, following the Launcher's own test convention. The target comes from `Saves.ImportTarget`, including
+its public fixed profile ID; it is not a user's account. No fixture file is a usable game save.
 
 `launcher-capture.json` records the original source revision/hashes, the adapters, SDK, helper/lock hashes and image
 hashes. Review the adapters whenever source structure changes. The manifest conservatively tracks all compiled

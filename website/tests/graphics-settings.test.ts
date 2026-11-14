@@ -28,6 +28,20 @@ test('the Audio, Gameplay and Controls tabs follow the README, and Debug stays o
   assert.equal(new Set(groups.flatMap(group => group.settings).map(setting => setting.id)).size, groups.flatMap(group => group.settings).length);
 });
 
+test('registered text fields retain their choices and restart requirements; unknown actions still fail', () => {
+  const setting = readGraphicsSettings(readme, menu).flatMap(group => group.settings)
+    .find(setting => setting.name === 'Custom output size');
+  assert.equal(setting.defaultValue, 'None');
+  assert.equal(setting.restart, true);
+  assert.match(setting.choices, /<width>x<height>/);
+  const unregistered = menu.replace(/const FieldRow field_rows\[\][\s\S]*?;/, 'const FieldRow field_rows[] = {};');
+  assert.notEqual(unregistered, menu);
+  assert.throws(() => readGraphicsSettings(readme, unregistered), /coverage mismatch at Custom output size/);
+  const wrongRestart = readme.replace(/(\| \| Custom output size \|[^\n]*)\(after a restart\)/, '$1');
+  assert.notEqual(wrongRestart, readme);
+  assert.throws(() => readGraphicsSettings(wrongRestart, menu), /restart mismatch at Custom output size/);
+});
+
 test('all Graphics rows follow the source sections and preserve README choices/defaults', () => {
   const groups = readGraphicsSettings(readme, menu).filter(group => group.tab === 'Graphics');
   const settings = groups.flatMap(group => group.settings);
@@ -80,7 +94,7 @@ test('cards take the menu\'s help, the source restart flag and README conditions
   assert(settings.every(setting => setting.summary), 'every card has the menu\'s description');
   assert(!settings.some(setting => /Applies after/.test(setting.summary)));
   assert.deepEqual(settings.filter(setting => setting.restart).map(setting => setting.name),
-    ['Aspect ratio', 'Output resolution', 'Profile', 'GPU device', 'Audio output', 'Game language', 'Button prompts']);
+    ['Aspect ratio', 'Output resolution', 'Custom output size', 'Profile', 'GPU device', 'Audio output', 'Skip title screen', 'Game language', 'Button prompts']);
   assert.deepEqual(find('NVIDIA Reflex').badges, ['NVIDIA GPUs only']);
   assert.deepEqual(find('HDR tone mapper').badges, ['With HDR on Native']);
   assert(find('HDR contrast').badges.includes('While HDR is on'));

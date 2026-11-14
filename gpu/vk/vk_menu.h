@@ -59,6 +59,10 @@ struct Options {
     int disable_camera_centering = 0; // 0: stock movement-follow turning; 1: keep the player's horizontal direction
     int mouse_sens = 100; // the mouse's sensitivity in percent: 0.1 degrees a count at 100 with native look (host/nn_hid.c)
     int mouse_invert = 0; // the mouse's up and down swapped
+    int walk_mode = 0;    // (longshot) the Walk key (the Controls page): 0 Link walks while it is held, 1 one press walks and the next
+                          // runs again (host/nn_hid.c walk_held: HOS_OPT_WALK_MODE, 49)
+    int walk_speed = 45;  // (longshot) how far the movement keys tilt the left stick while Link walks, percent, 15 to 90
+                          // (host/nn_hid.c: HOS_OPT_WALK_SPEED, 50)
     int text_speed = 0;   // how fast dialogue prints: 0 the game's, 1 2x, 2 4x, 3 instant (host/nn_vi.c, nx2/oot_patches.py; HOS_TEXT_SPEED)
     int damage_taken = 1; // 0 Half, 1 Normal, 2 Double, 3 Quadruple (host/oot_damage.c)
     int fov = 100;        // vertical gameplay field of view, 50..150% of the game's current angle (host/oot_fov.c)
@@ -85,6 +89,8 @@ struct Options {
                           // RX_VK_ASTC_RGBA8 over it): the AMD texture workaround. Read once, at the start
     int intel_compiles = 0;   // (longshot) Intel's shader compiler on Windows: 0 one thread at a time, 1 side by side (vk_internal.h
                               // IntelDriverGate; RX_VK_NO_INTEL_SERIAL=1 over it). Read once, at the start
+    int intel_quick = 1;   // (longshot) Intel's one-at-a-time compute builds: a dispatch's pipeline first without the optimizer,
+                           // the optimized one bound once made (vk_draw.cpp compute_optimize; RX_VK_COMPUTE_QUICK_FIRST over it)
     int preset = 0;       // quality preset: 0 Custom, 1 Minimum (4GB), 2 Low (6GB), 3 Balanced (8GB), 4 High (12GB), 5 Ultra (16GB+),
                           // 6 Auto (this PC), kAutoPreset (its tier's budgets: budget)
     int vram_mb = 0;      // dynamic texture cache budget limit in MB
@@ -104,6 +110,7 @@ struct Options {
     int menu_lang = 0;    // this menu's language: 0 Auto (the game's own, language.txt), else menu_i18n::kLangs[menu_lang - 1]
                           // (vk_menu_i18n.cpp). Saved as menu_language
     int mic = 1;          // (longshot) the ocarina's microphone: 0 Off, 1 the system's default, 2.. a device as host->mic_name lists it (host/nn_audio_in.c)
+    int skip_title = 0;   // (longshot) start with the most recent save, pressing through the title and its file list (host/oot_autoload.c); read at the start
 };
 extern Options opts;
 constexpr int kAutoPreset = 6;   // (the Quality preset Auto (this PC): menu_auto_for_gpu, auto_settings.h)

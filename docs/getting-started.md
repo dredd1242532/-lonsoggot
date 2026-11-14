@@ -30,7 +30,7 @@ Press **Build** on the launcher’s welcome screen.
 
 </a>
 
-*Longshot Launcher v1.0.0-rc.3 on Linux. The build version shown may change as new releases arrive.*
+*Launcher nightly-52-b1d9f7a9 on Linux, UI-only example. The selected game build is illustrative; your version may differ.*
 
 On **Game files**, choose your game from the list. If it is not listed, use **Browse…**.
 Choose **Next** once the launcher has checked your selection.
@@ -40,6 +40,8 @@ Choose **Next** once the launcher has checked your selection.
 ![Launcher Game files step with an empty file list, Browse and romfs and exefs folders choices, and Next disabled.](images/guide/launcher-game-files.png)
 
 </a>
+
+*Same Launcher example, with illustrative requirements and tools-ready results. Your PC is checked when you use the launcher.*
 
 Follow the remaining launcher steps to build. Building takes about 15 minutes on a 12-core desktop, and longer on
 a slower PC. Then press **Play**. The first start prepares the game's shaders, so it's slower than the next ones.
