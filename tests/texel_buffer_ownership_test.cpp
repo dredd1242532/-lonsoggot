@@ -73,8 +73,11 @@ Host* host = &host_value;
 int view_nvn_format(const nvn_tex*, const nvn_view* v) { return v ? v->format : 42; }
 struct Format { VkFormat format; };
 Format vk_format(int nf) {
-    return {nf == 42 ? VK_FORMAT_R32_UINT : nf == 43 ? VK_FORMAT_R32_SFLOAT : VK_FORMAT_UNDEFINED};
+    return {nf == 42 ? VK_FORMAT_R32_UINT : nf == 43 ? VK_FORMAT_R32_SFLOAT : nf == 44 ? VK_FORMAT_R16G16B16_UINT
+                                                                                         : VK_FORMAT_UNDEFINED};
 }
+VkFormatFeatureFlags buffer_features = VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT | VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT;
+VkFormatProperties format_props(VkFormat) { return {0, 0, buffer_features}; }
 int nvn_block_size(int, int* w, int* h) { *w = *h = 1; return 4; }
 void texture_gpu_wrote(uint64_t gpu, uint64_t size) { writes++; written_gpu = gpu; written_size = size; }
 using VmaAllocation = void*;
@@ -149,6 +152,13 @@ void run(const std::string& test) {
     } else if (test == "clamped-range") {
         dev.props.limits.maxTexelBufferElements = 8; auto v = get(tex); assert(v && live.at(v).range == 32);
         tex.d.width = 32; assert(get(tex) == v && creates == 1);
+    } else if (test == "three-component") {
+        // (images widen it: a buffer view only where the device has the format for the view's use)
+        nvn_view rgb{44};
+        buffer_features = 0; assert(!get(tex, &rgb) && !get(tex, &rgb, true)); assert(creates == 0 && writes == 0);
+        buffer_features = VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT;
+        auto v = get(tex, &rgb); assert(v && live.at(v).format == VK_FORMAT_R16G16B16_UINT);
+        assert(!get(tex, &rgb, true)); assert(creates == 1 && writes == 0);
     } else if (test == "invalid") {
         assert(!texel_buffer_view(nullptr, nullptr, false));
         tex.gpu = 0; assert(!get(tex)); tex.gpu = 0x1000;
