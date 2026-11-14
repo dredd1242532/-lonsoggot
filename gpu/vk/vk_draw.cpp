@@ -45,6 +45,10 @@
 #include "reactive_policy.h"
 #include "upscaler_rows.h"
 #include "pcache_stamp.h"
+#include "pcache_load.h"     // (longshot, issue 388: whether the pipeline cache file is read)
+#ifndef _WIN32
+#include <unistd.h>          // (sysconf: the RAM, pcache_load_off)
+#endif
 #include "vk_reactive.h"   // (the upscalers' reactive mask: the scene copied before its transparent draws)
 #include "vk_dump.h"
 #include "vk_gprof.h"
@@ -80,6 +84,7 @@ struct PointerEntry { uint64_t addr, size; };
 const PointerEntry* pointer_table(const NvnState& s, int stage);
 uint32_t stage_cbuf_word(const NvnState& s, const Stage& st, uint32_t index, uint32_t offset);   // (vk_shader.cpp)
 uint64_t sampler_registrations_generation();   // (vk_bank.cpp: sampler_for's cache)
+uint64_t driver_cache_bytes(std::string* where);   // (below: the drivers' shader cache folders; pcache_load_off)
 namespace {
 // ---- (longshot) this file's per-thread objects that need a constructor or a destructor ----
 // With llvm-mingw every use of such a thread_local calls the file's TLS init function, which saves registers, finds the
@@ -850,9 +855,14 @@ size_t play_file_write(VkPipelineCache cache, const std::string& path, int wait_
     }
     return data.publish(n) ? n : 0;
 }
+extern bool pcache_no_save;   // (pcache_init, below: the file not read, RX_VK_PCACHE_LOAD or pcache_load.h)
 /// (pcache_init, before any other thread has pcache) the play files the last starts wrote, merged into pcache; at kPlayFilesKept
 /// of them pcache is written into its file and they are removed. A file of another driver is of no use: removed. The number merged
 size_t play_files_merge() {
+    // (longshot, issue 388) The file not read: nothing merged into the cache, which started empty, and above all that cache never
+    // written over the file at kPlayFilesKept (a session without it wrote its 38 MB over a 1.2 GB file a start loading programs
+    // before the title then lacked). The play files stay for a start that reads the file
+    if (pcache_no_save) return 0;
     std::vector<std::string> merged;
     size_t merged_kb = 0;
     std::error_code ec;
@@ -936,6 +946,12 @@ void play_cache_save(int wait_ms = -1, bool queue = true) {
             static std::atomic<int> told{0};
             if (told++ < 4) logf("vk: pipeline cache: a play file not written yet: a pipeline was still being built in it");
             ++it;
+            continue;
+        }
+        if (pcache_no_save) {   // (longshot, issue 388: the file not read, nor saved: what play made is in the driver's own cache)
+            vkDestroyPipelineCache(dev.device, old->cache, nullptr);
+            old->cache = VK_NULL_HANDLE;
+            it = unsaved.erase(it);
             continue;
         }
         if (const size_t wrote = play_file_write(old->cache, play_path(play_seq + 1), wait_ms, queue)) {
@@ -1024,9 +1040,33 @@ bool play_cache_in_use() { return play_cache.load() != nullptr; }
 
 bool pcache_no_save = false;   // (RX_VK_PCACHE_LOAD=0: pcache_init)
 // (RX_VK_PCACHE_LOAD=0, an A/B of what the file costs in memory: its 2.5 GB read whole and held by the driver. The cache
-// starts empty and is not saved; the driver's own shader cache is all there is)
+// starts empty and is not saved; the driver's own shader cache is all there is.) (longshot, issue 388) Unset, the file is
+// not read either on a Linux PC with NVIDIA's driver, 20 GB of RAM or less and programs loaded at their create calls, where
+// the driver's own cache is not nearly empty: the driver's copy of it was most of a gigabyte of a 16 GB PC's swap
+// (pcache_load.h). RX_VK_PCACHE_LOAD=1 reads it there too
 bool pcache_load_off() {
-    static const bool off = [] { const char* e = getenv("RX_VK_PCACHE_LOAD"); return e && env_value_off(e); }();   // (longshot_env.h: 0/off/false/no)
+    static const bool off = [] {
+        const char* e = getenv("RX_VK_PCACHE_LOAD");
+        const int sw = e && *e ? (env_value_off(e) ? 0 : 1) : -1;   // (longshot_env.h: 0/off/false/no)
+        const bool preparing = env_on("LONGSHOT_PREPARE_ONLY"), at_create = programs_load_at_create();
+#ifdef _WIN32
+        const bool linux_nvidia = false;
+        const uint32_t ram_mb = 0;
+#else
+        const bool linux_nvidia = dev.props.vendorID == 0x10DE;
+        const long pages = sysconf(_SC_PHYS_PAGES), page = sysconf(_SC_PAGE_SIZE);
+        const uint32_t ram_mb = pages > 0 && page > 0 ? (uint32_t)(((uint64_t)pages * (uint64_t)page) >> 20) : 0;
+#endif
+        // (the driver's folders walked only where everything else says not to read the file)
+        const bool small = sw < 0 && !preparing && at_create && linux_nvidia && ram_mb && ram_mb <= pcache_load::kSmallRamMb;
+        const uint64_t cache_mb = small ? driver_cache_bytes(nullptr) >> 20 : 0;
+        const pcache_load::Choice c = pcache_load::choose(sw, preparing, at_create, linux_nvidia, ram_mb, cache_mb);
+        if (small || sw >= 0)
+            logf("vk: pipeline cache file %s: %s (%u MB of RAM, the driver's own cache %llu MB; RX_VK_PCACHE_LOAD=%d %s)",
+                 c.load ? "read" : "not read", pcache_load::why_text(c.why), (unsigned)ram_mb, (unsigned long long)cache_mb,
+                 c.load ? 0 : 1, c.load ? "would leave it" : "reads it");
+        return !c.load;
+    }();
     return off;
 }
 /// (longshot) The pipeline cache's files go when they were made for another translator than this one (program_cache_stamp,

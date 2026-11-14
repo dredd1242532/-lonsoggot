@@ -51,6 +51,7 @@ struct {
 } dev;
 VkPipelineCache pcache = nullptr;
 std::string pcache_dir, pcache_path;
+bool pcache_no_save = false;   // (vk_draw.cpp pcache_init: the file not read, RX_VK_PCACHE_LOAD or pcache_load.h; the no-save case)
 std::atomic<int> creates{0}, destroys{0}, merges{0}, compiles{0}, failed_moves{0};
 std::atomic<int> fail_moves{0};   // (the next moves into place that fail)
 FakePipeline the_pipeline;
@@ -450,6 +451,23 @@ int run(const std::string& name) {
         CHECK(make(47) == VK_SUCCESS);
         play_cache_save();
         CHECK(file_keys(play_path(8)) == std::set<uint64_t>{47});   // (numbered after the highest read)
+    } else if (name == "no-save") {
+        // (longshot, issue 388: the file not read, pcache_load.h) the play files neither merged nor written into the file, however
+        // many there are; play's generations still taken away at a save, and freed, with nothing written
+        pcache_no_save = true;
+        pcache = cache_of({});
+        write_file(pcache_path, "FAKE", {1, 2, 3});
+        for (uint64_t i = 1; i <= kPlayFilesKept + 2; i++) write_file(play_path((uint32_t)i), "FAKE", {100 + i});
+        CHECK(play_files_merge() == 0);
+        CHECK(keys_of(pcache).empty() && file_keys(pcache_path) == (std::set<uint64_t>{1, 2, 3}));   // (the file as it was)
+        for (uint32_t i = 1; i <= kPlayFilesKept + 2; i++) CHECK(exists(play_path(i)));             // (kept for a start that reads it)
+        play_cache_begin();
+        PlayCache* g = play_cache.load();
+        CHECK(g && make(60) == VK_SUCCESS && g->built == 1);
+        play_cache_save();
+        CHECK(play_cache.load() != g && !exists(play_path(kPlayFilesKept + 3)));   // (taken away, nothing written)
+        CHECK(file_keys(pcache_path) == (std::set<uint64_t>{1, 2, 3}));
+        pcache_no_save = false;
     } else if (name == "compact") {
         pcache = cache_of({1});
         write_file(pcache_path, "FAKE", {1});
