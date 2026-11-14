@@ -61,13 +61,19 @@ VkResult vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count, con
     // Vulkan may return owned pipeline handles together with an error: cleanup must inspect the output.
     *p = allocate('P', info->layout); return fail ? VK_ERROR_OUT_OF_DEVICE_MEMORY : VK_SUCCESS;
 }
-// Outside Intel on Windows, the gate does not lock and the guarded calls use these same Vulkan entry points.
-struct IntelDriverGate { IntelDriverGate() {} };
-VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* ci, VkShaderModule* module) {
-    return vkCreateShaderModule(dev.device, ci, nullptr, module);
+// Main's compiler guard wraps the same injected allocation failures.
+bool gate_held = false;
+struct IntelDriverGate {
+    IntelDriverGate() { CHECK(!gate_held); gate_held = true; }
+    ~IntelDriverGate() { CHECK(gate_held); gate_held = false; }
+};
+VkResult extern_guarded_shader_module(const VkShaderModuleCreateInfo* info, VkShaderModule* p) {
+    CHECK(gate_held);
+    return vkCreateShaderModule(dev.device, info, nullptr, p);
 }
-VkResult extern_guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* ci, VkPipeline* pipeline) {
-    return vkCreateComputePipelines(dev.device, cache, 1, ci, nullptr, pipeline);
+VkResult extern_guarded_compute(VkPipelineCache cache, const VkComputePipelineCreateInfo* info, VkPipeline* p) {
+    CHECK(gate_held);
+    return vkCreateComputePipelines(dev.device, cache, 1, info, nullptr, p);
 }
 void vkDestroyPipeline(VkDevice, VkPipeline h, const VkAllocationCallbacks*) { release(h, 'P'); }
 void vkDestroyPipelineLayout(VkDevice, VkPipelineLayout h, const VkAllocationCallbacks*) { release(h, 'L'); }
@@ -91,6 +97,7 @@ void to_general(VkCommandBuffer, VkImage image) { CHECK(image && live.count(imag
 /* ACTUAL_FUNCTIONS */
 
 void clear_model() {
+    CHECK(!gate_held);
     CHECK(live.empty()); fg.init = fg.failed = false; fg.w = fg.h = 0; fg.mult = 0;
     fg.have_prev = false; fg.recorded = nullptr; fg.nearest = fg.linear = 0;
     fg.copy = fg.luma = fg.flow = fg.median = fg.synth = {};

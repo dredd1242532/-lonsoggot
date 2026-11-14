@@ -790,6 +790,10 @@ displayed frame after frame generation. It downsamples to a virtual raster, then
 the destination size. The game's HUD is already in that picture; Longshot's menu, FPS counter and other overlays
 are drawn afterwards. Keep the mask out of temporal upscalers and frame-generation history.
 
+When the checked source rectangle is larger than the destination in either dimension, the window downscale runs
+even with Window scaling filter Off and Sharpness 0. CRT reads that destination-size result, not the original
+larger image. Returning CRT to Off keeps this downscale. Native HDR still uses the 10-bit scaling pass and skips CRT.
+
 The requested virtual height is 240, 480 or 720, capped at `max(1, destination_height / 2)` using integer division;
 the virtual width follows the destination aspect. This does not change Render resolution, force 4:3, or introduce
 integer scaling. Destination-pixel masks and non-integer raster scaling can show moire; the cap limits scanline
