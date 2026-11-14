@@ -514,7 +514,8 @@ std::string write(const Inputs& in) {
             detail += "; home/user paths redacted; diagnostic register and nearby-memory rows are not filtered";
             items.push_back({name, "included", std::move(detail), facts.bytes, true});
         } else omit(name, !strcmp(name, "longshot_log.txt") && in.current_log.empty() ?
-                    "this run's log is not a file (terminal or pipe)" : "log could not be read or copied", facts.failed);
+                    "this run's log is not a file (terminal or pipe)" :
+                    facts.failed ? "log could not be read or copied" : "log file not found", facts.failed);
     };
     log_item("longshot_log.txt", now, "this run so far");
     log_item("longshot_log.1.txt", last, "the run before; not automatically an incident's log");

@@ -521,9 +521,11 @@ def main():
         entries = inventory(game_path / folders[0], picture="omitted")
         check(entries["longshot_log.txt"]["size"] == 0, "empty included log has a nonzero size")
         folders, _ = run(exe, "plain", game, str(tmp / "absent.log"), home, user, windows)
-        inventory(game_path / folders[0], current="omitted", picture="omitted")
+        entries = inventory(game_path / folders[0], current="omitted", picture="omitted")
+        check("not found" in entries["longshot_log.txt"]["reason"], "a log file that does not exist is not said to be missing")
         folders, _ = run(exe, "fail-longshot_log.txt", game, str(now_log), home, user, windows)
-        inventory(game_path / folders[0], current="failed", picture="omitted")
+        entries = inventory(game_path / folders[0], current="failed", picture="omitted")
+        check("could not be read or copied" in entries["longshot_log.txt"]["reason"], "a failed log copy is not said to have failed")
         for name in ("report.txt", "manifest.json", "manifest.json.new"):
             failed = tmp / ("fail-" + name)
             failed.mkdir()
