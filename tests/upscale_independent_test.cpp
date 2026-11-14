@@ -117,7 +117,7 @@ void pass(int, const Pipe& p, std::initializer_list<std::pair<VkImageView, VkSam
     CHECK((b.begin() + 1)->first && !(b.begin() + 1)->second);
     struct PC { int mode; float sharp; float x0, x1; int side; float colour[9]; } pc;
     std::memcpy(&pc, data, sizeof pc);
-    float expected[9]; colour_filter_matrix(opts.hdr == 2 ? 0 : opts.colour_filter, expected);
+    float expected[9]; colour_filter_matrix(p.pipe == 5 ? 0 : opts.colour_filter, expected);
     for (int i = 0; i < 9; i++) CHECK(pc.colour[i] == expected[i]);
     ++dispatches; dispatched_mode = pc.mode; dispatched_sharp = pc.sharp;
     dispatched_side = pc.side; dispatched_x0 = pc.x0; dispatched_x1 = pc.x1;
@@ -136,13 +136,13 @@ VkImage draw(const int* crop = nullptr, uint32_t dw = 2560, uint32_t dh = 1440, 
 }
 int main() {
     reset(); CHECK(!draw()); CHECK(pipe_calls == 0 && image_calls == 0 && dispatches == 0);
-    for (int hdr : {0, 1}) for (int mode : {1, 2, 3}) {
+    for (int hdr : {0, 1, 2}) for (int mode : {1, 2, 3}) {
         reset(); opts.hdr = hdr; opts.colour_filter = mode;
         CHECK(draw() && dispatches == 1 && image_calls == 1);
         opts.colour_filter = 0; CHECK(!draw() && dispatches == 1); // live Off restores the bypass
     }
     reset(); opts.hdr = 2; opts.colour_filter = 1;
-    CHECK(!draw() && !draw(nullptr, 2560, 1440, true) && dispatches == 0);
+    CHECK(!draw(nullptr, 2560, 1440, true) && dispatches == 0); // only actual PQ bypasses correction
     opts.upscale = 1; CHECK(draw(nullptr, 2560, 1440, true)); // Native HDR still scales with identity
     CHECK(dispatched_pipe == 5);
     reset(); opts.upscale = 1;
