@@ -161,6 +161,10 @@ motion as usual. It requires the engine's native-HDR context: DLSS's HDR feature
 path) or FSR 4's HDR context (`RX_VK_FSR4_HDR=0` prevents it). FSR 3.1 and TAAU are not enabled by this switch.
 See [the format and history rules](temporal-history.md#psychov35-with-dlssdlaa-and-fsr-4-opt-in) for validation and shader regeneration.
 
+Upscaler Off supports Native HDR PsychoV35 without that opt-in: matching RGBA16F views and a typed output pass bypass
+the game's network at 100% render resolution, or spatially scale its input below 100%. The output pass decodes the
+network input once; it supplies neither temporal anti-aliasing nor the temporal engines' NVIDIA FG input handoff.
+
 ### Running a test
 
 | Switch | What it does |

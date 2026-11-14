@@ -10,9 +10,11 @@ The game-free fixture compiles actual reprojection math, both preparation polici
 
 `RX_VK_PSYCHOV35_DLSS=1` lets NVIDIA DLSS/DLAA and AMD FSR 4 (and its Native AA) take the Native HDR PsychoV35 scene, whose gameplay network input and output are RGBA16F (`upscaler_rows.h` `takes_psychov35`: the engines the chain gives linear light in an HDR context). It is off by default. Vanilla's packed B10G11R11 route is unchanged; this switch does not enable PsychoV35 for FSR 3.1 or TAAU.
 
-The pre-existing Upscaler Off stretch also only writes packed output, so Off with PsychoV35 still falls back to the
-game's network, even at 100%. It must not be labelled native with no anti-aliasing in a benchmark. This
-switch does not change that route; Vanilla with Off and 100% provides the true native, no-upscaling comparison.
+Upscaler Off also accepts Native HDR PsychoV35's matching RGBA16F input and output, without this switch. It bypasses
+the game's network: at 100% the output shader fetches the corresponding input texel; below 100% it samples with a
+linear filter. This path decodes the network input's perceptual colour once, unlike the HDR engines' output pass,
+which receives already-linear colour. It adds no temporal anti-aliasing or frame-generation input handoff. Mixed
+formats, unsupported scene formats and unrelated compute dispatches remain rejected.
 
 The network's perceptual colour encoding still needs the existing HDR prep square to linear light, even though the scene tone-map pass itself writes linear colour. Storage precision does not determine that encoding. The typed RGBA16F output pass writes the engine's linear result without squaring again. FSR 4 takes the same pair: its context is made for HDR, linear colour while the game presents PQ (`vk_fsr4.cpp`), and the route waits for that context as DLSS's waits for its HDR feature (`RX_VK_FSR4_HDR=0` prevents it). Changing the tone mapper or input format resets history.
 

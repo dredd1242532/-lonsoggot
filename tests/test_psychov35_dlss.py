@@ -52,6 +52,7 @@ int mode=ur::DLSS;
 bool tone=false;
 int temporal_mode() { return mode; }
 bool scene_tonemap_on() { return tone; }
+bool temporal_off() { return mode==ur::OFF; }
 int env_switch(const char* n) { const char* e=std::getenv(n); return e && *e ? std::atoi(e) : -1; }
 unsigned logs=0;
 std::string route;
@@ -75,17 +76,18 @@ int main(int argc, char**) {
     for (int t=0;t<2;++t) {
       tone=t;
       for (int f=0;f<256;++f) {
-        const bool expected=f==122 || (enabled && tone && ur::takes_psychov35(mode) && f==97);
+        const bool psycho_mode=mode==ur::OFF || (enabled && ur::takes_psychov35(mode));
+        const bool expected=f==122 || (tone && psycho_mode && f==97);
         assert(temporal_scene_format(f)==expected);
         for (int output=0;output<256;++output) {
           const bool correct=(f==122 && output==122) ||
-              (enabled && tone && ur::takes_psychov35(mode) && f==97 && output==97);
+              (tone && psycho_mode && f==97 && output==97);
           assert(temporal_colour_pair(f,output)==correct);
         }
       }
     }
   }
-  // DLSS/DLAA and FSR 4 / its native AA take it; FSR 3.1 (own packed inputs), the game's network and Off never do
+  // Only the HDR engines take linear input. Off accepts RGBA separately, decoding the network input itself.
   assert(ur::takes_psychov35(ur::DLSS) && ur::takes_psychov35(ur::DLAA) && ur::takes_psychov35(ur::FSR4) &&
          ur::takes_psychov35(ur::FSR4_AA));
   assert(!ur::takes_psychov35(ur::GAME) && !ur::takes_psychov35(ur::FSR3) && !ur::takes_psychov35(ur::OFF));
