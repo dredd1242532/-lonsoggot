@@ -256,6 +256,25 @@ class GamePaths(unittest.TestCase):
             self.assertEqual(m.game_exe(tmp, str(game / "custom")), str(game / "custom"))
 
 
+class SourceSelection(unittest.TestCase):
+    def test_environment_source_and_explicit_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "selected.py"
+            selected.write_text("raise RuntimeError('selected environment client')\n", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "longshot_ctl.py").write_text(
+                "raise RuntimeError('selected checkout client')\n", encoding="utf-8")
+            for args, marker in (([], "selected environment client"),
+                                 (["--source-root", str(root)], "selected checkout client")):
+                with self.subTest(args=args):
+                    result = subprocess.run([sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+                                             *args, "GamePaths"], capture_output=True, text=True, timeout=20,
+                                            env=dict(os.environ, LONGSHOT_CTL_SOURCE=str(selected)))
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("RuntimeError: " + marker, result.stderr)
+
+
 class Sessions(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="ctl-session-")
@@ -317,6 +336,33 @@ class Sessions(unittest.TestCase):
         self.assertEqual(stopped["save_drain"], "unsupported")
         self.assertTrue(stopped["process_exited"])
         self.assertFalse(self.m.same_process(info["pid"], info["process_start"]))
+
+    def test_sampled_state_after_reattach(self):
+        session = self.start(profile="test", ready="play")
+        attached = self.m.Session.attach(session.folder)
+        status = attached.request("status")
+        game = status["game"]
+        self.assertEqual((game["frame"], game["pos"], game["life"], game["rupees"]),
+                         (94, [-20.1, 0.0, 6.8], 12, 7))
+        self.assertFalse(game["event"])
+        self.assertFalse(game["loading"])
+        self.assertGreater(status["frame"], game["frame"])
+        args = ("--run", str(session.folder))
+        self.assertEqual(json.loads(ctl("--json", *args, "status", check=0).stdout)["game"], game)
+        plain = ctl(*args, "status", check=0).stdout
+        self.assertEqual(json.loads(plain.splitlines()[1][7:]), game)
+        self.assertNotIn("\x1b", plain)
+        watched = ctl("--json", *args, "watch", "--events", "oot", "--every", "6",
+                      "--flags", "Test.Flag,0x00000110", "--changes", "--count", "3", check=0)
+        events = [json.loads(line) for line in watched.stdout.splitlines()]
+        self.assertEqual([e["game"]["frame"] for e in events], [94, 100, 106])
+        self.assertEqual([e["game"]["changed"] for e in events], [{}, {"0x12345678": 1}, {"0x12345678": 2}])
+        for event in events:
+            self.assertEqual(event["game"]["flags"], {"Test.Flag": 1, "0x00000110": 1})
+            self.assertEqual(event["game"]["pos"], game["pos"])
+        ctl(*args, "raw", '{"cmd":"fixture_game","game":null}', check=0)
+        self.assertIsNone(attached.request("status")["game"])
+        self.assertEqual(len(ctl(*args, "status", check=0).stdout.splitlines()), 1)
 
     def test_default_profile_and_unique_folders(self):
         first, second = self.start(), self.start()
@@ -888,14 +934,10 @@ class LongshotCtl(unittest.TestCase):
     def test_input_waits_as_long_as_the_bridge(self):
         # (without --timeout the bridge's default holds: 30 s plus the input's frames at 10 fps. The client waited 70 s
         # for any reply and gave up on long inputs the game was still pressing)
-        sys.path.insert(0, str(CTL.parent))
-        try:
-            import longshot_ctl
-        finally:
-            sys.path.pop(0)
+        m = client_module()
         waits = []
 
-        class Fake(longshot_ctl.Bridge):
+        class Fake(m.Bridge):
             def __init__(self):
                 self.next_id, self.pending, self.sock = 0, b"", None
 
@@ -1053,10 +1095,7 @@ class LongshotCtl(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(thumbs, "slot_00.jpg")))
 
     def test_copy_save(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("longshot_ctl", CTL)
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
+        m = client_module()
         src = os.path.join(self.dir, "src-save")
         for d in ("slot_00", "slot_03"):
             os.makedirs(os.path.join(src, d))
@@ -1136,7 +1175,8 @@ class LongshotCtl(unittest.TestCase):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--source-root", type=Path, default=ROOT)
+    parser.add_argument("--source-root", type=Path)
     options, remaining = parser.parse_known_args()
-    CTL = options.source_root.resolve() / "scripts" / "longshot_ctl.py"
+    if options.source_root is not None:
+        CTL = options.source_root.resolve() / "scripts" / "longshot_ctl.py"
     unittest.main(argv=[sys.argv[0]] + remaining)

@@ -666,7 +666,9 @@ with its explicit `process_exited:false` result, so callers can decide whether t
 Linux, the named pipe on Windows (a Windows tester's run: CI is Linux only). On Windows it also checks the pipe's access control:
 another first instance of the name and a second bridge on it are refused, and the DACL, read back through a client's
 handle, is protected with a single ACE for the current user. `tests/test_longshot_ctl.py` drives the client against a
-fake bridge on the same transports.
+fake bridge on the same transports. It covers durable-session reattachment with sampled status, watched flags and
+changes, escaped text and null snapshots as well as readiness and shutdown. `--source-root OTHER_CHECKOUT` selects
+another checkout's client for negative checks; `LONGSHOT_CTL_SOURCE` selects a client file when that argument is absent.
 `tests/test_oot_state_tap.py` uses bounded fake guest memory and the real bridge transport for sampled values,
 per-connection watches/changes, cadence, nulls, table limits, hashes, subscription lifecycle and wiring.
 
