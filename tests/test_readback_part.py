@@ -112,6 +112,12 @@ static std::atomic<int64_t> st_early_waits{0}, st_early_ns{0}, st_early_whole{0}
 struct Host { uint64_t gpu_guest(uint64_t g) const { return g; } };
 static Host host_v;
 static Host* host = &host_v;
+// (RX_VK_LOG_RB_WRITERS: its wait for the last writer's part, counted)
+struct RbDiag {};
+static bool diag_on;
+static int diag_waits;
+static bool rb_writers_on() { return diag_on; }
+static void rb_diag_wait(uint64_t, uint64_t, RbDiag&) { diag_waits++; }
 /// what a readback of [guest, guest + size) waits for: the recording (0: none)
 static uint64_t readback(uint64_t guest, uint64_t size) {
     bool w = false;
@@ -119,6 +125,7 @@ static uint64_t readback(uint64_t guest, uint64_t size) {
     uint64_t part = 0, whole = 0;
     const uint64_t v = memory_writeback_value(guest, size, nullptr, &part, &whole);
     const uint64_t f0 = fence_handed, gpu = guest;
+    RbDiag rbd;
     /* CHOICE */
     (void)w;
     return waited_seq;
@@ -144,6 +151,7 @@ static void finish_recording(uint64_t) {   // (ends the recording: its pages are
     rec_cur = nullptr;
     unsettled_while_finishing += ev_cpu_settled.load() != ev_cpu_signals.load();
 }
+static void rb_span_close() {}   // (RX_VK_LOG_RB_WRITERS's span: tests/test_readback_early.py)
 static int looks, signal_during_look;
 static void cpu_signal() { ev_cpu_signals.fetch_add(1, std::memory_order_release); }
 static bool wait_met_at(const uint8_t*) {
@@ -230,9 +238,14 @@ int main() {
     check(readback(4 * P, 64) == 4, "newest: a range an older submission writes still waits for its part");
     late_rules = readback_late::parse("40");
     check(readback(4 * P, 0x40) == 0 && readback(4 * P, 0x20) == 4, "a size: the ranges of that size are read without their wait, no other");
+    diag_on = true;   // (RX_VK_LOG_RB_WRITERS: its wait comes after the late rule, and never for a late read)
+    late_rules = readback_late::parse("newest");
+    fence_handed = 11;
+    check(readback(4 * P, 64) == 0 && diag_waits == 0, "the diagnostics add no wait to a range read late");
     late_rules = readback_late::parse(nullptr);
     fence_handed = 11;
-    check(readback(4 * P, 64) == 4, "no rule: the wait, as before");
+    check(readback(4 * P, 64) == 4 && diag_waits == 1, "no rule: the wait, as before, the diagnostics' first");
+    diag_on = false;
 
     // the look at the stopped queues: only after a CPU signal nobody has looked at
     const uint64_t event = 0x1000;
@@ -300,6 +313,8 @@ def main():
     marker = "if (pending && !late) {\n                int ok = 0;"
     choice = after[after.index("const bool pending = v > completed()"):after.index(marker)] + block(after, marker)
     assert "readback_late_wanted(size, newest)" in choice, "the readback's late rule is no longer asked before its wait"
+    assert "rb_diag_wait(" not in inv[:inv.index("const bool pending = v > completed()")], \
+        "RX_VK_LOG_RB_WRITERS's wait comes before the late rule: a read late would wait"
     assert "wait_recorded_part(part" in choice, "the readback no longer waits for its pages' part: update this test"
     # (the settle before the lookup goes through sync_settle_met with per-queue fences)
     before = inv[:inv.index(lookup)]

@@ -2448,12 +2448,13 @@ void burst_begin(uint64_t value) {
     }
 }
 void finish_recording(uint64_t value);
+void rb_span_close();   // (RX_VK_LOG_RB_WRITERS: below, with the readback's)
 void burst_end() {
     if (!burst_open) return;
     burst_open = false;
     {
         std::lock_guard lk(replay_mu);
-        if (rec_cur) finish_recording(burst_value);
+        if (rec_cur) rb_span_close(), finish_recording(burst_value);
     }
     // (the looks taken in this burst count only now: what they let on is recorded, its write-backs are in the page table
     // and its recording is submitted. Said at the look's end, a readback that came before this point found the counts
@@ -2580,8 +2581,7 @@ bool run_submit(const uint64_t* handles, int n, uint64_t value, uint64_t queue, 
         done_max = std::max(done_max, value);
         rec_open_values.push_back(value);
     }
-    if (!burst_open && rec_cur && rb_writers_on()) rb_span_end(rec_cur->value, rec_cur->part);   // (RX_VK_LOG_RB_WRITERS)
-    if (!burst_open) finish_recording(value);   // (a burst's: at its end)
+    if (!burst_open) rb_span_close(), finish_recording(value);   // (a burst's: at its end)
     if (stop) return false;
     if (pushed.load() < value) pushed = value;
     st_submits++;
@@ -2609,7 +2609,7 @@ void resume_queue(uint64_t queue, bool forced) {
             }
             if (cpu_event) {
                 std::lock_guard lk(replay_mu);
-                if (rec_cur) finish_recording(burst_open ? burst_value : q.value);   // (its mirrors synced again after)
+                if (rec_cur) rb_span_close(), finish_recording(burst_open ? burst_value : q.value);   // (its mirrors synced again after)
                 memory_capture_now(q.value, completed());
                 st_resume_captures++;
             }
@@ -2956,6 +2956,12 @@ void rb_span_end(uint64_t value, uint64_t part) {
     if (!s.first_part) s.first_part = part, s.w0 = memory_work_count();
     s.last_part = std::max(s.last_part, part), s.w1 = memory_work_count();
 }
+/// The recording about to be finished closes its submission's span: on every path that finishes one (run_submit's, a burst's
+/// end, a resumed queue's capture). Closed only outside a burst before, a burst's span kept no last part or total work: the
+/// log took the last writer's count for the total and printed a last part of 0
+void rb_span_close() {
+    if (rb_writers_on() && rec_cur) rb_span_end(rec_cur->value, rec_cur->part);
+}
 const char* rb_what_name(uint32_t what) {
     switch (what) {
     case kRbWriterUb: return "uniform-updates";
@@ -3229,8 +3235,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             uint64_t part = 0, whole = 0;
             const uint64_t v = memory_writeback_value(host->gpu_guest(gpu), size, nullptr, &part, &whole);
             static const bool log_each = env_on("RX_VK_LOG_READBACK_WAITS");
-            RbDiag rbd;   // (RX_VK_LOG_RB_WRITERS: its writers, and its last writer's part waited for first, timed)
-            if (rb_writers_on() && v > completed()) rb_diag_wait(gpu, size, rbd);
+            RbDiag rbd;   // (RX_VK_LOG_RB_WRITERS: its writers, and its last writer's part waited for first, timed: below)
             uint64_t l_part = 0, l_last = 0, l_sent = 0, l_done = 0;   // (the log's: recordings, on their timeline)
             if (log_each && v > completed() && rec_timeline) {
                 std::lock_guard mk(rec_map_mu);
@@ -3241,6 +3246,7 @@ void invalidate(uint64_t gpu, uint64_t size) {
             }
             const bool pending = v > completed(), newest = pending && v >= f0;
             const bool late = pending && readback_late_wanted(size, newest);   // (RX_VK_READBACK_LATE: read without its wait)
+            if (rb_writers_on() && pending && !late) rb_diag_wait(gpu, size, rbd);   // (a read late takes no wait, the diagnostics' either)
             // (longshot) RX_VK_READBACK_EARLY=1 (opt-in): pages written in place (no mirror: the Steam Deck's every page) are waited for
             // up to the part their last writer was recorded in, not their whole submission. There the game's job polled ~18 ms a frame
             // for its camera block's read while the GPU finished the rest of a 22-26 ms submission after the writer. The parts after

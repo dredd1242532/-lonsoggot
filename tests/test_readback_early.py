@@ -20,7 +20,9 @@ after the writer. Cut from the source and run:
   - the wiring: note_direct_write notes every in-place write; the early wait comes before the choice of the usual wait, which
     it replaces only when it waited; the replay ends a part after an op that asked, at least RX_VK_READBACK_EARLY_GAP draws
     into it, maybe_split still ends one every RX_VK_CHUNK draws, and a draw of a program that writes storage buffers builds
-    its descriptors.
+    its descriptors;
+  - RX_VK_LOG_RB_WRITERS: a recording closes its submission's span on every path that finishes it, a burst's end included
+    (burst_end and the spans cut out and run).
 
 python -I -B tests/test_readback_early.py [--cxx g++]
 """
@@ -98,10 +100,11 @@ static void check(bool ok, const char* what) {
 }
 constexpr uint64_t P = 4096;
 constexpr uint32_t kDispatch = 27, kCopy = 6;   // (any op but the uniform updates)
-static void write(uint64_t lo, uint64_t hi, uint64_t value, uint64_t rec, uint32_t what) {
+static void write(uint64_t lo, uint64_t hi, uint64_t value, uint64_t rec, uint32_t what) {   // (as note_direct_write)
     mem_rec_part = rec;
     memory_writer_note(what, 0);
     early_in_place_write(lo, hi, value);
+    if (hi - lo <= (1u << 20)) wb_pages_note(lo, hi, value, 0);
 }
 int main(int argc, char** argv) {
     const bool on = argc > 1 && !std::strcmp(argv[1], "on");
@@ -125,12 +128,35 @@ int main(int argc, char** argv) {
     write(9 * P, 10 * P, 12, 9, kDispatch);
     check(!memory_split_wanted(), "a write elsewhere asks for no split");
     check(memory_in_place_writer_part(9 * P, 64, 12) == 0, "and keeps nothing");
-    write(0, 64 * P, 13, 10, kDispatch);   // (64 pages: past note_direct_write's 1 MB for the plain wait, any size here)
-    check(memory_in_place_writer_part(1 * P, 0x3980, 13) == (on ? 10u : 0u), "a write over it of any size keeps its part");
-    check(memory_split_wanted() == on, "and asks for its part to end");
+    write(0, 320 * P, 13, 10, kDispatch);   // (1.25 MiB: past note_direct_write's 1 MB for the plain wait, kept here whatever its size)
+    check(memory_split_wanted() == on, "a write over 1 MB over it asks for its part to end");
+    check(memory_in_place_writer_part(1 * P, 0x3980, 11) == 0,
+          "and the read of what the plain wait knows (11) no longer finds 11's write there: the whole submission");
     write(1 * P, 1 * P + 64, 14, 11, kRbWriterUb);
     check(memory_in_place_writer_part(1 * P, 64, 14) == (on ? 11u : 0u), "the uniform updates' write keeps its part");
     check(!memory_split_wanted(), "but asks for no split: written at their part's end already");
+    // (a range widened over a page that the same submission wrote before: that write was not seen)
+    memory_rb_waited(20 * P, 64);
+    write(20 * P, 20 * P + 64, 15, 12, kDispatch);
+    write(21 * P, 21 * P + 64, 15, 13, kDispatch);   // (page 21: no range of it yet)
+    (void)memory_split_wanted();
+    memory_rb_waited(20 * P, 2 * P);
+    check(memory_in_place_writer_part(20 * P, 2 * P, 15) == 0, "a range widened over a page its submission wrote unseen: the whole submission");
+    check(memory_in_place_writer_part(20 * P, 64, 15) == (on ? 12u : 0u), "its first page alone: that page's part");
+    write(21 * P, 21 * P + 64, 15, 14, kDispatch);
+    check(memory_in_place_writer_part(20 * P, 2 * P, 15) == (on ? 14u : 0u), "seen once written again: the later part");
+    (void)memory_split_wanted();
+    // (two ranges of one page: a write of the page's other bytes in a later part is seen, for the page)
+    memory_rb_waited(30 * P, 64);
+    write(30 * P, 30 * P + 64, 16, 15, kDispatch);
+    check(memory_split_wanted() == on, "a write of the bytes read asks for its part to end");
+    write(30 * P + 128, 30 * P + 192, 16, 16, kDispatch);
+    check(!memory_split_wanted(), "a write of the page's other bytes asks for no split");
+    check(memory_in_place_writer_part(30 * P, 64, 16) == (on ? 16u : 0u), "but is the page's newest writer: its part");
+    memory_rb_waited(30 * P + 128, 64);
+    check(memory_in_place_writer_part(30 * P + 128, 64, 16) == (on ? 16u : 0u), "and for a second range of the page");
+    write(31 * P, 31 * P + 64, 16, 17, kDispatch);   // (page 31: in no range)
+    check(memory_in_place_writer_part(30 * P, 2 * P, 16) == 0, "a range reaching past it into a page written unseen: the whole submission");
     for (uint64_t r = 0; r < 64; r++) memory_rb_waited((100 + 2 * r) * P, 64);   // (64 more ranges: the first is let go)
     check(!memory_rb_waited_range(1 * P + 100, 8), "the oldest range let go");
     check(memory_in_place_writer_part(1 * P, 64, 14) == 0, "with its pages");
@@ -205,6 +231,48 @@ int main() {
 }
 """
 
+SPAN = r"""
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <mutex>
+static uint64_t work;   // (draws and dispatches recorded so far)
+static uint64_t memory_work_count() { return work; }
+static bool rb_writers_on() { return true; }
+struct Recording { uint64_t value = 0, part = 0; };
+static Recording rec_v;
+static Recording* rec_cur = nullptr;
+static std::mutex replay_mu;
+static bool burst_open = false;
+static uint64_t burst_value = 0, ev_looked = 0;
+static bool ev_looked_any = false;
+static std::atomic<uint64_t> ev_cpu_settled{0};
+static int finished;
+static uint64_t finished_value;
+static void finish_recording(uint64_t v) { rec_cur = nullptr, finished++, finished_value = v; }
+/* SPANS */
+/* BURST_END */
+static int failures;
+static void check(bool ok, const char* what) {
+    std::printf("%s  %s\n", ok ? "ok  " : "FAIL", what);
+    failures += !ok;
+}
+int main() {
+    rec_v = {20, 5}, rec_cur = &rec_v, work = 100, burst_open = true, burst_value = 20;
+    rb_span_begin(20, 5);
+    work = 130, rec_v.part = 6;   // (the writer)
+    work = 150, rec_v.part = 7;   // (work after it, in a later part)
+    burst_end();
+    const SubSpan& s = rb_spans[20];
+    check(finished == 1 && finished_value == 20, "the burst's recording finished at its end");
+    check(s.first_part == 5 && s.last_part == 7 && s.w0 == 100 && s.w1 == 150,
+          "and its span closed there: the last part and the submission's work, not the writer's");
+    return failures ? 1 : 0;
+}
+"""
+
 
 def run(cxx, src, exe, args=(), env=None):
     subprocess.run([cxx, "-std=c++20", "-O1", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-variable",
@@ -242,6 +310,11 @@ def main():
         raise SystemExit("FAIL: vk_draw.cpp: a draw of a program that writes storage buffers may keep the set before, its write not noted")
     if "if (early && !dry && memory_rb_waited_range(host->gpu_guest(u.dst), u.size)) split_after = true;" not in rep:
         raise SystemExit("FAIL: replay: an update of uniforms a read waited for does not end its part")
+    for where, text in (("run_submit", block(replay, "bool run_submit(")), ("resume_queue", replay)):
+        if "rb_span_close(), finish_recording(" not in text:
+            raise SystemExit("FAIL: %s finishes a recording without closing its RX_VK_LOG_RB_WRITERS span" % where)
+    if replay.count("finish_recording(") != replay.count("rb_span_close(), finish_recording(") + 2:   # (+ its declaration, definition)
+        raise SystemExit("FAIL: a recording is finished without closing its RX_VK_LOG_RB_WRITERS span")
     if "void maybe_split(VkCommandBuffer& cmd) { split_part(cmd, false); }" not in replay:
         raise SystemExit("FAIL: maybe_split no longer ends a part by its count")
     split = block(replay, "void split_part(VkCommandBuffer& cmd, bool now) {")
@@ -269,6 +342,10 @@ def main():
         choice_src, choice_exe = tmp / "choice.cpp", tmp / ("choice.exe" if os.name == "nt" else "choice")
         choice_src.write_text(CHOICE.replace("/* EARLY */", early), encoding="utf-8")
         run(a.cxx, choice_src, choice_exe)
+        span_src, span_exe = tmp / "span.cpp", tmp / ("span.exe" if os.name == "nt" else "span")
+        span_src.write_text(SPAN.replace("/* SPANS */", between(replay, "struct SubSpan {", "const char* rb_what_name("))
+                            .replace("/* BURST_END */", block(replay, "void burst_end() {")), encoding="utf-8")
+        run(a.cxx, span_src, span_exe)
     print("PASS: a read of pages written in place waits for its writer's part, which ends after the writer, with the switch on")
 
 

@@ -2018,19 +2018,21 @@ void memory_count_work() {
     if (rb_writers_on()) wr_work.fetch_add(1, std::memory_order_relaxed);
 }
 uint64_t memory_work_count() { return wr_work.load(std::memory_order_relaxed); }
-/// (RX_VK_READBACK_EARLY) a GPU write in place of [lo, hi) in the submission value, recorded now: each page of it in a range
-/// whose read waited keeps it, and a write by anything but the uniform updates (written at their part's end already) asks for
-/// its part to end after it
+/// (RX_VK_READBACK_EARLY) a GPU write in place of [lo, hi) in the submission value, recorded now: each page of it that a range
+/// whose read waited reaches keeps it, whichever bytes of the page it writes (a read of the page's other bytes, or a range widened
+/// over them later, must not take an earlier part of the same submission: memory_in_place_writer_part), and a write of those
+/// ranges' bytes by anything but the uniform updates (written at their part's end already) asks for its part to end after it
 void early_in_place_write(uint64_t lo, uint64_t hi, uint64_t value) {
     if (!readback_early_on() || hi <= lo || !early_any.load(std::memory_order_relaxed)) return;
     const uint64_t part = mem_rec_part.load(std::memory_order_relaxed);
+    constexpr uint64_t kPageMask = (1ull << kPageShift) - 1;
     bool hit = false;
     {
         std::lock_guard lk(wb_pages_mu);
         for (const auto& [a, b] : early_ranges) {
-            const uint64_t x = std::max(a, lo), y = std::min(b, hi);
+            const uint64_t x = std::max(a & ~kPageMask, lo), y = std::min(((b - 1) | kPageMask) + 1, hi);
             if (x >= y) continue;
-            hit = true;
+            hit = hit || std::max(a, lo) < std::min(b, hi);
             for (uint64_t pg = x >> kPageShift; pg <= (y - 1) >> kPageShift; pg++) early_pages[pg] = {value, part};
         }
     }
@@ -2039,16 +2041,18 @@ void early_in_place_write(uint64_t lo, uint64_t hi, uint64_t value) {
 uint64_t memory_in_place_writer_part(uint64_t guest, uint64_t size, uint64_t whole) {
     if (!size || !whole || !readback_early_on()) return 0;
     std::lock_guard lk(wb_pages_mu);
-    uint64_t newest = 0, part = 0;
+    uint64_t part = 0;
+    // (every page of the range that whole's submission wrote in place, as memory_writeback_value found it, must have that write
+    // seen here: one written before its range's read waited (a range widened since, or a page tracked later) has no part known,
+    // and the read waits for the whole submission, as before. The pages an older submission wrote are done with any part of
+    // this one: the recordings' timeline is in order. A mirror's pages: the caller's part)
     for (uint64_t pg = guest >> kPageShift; pg <= (guest + size - 1) >> kPageShift; pg++) {
-        auto it = early_pages.find(pg);
-        if (it == early_pages.end()) continue;
-        if (it->second.value > newest) newest = it->second.value, part = it->second.part;
-        else if (it->second.value == newest) part = std::max(part, it->second.part);
+        if (wb_pages.get(pg) != whole || wb_parts.get(pg)) continue;
+        const auto it = early_pages.find(pg);
+        if (it == early_pages.end() || it->second.value != whole) return 0;
+        part = std::max(part, it->second.part);
     }
-    // (only when the newest write in place it knows is the range's newest: one it did not see (a range not yet waited for when
-    // it was written) leaves the read waiting for the whole submission, as before)
-    return newest == whole ? part : 0;
+    return part;
 }
 void memory_rb_waited(uint64_t guest, uint64_t size) {
     if (!size || !readback_early_on()) return;
