@@ -2102,6 +2102,14 @@ struct ComputePlan {
     size_t shipped = 0, learned = 0;   // (the keys the shipped list names, and those play dispatched here)
     size_t fresh = 0;                  // (the shipped list's that this install's play has not dispatched)
 };
+/// RX_VK_PRECOMPILE_COMPUTES, as computes_plan reads it. Unset: "listed" on Mesa's Intel driver, all on a first start
+/// elsewhere. There every compute program on a first start was 4,058 programs and 9,691 variants for the driver, where the
+/// shipped list and this PC's play name about 230: the rest held the preparation for hours, and two of them were never
+/// built (compute_pin.h too_big). A program the list misses is made at its first dispatch, as any GPU's with "listed"
+const char* precompile_computes_which() {
+    if (const char* e = getenv("RX_VK_PRECOMPILE_COMPUTES")) return e;
+    return dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA ? "listed" : nullptr;
+}
 ComputePlan computes_plan(const char* which, bool state_lists) {
     ComputePlan plan;
     plan.learned_only = which && !strcmp(which, "learned");
@@ -8885,6 +8893,80 @@ bool warm_libraries(void (*progress)(size_t done, size_t total)) {
     }
     return true;
 }
+/// (longshot) Every kept compute program's variants given to warm, each variant an item of its own on every CPU (prepare_run, where
+/// the driver's compute compiles are gated): a thread takes the next program, borrows all its variants at once and queues them,
+/// and every thread takes queued variants before it takes another program, so a program's variants are compiled side by side
+/// and only a few programs are read in at once. The gate (compute_gate.h) decides how many compiles run. progress: in programs.
+/// only: the programs to warm, the precompile's plan (computes_plan), null for every kept one. The programs done
+size_t warm_computes_apart(void (*progress)(size_t done, size_t total), const std::function<void(Program&)>& warm,
+                           const std::unordered_set<uint64_t>* only) {
+    std::vector<uint64_t> keys = program_cache_compute_keys();
+    if (only) keys.erase(std::remove_if(keys.begin(), keys.end(), [&](uint64_t k) { return !only->count(k); }), keys.end());
+    struct Batch {
+        size_t left = 0;
+    };
+    std::mutex mu;
+    std::condition_variable cv;
+    std::deque<std::pair<Program*, Batch*>> items;
+    size_t open_batches = 0;
+    std::atomic<size_t> next_key{0}, keys_done{0};
+    // (mu held: one queued variant run, the lock let go meanwhile. False when none is queued)
+    const auto run_one = [&](std::unique_lock<std::mutex>& lk) {
+        if (items.empty()) return false;
+        const auto [p, batch] = items.front();
+        items.pop_front();
+        lk.unlock();
+        warm(*p);
+        lk.lock();
+        if (!--batch->left) cv.notify_all();
+        return true;
+    };
+    const auto worker = [&] {
+        ub_thread_off();   // (a background thread: see ub_thread_off)
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        for (;;) {
+            {
+                std::unique_lock lk(mu);
+                if (run_one(lk)) continue;
+                if (next_key.load() >= keys.size() || prepare_stopped()) {
+                    if (!open_batches) return;   // (nothing queued, nothing more to come)
+                    cv.wait_for(lk, std::chrono::milliseconds(100));
+                    continue;
+                }
+            }
+            const size_t k = next_key++;
+            if (k >= keys.size()) continue;
+            program_cache_borrow_all(keys[k], [&](std::vector<std::unique_ptr<Program>>& variants) {
+                Batch batch;
+                std::unique_lock lk(mu);
+                for (auto& p : variants)
+                    if (p->compute && !p->failed && !p->stages.empty() && p->stages[0].module) items.push_back({p.get(), &batch}), batch.left++;
+                open_batches++;
+                cv.notify_all();
+                while (batch.left)   // (its own variants and others', until its own are compiled: they die when this returns)
+                    if (!run_one(lk)) cv.wait_for(lk, std::chrono::milliseconds(100));
+                open_batches--;
+                cv.notify_all();
+            });
+            keys_done++;
+        }
+    };
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < std::max(1u, usable_cpus()); i++) threads.emplace_back(worker);
+    for (;;) {
+        if (progress) progress(keys_done.load(), keys.size());
+        {
+            std::unique_lock lk(mu);
+            if (keys_done.load() >= keys.size() || (prepare_stopped() && !open_batches)) break;
+        }
+        compute_compiles_log();
+        Sleep(100);
+    }
+    for (std::thread& t : threads) t.join();
+    if (progress) progress(keys_done.load(), keys.size());
+    return keys_done.load();
+}
+
 /// Every shader of the game, before its first start (vk_shader.cpp, the seed): translated once for this translator, and the
 /// driver's part made once for this driver (see PreparedFor). True: prepared now, either of them.
 /// background: in play, behind the game: a few workers at idle priority, translation only (the driver's part is left to first use:
@@ -8975,8 +9057,17 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     }
     // (longshot) compute pipelines too, for the driver's own cache: built in play they stopped the game while the driver compiled
     // them, seconds each for the culling programs (53caac5f: 6.5 s, 41 s inlined), which looked like a hang
+    // (longshot) Where the driver's compute compiles are gated (Mesa's Intel driver, compute_gate.h), a program's variants are not
+    // compiled here, one after the other on the worker that translated them (up to 64 of them, 15-25 s each for one held to 32
+    // lanes: four such programs held four workers for half an hour), but after the translation, each variant its own item on
+    // every CPU (warm_computes_apart). RX_VK_COMPUTE_WARM_APART=0 or 1 says so on any GPU
+    static const bool apart = [] {
+        const char* e = getenv("RX_VK_COMPUTE_WARM_APART");
+        return e ? !env_value_off(e) : dev.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
+    }();
+    bool warming_apart = false;   // (the pass after the translation runs: warm_compute compiles)
     const auto warm_compute = [&](Program& p) {
-        if (!warm_cs || taau_key(p.key)) return;
+        if (!warm_cs || taau_key(p.key) || (apart && !warming_apart)) return;
         ensure_layout(p);
         // (as a dispatch, a load and the precompile ask for it: the same pin, so the same pipeline in the caches)
         const VkComputePipelineCreateInfo ci = compute_pipeline_info(p, true);
@@ -9062,6 +9153,25 @@ bool prepare_run(void (*progress)(size_t done, size_t total), bool background, b
     logf("vk: prepared %zu shader programs%s (%zu new, %lld failed, %zu compute pipelines; %zu compute variants, %zu programs with "
          "texture variants, %zu at the limit) in %.1f s", programs, background ? " in play" : "", made.load(), (long long)failed, libs.load(), variants.load(),
          asking.load(), capped.load(), std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    if (warm_cs && apart) {
+        warming_apart = true;
+        const auto w0 = std::chrono::steady_clock::now();
+        const size_t before = libs.load();
+        // (the programs the precompile keeps ready, and no others: on Mesa's Intel driver the listed ones, precompile_computes_which.
+        // The rest are compiled at their first dispatch)
+        const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
+        const std::unordered_set<uint64_t> none;
+        const std::unordered_set<uint64_t>* only = plan.all ? nullptr : plan.none ? &none : &plan.keys;
+        const size_t programs_warmed = warm_computes_apart(progress, warm_compute, only);
+        logf("vk: preparation: the compute pipelines of %zu compute programs compiled for the driver's cache (%s): %zu variants on "
+             "%u threads in %.1f s%s", programs_warmed, only ? "those the precompile keeps" : "every kept one",
+             libs.load() - before, usable_cpus(), std::chrono::duration<double>(std::chrono::steady_clock::now() - w0).count(),
+             prepare_stopped() ? "; stopped before the end" : "");
+        if (prepare_stopped()) {
+            remove(warming.c_str());
+            return false;
+        }
+    }
     if (warm) {
         // (translated, whatever becomes of the libraries: a start that is closed in them goes on with them alone)
         prepared_for.warmed = 0;
@@ -9232,7 +9342,7 @@ void precompile_at_create() {
         std::lock_guard lk(state_mu);
         if (!state_file) state_open_locked();
     }
-    const ComputePlan plan = computes_plan(getenv("RX_VK_PRECOMPILE_COMPUTES"), !env_on("RX_VK_NO_STATE_LIST"));
+    const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
     // (every program read in here, kept from now on: its records are taken as they are read, so the load its create call
     // queues finds none and makes none of its noted pipelines. Those are asked of the caches here, as that load would)
     std::vector<Program*> fallbacks, kept;
@@ -9335,7 +9445,7 @@ void precompile_run(void (*progress)(size_t done, size_t total)) {
     for (const auto& n : notes) wanted.insert(n->prog);
     // (the compute programs: those this install's play dispatched (longshot_computes.bin) and those the shipped state list names,
     // each once; every kept one on a first start, with nothing dispatched yet: computes_plan)
-    const ComputePlan plan = computes_plan(getenv("RX_VK_PRECOMPILE_COMPUTES"), !env_on("RX_VK_NO_STATE_LIST"));
+    const ComputePlan plan = computes_plan(precompile_computes_which(), !env_on("RX_VK_NO_STATE_LIST"));
     if (!plan.all && !plan.none) wanted.insert(plan.keys.begin(), plan.keys.end());
     std::vector<Program*> computes, fallbacks;
     std::unordered_set<uint64_t> listed_here;   // (the listed keys this install has a program of)
