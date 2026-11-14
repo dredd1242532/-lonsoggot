@@ -11,7 +11,8 @@ His guide and checks are retained in the import history, changed only by the pro
 The command-line client works without MCP. The scenario runner and contributor-process proposals from that original work
 are separate, not requirements of this server.
 This server is part 2 of 3, stacked on [Longshot pull request 47](https://git.magicbean.dev/MagicBeanDev/Longshot/pulls/47);
-review only commits after `311efa39e9772745a237a69cfcee42cfface027c`. It becomes reviewable on its own once 47 is merged.
+the session prerequisite ends with `docs(control): link the README by its name in this repository`. The branch keeps
+those session commits until pull request 47 is merged; their hashes can differ after a rebase.
 The third part is the separate scenario runner.
 
 ## Install
@@ -240,6 +241,8 @@ Use the venv interpreter for SDK checks. The real SDK client exercises tools/res
 subprocess checks initialize, list, call, resource, error and end of input. The shared control fixture publishes an
 authored tiny PNG, following Nicholas's test idea, and keeps option state. Tests cover frame conversion, concurrent
 calls, cancellation, output bounds, failed launch cleanup and explicit force. General docs checks need no SDK.
+The same fixture retains sampled game state alongside session readiness. Both the in-memory and stdio checks
+require those fields to survive status tool and resource replies, with the sample frame distinct from the reply frame.
 The documentation checker excludes the dedicated `tests/pr_description/` data directory, whose sample PRs intentionally
 name fictional files. Ordinary Markdown guides, including guides under `tests/`, keep their link and command checks.
 `RUN_ALL_MODULES = ["fastmcp"]` lets the runner skip only the SDK checks without the package; `--strict` fails a

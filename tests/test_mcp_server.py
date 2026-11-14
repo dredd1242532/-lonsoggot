@@ -118,6 +118,12 @@ class InMemory(unittest.IsolatedAsyncioTestCase):
         status = await self.call("status")
         self.assertEqual(status["bridge"]["state"], "play")
         self.assertEqual(status["run"]["pid"], info["pid"])
+        game = status["bridge"]["game"]
+        self.assertEqual((game["frame"], game["pos"], game["life"], game["rupees"]),
+                         (94, [-20.1, 0.0, 6.8], 12, 7))
+        self.assertGreater(status["bridge"]["frame"], game["frame"])
+        self.assertFalse(game["event"])
+        self.assertFalse(game["loading"])
         await self.call("press", buttons="A", frames=3, at=2)
         await self.call("stick", which="left", x=0.25, y=-0.5, frames=4)
         await self.call("stick", which="right", x=0, y=0, frames=4)
@@ -156,6 +162,8 @@ class InMemory(unittest.IsolatedAsyncioTestCase):
         for kind in ("status", "log", "last-screenshot"):
             resource = await self.client.read_resource(f"longshot://runs/{key}/{kind}")
             self.assertTrue(resource)
+            if kind == "status":
+                self.assertEqual(json.loads(resource[0].text)["bridge"]["game"], game)
         await self.error("set_option", 1, name="nope", value=0)
         await self.error("wait", 3, event="loading_end", timeout=0.1)
         await self.error("sequence", 2, steps=[])
@@ -321,8 +329,13 @@ class Stdio(unittest.TestCase):
                     key = launched["structuredContent"]["run_id"]
                     status = send("tools/call", {"name": "status", "arguments": {}})["result"]
                     self.assertEqual(status["structuredContent"]["bridge"]["state"], "play")
+                    game = status["structuredContent"]["bridge"]["game"]
+                    self.assertEqual((game["frame"], game["pos"], game["life"], game["rupees"]),
+                                     (94, [-20.1, 0.0, 6.8], 12, 7))
+                    self.assertGreater(status["structuredContent"]["bridge"]["frame"], game["frame"])
                     resource = send("resources/read", {"uri": f"longshot://runs/{key}/status"})
                     self.assertIn("contents", resource["result"])
+                    self.assertEqual(json.loads(resource["result"]["contents"][0]["text"])["bridge"]["game"], game)
                     error = send("tools/call", {"name": "set_option", "arguments": {"name": "nope", "value": 1}})
                     self.assertTrue(error["result"]["isError"])
                     self.assertIn('"code": 1', error["result"]["content"][0]["text"])
