@@ -67,7 +67,7 @@ message. OoT-specific code goes into new files where it can, so the shared files
         │  clang (llvm-mingw, emsdk or the system's) -O1, the hot functions -O2 with the play profile, lld (nx2/build.py --standalone)
         ▼
  longshot.exe = lifted game + host/ (Horizon: threads, SVCs, memory, fs, hid, audio, vi, gs, NVN2)
- longshot_vk.dll = the Vulkan back end (gpu/vk), loaded by host/rx_backend.c unless RX_BACKEND names another renderer
+ longshot_vk.dll = the Vulkan back end (gpu/vk), the only renderer, loaded by host/rx_backend.c
 ```
 
 - **Standalone from the start.** MKW went emulator-hosted first (Eglantine with a recompiled CPU backend), then
@@ -81,8 +81,9 @@ message. OoT-specific code goes into new files where it can, so the shared files
 - **GPU.** `host/nvn_native.c` implements the NVN2 procs over guest memory in place: objects live where the game
   puts them, command buffers record an op stream (`gpu/render/rx_nvn.h`), queue submits hand it to the back end.
   `gpu/vk` replays it on Vulkan 1.3: pools imported as host memory, SM86 programs through Eden's recompiler to
-  SPIR-V, mesh/task programs with `VK_EXT_mesh_shader`. The WebGPU renderer (`gpu/render`) stays in the Windows exe as the
-  fallback when Vulkan is missing, as in mkw-recomp, when the build has wgpu-native (`WGPU_NATIVE`).
+  SPIR-V, mesh/task programs with `VK_EXT_mesh_shader`. It is the only renderer: TOTKPort's WebGPU renderer
+  (`gpu/render`), which the Windows exe once fell back to when Vulkan was missing, as in mkw-recomp, is built no more
+  (2026-11-14); without a usable Vulkan nothing is drawn, as on Linux.
 
 ### Graphics pipeline state
 

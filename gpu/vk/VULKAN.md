@@ -1,8 +1,8 @@
 # The Vulkan back end (longshot_vk.dll)
 
 > This is the back end's development log from mkw-recomp, kept for its reasons and not updated since. Names and
-> defaults have moved: the DLL is `longshot_vk.dll` (`longshot_vk.so` on Linux) and the default renderer, with
-> `RX_BACKEND` only to pick another; the image and upload code of `vk_image.cpp` and `vk_upload.cpp` is in
+> defaults have moved: the DLL is `longshot_vk.dll` (`longshot_vk.so` on Linux) and the only renderer (the WebGPU
+> renderer in `gpu/render` and `RX_BACKEND`, which picked it, are gone: without Vulkan nothing is drawn); the image and upload code of `vk_image.cpp` and `vk_upload.cpp` is in
 > `vk_texture.cpp`; a draw whose pipeline is not ready waits with `RX_VK_PIPE_SKIP=0` (there is no `RX_VK_PIPE_WAIT`);
 > `RX_VK_DUMP` takes a present number and writes PNGs; `RX_VK_FRAMEGEN` only turns frame generation off (the Insert
 > menu turns it on); the texture budget `RX_VK_VRAM_MB` defaults to 70% of what the driver allows (at most 6 GB),

@@ -358,15 +358,15 @@ static void live_input(void) {
             offset += (int64_t)n;
             const int64_t at = script_elapsed_ms(now);
             if (line[0] == '!') {   /* commands: !dump = a frame dump of the next frame (as RX_DUMP_AT) */
-                void rx_request_frame_dump(void);   /* gpu/render/rx_debug.cpp */
+                void rx_request_frame_dump(void);   /* the WebGPU renderer's, gone: host/rx_nowgpu.c, host/posix/linux_stubs.c say so */
                 if (!strncmp(line, "!dump", 5)) rx_request_frame_dump();
                 extern volatile int hos_nvn_sync_log_on;   /* nvn_native.c: "!synclog" */
                 if (!strncmp(line, "!synclog", 8)) hos_nvn_sync_log_on = 1;
-                void rx_set_screenshot_ms(int64_t ms);   /* gpu/render/rx_core.cpp: "!shots <ms>" */
+                void rx_set_screenshot_ms(int64_t ms);   /* (as !dump): "!shots <ms>" */
                 if (!strncmp(line, "!shots ", 7)) rx_set_screenshot_ms(atoll(line + 7));
-                void rx_request_rdoc_capture(int frames);   /* gpu/render/rx_debug.cpp: "!rdoc [frames]" */
+                void rx_request_rdoc_capture(int frames);   /* (as !dump): "!rdoc [frames]" */
                 if (!strncmp(line, "!rdoc", 5)) rx_request_rdoc_capture(atoi(line + 5));
-                void rx_flash_dark_arm(void);   /* gpu/render/rx_core.cpp: arms RX_FLASH_DARK_DUMP (RX_FLASH_DARK_AFTER=-1) */
+                void rx_flash_dark_arm(void);   /* (as !dump): armed RX_FLASH_DARK_DUMP (RX_FLASH_DARK_AFTER=-1) */
                 if (!strncmp(line, "!flasharm", 9)) rx_flash_dark_arm();
                 extern volatile int hos_oot_live_action;   /* host/hos_main.c: "!cheat <action>", as the Cheats page sends */
                 if (!strncmp(line, "!cheat ", 7)) __atomic_store_n(&hos_oot_live_action, atoi(line + 7), __ATOMIC_RELAXED);

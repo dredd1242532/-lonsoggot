@@ -1,4 +1,4 @@
-/* The game's window (Windows): the renderer's surface (gpu/render/, WebGPU). The native NVN layer (nvn_native.c)
+/* The game's window (Windows): the renderer's surface (the Vulkan back end, gpu/vk). The native NVN layer (nvn_native.c)
    presents the game's window textures into it (rx_nvn_present). The title bar carries live numbers.
    TOTKPort's hos/display.c, without its emulated-GPU fallback (the window buffer read from guest memory): MKW has
    no emulated GPU, so the renderer is the only way to a picture.
@@ -551,7 +551,7 @@ static DWORD WINAPI display_main(void *p) {
     RegisterRawInputDevices(&rid, 1, sizeof rid);
     pointer_update(hwnd, 0, 0);
     renderer = rx_start(hwnd);
-    if (!renderer) hos_log("display: no WebGPU device: the window stays black");
+    if (!renderer) hos_log("display: no renderer: the window stays black");
     SetEvent(renderer_up);
     SetTimer(hwnd, 1, 250, NULL);
     MSG m;

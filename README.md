@@ -843,7 +843,6 @@ You need:
   - `tools\cpm`: the Vulkan headers and FFmpeg. Set `RX_CPM` to this folder. Without it (and without system
     Vulkan / SPIR-V / VMA headers or `LONGSHOT_*_HEADERS`), the standalone build stops instead of shipping a
     game with no renderer.
-  - `tools\wgpu-native`: set `WGPU_NATIVE` to this folder.
   - `tools\third_party`: the prebuilt files a clone lacks (`a64emit`, `lld-link`, `zbic` and SDL2). Copy its `.dll`,
     `.exe`, `.lib` and `.sha1` files to the same places under `third_party\`.
   - `tools\work`: copy it to `work\`. It holds the hot-function list, the link order, the profile and the icon;

@@ -1301,7 +1301,7 @@ static float audio_volume_curve(int percent) {
     const float v = (float)(percent < 0 ? 0 : percent > 100 ? 100 : percent) / 100.0f;
     return v * v;
 }
-/* The gain the menu asks for: Volume and Mute in background. With no menu (the WebGPU renderer) the game plays at full
+/* The gain the menu asks for: Volume and Mute in background. With no menu (no renderer) the game plays at full
    volume. */
 static float audio_player_gain(void) {
     int rx_option(int id, int otherwise);

@@ -228,7 +228,7 @@ int hos_posix_guest_discard(void *p, size_t n) {
 }
 #endif
 
-/* The guest window, for the renderer (gpu/render/rx_buffer.cpp). */
+/* The guest window, for the renderer (MkwVkHost.guest_base and guest_size, host/rx_backend.c). */
 uint8_t *hos_guest_base(void) { return A64_MEM; }
 uint64_t hos_guest_size(void) { return GUEST_SPACE; }
 
